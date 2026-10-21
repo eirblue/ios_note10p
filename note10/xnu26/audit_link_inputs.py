@@ -125,7 +125,7 @@ def main():
               'boot_image_created': False, 'device_operations': []}
     (private / 'link-audit-result.json').write_text(json.dumps(report, indent=2))
     print(json.dumps({k: report[k] for k in ('compiled_objects', 'compile_failures',
-                      'entry_architecture_symbols_present', 'relocatable_merge_passed', 'whole_kernel_linked')}), flush=True)
+                      'entry_architecture_symbols_in_input_objects', 'relocatable_merge_passed', 'whole_kernel_linked')}), flush=True)
     print('Unresolved external symbol names: ' + str(len(unresolved)), flush=True)
 
 
