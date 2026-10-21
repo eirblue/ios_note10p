@@ -19,7 +19,10 @@ def main():
     configured = json.loads((private / 'configure-result.json').read_text())
     source = ROOT / configured['source_directory']
     audit = json.loads((private / 'objects/DEVELOPMENT/all-c-result.json').read_text())
-    unit = next(r for r in audit['units'] if r['source'] == 'osfmk/arm64/machine_routines.c')
+    # libdispatch's kernel firehose mixes BSD and libkern interfaces. Reuse the
+    # successful libkern logging environment, not Mach's conflicting clock_t and
+    # standalone libsa types namespace.
+    unit = next(r for r in audit['units'] if r['source'] == 'libkern/os/log.c')
     command = list(unit['command'])
     original = library / 'src/firehose/firehose_buffer.c'
     obj = private / 'objects/DEVELOPMENT/public_libdispatch_firehose_buffer.c.o'
