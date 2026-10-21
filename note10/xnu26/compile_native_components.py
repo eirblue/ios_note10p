@@ -140,6 +140,7 @@ def main():
             'KDK_SDK.pkg/System/Library/Frameworks/Kernel.framework/Versions/A/PrivateHeaders/platform',
             'KDK.pkg/System/Library/KernelSupport'))
         if sdk:
+            includes.append(ROOT / 'host-tools/opensource-declarations')
             includes.extend(Path(sdk) / p for p in (
                 'System/Library/Frameworks/Kernel.framework/Versions/A/Headers',
                 'System/Library/Frameworks/Kernel.framework/Versions/A/PrivateHeaders',

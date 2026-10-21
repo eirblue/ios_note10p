@@ -77,7 +77,9 @@ def sdk_declarations():
     mount = ROOT / 'host-tools/kdk/cloud-mount'; mount.mkdir(parents=True, exist_ok=True)
     subprocess.run(['hdiutil', 'attach', '-readonly', '-nobrowse', '-mountpoint', str(mount), str(image)], check=True)
     try:
-        for payload in xar_payloads(mount / 'KernelDebugKit.pkg', selected=('KDK_SDK.pkg/Payload',)):
+        # CE V2/Kernel.h lives in KernelSupport in KDK.pkg, while the API
+        # declarations are in KDK_SDK.pkg. Both payloads are needed.
+        for payload in xar_payloads(mount / 'KernelDebugKit.pkg'):
             extract(payload)
     finally:
         subprocess.run(['hdiutil', 'detach', str(mount)], check=True)
@@ -103,6 +105,9 @@ def main():
     target = json.loads((ROOT / 'note10/target.json').read_text())
     generated_headers(ROOT / target['research_directory'])
     sdk_declarations()
+    download('https://raw.githubusercontent.com/apple-oss-distributions/libdispatch/2361ffb78a76f7ee488cd052eb0bc5c767118bf9/os/firehose_buffer_private.h',
+             ROOT / 'host-tools/opensource-declarations/os/firehose_buffer_private.h',
+             'b1da2269d930974d1fb122d90446534553829dc2a3b090b3d0ea0813fd95dd45')
     env = dict(os.environ)
     env['N10_CC'] = compiler
     env['N10_SDKROOT'] = sdk
