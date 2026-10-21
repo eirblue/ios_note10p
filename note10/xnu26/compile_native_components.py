@@ -19,6 +19,14 @@ UNITS = ('pexpert/arm/pe_note10_bootstrap.c', 'pexpert/arm/pe_note10_irq.c',
          'osfmk/arm64/machine_routines.c', 'osfmk/arm64/sleh.c', 'pexpert/arm/pe_identify_machine.c',
          'osfmk/arm/arm_init.c', 'osfmk/arm64/arm_vm_init.c')
 
+# Public architecture implementations excluded by the current NOS_ARM/PPL
+# selection. These are candidates for porting, not a complete platform archive.
+PLATFORM_C = tuple('osfmk/arm/pmap/' + n + '.c' for n in
+                   ('pmap', 'pmap_cs', 'pmap_data', 'pmap_iommu', 'pmap_misc', 'pmap_ppl_interface')) + \
+             ('osfmk/arm/arm_init.c', 'osfmk/arm64/arm_vm_init.c', 'osfmk/arm64/pcb.c')
+PLATFORM_ASM = tuple('osfmk/arm64/' + n + '.s' for n in
+                     ('caches_asm', 'locore', 'cswitch', 'machine_routines_asm', 'start'))
+
 
 def main():
     private = ROOT / 'note10/private/windows-xnu'
@@ -96,7 +104,9 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     results = []
     modes = {'--all-c': ('CFILES', 'C', 'all-c'), '--all-cxx': ('CXXFILES', 'C++', 'all-cxx'),
-             '--all-asm': ('SFILES', 'assembly', 'all-asm')}
+             '--all-asm': ('SFILES', 'assembly', 'all-asm'),
+             '--platform-c': ('PLATFORM_C', 'C', 'platform-c'),
+             '--platform-asm': ('PLATFORM_ASM', 'assembly', 'platform-asm')}
     mode = modes.get(sys.argv[1]) if len(sys.argv) == 2 else None
     audit = mode is not None
     skipped = []
@@ -129,6 +139,8 @@ def main():
                     units.append(name)
                 else:skipped.append({'source': token, 'component': component, 'reason': 'generated source not yet built'})
         units = sorted(set(units))
+        if mode[0].startswith('PLATFORM_'):
+            units = list(PLATFORM_C if mode[0] == 'PLATFORM_C' else PLATFORM_ASM)
     private_flags = {
         'osfmk': ['-DMACH_KERNEL_PRIVATE', '-DMACH_KERNEL'],
         'bsd': ['-DDRIVER_PRIVATE', '-D_KERNEL_BUILD', '-DKERNEL_BUILD', '-DMACH_KERNEL', '-DBSD_BUILD', '-DBSD_KERNEL_PRIVATE'],
@@ -242,6 +254,7 @@ def main():
               'native_mach_mig_headers': bool(native_mig),
               'synthetic_board_inputs': True, 'whole_kernel_build': False, 'device_operations': []}
     report['skipped_generated_sources'] = skipped
+    report['architecture_candidates_not_selected_in_native_config'] = bool(mode and mode[0].startswith('PLATFORM_'))
     report['scope'] = (mode[1] if mode else 'C') + ' compiler audit with component-private flags; not a full Make build or per-file instrumentation reproduction'
     (output / (mode[2] + '-result.json' if audit else 'compile-result.json')).write_text(json.dumps(report, indent=2))
     print(json.dumps({'compiled': sum(r['passed'] for r in results), 'attempted': len(results),

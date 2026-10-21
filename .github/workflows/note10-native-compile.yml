@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       full_c_audit:
-        description: Audit selected C sources (does not link a kernel)
+        description: Audit C/C++/assembly, generated inputs and partial link
         type: boolean
         default: true
 
@@ -40,6 +40,7 @@ jobs:
           if-no-files-found: warn
           path: |
             note10/private/cloud-toolchain-result.json
+            note10/private/cloud-source-result.json
             note10/private/windows-config/build-result.json
             note10/private/windows-config/build-*.log
             note10/private/windows-xnu/configure-result.json

@@ -107,7 +107,7 @@ def main():
               'source_makefile_sha256': hashlib.sha256(makefile.read_bytes()).hexdigest(),
               'scope': 'Mach export/kernel headers and selected Mach C sources; BSD/IOKit interfaces still borrowed',
               'generated_sources': generated_sources,
-              'generated_c_compiled': False, 'synthetic_board_inputs': True, 'whole_kernel_build': False}
+              'generated_c_compilation_in_separate_audit': True, 'synthetic_board_inputs': True, 'whole_kernel_build': False}
     (private / 'native-mig-result.json').write_text(json.dumps(report, indent=2))
     print(json.dumps({'native_mig_headers': sum(r['passed'] for r in rows), 'attempted': len(rows),
                       'generated_c_sources': sum(r['passed'] for r in generated_sources),
