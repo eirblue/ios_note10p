@@ -256,3 +256,18 @@ Exynos SoC MASTER 및 플랫폼 archive 입력 분리:
 - 로컬 PC 28개 검사 통과. 기기 접근·언락·재부팅·플래시는 없다.
 - 실제 초기 EL/RAM/예약 영역/cache/page/GIC 상태는 미측정이다. 합성 값을 실제 부팅 계약으로 대체하지 않는다.
 - Samsung 부팅 이미지·실제 부팅·저장장치/화면/터치·PAC 및 iOS 사용자 공간 통합은 여전히 미완료다.
+
+
+## 2026-10-21: 실제 기기 시험 1단계 패키지 준비
+
+- 사용자 확인: 현재 부트로더 잠금·순정 리커버리, 필요 시 직접 언락·TWRP 설치 예정.
+- TWRP에서 실행할 RAM 전용 하드웨어 진단 ZIP과 Windows ADB/수집/분석 키트를 만들었다.
+- 목표는 실제 선택된 DT·RAM/예약 영역·GIC/timer/PSCI·Linux config/log/cache 관측이다. XNU를 실행하거나 파티션에 쓰는 패키지가 아니다.
+- 일반 Android·순정 recovery·다른 모델·비root·sideload·복수 ADB 기기를 거부한다. 새 메모리 세션만 생성하고 PC로 회수한다.
+- raw DT 대신 sysfs devicetree tar fallback을 지원한다. 동적 예약/주소 가림/관측 실패를 기록하고 XNU 안전 로드 주소를 자동 선정하지 않는다.
+- Windows PC 10개 시험 통과. 합성 파일시스템에서 실제 collector 흐름과 RAM guard, 가짜 ADB에서 전체 회수·분석 흐름을 확인했다.
+- Linux 원격 시험도 10/10 통과: https://github.com/eirblue/ios_note10p/actions/runs/39566103989 (`15b004e`). ZIP 내부 파일·manifest가 일치한다. 압축 라이브러리 차이로 ZIP 압축 바이트 자체는 다를 수 있다.
+- Windows 키트의 파일 해시·CLI import·PowerShell 구문·포함 ADB 버전 실행을 확인했다. Python 3은 필요하다.
+- 공식 d2x TWRP 참조 이미지를 다운로드해 공식 SHA256 및 /sbin/sh/awk/cat/getprop/tar/adbd 포함을 확인했다. 실제 사용자 펌웨어 호환성/부팅은 미검증이다.
+- 다음 사용자 조작: 데이터 백업 후 언락·호환 TWRP 설치 및 TWRP 홈 화면에서 USB 연결. 연결 전에는 이 도구가 기기에 접근하지 않았다.
+- 자세한 실행법: device_test/README.ko.md. 실제 기기에서의 진단 실행과 XNU 초기 진입 시험은 아직 미완료다.

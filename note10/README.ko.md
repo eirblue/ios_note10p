@@ -78,3 +78,7 @@ V60용 `fastboot boot` 명령을 Samsung 기기에 그대로 안내하지 않는
 
 Platform-Tools 공식 출처: https://developer.android.com/tools/releases/platform-tools
 이 프로젝트의 `host-tools/`에만 설치하며 전역 PATH를 변경하지 않는다.
+
+## 실기기 첫 시험 패키지
+
+TWRP가 정상 부팅한 SM-N976N에서 실행할 [RAM 전용 진단 패키지](device_test/README.ko.md)를 준비했다. 실제 DT·메모리·커널 로그를 PC로 회수하는 단계이며, XNU/iOS 실행이나 파티션 플래시를 수행하지 않는다.

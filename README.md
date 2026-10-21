@@ -18,3 +18,5 @@ Reference project: https://github.com/ch1tmdgus/ios-v60 at
 https://github.com/dipa-studio/ios-sweet . Reference project boot reports do not
 establish boot success on Note10. Individual upstream license notices and the
 QARMA LGPL license are retained in the corresponding source files/directories.
+
+First device observation: [RAM-only TWRP probe](note10/device_test/README.ko.md). It collects real hardware facts; it does not execute XNU or flash partitions.
