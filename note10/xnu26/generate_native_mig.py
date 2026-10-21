@@ -42,9 +42,11 @@ def main():
               '-Darm64', '-DARM64', '-D__ARM64__', '-DKERNEL', '-DKERNEL_PRIVATE', '-DXNU_KERNEL_PRIVATE',
               '-DXNU_TARGET_OS_IOS', '-DARM64_BOARD_CONFIG_EXYNOS9825',
               '-DN10_BOARD_SCHEMA=1', '-DN10_ICACHE_LINE_LOG2=6', '-DN10_DCACHE_LINE_LOG2=6',
-              '-DN10_MAX_CACHE_LINE_LOG2=7', '-DN10_KERNEL_PAGE_SHIFT=14',
-              '-include', str(config / 'meta_features.h'), *flags]
-    for directory in includes:common += ['-I', str(directory)]
+              '-DN10_MAX_CACHE_LINE_LOG2=7', '-DN10_KERNEL_PAGE_SHIFT=14', *flags]
+    # The mig shell driver forwards joined -I/-D options; separate -I arguments
+    # and clang's -include operand are parsed as input filenames by that driver.
+    # Upstream MIGFLAGS uses joined include flags and CONFIG_DEFINES as well.
+    for directory in includes:common.append('-I' + str(directory))
     rows = []
     modes = [('export', 'MIG_UUHDRS', False, []), ('export', 'MIG_USHDRS', True, []),
              ('kernel', 'MIG_KUHDRS', False, ['-DMACH_KERNEL_PRIVATE', '-DKERNEL_USER=1', '-DEXC_SERVER_AUDITTOKEN=1', '-DMACH_EXC_SERVER_AUDITTOKEN=1', '-maxonstack', '1024']),
