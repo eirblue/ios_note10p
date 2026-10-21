@@ -56,6 +56,9 @@ jobs:
             note10/private/windows-xnu/symbol-audit.log
             note10/private/windows-xnu/public-dependencies-result.json
             note10/private/windows-xnu/public-dependencies.log
+            note10/private/windows-xnu/link-metadata-result.json
+            note10/private/windows-xnu/native-link/*-result.json
+            note10/private/windows-xnu/native-link/*.log
             note10/private/windows-xnu/configured/**/config.log
             note10/private/windows-xnu/objects/DEVELOPMENT/*-result.json
             note10/private/windows-xnu/objects/DEVELOPMENT/*.log

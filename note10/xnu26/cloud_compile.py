@@ -121,7 +121,7 @@ def main():
     env['N10_CC'] = compiler
     env['N10_SDKROOT'] = sdk
     env['N10_MAKE'] = shutil.which('make')
-    for script in ('build_windows_config.py', 'configure_windows_xnu.py', 'export_source_headers.py', 'generate_native_mig.py', 'generate_native_extra.py'):
+    for script in ('build_windows_config.py', 'configure_windows_xnu.py', 'export_source_headers.py', 'generate_native_mig.py', 'generate_native_extra.py', 'generate_link_metadata.py'):
         subprocess.run([sys.executable, str(Path(__file__).parent / script)], cwd=ROOT, env=env, check=True)
     mode = ['--all-c'] if '--all-c' in sys.argv[1:] else []
     subprocess.run([sys.executable, str(Path(__file__).parent / 'compile_native_components.py'), *mode],
@@ -135,6 +135,8 @@ def main():
             subprocess.run([sys.executable, str(Path(__file__).parent / 'compile_native_components.py'), extra],
                            cwd=ROOT, env=env, check=True)
         subprocess.run([sys.executable, str(Path(__file__).parent / 'compile_public_dependencies.py')],
+                       cwd=ROOT, env=env, check=True)
+        subprocess.run([sys.executable, str(Path(__file__).parent / 'compile_link_metadata.py')],
                        cwd=ROOT, env=env, check=True)
         subprocess.run([sys.executable, str(Path(__file__).parent / 'audit_link_inputs.py')],
                        cwd=ROOT, env=env, check=True)

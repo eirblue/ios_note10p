@@ -44,6 +44,17 @@
  LEXT(CleanPoC_DcacheRegion_internal)
  	dsb		sy
  	CLEANPOC_DCACHEREGION
+--- a/osfmk/arm64/genassym.c
++++ b/osfmk/arm64/genassym.c
+@@ -347,7 +347,7 @@
+ 	DECLARE("RTCLOCKDataSize", sizeof(rtclock_data_t));
+ 
+ 	DECLARE("rhdSize", sizeof(struct reset_handler_data));
+-#if WITH_CLASSIC_S2R
++#if WITH_CLASSIC_S2R || defined(ARM64_BOARD_CONFIG_EXYNOS9825)
+ 	DECLARE("stSize", sizeof(SleepToken));
+ #endif /* WITH_CLASSIC_S2R */
+ 
 --- a/osfmk/arm64/start.s
 +++ b/osfmk/arm64/start.s
 @@ -210,7 +210,7 @@

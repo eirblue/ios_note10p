@@ -186,6 +186,12 @@ def main():
                 raise ValueError('Upstream semantic type rule changed')
             semantic_type_flags = ['-DVM_UNSAFE_TYPES=1']
         includes = [config, exported, source / 'EXTERNAL_HEADERS']
+        if sdk and (private / 'native-link/generate-result.json').exists():
+            stamp = json.loads((private / 'native-link/generate-result.json').read_text())
+            header = private / 'native-link/include/libkern/version.h'
+            if hashlib.sha256(header.read_bytes()).hexdigest() != stamp['version_header_sha256']:
+                raise ValueError('Native version header changed')
+            includes.insert(0, private / 'native-link/include')
         if sdk and extra_report.exists():
             includes += [private / 'generated-extra' / c for c in (component, 'bsd', 'iokit')]
         if native_mig:

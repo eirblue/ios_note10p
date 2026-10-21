@@ -16,6 +16,7 @@ PINS = {
     'osfmk/arm64/start.s': 'a5c1a95b087f62f9e548bed7a0274cf420af1d69bfd656c1481d629093e2b07a',
     'osfmk/arm/pmap/pmap.h': '90eb47769ca63b300cb4f589c6121a2bb1553c0f704b10c5af2e042cc4d8bc55',
     'osfmk/arm64/arm_vm_init.c': '9e17da181e72144d27df4ce256988226bfef0e41c0744fc9ef6466f0844c2a32',
+    'osfmk/arm64/genassym.c': 'e2ca4b5c8d0c05d63408fb9cb88365733056fbb3cf8dfe448750fc854bedd263',
 }
 
 
@@ -58,6 +59,9 @@ def main():
     n = 'osfmk/arm64/start.s'
     new[n] = replace_one(new[n], '#if WITH_CLASSIC_S2R\nLEXT(SleepToken)',
         '#if WITH_CLASSIC_S2R || defined(ARM64_BOARD_CONFIG_EXYNOS9825)\nLEXT(SleepToken)')
+    n = 'osfmk/arm64/genassym.c'
+    new[n] = replace_one(new[n], '#if WITH_CLASSIC_S2R\n\tDECLARE("stSize", sizeof(SleepToken));',
+        '#if WITH_CLASSIC_S2R || defined(ARM64_BOARD_CONFIG_EXYNOS9825)\n\tDECLARE("stSize", sizeof(SleepToken));')
     n = 'osfmk/arm/pmap/pmap.h'
     new[n] = replace_one(new[n], '#if SCHED_HYGIENE_DEBUG && (DEBUG || DEVELOPMENT)\nbool pmap_pending_preemption',
         '#if SCHED_HYGIENE_DEBUG && (DEBUG || DEVELOPMENT) && !defined(ARM64_BOARD_CONFIG_EXYNOS9825)\nbool pmap_pending_preemption')
