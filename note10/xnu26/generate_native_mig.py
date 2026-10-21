@@ -86,7 +86,9 @@ def main():
         out.parent.mkdir(parents=True, exist_ok=True)
         extra = modes[3 if server else 2][3]
         extra_header = out.parent / (stem + ('_server.h' if server else '.h'))
-        write_header = relative.parts[0] != 'mach'
+        # Generated C includes this header by basename. /dev/null would make
+        # mig emit #include "null" or omit declarations required by user stubs.
+        write_header = True
         command = [*common, *extra, '-user', '/dev/null' if server else str(out),
                    '-server', str(out) if server else '/dev/null',
                    '-header', str(extra_header) if write_header and not server else '/dev/null',
@@ -98,6 +100,9 @@ def main():
                                   'passed': passed, 'command': command,
                                   'source_sha256': hashlib.sha256(out.read_bytes()).hexdigest() if passed else None,
                                   'definition_sha256': hashlib.sha256(definition.read_bytes()).hexdigest()})
+    for row in rows:
+        path = base / row['mode'] / 'osfmk/mach' / row['header']
+        if row['passed']:row['header_sha256'] = hashlib.sha256(path.read_bytes()).hexdigest()
     report = {'interfaces': rows, 'all_passed': all(r['passed'] for r in rows),
               'source_makefile_sha256': hashlib.sha256(makefile.read_bytes()).hexdigest(),
               'scope': 'Mach export/kernel headers and selected Mach C sources; BSD/IOKit interfaces still borrowed',
