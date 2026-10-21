@@ -9,7 +9,6 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'host-tools/python-packages'))
-import lz4.frame
 
 
 def need(condition, message):
@@ -141,6 +140,7 @@ def dt_table(raw, output, stem):
 
 
 def main():
+    import lz4.frame
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('input', type=Path, help='Directory containing extracted AP *.img.lz4 files')
     p.add_argument('--out', type=Path, default=ROOT / 'note10/private/firmware')

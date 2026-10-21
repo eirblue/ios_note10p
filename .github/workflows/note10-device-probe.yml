@@ -1,0 +1,33 @@
+name: Note10 recovery probe package checks
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Test package and simulated recovery capture
+        run: |
+          python3 note10/device_test/test_probe.py
+          dash -n note10/device_test/collect.sh
+      - name: Collect diagnostic package and test report
+        uses: actions/upload-artifact@v4
+        with:
+          name: note10-phase1-recovery-probe
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            note10/private/device-test/note10-phase1-probe.zip
+            note10/private/device-test/package-result.json
+            note10/private/device-test/test-result.json
