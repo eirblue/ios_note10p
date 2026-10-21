@@ -40,6 +40,18 @@ def main():
     mig = ROOT / target['research_directory'] / 'generated-headers-vmapple/RELEASE_ARM64_VMAPPLE'
     exported = private / 'exports'
     borrowed_mig = private / 'borrowed-mig'
+    native_mig_report = private / 'native-mig-result.json'
+    native_mig = None
+    if sdk and native_mig_report.exists():
+        candidate = json.loads(native_mig_report.read_text())
+        if candidate['all_passed']:
+            native_mig = private / 'native-mig'
+            if hashlib.sha256((source / 'osfmk/mach/Makefile').read_bytes()).hexdigest() != candidate['source_makefile_sha256']:
+                raise ValueError('Native MIG source Makefile changed')
+            for item in candidate['interfaces']:
+                header = native_mig / item['mode'] / 'osfmk/mach' / item['header']
+                if hashlib.sha256(header.read_bytes()).hexdigest() != item['header_sha256']:
+                    raise ValueError('Native MIG header changed')
     mig_hashes = {}
     for component in ('osfmk', 'bsd', 'iokit'):
         directory = mig / component / 'RELEASE'
@@ -111,6 +123,9 @@ def main():
                 raise ValueError('Upstream semantic type rule changed')
             semantic_type_flags = ['-DVM_UNSAFE_TYPES=1']
         includes = [config, exported, source / 'EXTERNAL_HEADERS']
+        if native_mig:
+            if component == 'osfmk':includes.append(native_mig / 'kernel/osfmk')
+            includes.append(native_mig / 'export/osfmk')
         includes.extend(private / 'source-exports' / c for c in
                         (component, *[c for c in ('osfmk', 'bsd', 'pexpert', 'libkern', 'iokit', 'libsa', 'security', 'san', 'EXTERNAL_HEADERS') if c != component]))
         includes.extend(private / 'configured/DEVELOPMENT' / c for c in
@@ -179,6 +194,7 @@ def main():
     report = {'units': results, 'source_export_sha256': export_hashes,
               'borrowed_nested_generated_header_sha256': mig_hashes,
               'native_exynos_config': True, 'foreign_mig_version_headers': True, 'macos_kdk_declaration_headers': True,
+              'native_mach_mig_headers': bool(native_mig),
               'synthetic_board_inputs': True, 'whole_kernel_build': False, 'device_operations': []}
     report['skipped_generated_sources'] = skipped
     report['scope'] = 'C compiler audit with component-private flags; not a full Make build or per-file instrumentation reproduction'
