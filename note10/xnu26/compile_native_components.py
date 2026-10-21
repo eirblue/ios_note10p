@@ -23,7 +23,8 @@ UNITS = ('pexpert/arm/pe_note10_bootstrap.c', 'pexpert/arm/pe_note10_irq.c',
 # selection. These are candidates for porting, not a complete platform archive.
 PLATFORM_C = tuple('osfmk/arm/pmap/' + n + '.c' for n in
                    ('pmap', 'pmap_cs', 'pmap_data', 'pmap_iommu', 'pmap_misc', 'pmap_ppl_interface')) + \
-             ('osfmk/arm/arm_init.c', 'osfmk/arm64/arm_vm_init.c', 'osfmk/arm64/pcb.c')
+             ('osfmk/arm/arm_init.c', 'osfmk/arm64/arm_vm_init.c', 'osfmk/arm64/pcb.c',
+              'osfmk/arm/machine_routines_apple.c')
 PLATFORM_ASM = tuple('osfmk/arm64/' + n + '.s' for n in
                      ('caches_asm', 'locore', 'cswitch', 'machine_routines_asm', 'start'))
 
@@ -49,6 +50,21 @@ def main():
     sdk = os.environ.get('N10_SDKROOT')
     mig = ROOT / target['research_directory'] / 'generated-headers-vmapple/RELEASE_ARM64_VMAPPLE'
     exported = private / 'exports'
+    # Export only the KDK KernelSupport declarations this target actually uses.
+    # Exposing every optional header would silently enable __has_include based
+    # subsystems, such as Tightbeam, without selecting their implementation.
+    support = ROOT / 'host-tools/kdk/headers/KDK.pkg/System/Library/KernelSupport'
+    support_export = private / 'kernel-support-declarations'
+    support_hashes = {}
+    for header in (support / 'CoreEntitlements').rglob('*.h'):
+        relative = header.relative_to(support)
+        path = support_export / relative; path.parent.mkdir(parents=True, exist_ok=True)
+        raw = header.read_bytes(); path.write_bytes(raw)
+        support_hashes[relative.as_posix()] = hashlib.sha256(raw).hexdigest()
+    if support_export.exists():
+        for header in support_export.rglob('*.h'):
+            if header.relative_to(support_export).as_posix() not in support_hashes:
+                raise ValueError('Unexpected optional KDK declaration export')
     borrowed_mig = private / 'borrowed-mig'
     native_mig_report = private / 'native-mig-result.json'
     native_mig = None
@@ -185,9 +201,8 @@ def main():
             includes.append(source / 'EXTERNAL_HEADERS/corecrypto')
         includes.extend(borrowed_mig / c for c in ('osfmk', 'bsd', 'iokit'))
         includes.extend(mig / c for c in ('osfmk', 'bsd', 'iokit', 'libkern'))
-        includes.extend(ROOT / 'host-tools/kdk/headers' / p for p in (
-            'KDK_SDK.pkg/System/Library/Frameworks/Kernel.framework/Versions/A/PrivateHeaders/platform',
-            'KDK.pkg/System/Library/KernelSupport'))
+        includes.append(ROOT / 'host-tools/kdk/headers/KDK_SDK.pkg/System/Library/Frameworks/Kernel.framework/Versions/A/PrivateHeaders/platform')
+        includes.append(support_export)
         if sdk:
             includes.append(ROOT / 'host-tools/opensource-declarations')
             includes.extend(Path(sdk) / p for p in (
@@ -263,6 +278,7 @@ def main():
               'native_exynos_config': True, 'foreign_mig_version_headers': True, 'macos_kdk_declaration_headers': True,
               'native_mach_mig_headers': bool(native_mig),
               'deployment_target': deployment_target, 'kernel_codegen_mode': True,
+              'kernel_support_declaration_sha256': support_hashes,
               'synthetic_board_inputs': True, 'whole_kernel_build': False, 'device_operations': []}
     report['skipped_generated_sources'] = skipped
     report['architecture_candidates_not_selected_in_native_config'] = bool(mode and mode[0].startswith('PLATFORM_'))

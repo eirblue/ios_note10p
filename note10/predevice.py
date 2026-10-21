@@ -107,6 +107,7 @@ def main():
             ('master-link-selection', [py, 'note10/xnu26/test_master_profile.py']),
             ('exception-header-patch', [py, 'note10/xnu26/prepare_exception_headers.py']),
             ('architecture-patch', [py, 'note10/xnu26/prepare_architecture_sources.py']),
+            ('native-interfaces-patch', [py, 'note10/xnu26/prepare_native_interfaces.py']),
             ('patch-series', [py, 'note10/xnu26/validate_series.py']),
             ('header-dependency-probe', [py, 'note10/xnu26/probe_kernel_headers.py']),
             ('host-config-build', [py, 'note10/xnu26/build_windows_config.py']),

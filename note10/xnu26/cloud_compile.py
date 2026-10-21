@@ -96,6 +96,10 @@ def main():
                  'compiler_version': subprocess.check_output([compiler, '--version']).decode(),
                  'xnu_type_summary': 'summary_supported' in probe.stdout,
                  'xnu_types_compatible': 'compatible_supported' in probe.stdout}
+    resources = Path(subprocess.check_output([compiler, '-print-resource-dir']).decode().strip())
+    toolchain['compiler_runtime_directory'] = str(resources)
+    toolchain['compiler_profile_archives'] = [str(p) for p in sorted((resources / 'lib/darwin').glob('*profile*.a'))]
+    toolchain['compiler_kernel_archives'] = [str(p) for p in sorted((resources / 'lib/darwin').glob('*kext*.a'))]
     report = ROOT / 'note10/private/cloud-toolchain-result.json'
     report.parent.mkdir(parents=True, exist_ok=True)
     report.write_text(json.dumps(toolchain, indent=2))
