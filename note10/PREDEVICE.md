@@ -50,7 +50,7 @@ C:\Python314\python.exe note10/predevice.py
 | GIC handoff | 사전 초기화된 상태의 실제 생산자·소유권·priority/trigger 설정 미확정 |
 | 사용자 공간 | PAC 키/예외/loader 연결 및 iOS 프로세스 실행 미완료 |
 | 장치 드라이버 | storage/APFS 부팅 경로, 화면·터치 등 통합 미완료 |
-| 배포 산출물 | 링크된 커널, Samsung 부팅 이미지 및 복구 절차 검증 없음 |
+| 배포 산출물 | 연구용 Mach-O 링크 성공. Samsung 부팅 이미지 및 복구 절차 검증 없음 |
 | 소스 ABI | public 12377.121.6과 대상 12377.122.8의 차이 미검증 |
 
 실기기에서만 확인 가능한 항목은 관측 없이 확정하지 않는다. PC 합성 검사 통과만으로

@@ -1,6 +1,6 @@
 # Experimental ARM64 kernel link
 
-Verified run: [39559172237](https://github.com/eirblue/ios_note10p/actions/runs/39559172237), commit `71b5960`.
+Verified run: [39560904016](https://github.com/eirblue/ios_note10p/actions/runs/39560904016), commit `ff5ace1`.
 
 - Selected C 904/904, C++ 129/129, assembly 19/19, with no skipped generated inputs.
 - Public architecture candidates: 10 C and 5 assembly units, all compiled.
@@ -9,8 +9,8 @@ Verified run: [39559172237](https://github.com/eirblue/ios_note10p/actions/runs/
 - All 1,071 objects passed an Apple `ld -r` merge.
 - Six VM aliases came from real upstream export lists, not replacement functions.
 - The plain arm64 slice of Apple's `libclang_rt.cc_kext_ios.a` supplied kernel compiler support.
-- The subsequent static source-object link produced an arm64 `MH_EXECUTE`, 18,505,624 bytes.
-- SHA256: `bace190b2cc1c787a3098f13acabae9866305c817b425ce08cad80fcc451d6f4`.
+- The subsequent static source-object link produced an arm64 `MH_EXECUTE`, 18,522,008 bytes.
+- SHA256: `8584aec16c94eeb16b078cb18807f5b93b923c989c19afd78a778745d851454b`.
 - No undefined symbols or dynamic-library load commands remained in the executable.
 
 The relocatable merge still had 38 unresolved names, including linker-created section
@@ -29,7 +29,7 @@ moves `__LINKEDIT` last. Mac SDK declarations are used with an iOS deployment ta
 
 The board page/cache parameters remain synthetic. Virtual linker addresses do not
 supply a physical RAM/load/reserved-memory contract. A diagnostic archive of the 15
-public architecture candidates is being added; it is not verified Samsung hardware
+public architecture candidates was created and force-loaded in the final link; it is not verified Samsung hardware
 support and does not establish DMA isolation, monitor services or sleep support.
 No closed Apple platform support archive is linked as an Exynos replacement.
 
@@ -39,3 +39,18 @@ Public XNU 12377.121.6 also differs from target IPSW XNU 12377.122.8.
 Executable-link success does not establish bootability or userland ABI compatibility.
 Only locally built experimental outputs and diagnostics may be retained by the manual
 workflow; original firmware, IPSW, SDK/KDK contents and credentials remain excluded.
+
+## Downloaded executable validation
+
+The actual native-build artifact was downloaded to the Windows workspace.
+`verify_experimental_artifact.py` verified its manifest hash, Mach-O bounds,
+non-overlapping virtual segments, no writable executable segment, all six expected
+architecture symbols and LC_UNIXTHREAD PC equal to `__start` at
+`0xfffffff007340490`. No undefined symbol remained. Independent LLVM readobj
+confirmed Mach-O arm64, ARM64_ALL subtype and MH_EXECUTE.
+The downloaded 15-object archive also matched its recorded SHA256.
+
+The manual workflow retains `note10-experimental-native-build` for seven days.
+It contains source-built research outputs and a manifest, not a Samsung flash package.
+Local copies remain under ignored `note10/private/cloud-runs/39560904016/`.
+PC component verification separately passed all 28 checks with deployment_ready=false.

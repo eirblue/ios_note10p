@@ -243,3 +243,16 @@ Exynos SoC MASTER 및 플랫폼 archive 입력 분리:
 - 1,071개 객체 부분 링크 후, XNU 원본 배치 옵션으로 18,505,624-byte arm64 MH_EXECUTE를 링크했다. 미해결 심볼과 동적 라이브러리 명령은 없다.
 - 이 실행은 전체 upstream Make/커널 컬렉션/KPI/계측 재현이 아니다. 보드 입력은 합성이며 실제 부팅·부팅 이미지·드라이버·사용자 공간은 미완료다.
 - 로컬 PC 검사 28/28 통과 및 Windows genassym 149개 생성 확인. 실기기 조작은 없다. 자세한 범위: xnu26/LINK.md.
+
+
+## 2026-10-21: 원격 생성물 다운로드·독립 구조 검증 완료
+
+- 최종 검증: https://github.com/eirblue/ios_note10p/actions/runs/39560904016 (`ff5ace1`), success.
+- 실제 공개 ARM 구현 15개로 archive를 만들고 force-load하여 arm64 MH_EXECUTE를 다시 링크했다.
+- 결과 18,522,008 bytes, SHA256 8584aec16c94eeb16b078cb18807f5b93b923c989c19afd78a778745d851454b.
+- 원격 생성물을 Windows로 다운로드했다. 해시·세그먼트 범위/보호·정의 심볼·진입 PC를 읽기 전용 검사했다.
+- __start와 진입 PC는 0xfffffff007340490으로 일치한다. 여섯 ARM 진입/초기화 심볼이 실제 출력에 있다.
+- LLVM readobj도 plain arm64 / MH_EXECUTE로 확인했다. 다운로드 archive 해시도 일치한다.
+- 로컬 PC 28개 검사 통과. 기기 접근·언락·재부팅·플래시는 없다.
+- 실제 초기 EL/RAM/예약 영역/cache/page/GIC 상태는 미측정이다. 합성 값을 실제 부팅 계약으로 대체하지 않는다.
+- Samsung 부팅 이미지·실제 부팅·저장장치/화면/터치·PAC 및 iOS 사용자 공간 통합은 여전히 미완료다.

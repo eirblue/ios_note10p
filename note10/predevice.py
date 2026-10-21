@@ -126,7 +126,7 @@ def main():
     # Patch generators are expected to reproduce the checked-in patch bytes exactly.
     steps.append({'name': 'reviewable-inputs-unchanged', 'passed': before == after})
     blockers = [
-        {'id': 'kernel-build', 'state': 'missing',
+        {'id': 'kernel-build', 'state': 'incomplete',
          'detail': 'Native configuration, generated inputs and source compilation are exercised by macOS CI. Complete upstream Make reproduction, verified hardware platform support and a validated Exynos kernel remain incomplete; local Windows checks do not establish remote kernel completion.'},
         {'id': 'boot-memory-contract', 'state': 'unverified',
          'detail': 'Entry EL, load/reserved RAM, MMU/cache/granule capabilities and diagnostic recovery are unknown.'},
@@ -137,7 +137,7 @@ def main():
         {'id': 'device-drivers', 'state': 'missing',
          'detail': 'Storage/APFS boot path, framebuffer, touch and other Exynos device drivers are not integrated.'},
         {'id': 'boot-artifact', 'state': 'missing',
-         'detail': 'No linked kernel, Note10 boot image, verified packaging or recovery procedure.'},
+         'detail': 'Experimental kernel linking is audited separately. No Note10 boot image, verified packaging or recovery procedure.'},
         {'id': 'source-abi', 'state': 'unverified',
          'detail': 'Public XNU 12377.121.6 differs from IPSW 12377.122.8; ABI compatibility is unproven.'},
     ]
