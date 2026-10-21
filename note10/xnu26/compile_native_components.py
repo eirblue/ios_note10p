@@ -175,6 +175,8 @@ def main():
             # Documented image4 kernel-build option: SDK availability macros
             # otherwise mix with the pinned public AvailabilityInternal.h.
             command.append('-DIMAGE4_STRIP_AVAILABILITY=1')
+            if name in ('bsd/kern/subr_log.c', 'libkern/os/log.c'):
+                command.append('-DOS_FIREHOSE_SPI=1')
         for directory in includes:
             command.extend(['-I', str(directory)])
         command.extend(['-c', str(source / name), '-o', str(object_file)])
