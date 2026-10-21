@@ -108,6 +108,11 @@ def main():
     download('https://raw.githubusercontent.com/apple-oss-distributions/libdispatch/2361ffb78a76f7ee488cd052eb0bc5c767118bf9/os/firehose_buffer_private.h',
              ROOT / 'host-tools/opensource-declarations/os/firehose_buffer_private.h',
              'b1da2269d930974d1fb122d90446534553829dc2a3b090b3d0ea0813fd95dd45')
+    library_archive = ROOT / target['research_directory'] / 'libdispatch-2361ffb78a76f7ee488cd052eb0bc5c767118bf9.tar.gz'
+    download('https://codeload.github.com/apple-oss-distributions/libdispatch/tar.gz/2361ffb78a76f7ee488cd052eb0bc5c767118bf9',
+             library_archive, 'd6d2513ac5217c3ce3e79f41c51f74fdc14446f42f020a1289ab7d9370fa182e')
+    with tarfile.open(library_archive) as package:
+        package.extractall(ROOT / target['research_directory'], filter='data')
     env = dict(os.environ)
     env['N10_CC'] = compiler
     env['N10_SDKROOT'] = sdk
@@ -125,6 +130,8 @@ def main():
         for extra in ('--platform-c', '--platform-asm'):
             subprocess.run([sys.executable, str(Path(__file__).parent / 'compile_native_components.py'), extra],
                            cwd=ROOT, env=env, check=True)
+        subprocess.run([sys.executable, str(Path(__file__).parent / 'compile_public_dependencies.py')],
+                       cwd=ROOT, env=env, check=True)
         subprocess.run([sys.executable, str(Path(__file__).parent / 'audit_link_inputs.py')],
                        cwd=ROOT, env=env, check=True)
         results = []

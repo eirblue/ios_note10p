@@ -18,8 +18,11 @@ def main():
     private = ROOT / 'note10/private/windows-xnu'
     objects = private / 'objects/DEVELOPMENT'
     paths = []; skipped = []; failed = 0
-    for name in ('all-c-result.json', 'all-cxx-result.json', 'all-asm-result.json'):
-        report = json.loads((objects / name).read_text())
+    reports = [objects / n for n in ('all-c-result.json', 'all-cxx-result.json', 'all-asm-result.json')]
+    optional = private / 'public-dependencies-result.json'
+    if optional.exists():reports.append(optional)
+    for report_path in reports:
+        report = json.loads(report_path.read_text())
         skipped += report.get('skipped_generated_sources', [])
         for unit in report['units']:
             if not unit['passed']:failed += 1;continue
