@@ -112,7 +112,7 @@ def main():
     env['N10_CC'] = compiler
     env['N10_SDKROOT'] = sdk
     env['N10_MAKE'] = shutil.which('make')
-    for script in ('build_windows_config.py', 'configure_windows_xnu.py', 'export_source_headers.py', 'generate_native_mig.py'):
+    for script in ('build_windows_config.py', 'configure_windows_xnu.py', 'export_source_headers.py', 'generate_native_mig.py', 'generate_native_extra.py'):
         subprocess.run([sys.executable, str(Path(__file__).parent / script)], cwd=ROOT, env=env, check=True)
     mode = ['--all-c'] if '--all-c' in sys.argv[1:] else []
     subprocess.run([sys.executable, str(Path(__file__).parent / 'compile_native_components.py'), *mode],

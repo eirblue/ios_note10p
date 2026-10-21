@@ -70,17 +70,27 @@ def main():
                          'header_sha256': hashlib.sha256(out.read_bytes()).hexdigest() if passed else None})
     selected = re.search(r'^CFILES=(.*)$', text.replace('\\\n', ' '), re.M).group(1).split()
     for token in selected:
-        if not token.startswith('./mach/'):continue
+        if not token.startswith('./'):continue
+        relative = Path(token.removeprefix('./'))
+        if len(relative.parts) != 2 or relative.parts[0] not in ('mach', 'device', 'gssd', 'lockd', 'kextd'):
+            raise ValueError('Unexpected selected generated osfmk source: ' + token)
         name = Path(token).name
         server = name.endswith('_server.c')
-        if not server and not name.endswith('_user.c'):raise ValueError('Unexpected generated Mach source')
-        stem = name.removesuffix('_server.c' if server else '_user.c')
-        definition = source / 'osfmk/mach' / (stem + '.defs')
-        out = base / 'kernel/osfmk/mach' / name
+        if name.endswith(('_server.c', '_user.c')):
+            stem = name.removesuffix('_server.c' if server else '_user.c')
+        elif relative.parts[0] in ('gssd', 'lockd', 'kextd'):
+            stem = name.removesuffix('.c')
+        else:raise ValueError('Unexpected generated MIG source')
+        definition = source / 'osfmk' / relative.parent / (stem + '.defs')
+        out = base / 'kernel/osfmk' / relative
+        out.parent.mkdir(parents=True, exist_ok=True)
         extra = modes[3 if server else 2][3]
+        extra_header = out.parent / (stem + ('_server.h' if server else '.h'))
+        write_header = relative.parts[0] != 'mach'
         command = [*common, *extra, '-user', '/dev/null' if server else str(out),
-                   '-server', str(out) if server else '/dev/null', '-header', '/dev/null',
-                   '-sheader', '/dev/null', str(definition)]
+                   '-server', str(out) if server else '/dev/null',
+                   '-header', str(extra_header) if write_header and not server else '/dev/null',
+                   '-sheader', str(extra_header) if write_header and server else '/dev/null', str(definition)]
         result = subprocess.run(command, capture_output=True, text=True, timeout=30)
         (base / ('source-' + name + '.log')).write_text(result.stdout + result.stderr)
         passed = result.returncode == 0 and out.is_file()

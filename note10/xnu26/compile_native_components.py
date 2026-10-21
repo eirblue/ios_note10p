@@ -43,6 +43,15 @@ def main():
     native_mig_report = private / 'native-mig-result.json'
     native_mig = None
     generated_mig = {}
+    generated_extra = {}
+    extra_report = private / 'native-extra-result.json'
+    if sdk and extra_report.exists():
+        for item in json.loads(extra_report.read_text())['generated_sources']:
+            if not item['passed']:continue
+            path = private / item['source']
+            if not path.resolve().is_relative_to(private.resolve()) or hashlib.sha256(path.read_bytes()).hexdigest() != item['source_sha256']:
+                raise ValueError('Generated extra source escaped output or changed')
+            generated_extra[(item['component'], item['selected_name'])] = path
     if sdk and native_mig_report.exists():
         candidate = json.loads(native_mig_report.read_text())
         if candidate['all_passed']:
@@ -113,6 +122,11 @@ def main():
                     owners[name] = component
                     input_files[name] = generated_mig[token]
                     units.append(name)
+                elif (component, token) in generated_extra:
+                    name = '@generated/' + component + '/' + token.removeprefix('./')
+                    owners[name] = component
+                    input_files[name] = generated_extra[(component, token)]
+                    units.append(name)
                 else:skipped.append({'source': token, 'component': component, 'reason': 'generated source not yet built'})
         units = sorted(set(units))
     private_flags = {
@@ -142,6 +156,8 @@ def main():
                 raise ValueError('Upstream semantic type rule changed')
             semantic_type_flags = ['-DVM_UNSAFE_TYPES=1']
         includes = [config, exported, source / 'EXTERNAL_HEADERS']
+        if sdk and extra_report.exists():
+            includes += [private / 'generated-extra' / c for c in (component, 'bsd', 'iokit')]
         if native_mig:
             if component == 'osfmk':includes.append(native_mig / 'kernel/osfmk')
             includes.append(native_mig / 'export/osfmk')
