@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 import subprocess
 import os
+import sys
 from prepare_build_selection import ROOT, NDK
 
 
@@ -54,16 +55,25 @@ def main():
             if not original.is_file():
                 unresolved.append({'makefile': path.relative_to(source).as_posix(), 'missing_export': name}); continue
             output = destination / component / directory / name
-            if not output.resolve().is_relative_to(destination.resolve()):raise ValueError('Export path escaped output')
+            if not output.parent.resolve().is_relative_to(destination.resolve()):raise ValueError('Export path escaped output')
             raw = original.read_bytes(); digest = hashlib.sha256(raw).hexdigest()
             key = output.relative_to(destination).as_posix()
             if key in exported and exported[key]['sha256'] != digest:
                 raise ValueError('Conflicting header export: ' + key)
-            output.parent.mkdir(parents=True, exist_ok=True); output.write_bytes(raw)
+            output.parent.mkdir(parents=True, exist_ok=True)
+            if sys.platform == 'darwin':
+                # Preserve file identity for #pragma once when a source also
+                # includes its local header by quotes. Only the isolated source
+                # stage is linked; the pristine reference remains separate.
+                if output.exists() or output.is_symlink():output.unlink()
+                os.link(original, output)
+            else:
+                output.write_bytes(raw)
             exported[key] = {'source': original.relative_to(source).as_posix(), 'sha256': digest,
                              'makefile_sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
     report = {'exported': exported, 'unresolved': unresolved, 'full_make_export_stage': False,
-              'files_modified_in_public_source': False}
+              'files_modified_in_public_source': False,
+              'export_file_identity_preserved': sys.platform == 'darwin'}
     (private / 'exports-result.json').write_text(json.dumps(report, indent=2))
     print(json.dumps({'source_exports': len(exported), 'unresolved_export_inputs': len(unresolved), 'full_make_export_stage': False}))
 

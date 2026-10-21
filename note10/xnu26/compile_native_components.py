@@ -68,6 +68,7 @@ def main():
     audit = sys.argv[1:] == ['--all-c']
     skipped = []
     units = list(sys.argv[1:]) or list(UNITS)
+    owners = {}
     if audit:
         units = []
         for component in ('osfmk', 'bsd', 'iokit', 'libkern', 'pexpert', 'libsa', 'security', 'san'):
@@ -76,7 +77,11 @@ def main():
             for token in match.group(1).split() if match else []:
                 if token.startswith('$(SOURCE_DIR)/'):
                     name = token[len('$(SOURCE_DIR)/'):]
-                    if (source / name).is_file():units.append(name)
+                    if (source / name).is_file():
+                        if name in owners and owners[name] != component:
+                            raise ValueError('Source selected by multiple components: ' + name)
+                        owners[name] = component
+                        units.append(name)
                     else:skipped.append({'source': name, 'reason': 'selected source missing'})
                 else:skipped.append({'source': token, 'component': component, 'reason': 'generated source not yet built'})
         units = sorted(set(units))
@@ -91,11 +96,20 @@ def main():
     def compile_one(name):
         if not (source / name).resolve().is_relative_to(source.resolve()) or not name.endswith('.c'):
             raise ValueError('Invalid source input')
-        component = name.split('/')[0]
+        # kperfbsd.c lives under osfmk/ but is selected by bsd/conf/files.
+        component = owners.get(name, name.split('/')[0])
         config = private / 'configured/DEVELOPMENT' / component
         text = (config / 'Makefile').read_text()
         defines = re.search(r'^export CONFIG_DEFINES =(.*)$', text, re.MULTILINE).group(1)
         flags = shlex.split(defines)
+        semantic_type_flags = []
+        if name.startswith(('osfmk/vm/', 'bsd/vm/')) or name == 'bsd/kern/kern_mman.c':
+            # These are the actual FORCE_UNSAFE_TYPES rules in the component
+            # Makefile templates, not replacement typedefs or a safety opt-out.
+            template = (source / component / 'conf/Makefile.template').read_text()
+            if '$1_CFLAGS_ADD += -DVM_UNSAFE_TYPES' not in template:
+                raise ValueError('Upstream semantic type rule changed')
+            semantic_type_flags = ['-DVM_UNSAFE_TYPES=1']
         includes = [config, exported, source / 'EXTERNAL_HEADERS']
         includes.extend(private / 'source-exports' / c for c in
                         (component, *[c for c in ('osfmk', 'bsd', 'pexpert', 'libkern', 'iokit', 'libsa', 'security', 'san', 'EXTERNAL_HEADERS') if c != component]))
@@ -130,7 +144,11 @@ def main():
                    '-DN10_MAX_CACHE_LINE_LOG2=7', '-DN10_KERNEL_PAGE_SHIFT=14',
                    '-include', str(config / 'meta_features.h'), *flags]
         if sdk:command.extend(['-isysroot', sdk])
-        command += private_flags[component]
+        command += private_flags[component] + semantic_type_flags
+        if sdk:
+            # Documented image4 kernel-build option: SDK availability macros
+            # otherwise mix with the pinned public AvailabilityInternal.h.
+            command.append('-DIMAGE4_STRIP_AVAILABILITY=1')
         for directory in includes:
             command.extend(['-I', str(directory)])
         command.extend(['-c', str(source / name), '-o', str(object_file)])
@@ -139,7 +157,7 @@ def main():
         log.write_bytes(result.stdout + result.stderr)
         passed = result.returncode == 0
         diagnostics = result.stderr.decode('utf-8', errors='replace')
-        row = {'source': name, 'passed': passed, 'command': command,
+        row = {'source': name, 'component': component, 'passed': passed, 'command': command,
                         'source_sha256': hashlib.sha256((source / name).read_bytes()).hexdigest(),
                         'object_sha256': hashlib.sha256(object_file.read_bytes()).hexdigest() if passed else None,
                         'diagnostics': diagnostics}
