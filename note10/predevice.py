@@ -106,6 +106,7 @@ def main():
             ('master-patch', [py, 'note10/xnu26/prepare_master_profile.py']),
             ('master-link-selection', [py, 'note10/xnu26/test_master_profile.py']),
             ('exception-header-patch', [py, 'note10/xnu26/prepare_exception_headers.py']),
+            ('architecture-patch', [py, 'note10/xnu26/prepare_architecture_sources.py']),
             ('patch-series', [py, 'note10/xnu26/validate_series.py']),
             ('header-dependency-probe', [py, 'note10/xnu26/probe_kernel_headers.py']),
             ('host-config-build', [py, 'note10/xnu26/build_windows_config.py']),
@@ -125,7 +126,7 @@ def main():
     steps.append({'name': 'reviewable-inputs-unchanged', 'passed': before == after})
     blockers = [
         {'id': 'kernel-build', 'state': 'missing',
-         'detail': 'Native config/headers and selected C objects exist. Apple compiler builtins, remaining source/generated code, complete platform archive, assembly/C++ and whole Exynos link remain incomplete.'},
+         'detail': 'Native config/headers and selected C objects exist. Apple compiler builtins are available in the designated macOS CI. Complete selected generated inputs, hardware platform archive and whole Exynos kernel link remain incomplete; local Windows checks do not establish remote kernel completion.'},
         {'id': 'boot-memory-contract', 'state': 'unverified',
          'detail': 'Entry EL, load/reserved RAM, MMU/cache/granule capabilities and diagnostic recovery are unknown.'},
         {'id': 'gic-handoff', 'state': 'missing',

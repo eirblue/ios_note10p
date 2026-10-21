@@ -19,17 +19,23 @@ def main():
     objects = private / 'objects/DEVELOPMENT'
     paths = []; skipped = []; failed = 0
     reports = [objects / n for n in ('all-c-result.json', 'all-cxx-result.json', 'all-asm-result.json')]
+    for name in ('platform-c-result.json', 'platform-asm-result.json'):
+        if (objects / name).exists():reports.append(objects / name)
     optional = private / 'public-dependencies-result.json'
     if optional.exists():reports.append(optional)
+    groups = {}
     for report_path in reports:
         report = json.loads(report_path.read_text())
+        group = 'selected' if report_path.name.startswith('all-') else 'architecture_candidates' if report_path.name.startswith('platform-') else 'public_dependency_candidates'
+        counts = groups.setdefault(group, {'compiled': 0, 'failed': 0})
         skipped += report.get('skipped_generated_sources', [])
         for unit in report['units']:
-            if not unit['passed']:failed += 1;continue
+            if not unit['passed']:failed += 1;counts['failed'] += 1;continue
             path = objects / (unit['source'].replace('/', '_').replace('@', '') + '.o')
             if hashlib.sha256(path.read_bytes()).hexdigest() != unit['object_sha256']:
                 raise ValueError('Object changed after compilation: ' + path.name)
             paths.append(path)
+            counts['compiled'] += 1
     if len(paths) != len(set(paths)):raise ValueError('Duplicate object input')
     nm = subprocess.check_output(['xcrun', '-f', 'nm']).decode().strip()
     result = subprocess.run([nm, '-g', *[p.name for p in paths]], cwd=objects,
@@ -52,6 +58,7 @@ def main():
     linked = subprocess.run(command, capture_output=True, text=True, timeout=120)
     (private / 'link-audit.log').write_text(linked.stdout + linked.stderr)
     report = {'compiled_objects': len(paths), 'compile_failures': failed,
+              'input_groups': groups,
               'skipped_generated_inputs': skipped, 'defined_external_symbols': len(defined),
               'unresolved_external_symbols': unresolved,
               'unresolved_note': 'Includes weak/optional imports; absence from this partial set is not an ABI proof.',

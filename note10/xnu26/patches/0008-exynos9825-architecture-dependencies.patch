@@ -1,0 +1,59 @@
+--- a/osfmk/arm/pmap/pmap.c
++++ b/osfmk/arm/pmap/pmap.c
+@@ -84,8 +84,10 @@
+ 
+ #include <arm64/proc_reg.h>
+ #include <pexpert/arm64/boot.h>
++#if !defined(ARM64_BOARD_CONFIG_EXYNOS9825)
+ #include <arm64/ppl/sart.h>
+ #include <arm64/ppl/uat.h>
++#endif
+ 
+ #if defined(KERNEL_INTEGRITY_KTRR) || defined(KERNEL_INTEGRITY_CTRR) || defined(KERNEL_INTEGRITY_PV_CTRR)
+ #include <arm64/amcc_rorgn.h>
+@@ -2334,7 +2336,11 @@
+ 	/**
+ 	 * Bootstrap any necessary SART data structures and values needed from the device tree.
+ 	 */
++#if !defined(ARM64_BOARD_CONFIG_EXYNOS9825)
+ 	sart_bootstrap();
++#else
++	/* Exynos has no Apple SART. Samsung DMA protection is not implemented here. */
++#endif
+ 
+ 	/**
+ 	 * Don't make any assumptions about the alignment of avail_start before this
+--- a/osfmk/arm64/pcb.c
++++ b/osfmk/arm64/pcb.c
+@@ -71,7 +71,9 @@
+ 
+ #include <IOKit/IOBSD.h>
+ 
++#if !defined(ARM64_BOARD_CONFIG_EXYNOS9825)
+ #include <pexpert/arm64/apple_arm64_cpu.h>
++#endif
+ #include <pexpert/pexpert.h>
+ 
+ // fixme: rdar://114299113 tracks resolving the supportlib issue with hwtrace features
+--- a/osfmk/arm64/start.s
++++ b/osfmk/arm64/start.s
+@@ -33,7 +33,9 @@
+ #include <pexpert/arm64/board_config.h>
+ #include <mach_assert.h>
+ #include <machine/asm.h>
++#if !defined(ARM64_BOARD_CONFIG_EXYNOS9825)
+ #include <arm64/tunables/tunables.s>
++#endif
+ #include <arm64/exception_asm.h>
+ 
+ #if __ARM_KERNEL_PROTECT__
+@@ -784,7 +786,9 @@
+ 	// Read MIDR before start of per-SoC tunables
+ 	mrs x12, MIDR_EL1
+ 
++#if !defined(ARM64_BOARD_CONFIG_EXYNOS9825)
+ 	APPLY_TUNABLES x12, x13, x14
++#endif /* Apple per-SoC tuning is not applicable to Exynos. */
+ 
+ #if HAS_CLUSTER && !NO_CPU_OVRD
+ 	// Unmask external IRQs if we're restarting from non-retention WFI
