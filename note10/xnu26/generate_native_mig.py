@@ -48,6 +48,7 @@ def main():
     # Upstream MIGFLAGS uses joined include flags and CONFIG_DEFINES as well.
     for directory in includes:common.append('-I' + str(directory))
     rows = []
+    generated_sources = []
     modes = [('export', 'MIG_UUHDRS', False, []), ('export', 'MIG_USHDRS', True, []),
              ('kernel', 'MIG_KUHDRS', False, ['-DMACH_KERNEL_PRIVATE', '-DKERNEL_USER=1', '-DEXC_SERVER_AUDITTOKEN=1', '-DMACH_EXC_SERVER_AUDITTOKEN=1', '-maxonstack', '1024']),
              ('kernel', 'MIG_KSHDRS', True, ['-DMACH_KERNEL_PRIVATE', '-DKERNEL_SERVER=1', '-mach_msg2'])]
@@ -67,12 +68,34 @@ def main():
             rows.append({'mode': mode, 'header': name, 'passed': passed, 'command': command,
                          'definition_sha256': hashlib.sha256(definition.read_bytes()).hexdigest(),
                          'header_sha256': hashlib.sha256(out.read_bytes()).hexdigest() if passed else None})
+    selected = re.search(r'^CFILES=(.*)$', text.replace('\\\n', ' '), re.M).group(1).split()
+    for token in selected:
+        if not token.startswith('./mach/'):continue
+        name = Path(token).name
+        server = name.endswith('_server.c')
+        if not server and not name.endswith('_user.c'):raise ValueError('Unexpected generated Mach source')
+        stem = name.removesuffix('_server.c' if server else '_user.c')
+        definition = source / 'osfmk/mach' / (stem + '.defs')
+        out = base / 'kernel/osfmk/mach' / name
+        extra = modes[3 if server else 2][3]
+        command = [*common, *extra, '-user', '/dev/null' if server else str(out),
+                   '-server', str(out) if server else '/dev/null', '-header', '/dev/null',
+                   '-sheader', '/dev/null', str(definition)]
+        result = subprocess.run(command, capture_output=True, text=True, timeout=30)
+        (base / ('source-' + name + '.log')).write_text(result.stdout + result.stderr)
+        passed = result.returncode == 0 and out.is_file()
+        generated_sources.append({'selected_name': token, 'source': out.relative_to(private).as_posix(),
+                                  'passed': passed, 'command': command,
+                                  'source_sha256': hashlib.sha256(out.read_bytes()).hexdigest() if passed else None,
+                                  'definition_sha256': hashlib.sha256(definition.read_bytes()).hexdigest()})
     report = {'interfaces': rows, 'all_passed': all(r['passed'] for r in rows),
               'source_makefile_sha256': hashlib.sha256(makefile.read_bytes()).hexdigest(),
-              'scope': 'Mach export/kernel headers only; BSD/IOKit generated interfaces still borrowed',
+              'scope': 'Mach export/kernel headers and selected Mach C sources; BSD/IOKit interfaces still borrowed',
+              'generated_sources': generated_sources,
               'generated_c_compiled': False, 'synthetic_board_inputs': True, 'whole_kernel_build': False}
     (private / 'native-mig-result.json').write_text(json.dumps(report, indent=2))
     print(json.dumps({'native_mig_headers': sum(r['passed'] for r in rows), 'attempted': len(rows),
+                      'generated_c_sources': sum(r['passed'] for r in generated_sources),
                       'all_passed': report['all_passed']}), flush=True)
 
 

@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import re
 import subprocess
+import sys
 from prepare_build_selection import ROOT
 
 
@@ -28,6 +29,7 @@ def main():
     (private / 'genassym.log').write_bytes(result.stdout + result.stderr)
     passed = result.returncode == 0
     constants = {}
+    sed_matched = False
     if passed:
         text = assembly.read_text()
         for name, prefix, number in re.findall(r'DEFINITION__define__([A-Za-z0-9_]+):\s*\.ascii\s+"([#$]*)(-?\d+)"', text):
@@ -41,7 +43,15 @@ def main():
             lines += ['#define ' + name + ' ' + prefix + number,
                       '#define ' + name + '_NUM ' + number]
         (directory / 'assym.s').write_text('\n'.join(lines) + '\n', newline='\n')
-    report = {'passed': passed, 'constants': len(constants), 'command': command,
+        if sys.platform == 'darwin':
+            template = (source / 'osfmk/conf/Makefile.template').read_text()
+            rule = next(s for s in template.splitlines() if 'sed -e' in s and 'DEFINITION__define__' in s)
+            recipe = rule.split('$(_v)', 1)[1].split(' > $@')[0].replace('genassym.o', '"$1"').replace('$$', '$')
+            expected = subprocess.check_output(['/bin/sh', '-c', recipe, 'genassym-check', str(assembly)])
+            if expected != (directory / 'assym.s').read_bytes():
+                raise ValueError('Generated offsets differ from actual upstream sed recipe')
+            sed_matched = True
+    report = {'passed': passed, 'constants': len(constants), 'command': command, 'upstream_sed_matched': sed_matched,
               'source_sha256': hashlib.sha256((source / 'osfmk/arm64/genassym.c').read_bytes()).hexdigest(),
               'synthetic_board_inputs': True, 'whole_kernel_build': False}
     (private / 'genassym-result.json').write_text(json.dumps(report, indent=2))

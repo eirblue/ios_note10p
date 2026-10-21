@@ -42,6 +42,7 @@ def main():
     borrowed_mig = private / 'borrowed-mig'
     native_mig_report = private / 'native-mig-result.json'
     native_mig = None
+    generated_mig = {}
     if sdk and native_mig_report.exists():
         candidate = json.loads(native_mig_report.read_text())
         if candidate['all_passed']:
@@ -52,6 +53,14 @@ def main():
                 header = native_mig / item['mode'] / 'osfmk/mach' / item['header']
                 if hashlib.sha256(header.read_bytes()).hexdigest() != item['header_sha256']:
                     raise ValueError('Native MIG header changed')
+            for item in candidate.get('generated_sources', []):
+                if not item['passed']:continue
+                generated_path = private / item['source']
+                if not generated_path.resolve().is_relative_to(native_mig.resolve()):
+                    raise ValueError('Generated MIG source path escaped output')
+                if hashlib.sha256(generated_path.read_bytes()).hexdigest() != item['source_sha256']:
+                    raise ValueError('Generated MIG source changed')
+                generated_mig[item['selected_name']] = generated_path
     mig_hashes = {}
     for component in ('osfmk', 'bsd', 'iokit'):
         directory = mig / component / 'RELEASE'
@@ -84,6 +93,7 @@ def main():
     skipped = []
     units = list(sys.argv[1:]) or list(UNITS)
     owners = {}
+    input_files = {}
     if audit:
         units = []
         for component in ('osfmk', 'bsd', 'iokit', 'libkern', 'pexpert', 'libsa', 'security', 'san'):
@@ -98,6 +108,11 @@ def main():
                         owners[name] = component
                         units.append(name)
                     else:skipped.append({'source': name, 'reason': 'selected source missing'})
+                elif component == 'osfmk' and token in generated_mig:
+                    name = '@generated/osfmk/' + token.removeprefix('./')
+                    owners[name] = component
+                    input_files[name] = generated_mig[token]
+                    units.append(name)
                 else:skipped.append({'source': token, 'component': component, 'reason': 'generated source not yet built'})
         units = sorted(set(units))
     private_flags = {
@@ -109,7 +124,8 @@ def main():
         'security': ['-DBSD_KERNEL_PRIVATE'], 'san': [],
     }
     def compile_one(name):
-        if not (source / name).resolve().is_relative_to(source.resolve()) or Path(name).suffix not in ('.c', '.cpp', '.cc', '.cxx', '.S', '.s'):
+        original = input_files.get(name, source / name)
+        if (name not in input_files and not original.resolve().is_relative_to(source.resolve())) or Path(name).suffix not in ('.c', '.cpp', '.cc', '.cxx', '.S', '.s'):
             raise ValueError('Invalid source input')
         # kperfbsd.c lives under osfmk/ but is selected by bsd/conf/files.
         component = owners.get(name, name.split('/')[0])
@@ -150,7 +166,7 @@ def main():
                 'System/Library/Frameworks/Kernel.framework/Headers',
                 'System/Library/Frameworks/Kernel.framework/PrivateHeaders',
                 'usr/local/include', 'usr/include'))
-        object_file = output / (name.replace('/', '_') + '.o')
+        object_file = output / (name.replace('/', '_').replace('@', '') + '.o')
         command = [compiler, '--target=arm64-apple-darwin', '-march=armv8.2-a+crypto',
                    '-std=gnu11', '-O2', '-ffreestanding', '-fno-builtin', '-fno-common', '-fblocks',
                    '-nostdlibinc', '-fno-stack-protector', '-mno-implicit-float', '-mstrict-align',
@@ -179,14 +195,14 @@ def main():
                 command.append('-DOS_FIREHOSE_SPI=1')
         for directory in includes:
             command.extend(['-I', str(directory)])
-        command.extend(['-c', str(source / name), '-o', str(object_file)])
+        command.extend(['-c', str(original), '-o', str(object_file)])
         result = subprocess.run(command, cwd=ROOT, capture_output=True, timeout=60)
         log = object_file.with_suffix('.log')
         log.write_bytes(result.stdout + result.stderr)
         passed = result.returncode == 0
         diagnostics = result.stderr.decode('utf-8', errors='replace')
         row = {'source': name, 'component': component, 'passed': passed, 'command': command,
-                        'source_sha256': hashlib.sha256((source / name).read_bytes()).hexdigest(),
+                        'source_sha256': hashlib.sha256(original.read_bytes()).hexdigest(),
                         'object_sha256': hashlib.sha256(object_file.read_bytes()).hexdigest() if passed else None,
                         'diagnostics': diagnostics}
         if not audit:
