@@ -50,6 +50,9 @@ jobs:
             note10/private/windows-xnu/genassym.log
             note10/private/windows-xnu/native-extra-result.json
             note10/private/windows-xnu/generated-extra/*.log
+            note10/private/windows-xnu/link-audit-result.json
+            note10/private/windows-xnu/link-audit.log
+            note10/private/windows-xnu/symbol-audit.log
             note10/private/windows-xnu/configured/**/config.log
             note10/private/windows-xnu/objects/DEVELOPMENT/*-result.json
             note10/private/windows-xnu/objects/DEVELOPMENT/*.log

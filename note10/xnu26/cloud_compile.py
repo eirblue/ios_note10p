@@ -122,6 +122,8 @@ def main():
         for extra in ('--all-cxx', '--all-asm'):
             subprocess.run([sys.executable, str(Path(__file__).parent / 'compile_native_components.py'), extra],
                            cwd=ROOT, env=env, check=True)
+        subprocess.run([sys.executable, str(Path(__file__).parent / 'audit_link_inputs.py')],
+                       cwd=ROOT, env=env, check=True)
 
 
 if __name__ == '__main__':
