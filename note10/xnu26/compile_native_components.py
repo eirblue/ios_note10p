@@ -77,7 +77,10 @@ def main():
     output = private / 'objects/DEVELOPMENT'
     output.mkdir(parents=True, exist_ok=True)
     results = []
-    audit = sys.argv[1:] == ['--all-c']
+    modes = {'--all-c': ('CFILES', 'C', 'all-c'), '--all-cxx': ('CXXFILES', 'C++', 'all-cxx'),
+             '--all-asm': ('SFILES', 'assembly', 'all-asm')}
+    mode = modes.get(sys.argv[1]) if len(sys.argv) == 2 else None
+    audit = mode is not None
     skipped = []
     units = list(sys.argv[1:]) or list(UNITS)
     owners = {}
@@ -85,7 +88,7 @@ def main():
         units = []
         for component in ('osfmk', 'bsd', 'iokit', 'libkern', 'pexpert', 'libsa', 'security', 'san'):
             text = (private / 'configured/DEVELOPMENT' / component / 'Makefile').read_text().replace('\\\n', ' ')
-            match = re.search(r'^CFILES=(.*)$', text, re.MULTILINE)
+            match = re.search(r'^' + mode[0] + r'=(.*)$', text, re.MULTILINE)
             for token in match.group(1).split() if match else []:
                 if token.startswith('$(SOURCE_DIR)/'):
                     name = token[len('$(SOURCE_DIR)/'):]
@@ -106,7 +109,7 @@ def main():
         'security': ['-DBSD_KERNEL_PRIVATE'], 'san': [],
     }
     def compile_one(name):
-        if not (source / name).resolve().is_relative_to(source.resolve()) or not name.endswith('.c'):
+        if not (source / name).resolve().is_relative_to(source.resolve()) or Path(name).suffix not in ('.c', '.cpp', '.cc', '.cxx', '.S', '.s'):
             raise ValueError('Invalid source input')
         # kperfbsd.c lives under osfmk/ but is selected by bsd/conf/files.
         component = owners.get(name, name.split('/')[0])
@@ -160,7 +163,14 @@ def main():
                    '-DN10_MAX_CACHE_LINE_LOG2=7', '-DN10_KERNEL_PAGE_SHIFT=14',
                    '-include', str(config / 'meta_features.h'), *flags]
         if sdk:command.extend(['-isysroot', sdk])
-        command += private_flags[component] + semantic_type_flags
+        language = mode[1] if mode else 'C'
+        if language == 'C++':
+            command[command.index('-std=gnu11')] = '-std=gnu++2b'
+            command += ['-fapple-kext', '-fsized-deallocation', '-nostdinc++']
+        elif language == 'assembly':
+            command.remove('-std=gnu11')
+            command += ['-x', 'assembler-with-cpp', '-DASSEMBLER', '-D__ASSEMBLER__']
+        command += ([] if language == 'assembly' else private_flags[component]) + semantic_type_flags
         if sdk:
             # Documented image4 kernel-build option: SDK availability macros
             # otherwise mix with the pinned public AvailabilityInternal.h.
@@ -187,7 +197,7 @@ def main():
             for future in as_completed(pending):
                 results.append(future.result())
                 if len(results) % 25 == 0:
-                    print(str(len(results)) + '/' + str(len(units)) + ' C units checked; '
+                    print(str(len(results)) + '/' + str(len(units)) + ' ' + mode[1] + ' units checked; '
                           + str(sum(r['passed'] for r in results)) + ' compiled', flush=True)
         results.sort(key=lambda r: r['source'])
     else:
@@ -198,8 +208,8 @@ def main():
               'native_mach_mig_headers': bool(native_mig),
               'synthetic_board_inputs': True, 'whole_kernel_build': False, 'device_operations': []}
     report['skipped_generated_sources'] = skipped
-    report['scope'] = 'C compiler audit with component-private flags; not a full Make build or per-file instrumentation reproduction'
-    (output / ('all-c-result.json' if audit else 'compile-result.json')).write_text(json.dumps(report, indent=2))
+    report['scope'] = (mode[1] if mode else 'C') + ' compiler audit with component-private flags; not a full Make build or per-file instrumentation reproduction'
+    (output / (mode[2] + '-result.json' if audit else 'compile-result.json')).write_text(json.dumps(report, indent=2))
     print(json.dumps({'compiled': sum(r['passed'] for r in results), 'attempted': len(results),
                       'whole_kernel_build': False}))
     if not audit and not all(r['passed'] for r in results):raise SystemExit(1)

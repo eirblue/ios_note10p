@@ -117,6 +117,11 @@ def main():
     mode = ['--all-c'] if '--all-c' in sys.argv[1:] else []
     subprocess.run([sys.executable, str(Path(__file__).parent / 'compile_native_components.py'), *mode],
                    cwd=ROOT, env=env, check=True)
+    if mode:
+        subprocess.run([sys.executable, str(Path(__file__).parent / 'generate_assym.py')], cwd=ROOT, env=env, check=True)
+        for extra in ('--all-cxx', '--all-asm'):
+            subprocess.run([sys.executable, str(Path(__file__).parent / 'compile_native_components.py'), extra],
+                           cwd=ROOT, env=env, check=True)
 
 
 if __name__ == '__main__':

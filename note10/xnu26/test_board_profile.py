@@ -48,7 +48,8 @@ def main():
              ('gicv3', {'HAS_GIC_V3': 1}, 'cannot inherit Apple'),
              ('apple_timer', {'HAS_APPLE_GENERIC_TIMER': 1}, 'cannot inherit Apple'),
              ('sptm', {'CONFIG_SPTM': 1}, 'monitor and SPTM'),
-             ('monitor', {'XNU_MONITOR': 1}, 'monitor and SPTM')]
+             ('monitor', {'XNU_MONITOR': 1}, 'monitor and SPTM'),
+             ('legacy_apple_monitor', {'MONITOR': 1}, 'monitor and SPTM')]
     results = []
     for name, overrides, expected in cases:
         inputs = dict(values); inputs.update(overrides)

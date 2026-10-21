@@ -46,6 +46,8 @@ jobs:
             note10/private/windows-xnu/exports-result.json
             note10/private/windows-xnu/native-mig-result.json
             note10/private/windows-xnu/native-mig/*.log
+            note10/private/windows-xnu/genassym-result.json
+            note10/private/windows-xnu/genassym.log
             note10/private/windows-xnu/configured/**/config.log
             note10/private/windows-xnu/objects/DEVELOPMENT/*-result.json
             note10/private/windows-xnu/objects/DEVELOPMENT/*.log

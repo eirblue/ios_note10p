@@ -26,7 +26,7 @@
 #if defined(APPLE_ARM64_ARCH_FAMILY) || defined(ARM64_BOARD_CONFIG_VMAPPLE) || USE_APPLEARMSMP || HAS_GIC_V3 || HAS_APPLE_GENERIC_TIMER
 #error Note10 cannot inherit Apple CPU platform or GICv3 configuration
 #endif
-#if CONFIG_SPTM || XNU_MONITOR
+#if CONFIG_SPTM || XNU_MONITOR || defined(MONITOR)
 #error Note10 monitor and SPTM support are not implemented
 #endif
 
@@ -38,6 +38,9 @@
 #define __ARM_VMSA__ 8
 #define __ARM_VFP__ 4
 #define ARM_ARCH_TIMER 1
+/* No legacy Apple MONITOR_SET_ENTRY interface. This says nothing about the
+ * presence of Samsung EL3 firmware. PSCI/power gating remain unimplemented. */
+#define NO_MONITOR 1
 #if N10_KERNEL_PAGE_SHIFT == 14
 #define __ARM_16K_PG__ 1
 #endif
