@@ -1,0 +1,41 @@
+--- a/makedefs/MakeInc.def
++++ b/makedefs/MakeInc.def
+@@ -29,7 +29,7 @@
+ else ifneq ($(findstring _host,$(RC_ProjectName)),)
+ SUPPORTED_ARM64_MACHINE_CONFIGS = NONE
+ else
+-SUPPORTED_ARM64_MACHINE_CONFIGS = T6000 T6020 T6030 T6031 T6041 T6050 T8101 T8103 T8112 T8122 T8132 T8142 VMAPPLE
++SUPPORTED_ARM64_MACHINE_CONFIGS = T6000 T6020 T6030 T6031 T6041 T6050 T8101 T8103 T8112 T8122 T8132 T8142 VMAPPLE EXYNOS9825
+ 
+ SPTM_ENABLED_SOCS_MacOSX = t6000 t8112 t6020 t8122 t6030 t6031 t6041 t6050 t8132 t8142
+ EXCLAVES_ENABLED_SOCS_MacOSX = t8142 t6050
+@@ -57,6 +57,10 @@
+ 
+ # Enable BTI by default for all ARM64 targets
+ BTI_BUILD = 1
++ifeq ($(CURRENT_MACHINE_CONFIG),EXYNOS9825)
++# Exynos9825 cores do not supply the Apple arm64e/BTI build target.
++override BTI_BUILD := 0
++endif
+ 
+ 
+ # -mkernel contains BTI by default
+@@ -93,6 +97,7 @@
+ MACHINE_FLAGS_ARM64_T8142 = -DARM64_BOARD_CONFIG_T8142 			-mcpu=apple-m4+memtag+predres2
+ 
+ MACHINE_FLAGS_ARM64_VMAPPLE = -DARM64_BOARD_CONFIG_VMAPPLE              -march=armv8.5a+sme2
++MACHINE_FLAGS_ARM64_EXYNOS9825 = -DARM64_BOARD_CONFIG_EXYNOS9825 -march=armv8.2-a+crypto
+ 
+ 
+ #
+@@ -351,6 +356,10 @@
+ else
+ 
+ ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG ?=
++ifeq ($(CURRENT_MACHINE_CONFIG),EXYNOS9825)
++# Reject a command-line arm64e override for this non-PAuth kernel target.
++override ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG := arm64
++endif
+ 
+ ifeq ($(ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG),)
+ 

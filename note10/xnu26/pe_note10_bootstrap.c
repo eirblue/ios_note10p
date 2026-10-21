@@ -1,0 +1,65 @@
+/* Adopt an explicitly declared, pre-initialized GICv2 handoff. No cold init. */
+#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
+#include <stdint.h>
+#include <mach/vm_types.h>
+#include <machine/machine_routines.h>
+#include <kern/debug.h>
+#include <pexpert/pexpert.h>
+#include <pexpert/device_tree.h>
+#include <pexpert/arm/protos.h>
+
+static void const *
+note10_property(DTEntry entry, char const *name, unsigned int expected)
+{
+    void const *value;
+    unsigned int size;
+    if (SecureDTGetProperty(entry,name,&value,&size)!=kSuccess || size!=expected || !value)
+        panic("Note10 bootstrap: missing or malformed property");
+    return value;
+}
+
+static uint64_t
+note10_le(void const *value, unsigned int bytes)
+{
+    uint8_t const *p=value;
+    uint64_t result=0;
+    for (unsigned int i=0;i<bytes;++i) result|=(uint64_t)p[i]<<(8*i);
+    return result;
+}
+
+void
+pe_note10_init_irq(void)
+{
+    const ml_topology_info_t *topology=ml_get_topology_info();
+    if (!topology || topology->num_cpus!=1 || ml_get_interrupts_enabled())
+        panic("Note10 bootstrap: single CPU and masked interrupts required");
+    DTEntry entry;
+    if (SecureDTLookupEntry(NULL,"/chosen/note10-platform",&entry)!=kSuccess)
+        panic("Note10 bootstrap: platform contract missing");
+    static char const compatible[]="samsung,exynos9825-note10";
+    uint8_t const *p=note10_property(entry,"compatible",sizeof(compatible));
+    for (unsigned int i=0;i<sizeof(compatible);++i)
+        if (p[i]!=(uint8_t)compatible[i]) panic("Note10 bootstrap: incompatible platform");
+    if (note10_le(note10_property(entry,"version",4),4)!=1 ||
+        note10_le(note10_property(entry,"gic-handoff",4),4)!=1)
+        panic("Note10 bootstrap: initialized GIC handoff required");
+    p=note10_property(entry,"gic-reg",32);
+    uint64_t distributor=note10_le(p,8), distributor_size=note10_le(p+8,8);
+    uint64_t cpu=note10_le(p+16,8), cpu_size=note10_le(p+24,8);
+    /* Pin the supplied SM-N976N firmware's candidate windows; do not map arbitrary DT addresses. */
+    if (distributor!=0x10101000ULL || distributor_size!=0x1000 || cpu!=0x10102000ULL || cpu_size!=0x1000)
+        panic("Note10 bootstrap: unexpected GIC windows");
+    uint64_t ppi=note10_le(note10_property(entry,"timer-intid",4),4);
+    if (ppi!=30) panic("Note10 bootstrap: unexpected physical timer PPI");
+    uint64_t dt_frequency=note10_le(note10_property(entry,"timebase-frequency",4),4);
+    uint64_t frequency=__builtin_arm_rsr64("CNTFRQ_EL0");
+    if (!frequency || frequency>UINT32_MAX || frequency!=dt_frequency ||
+        frequency!=gPEClockFrequencyInfo.timebase_frequency_hz)
+        panic("Note10 bootstrap: timebase frequency mismatch");
+    vm_offset_t mapped_distributor=ml_io_map(distributor,distributor_size);
+    if (!mapped_distributor) panic("Note10 bootstrap: distributor map failed");
+    vm_offset_t mapped_cpu=ml_io_map(cpu,cpu_size);
+    if (!mapped_cpu) panic("Note10 bootstrap: CPU interface map failed");
+    pe_note10_bind_irq(mapped_distributor,distributor_size,mapped_cpu,cpu_size,(uint32_t)ppi);
+}
+#endif

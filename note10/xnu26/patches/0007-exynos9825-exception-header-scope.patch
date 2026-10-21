@@ -1,0 +1,12 @@
+--- a/osfmk/arm64/sleh.c
++++ b/osfmk/arm64/sleh.c
+@@ -55,7 +55,9 @@
+ #include <machine/machine_cpc.h>
+ 
+ #include <pexpert/arm/protos.h>
++#if !defined(ARM64_BOARD_CONFIG_EXYNOS9825)
+ #include <pexpert/arm64/apple_arm64_cpu.h>
++#endif
+ #include <pexpert/arm64/apple_arm64_regs.h>
+ #include <pexpert/arm64/board_config.h>
+ 

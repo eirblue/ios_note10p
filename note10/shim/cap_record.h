@@ -1,0 +1,28 @@
+#ifndef NOTE10_CAP_RECORD_H
+#define NOTE10_CAP_RECORD_H
+#define N10_CAP_SIZE 320
+#define N10_CAP_STATUS 16
+#define N10_CAP_EL 24
+#define N10_CAP_X0 32
+#define N10_CAP_SP 64
+#define N10_CAP_DAIF 72
+#define N10_CAP_MPIDR 80
+#define N10_CAP_CNTFRQ 88
+#define N10_CAP_MMFR0 96
+#define N10_CAP_MMFR1 104
+#define N10_CAP_ISAR0 112
+#define N10_CAP_ISAR1 120
+#define N10_CAP_PFR0 128
+#define N10_CAP_CTR 136
+#define N10_CAP_CLIDR 144
+#define N10_CAP_SCTLR1 152
+#define N10_CAP_TCR1 160
+#define N10_CAP_TTBR01 168
+#define N10_CAP_TTBR11 176
+#define N10_CAP_VBAR1 184
+#define N10_CAP_SCTLR2 192
+#define N10_CAP_TCR2 200
+#define N10_CAP_HCR2 208
+#define N10_CAP_CSSELR 216
+#define N10_CAP_CCSIDR 224
+#endif

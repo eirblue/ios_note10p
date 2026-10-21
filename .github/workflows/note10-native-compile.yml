@@ -1,0 +1,48 @@
+name: Note10 XNU source compile audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      full_c_audit:
+        description: Audit selected C sources (does not link a kernel)
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  compile:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Compile source with Apple Clang
+        env:
+          FULL_C_AUDIT: ${{ inputs.full_c_audit }}
+        run: |
+          if [ "$FULL_C_AUDIT" = "true" ]; then
+            python3 note10/xnu26/cloud_compile.py --all-c
+          else
+            python3 note10/xnu26/cloud_compile.py
+          fi
+      - name: Collect source-only diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: note10-source-compile-diagnostics
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            note10/private/windows-config/build-result.json
+            note10/private/windows-config/build-*.log
+            note10/private/windows-xnu/configure-result.json
+            note10/private/windows-xnu/exports-result.json
+            note10/private/windows-xnu/configured/**/config.log
+            note10/private/windows-xnu/objects/DEVELOPMENT/*-result.json
+            note10/private/windows-xnu/objects/DEVELOPMENT/*.log

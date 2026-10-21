@@ -1,0 +1,7 @@
+0001-exynos9825-build-selection.patch
+0002-exynos9825-physical-decrementer.patch
+0003-exynos9825-timer-irq-bridge.patch
+0004-exynos9825-irq-bootstrap.patch
+0005-exynos9825-explicit-board-profile.patch
+0006-exynos9825-master-link-input.patch
+0007-exynos9825-exception-header-scope.patch

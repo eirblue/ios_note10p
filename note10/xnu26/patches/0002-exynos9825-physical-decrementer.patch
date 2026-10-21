@@ -1,0 +1,42 @@
+--- a/osfmk/arm64/machine_routines.c
++++ b/osfmk/arm64/machine_routines.c
+@@ -2450,7 +2450,17 @@
+ 	return KERN_FAILURE;
+ }
+ 
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
+ #if HAS_APPLE_GENERIC_TIMER
++#error Exynos9825 cannot select the Apple generic timer
++#endif
++/* Keep the virtual timebase shared with userspace; decrementer TVAL is relative. */
++#define KERNEL_CNTV_TVAL_EL0 "CNTP_TVAL_EL0"
++#define KERNEL_CNTVCT_EL0    "CNTVCT_EL0"
++#define KERNEL_CNTVCTSS_EL0  "CNTVCTSS_EL0"
++#define KERNEL_CNTV_CTL_EL0  "CNTP_CTL_EL0"
++#define KERNEL_CNTKCTL_EL1   "CNTKCTL_EL1"
++#elif HAS_APPLE_GENERIC_TIMER
+ /* The kernel timer APIs always use the Apple timebase */
+ #define KERNEL_CNTV_TVAL_EL0 "S3_1_C15_C15_4"
+ #define KERNEL_CNTVCT_EL0    "S3_4_C15_C11_7"
+@@ -2707,12 +2717,21 @@
+ {
+ 	uint64_t cntvctl = CNTV_CTL_EL0_ENABLE; /* One wants to use 32 bits, but "mrs" prefers it this way */
+ 
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	/* IRQs are masked by the caller. Establish a known physical deadline first. */
++	__builtin_arm_wsr64("CNTP_CTL_EL0", CNTP_CTL_EL0_IMASKED);
++	__builtin_arm_wsr64("CNTV_CTL_EL0", CNTV_CTL_EL0_IMASKED);
++	__builtin_arm_wsr64(KERNEL_CNTV_TVAL_EL0, (uint64_t)getCpuDatap()->cpu_decrementer);
++	__builtin_arm_wsr64(KERNEL_CNTV_CTL_EL0, cntvctl);
++	__builtin_arm_isb(ISB_SY);
++#else
+ 	__builtin_arm_wsr64(KERNEL_CNTV_CTL_EL0, cntvctl);
+ 	/* disable the physical timer as a precaution, as its registers reset to architecturally unknown values */
+ 	__builtin_arm_wsr64("CNTP_CTL_EL0", CNTP_CTL_EL0_IMASKED);
+ #if HAS_APPLE_GENERIC_TIMER
+ 	__builtin_arm_wsr64("S3_1_C15_C13_4", CNTP_CTL_EL0_IMASKED);
+ #endif
++#endif /* ARM64_BOARD_CONFIG_EXYNOS9825 */
+ }
+ 
+ void

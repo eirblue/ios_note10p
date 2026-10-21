@@ -1,0 +1,336 @@
+--- a/osfmk/arm/rtclock.h
++++ b/osfmk/arm/rtclock.h
+@@ -88,6 +88,9 @@
+ extern uint64_t arm_timer_slop_max;
+ 
+ extern void rtclock_intr(unsigned int);
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++extern void note10_rtclock_intr(unsigned int);
++#endif
+ extern boolean_t SetIdlePop(void);
+ 
+ extern void ClearIdlePop(boolean_t);
+--- a/osfmk/arm/rtclock.c
++++ b/osfmk/arm/rtclock.c
+@@ -527,3 +527,13 @@
+ 		now = mach_absolute_time();
+ 	} while (now < deadline);
+ }
++
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++/* Keep per-CPU private bookkeeping in osfmk, not in pexpert. */
++void
++note10_rtclock_intr(unsigned int context)
++{
++    getCpuDatap()->cpu_decrementer=UINT32_MAX;
++    rtclock_intr(context);
++}
++#endif
+--- a/osfmk/arm64/sleh.c
++++ b/osfmk/arm64/sleh.c
+@@ -3010,7 +3010,9 @@
+ 
+ 	sleh_interrupt_handler_prologue(state, DBG_INTR_TYPE_OTHER);
+ 
+-#if USE_APPLEARMSMP
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	pe_note10_handle_irq();
++#elif USE_APPLEARMSMP
+ 	PE_handle_ext_interrupt();
+ #else
+ 	/* Run the registered interrupt handler. */
+--- a/pexpert/pexpert/arm/protos.h
++++ b/pexpert/pexpert/arm/protos.h
+@@ -38,6 +38,13 @@
+ 
+ void pe_init_fiq(void);
+ 
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++/* Call only after nonsecure GICv2 initialization, with Device-mapped windows. */
++void pe_note10_bind_irq(vm_offset_t, vm_size_t, vm_offset_t, vm_size_t, uint32_t);
++void pe_note10_handle_irq(void);
++#endif
++
++
+ #ifdef PRIVATE
+ /**
+  * One hot ids to distinquish between all supported serial devices
+--- a/pexpert/conf/files.arm64
++++ b/pexpert/conf/files.arm64
+@@ -9,3 +9,8 @@
+ pexpert/arm/hwtrace/hwtrace.c         standard
+ pexpert/arm/hwtrace/apt_msg.c         standard
+ 
++
++# Note10 components compile to empty units on other machine configurations.
++pexpert/arm/pe_note10_irq.c standard
++pexpert/arm/note10/gicv2.c standard
++pexpert/arm/note10/gicv2_mmio.c standard
+--- /dev/null
++++ b/pexpert/arm/pe_note10_irq.c
+@@ -0,0 +1,70 @@
++/* Single-CPU XNU IRQ bridge. GIC initialization/mapping is a caller prerequisite. */
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++#include <mach/vm_types.h>
++#include <machine/machine_routines.h>
++#include <arm/rtclock.h>
++#include <kern/debug.h>
++#include <pexpert/arm/protos.h>
++#include "note10/gicv2_mmio.h"
++
++static struct n10_gic_mmio_view note10_view;
++static struct n10_gic_io note10_io;
++static uint32_t note10_irq_count, note10_timer_intid;
++static int note10_irq_ready;
++
++static void
++note10_require_cpu_context(void)
++{
++    const ml_topology_info_t *topology=ml_get_topology_info();
++    if (!topology || topology->num_cpus!=1 || ml_get_interrupts_enabled())
++        panic("Note10 IRQ: single CPU and masked interrupts required");
++}
++
++void
++pe_note10_bind_irq(vm_offset_t distributor, vm_size_t distributor_size,
++    vm_offset_t cpu_interface, vm_size_t cpu_size, uint32_t timer_intid)
++{
++    note10_require_cpu_context();
++    if (note10_irq_ready || timer_intid<16 || timer_intid>=32)
++        panic("Note10 IRQ: invalid or repeated binding");
++    note10_view=(struct n10_gic_mmio_view){distributor,cpu_interface,distributor_size,cpu_size};
++    if (!n10_gic_mmio_bind(&note10_view,&note10_io))
++        panic("Note10 IRQ: invalid mapped windows");
++    struct n10_gic_info info;
++    uint32_t distributor_ctl, cpu_ctl;
++    if (n10_gic_probe(&note10_io,&info)!=N10_GIC_OK ||
++        !note10_io.read(note10_io.context,N10_GIC_DISTRIBUTOR,0,&distributor_ctl) ||
++        !note10_io.read(note10_io.context,N10_GIC_CPU,0,&cpu_ctl) ||
++        !(distributor_ctl&1) || !(cpu_ctl&1) || (cpu_ctl&((1U<<9)|(1U<<10))))
++        panic("Note10 IRQ: initialized nonsecure EOImode0 GIC required");
++    /* Group/security ownership, priority and trigger setup are caller-owned. */
++    if (n10_gic_set_enabled(&note10_io,info.irq_count,timer_intid,1)!=N10_GIC_OK)
++        panic("Note10 IRQ: cannot enable timer PPI");
++    note10_irq_count=info.irq_count;
++    note10_timer_intid=timer_intid;
++    note10_irq_ready=1;
++}
++
++void
++pe_note10_handle_irq(void)
++{
++    note10_require_cpu_context();
++    if (!note10_irq_ready) panic("Note10 IRQ: platform binding missing");
++    struct n10_gic_irq irq;
++    enum n10_gic_result status=n10_gic_take(&note10_io,note10_irq_count,&irq);
++    if (status==N10_GIC_SPECIAL) return;
++    if (status!=N10_GIC_OK) panic("Note10 IRQ: acknowledge failed");
++    if (irq.intid!=note10_timer_intid) panic("Note10 IRQ: unimplemented interrupt source");
++
++    /* Mask the level source across the callback/EOI. rtclock_intr must rearm
++     * through the physical decrementer selected by patch 0002.
++     */
++    __builtin_arm_wsr64("CNTP_CTL_EL0",3);
++    __builtin_arm_isb(15);
++    note10_rtclock_intr(1);
++    if (n10_gic_complete(&note10_io,note10_irq_count,&irq)!=N10_GIC_OK)
++        panic("Note10 IRQ: completion failed");
++    __builtin_arm_wsr64("CNTP_CTL_EL0",1);
++    __builtin_arm_isb(15);
++}
++#endif
+--- /dev/null
++++ b/pexpert/arm/note10/gicv2.c
+@@ -0,0 +1,64 @@
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++#include "gicv2.h"
++
++static int valid_io(const struct n10_gic_io *io)
++{ return io && io->read && io->write && io->sync; }
++static int valid_count(uint32_t count)
++{ return count >= 32 && count <= 1020 && (count == 1020 || !(count & 31)); }
++static enum n10_gic_result check_mode(const struct n10_gic_io *io)
++{
++    uint32_t ctrl;
++    if (!io->read(io->context,N10_GIC_CPU,0,&ctrl)) return N10_GIC_IO_ERROR;
++    /* EOImodeS/NS in secure view; EOImodeNS is bit 9 in non-secure view.
++     * Reject either set bit conservatively; split deactivation is not supplied.
++     */
++    return ctrl & ((1U << 9) | (1U << 10)) ? N10_GIC_UNSUPPORTED_MODE : N10_GIC_OK;
++}
++enum n10_gic_result n10_gic_probe(const struct n10_gic_io *io, struct n10_gic_info *out)
++{
++    if (!valid_io(io) || !out) return N10_GIC_BAD_INPUT;
++    struct n10_gic_info info;
++    if (!io->read(io->context,N10_GIC_DISTRIBUTOR,4,&info.typer) ||
++        !io->read(io->context,N10_GIC_DISTRIBUTOR,8,&info.distributor_id) ||
++        !io->read(io->context,N10_GIC_CPU,0xfc,&info.cpu_id)) return N10_GIC_IO_ERROR;
++    info.irq_count = ((info.typer & 31) + 1) * 32;
++    if (info.irq_count > 1020) info.irq_count = 1020;
++    *out = info;
++    return N10_GIC_OK;
++}
++enum n10_gic_result n10_gic_take(const struct n10_gic_io *io, uint32_t count, struct n10_gic_irq *out)
++{
++    if (!valid_io(io) || !valid_count(count) || !out) return N10_GIC_BAD_INPUT;
++    enum n10_gic_result result = check_mode(io);
++    if (result != N10_GIC_OK) return result;
++    uint32_t raw;
++    if (!io->read(io->context,N10_GIC_CPU,0x0c,&raw)) return N10_GIC_IO_ERROR;
++    uint32_t intid = raw & 1023;
++    if (intid >= 1020) return N10_GIC_SPECIAL;
++    if ((raw & ~0x1fffU) || intid >= count) return N10_GIC_BAD_INPUT;
++    if (!io->sync(io->context)) return N10_GIC_IO_ERROR;
++    *out = (struct n10_gic_irq){raw,intid};
++    return N10_GIC_OK;
++}
++enum n10_gic_result n10_gic_complete(const struct n10_gic_io *io, uint32_t count, const struct n10_gic_irq *irq)
++{
++    if (!valid_io(io) || !valid_count(count) || !irq || irq->intid >= count ||
++        irq->intid >= 1020 || (irq->iar & ~0x1fffU) || (irq->iar & 1023) != irq->intid)
++        return N10_GIC_BAD_INPUT;
++    enum n10_gic_result result = check_mode(io);
++    if (result != N10_GIC_OK) return result;
++    if (!io->sync(io->context) || !io->write(io->context,N10_GIC_CPU,0x10,irq->iar) ||
++        !io->sync(io->context)) return N10_GIC_IO_ERROR;
++    return N10_GIC_OK;
++}
++enum n10_gic_result n10_gic_set_enabled(const struct n10_gic_io *io, uint32_t count, uint32_t irq, unsigned enabled)
++{
++    if (!valid_io(io) || !valid_count(count) || irq < 16 || irq >= count || enabled > 1)
++        return N10_GIC_BAD_INPUT;
++    uint32_t offset = (enabled ? 0x100 : 0x180) + (irq / 32) * 4;
++    if (!io->write(io->context,N10_GIC_DISTRIBUTOR,offset,1U << (irq % 32)) ||
++        !io->sync(io->context)) return N10_GIC_IO_ERROR;
++    return N10_GIC_OK;
++}
++
++#endif
+--- /dev/null
++++ b/pexpert/arm/note10/gicv2.h
+@@ -0,0 +1,43 @@
++#ifndef NOTE10_GICV2_H
++#define NOTE10_GICV2_H
++#include <stdint.h>
++/* Register offsets only. The caller supplies owned, correctly mapped GICv2
++ * distributor/CPU interfaces. There are no direct MMIO pointers in this module.
++ */
++enum n10_gic_bank { N10_GIC_DISTRIBUTOR, N10_GIC_CPU };
++typedef int (*n10_gic_read_fn)(void *, enum n10_gic_bank, uint32_t, uint32_t *);
++typedef int (*n10_gic_write_fn)(void *, enum n10_gic_bank, uint32_t, uint32_t);
++/* Caller implements appropriate device/CPU ordering; success means completed.
++ * Called after IAR read, before EOI and after an enable/disable/EOI write.
++ */
++typedef int (*n10_gic_sync_fn)(void *);
++struct n10_gic_io {
++    void *context;
++    n10_gic_read_fn read;
++    n10_gic_write_fn write;
++    n10_gic_sync_fn sync;
++};
++struct n10_gic_info { uint32_t typer, distributor_id, cpu_id, irq_count; };
++struct n10_gic_irq { uint32_t iar, intid; };
++enum n10_gic_result {
++    N10_GIC_OK, N10_GIC_BAD_INPUT, N10_GIC_IO_ERROR,
++    N10_GIC_SPECIAL, N10_GIC_UNSUPPORTED_MODE
++};
++/* Read-only register snapshot; this does not prove silicon identity or usable
++ * security-group ownership. Output is unchanged on a read failure.
++ */
++enum n10_gic_result n10_gic_probe(const struct n10_gic_io *, struct n10_gic_info *);
++/* Already initialized EOImode=0 only. Both EOImode bits must read zero in the
++ * caller's security view. No CTLR writes, distributor reset or group changes.
++ * IAR reads acknowledge hardware: an I/O/sync failure is not rollback-safe.
++ */
++enum n10_gic_result n10_gic_take(const struct n10_gic_io *, uint32_t irq_count, struct n10_gic_irq *);
++/* Exact acknowledged token, same CPU, interrupt nesting/order enforced by caller.
++ * Special IDs 1020..1023 must never be completed with EOIR.
++ */
++enum n10_gic_result n10_gic_complete(const struct n10_gic_io *, uint32_t irq_count, const struct n10_gic_irq *);
++/* PPIs and SPIs only. SGI enable state, priority, routing and trigger setup are
++ * outside scope. A write/sync failure can leave hardware partially changed.
++ */
++enum n10_gic_result n10_gic_set_enabled(const struct n10_gic_io *, uint32_t irq_count, uint32_t intid, unsigned enabled);
++#endif
+--- /dev/null
++++ b/pexpert/arm/note10/gicv2_mmio.c
+@@ -0,0 +1,59 @@
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++#include "gicv2_mmio.h"
++#if !defined(__aarch64__) || __BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__
++#error This adapter requires little-endian AArch64
++#endif
++static int valid_range(uintptr_t base, size_t size)
++{ return base && !(base & 3) && size >= 0x1000 && base <= UINTPTR_MAX-(size-1); }
++static int valid_view(const struct n10_gic_mmio_view *v)
++{
++    if (!v || !valid_range(v->distributor,v->distributor_size) || !valid_range(v->cpu,v->cpu_size)) return 0;
++    return v->distributor < v->cpu ? v->distributor_size <= v->cpu-v->distributor :
++                                   v->cpu_size <= v->distributor-v->cpu;
++}
++static volatile uint32_t *word(const struct n10_gic_mmio_view *v, enum n10_gic_bank bank, uint32_t offset)
++{
++    if (!valid_view(v) || (offset & 3)) return 0;
++    uintptr_t base; size_t size;
++    if (bank == N10_GIC_DISTRIBUTOR) { base=v->distributor; size=v->distributor_size; }
++    else if (bank == N10_GIC_CPU) { base=v->cpu; size=v->cpu_size; }
++    else return 0;
++    if (offset > size-4) return 0;
++    return (volatile uint32_t *)(base+offset);
++}
++static int read_word(void *context, enum n10_gic_bank bank, uint32_t offset, uint32_t *out)
++{
++    if (!out) return 0;
++    if (bank == N10_GIC_DISTRIBUTOR ? offset!=0 && offset!=4 && offset!=8 :
++        bank != N10_GIC_CPU || (offset!=0 && offset!=12 && offset!=0xfc)) return 0;
++    volatile uint32_t *p=word(context,bank,offset);
++    if (!p) return 0;
++    *out=*p;
++    return 1;
++}
++static int write_word(void *context, enum n10_gic_bank bank, uint32_t offset, uint32_t value)
++{
++    if (bank == N10_GIC_DISTRIBUTOR) {
++        if (offset<0x100 || offset>=0x200) return 0;
++        if ((offset==0x100 || offset==0x180) && (value&0xffff)) return 0; /* no SGI enable changes */
++        if ((offset==0x17c || offset==0x1fc) && (value&0xf0000000U)) return 0; /* special IDs */
++    } else if (bank != N10_GIC_CPU || offset!=16 || (value&~0x1fffU) || (value&1023)>=1020) return 0;
++    volatile uint32_t *p=word(context,bank,offset);
++    if (!p) return 0;
++    *p=value;
++    return 1;
++}
++static int synchronize(void *context)
++{
++    if (!valid_view(context)) return 0;
++    __asm__ volatile("dsb sy\n\tisb" ::: "memory");
++    return 1;
++}
++int n10_gic_mmio_bind(const struct n10_gic_mmio_view *view, struct n10_gic_io *out)
++{
++    if (!out || !valid_view(view)) return 0;
++    *out=(struct n10_gic_io){(void *)view,read_word,write_word,synchronize};
++    return 1;
++}
++
++#endif
+--- /dev/null
++++ b/pexpert/arm/note10/gicv2_mmio.h
+@@ -0,0 +1,17 @@
++#ifndef NOTE10_GICV2_MMIO_H
++#define NOTE10_GICV2_MMIO_H
++#include <stddef.h>
++#include "gicv2.h"
++/* Virtual addresses of caller-owned Device-mapped windows, not physical DT
++ * addresses. Keep view immutable and alive while callbacks are published.
++ * Caller supplies mapping/fault containment and interrupt/CPU synchronization.
++ */
++struct n10_gic_mmio_view {
++    uintptr_t distributor, cpu;
++    size_t distributor_size, cpu_size;
++};
++/* Validates ranges and binds callbacks; performs no register access.
++ * out must not alias view. Invalid inputs preserve out.
++ */
++int n10_gic_mmio_bind(const struct n10_gic_mmio_view *view, struct n10_gic_io *out);
++#endif

@@ -1,0 +1,7 @@
+{
+  "url": "https://raw.githubusercontent.com/qemu/qemu/ba93f3ae5cbe9bace0a8163843f0d678f08a3e6e/target/arm/tcg/pauth_helper.c",
+  "commit": "ba93f3ae5cbe9bace0a8163843f0d678f08a3e6e",
+  "sha256": "3848687fe9bfca20c7907f600f917d1d96e12dd210e88316891cf913b8067a60",
+  "license": "LGPL-2.1-or-later",
+  "adaptation": "Standalone architected QARMA3/QARMA5 core, no QEMU CPU helper integration."
+}
