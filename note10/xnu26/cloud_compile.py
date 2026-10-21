@@ -85,14 +85,27 @@ def sdk_declarations():
 
 def main():
     if sys.platform != 'darwin':raise SystemExit('This manual cloud entry point requires macOS/Xcode')
+    compiler = subprocess.check_output(['xcrun', '-f', 'clang']).decode().strip()
+    sdk = subprocess.check_output(['xcrun', '--sdk', 'macosx', '--show-sdk-path']).decode().strip()
+    probe = subprocess.run([compiler, '--target=arm64-apple-darwin', '-E', '-P', '-x', 'c', '-'],
+                           input='#if __has_builtin(__builtin_xnu_type_summary)\nsummary_supported\n#endif\n#if __has_builtin(__builtin_xnu_types_compatible)\ncompatible_supported\n#endif\n',
+                           capture_output=True, text=True, check=True)
+    toolchain = {'compiler': compiler, 'sdk': sdk,
+                 'compiler_version': subprocess.check_output([compiler, '--version']).decode(),
+                 'xnu_type_summary': 'summary_supported' in probe.stdout,
+                 'xnu_types_compatible': 'compatible_supported' in probe.stdout}
+    report = ROOT / 'note10/private/cloud-toolchain-result.json'
+    report.parent.mkdir(parents=True, exist_ok=True)
+    report.write_text(json.dumps(toolchain, indent=2))
+    print(json.dumps(toolchain), flush=True)
     prepare_source_and_master()
     from probe_kernel_headers import generated_headers
     target = json.loads((ROOT / 'note10/target.json').read_text())
     generated_headers(ROOT / target['research_directory'])
     sdk_declarations()
     env = dict(os.environ)
-    env['N10_CC'] = subprocess.check_output(['xcrun', '-f', 'clang']).decode().strip()
-    env['N10_SDKROOT'] = subprocess.check_output(['xcrun', '--sdk', 'macosx', '--show-sdk-path']).decode().strip()
+    env['N10_CC'] = compiler
+    env['N10_SDKROOT'] = sdk
     env['N10_MAKE'] = shutil.which('make')
     for script in ('build_windows_config.py', 'configure_windows_xnu.py', 'export_source_headers.py'):
         subprocess.run([sys.executable, str(Path(__file__).parent / script)], cwd=ROOT, env=env, check=True)

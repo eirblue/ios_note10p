@@ -39,6 +39,7 @@ jobs:
           retention-days: 7
           if-no-files-found: warn
           path: |
+            note10/private/cloud-toolchain-result.json
             note10/private/windows-config/build-result.json
             note10/private/windows-config/build-*.log
             note10/private/windows-xnu/configure-result.json
