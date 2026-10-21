@@ -1,3 +1,14 @@
+--- a/osfmk/arm/cpu_data_internal.h
++++ b/osfmk/arm/cpu_data_internal.h
+@@ -305,7 +305,7 @@
+ #if __arm64__
+ extern  unsigned int                    LowResetVectorBase;
+ extern  unsigned int                    LowResetVectorEnd;
+-#if WITH_CLASSIC_S2R
++#if WITH_CLASSIC_S2R || defined(ARM64_BOARD_CONFIG_EXYNOS9825)
+ extern  uint8_t                         SleepToken[8];
+ #endif
+ extern  unsigned int                    LowExceptionVectorBase;
 --- a/osfmk/arm/pmap/pmap.h
 +++ b/osfmk/arm/pmap/pmap.h
 @@ -773,7 +773,7 @@

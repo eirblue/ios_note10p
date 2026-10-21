@@ -12,6 +12,7 @@ import subprocess
 from prepare_build_selection import ROOT, replace_one
 
 PINS = {
+    'osfmk/arm/cpu_data_internal.h': '04205655d498653be75a34ec6759d9b8d81cd7567f4961cf28a531774e672e20',
     'osfmk/arm64/caches_asm.s': '1ee90140c81655f6e5eced4049f0887e3f75f6d8e77a491c8a36531e3db6d328',
     'osfmk/arm64/start.s': 'a5c1a95b087f62f9e548bed7a0274cf420af1d69bfd656c1481d629093e2b07a',
     'osfmk/arm/pmap/pmap.h': '90eb47769ca63b300cb4f589c6121a2bb1553c0f704b10c5af2e042cc4d8bc55',
@@ -62,6 +63,9 @@ def main():
     n = 'osfmk/arm64/genassym.c'
     new[n] = replace_one(new[n], '#if WITH_CLASSIC_S2R\n\tDECLARE("stSize", sizeof(SleepToken));',
         '#if WITH_CLASSIC_S2R || defined(ARM64_BOARD_CONFIG_EXYNOS9825)\n\tDECLARE("stSize", sizeof(SleepToken));')
+    n = 'osfmk/arm/cpu_data_internal.h'
+    new[n] = replace_one(new[n], '#if WITH_CLASSIC_S2R\nextern  uint8_t                         SleepToken[8];',
+        '#if WITH_CLASSIC_S2R || defined(ARM64_BOARD_CONFIG_EXYNOS9825)\nextern  uint8_t                         SleepToken[8];')
     n = 'osfmk/arm/pmap/pmap.h'
     new[n] = replace_one(new[n], '#if SCHED_HYGIENE_DEBUG && (DEBUG || DEVELOPMENT)\nbool pmap_pending_preemption',
         '#if SCHED_HYGIENE_DEBUG && (DEBUG || DEVELOPMENT) && !defined(ARM64_BOARD_CONFIG_EXYNOS9825)\nbool pmap_pending_preemption')
