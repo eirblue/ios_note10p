@@ -7,7 +7,7 @@ import hashlib
 import json
 from pathlib import Path
 import subprocess
-from prepare_build_selection import ROOT, replace_one
+from prepare_build_selection import ROOT, NDK, replace_one
 
 PINS = {
     'osfmk/arm/pmap/pmap.c': '90312d444fae75ef692106aa0ce755bfcf046395fe39d0c8bda72077d2adb9f0',
@@ -33,6 +33,34 @@ def main():
     new[name] = replace_one(new[name], '\tsart_bootstrap();',
         '#if !defined(ARM64_BOARD_CONFIG_EXYNOS9825)\n\tsart_bootstrap();\n'
         '#else\n\t/* Exynos has no Apple SART. Samsung DMA protection is not implemented here. */\n#endif')
+    new[name] = replace_one(new[name], '#include <pexpert/device_tree.h>',
+        '#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)\n'
+        'MARK_AS_PMAP_TEXT static void pmap_phys_write_disable(vm_address_t va);\n#endif\n\n'
+        '#include <pexpert/device_tree.h>')
+    old_panic = '''\t\t\t\tpanic("pmap_page_protect: attempt to compress ppnum 0x%x owned by iommu %p, pve_p=%p",
+\t\t\t\t    ppnum, ptep_get_iommu(pte_p), pve_p);'''
+    new[name] = replace_one(new[name], old_panic,
+        '#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)\n'
+        '\t\t\t\tpanic("pmap_page_protect: attempt to compress ppnum 0x%x with IOMMU PTE %p, pve_p=%p",\n'
+        '\t\t\t\t    ppnum, pte_p, pve_p);\n#else\n' + old_panic + '\n#endif')
+    start = new[name].index('MARK_AS_PMAP_TEXT static inline void\npmap_cs_lockdown_pages(')
+    end = new[name].index('/**\n * Perform basic validation checks', start)
+    cs_fragment = \
+        '#if !defined(ARM64_BOARD_CONFIG_EXYNOS9825) || PMAP_CS_INCLUDE_CODE_SIGNING || PMAP_CS_PPL_MONITOR\n' + \
+        new[name][start:end] + '#endif /* Keep CS helpers whenever a CS backend is enabled. */\n\n'
+    new[name] = new[name][:start] + cs_fragment + new[name][end:]
+    compiler = NDK / 'toolchains/llvm/prebuilt/windows-x86_64/bin/clang.exe'
+    guard_cases = []
+    for label, flags, expected in (
+        ('apple_unchanged', [], True),
+        ('exynos_inactive', ['-DARM64_BOARD_CONFIG_EXYNOS9825'], False),
+        ('exynos_active_cs', ['-DARM64_BOARD_CONFIG_EXYNOS9825', '-DPMAP_CS_INCLUDE_CODE_SIGNING=1'], True),
+        ('exynos_active_monitor', ['-DARM64_BOARD_CONFIG_EXYNOS9825', '-DPMAP_CS_PPL_MONITOR=1'], True)):
+        result = subprocess.run([str(compiler), '-E', '-P', '-x', 'c', '-', *flags],
+                                input=cs_fragment, text=True, capture_output=True, check=True)
+        present = 'pmap_cs_lockdown_pages(' in result.stdout and 'pmap_cs_unlockdown_pages(' in result.stdout
+        if present != expected:raise ValueError('Active code-signing helper scope changed: ' + label)
+        guard_cases.append({'case': label, 'helpers_present': present, 'passed': True})
     name = 'osfmk/arm64/pcb.c'
     new[name] = replace_one(new[name], '#include <pexpert/arm64/apple_arm64_cpu.h>',
         '#if !defined(ARM64_BOARD_CONFIG_EXYNOS9825)\n'
@@ -64,6 +92,9 @@ def main():
               'patched_source_sha256': {n: hashlib.sha256(t.encode()).hexdigest() for n,t in new.items()},
               'sequential_apply_reverse_passed': True, 'exynos_dma_protection_implemented': False,
               'hardware_cpu_tuning_verified': False, 'whole_kernel_build': False}
+    report['inactive_cs_helpers_scoped_by_existing_feature_flags'] = True
+    report['active_code_signing_backend_disabled_by_patch'] = False
+    report['actual_preprocessor_guard_cases'] = guard_cases
     (private / 'patch-result.json').write_text(json.dumps(report, indent=2))
     print(json.dumps({'files': len(new), 'apply_reverse_passed': True, 'whole_kernel_build': False}))
 

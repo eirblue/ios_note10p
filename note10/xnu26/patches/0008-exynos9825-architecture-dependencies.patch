@@ -1,6 +1,6 @@
 --- a/osfmk/arm/pmap/pmap.c
 +++ b/osfmk/arm/pmap/pmap.c
-@@ -84,8 +84,10 @@
+@@ -84,12 +84,18 @@
  
  #include <arm64/proc_reg.h>
  #include <pexpert/arm64/boot.h>
@@ -11,7 +11,15 @@
  
  #if defined(KERNEL_INTEGRITY_KTRR) || defined(KERNEL_INTEGRITY_CTRR) || defined(KERNEL_INTEGRITY_PV_CTRR)
  #include <arm64/amcc_rorgn.h>
-@@ -2334,7 +2336,11 @@
+ #endif // defined(KERNEL_INTEGRITY_KTRR) || defined(KERNEL_INTEGRITY_CTRR) || defined(KERNEL_INTEGRITY_PV_CTRR)
++
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++MARK_AS_PMAP_TEXT static void pmap_phys_write_disable(vm_address_t va);
++#endif
+ 
+ #include <pexpert/device_tree.h>
+ 
+@@ -2334,7 +2340,11 @@
  	/**
  	 * Bootstrap any necessary SART data structures and values needed from the device tree.
  	 */
@@ -23,6 +31,37 @@
  
  	/**
  	 * Don't make any assumptions about the alignment of avail_start before this
+@@ -4952,8 +4962,13 @@
+ 			}
+ #endif
+ 			if (remove && (options & PMAP_OPTIONS_COMPRESSOR)) {
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++				panic("pmap_page_protect: attempt to compress ppnum 0x%x with IOMMU PTE %p, pve_p=%p",
++				    ppnum, pte_p, pve_p);
++#else
+ 				panic("pmap_page_protect: attempt to compress ppnum 0x%x owned by iommu %p, pve_p=%p",
+ 				    ppnum, ptep_get_iommu(pte_p), pve_p);
++#endif
+ 			}
+ 			goto protect_skip_pve_pass1;
+ 		}
+@@ -12237,6 +12252,7 @@
+ #endif /* !XNU_MONITOR */
+ 
+ 
++#if !defined(ARM64_BOARD_CONFIG_EXYNOS9825) || PMAP_CS_INCLUDE_CODE_SIGNING || PMAP_CS_PPL_MONITOR
+ MARK_AS_PMAP_TEXT static inline void
+ pmap_cs_lockdown_pages(vm_address_t kva, vm_size_t size, bool ppl_writable)
+ {
+@@ -12256,6 +12272,8 @@
+ 	pmap_ppl_unlockdown_pages(kva, size, 0, ppl_writable);
+ #endif
+ }
++
++#endif /* Keep CS helpers whenever a CS backend is enabled. */
+ 
+ /**
+  * Perform basic validation checks on the destination only and
 --- a/osfmk/arm64/pcb.c
 +++ b/osfmk/arm64/pcb.c
 @@ -71,7 +71,9 @@

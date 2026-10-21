@@ -63,7 +63,7 @@ def main():
               'unresolved_external_symbols': unresolved,
               'unresolved_note': 'Includes weak/optional imports; absence from this partial set is not an ABI proof.',
               'entry_architecture_symbols_present': {n: n in defined for n in
-                  ('_start', '_arm_init', '_arm_vm_init', '_pmap_bootstrap', '_PE_init_platform')},
+                  ('__start', '_start_first_cpu', '_arm_init', '_arm_vm_init', '_pmap_bootstrap', '_PE_init_platform')},
               'relocatable_merge_passed': linked.returncode == 0, 'merge_command': command,
               'partial_object_sha256': hashlib.sha256(partial.read_bytes()).hexdigest() if linked.returncode == 0 else None,
               'whole_kernel_linked': False, 'platform_archive_supplied': False,
