@@ -43,6 +43,8 @@ def main():
             if hashlib.sha256((directory / name).read_bytes()).hexdigest() != expected:
                 raise ValueError('Native generated feature header changed')
     target = json.loads((ROOT / 'note10/target.json').read_text())
+    if not re.fullmatch(r'\d+(?:\.\d+){1,2}', target['version']):raise ValueError('Invalid deployment version')
+    deployment_target = 'arm64-apple-ios' + target['version']
     compiler = os.environ.get('N10_CC') or str(LLVM / 'clang-23.exe')
     sdk = os.environ.get('N10_SDKROOT')
     mig = ROOT / target['research_directory'] / 'generated-headers-vmapple/RELEASE_ARM64_VMAPPLE'
@@ -195,7 +197,7 @@ def main():
                 'System/Library/Frameworks/Kernel.framework/PrivateHeaders',
                 'usr/local/include', 'usr/include'))
         object_file = output / (name.replace('/', '_').replace('@', '') + '.o')
-        command = [compiler, '--target=arm64-apple-darwin', '-march=armv8.2-a+crypto',
+        command = [compiler, '--target=' + deployment_target, '-march=armv8.2-a+crypto', '-mcpu=generic',
                    '-std=gnu11', '-O2', '-ffreestanding', '-fno-builtin', '-fno-common', '-fblocks',
                    '-nostdlibinc', '-fno-stack-protector', '-mno-implicit-float', '-mstrict-align',
                    '-ferror-limit=8', '-Darm64', '-DARM64', '-D__ARM64__', '-DLP64', '-DAPPLE', '-DKERNEL',
@@ -208,6 +210,14 @@ def main():
                    '-include', str(config / 'meta_features.h'), *flags]
         if sdk:command.extend(['-isysroot', sdk])
         language = mode[1] if mode else 'C'
+        if language != 'assembly':
+            # Match the real XNU kernel code-generation context: no user
+            # red zone/PIC/static destructors and no Apple BTI default.
+            command += ['-mkernel', '-fno-c++-static-destructors', '-ftrivial-auto-var-init=zero',
+                        '-fsigned-bitfields', '-fmerge-all-constants', '-fno-strict-aliasing',
+                        '-momit-leaf-frame-pointer']
+            command += (['-fno-branch-target-identification', '-mno-implicit-sme'] if sdk
+                        else ['-mbranch-protection=none'])
         if language == 'C++':
             command[command.index('-std=gnu11')] = '-std=gnu++2b'
             command += ['-fapple-kext', '-fsized-deallocation', '-nostdinc++']
@@ -252,6 +262,7 @@ def main():
               'borrowed_nested_generated_header_sha256': mig_hashes,
               'native_exynos_config': True, 'foreign_mig_version_headers': True, 'macos_kdk_declaration_headers': True,
               'native_mach_mig_headers': bool(native_mig),
+              'deployment_target': deployment_target, 'kernel_codegen_mode': True,
               'synthetic_board_inputs': True, 'whole_kernel_build': False, 'device_operations': []}
     report['skipped_generated_sources'] = skipped
     report['architecture_candidates_not_selected_in_native_config'] = bool(mode and mode[0].startswith('PLATFORM_'))

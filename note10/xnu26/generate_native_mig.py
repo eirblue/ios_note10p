@@ -26,6 +26,7 @@ def header_list(text, variable):
 def main():
     if sys.platform != 'darwin':raise SystemExit('Native MIG generation requires macOS')
     private = ROOT / 'note10/private/windows-xnu'
+    target = json.loads((ROOT / 'note10/target.json').read_text())
     configured = json.loads((private / 'configure-result.json').read_text())
     source = ROOT / configured['source_directory']
     config = private / 'configured/DEVELOPMENT/osfmk'
@@ -38,7 +39,8 @@ def main():
     includes = [config, source / 'EXTERNAL_HEADERS']
     includes += [private / 'source-exports' / c for c in ('osfmk','bsd','pexpert','libkern','iokit','libsa','security','san')]
     includes += [source / c for c in ('osfmk','bsd','pexpert','libkern','iokit','libsa','security','san')]
-    common = [mig, '-arch', 'arm64', '-isysroot', os.environ['N10_SDKROOT'], '-novouchers',
+    common = [mig, '-arch', 'arm64', '-target', 'arm64-apple-ios' + target['version'],
+              '-march=armv8.2-a+crypto', '-mcpu=generic', '-isysroot', os.environ['N10_SDKROOT'], '-novouchers',
               '-Darm64', '-DARM64', '-D__ARM64__', '-DKERNEL', '-DKERNEL_PRIVATE', '-DXNU_KERNEL_PRIVATE',
               '-DXNU_TARGET_OS_IOS', '-DARM64_BOARD_CONFIG_EXYNOS9825',
               '-DN10_BOARD_SCHEMA=1', '-DN10_ICACHE_LINE_LOG2=6', '-DN10_DCACHE_LINE_LOG2=6',

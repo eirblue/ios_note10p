@@ -48,7 +48,7 @@ override BTI_BUILD := 0
 endif
 ''')
     marker = 'MACHINE_FLAGS_ARM64_VMAPPLE = -DARM64_BOARD_CONFIG_VMAPPLE              -march=armv8.5a+sme2\n'
-    new = replace_one(new,marker,marker+'MACHINE_FLAGS_ARM64_EXYNOS9825 = -DARM64_BOARD_CONFIG_EXYNOS9825 -march=armv8.2-a+crypto\n')
+    new = replace_one(new,marker,marker+'MACHINE_FLAGS_ARM64_EXYNOS9825 = -DARM64_BOARD_CONFIG_EXYNOS9825 -march=armv8.2-a+crypto -mcpu=generic\n')
     new = replace_one(new,'ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG ?=\n','''ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG ?=
 ifeq ($(CURRENT_MACHINE_CONFIG),EXYNOS9825)
 # Reject a command-line arm64e override for this non-PAuth kernel target.
@@ -89,7 +89,7 @@ endif
         for bti in ('0','1'):
             r=evaluate('new','EXYNOS9825',arch,bti)
             assert r['architecture']=='arm64' and r['arch_flags']=='-arch arm64' and r['bti']=='0'
-            assert r['machine_flags']=='-DARM64_BOARD_CONFIG_EXYNOS9825 -march=armv8.2-a+crypto'
+            assert r['machine_flags']=='-DARM64_BOARD_CONFIG_EXYNOS9825 -march=armv8.2-a+crypto -mcpu=generic'
             assert '-UXNU_BUILT_WITH_BTI' in r['bti_flags'] and 'EXYNOS9825' in r['supported'].split()
             results.append({'machine':'EXYNOS9825','input_arch':arch,'input_bti':bti,'output':r})
     for machine in ('T8101','T6050','VMAPPLE'):
