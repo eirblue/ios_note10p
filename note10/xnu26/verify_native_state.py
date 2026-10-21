@@ -52,7 +52,7 @@ def main():
                           'not_compiled_generated_sources': len(audit['skipped_generated_sources']),
                           'first_error_counts': dict(failures)},
               'llvm23_xnu_builtins': features, 'whole_kernel_build': False,
-              'manual_next_step': 'GitHub authentication and a user-selected repository for the prepared manual macOS compile workflow',
+              'next_work': 'Inspect the designated repository macOS audit; complete platform support, remaining generated interfaces and whole-kernel link',
               'device_operations': []}
     (private / 'state-result.json').write_text(json.dumps(report, indent=2))
     print(json.dumps({k: report[k] for k in ('native_configurations', 'generated_feature_headers', 'source_headers_exported',

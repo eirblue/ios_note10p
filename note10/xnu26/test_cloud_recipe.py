@@ -54,7 +54,7 @@ def main():
     report = {'workflow_sha256': hashlib.sha256(workflow.read_bytes()).hexdigest(),
               'workflow_manual_only': True, 'firmware_sdk_excluded_from_upload': True,
               'master_output_variants_matched': 3, 'source_archive_hash_checked': True,
-              'macos_job_executed': False, 'github_authenticated': False}
+              'macos_job_executed': False, 'github_authentication_checked': False}
     (ROOT / 'note10/private/cloud-recipe-result.json').write_text(json.dumps(report, indent=2))
     print(json.dumps(report))
 

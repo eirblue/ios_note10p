@@ -140,6 +140,8 @@ def main():
                        cwd=ROOT, env=env, check=True)
         subprocess.run([sys.executable, str(Path(__file__).parent / 'audit_link_inputs.py')],
                        cwd=ROOT, env=env, check=True)
+        subprocess.run([sys.executable, str(Path(__file__).parent / 'link_experimental_kernel.py')],
+                       cwd=ROOT, env=env, check=True)
         results = []
         for name in ('all-c-result.json', 'all-cxx-result.json', 'all-asm-result.json'):
             report = json.loads((ROOT / 'note10/private/windows-xnu/objects/DEVELOPMENT' / name).read_text())
@@ -147,8 +149,11 @@ def main():
                             'attempted': len(report['units']),
                             'missing_generated': len(report['skipped_generated_sources'])})
         passed = all(r['compiled'] == r['attempted'] and r['attempted'] > 0 and not r['missing_generated'] for r in results)
+        kernel = json.loads((ROOT / 'note10/private/windows-xnu/kernel-link-result.json').read_text())
         summary = {'source_compilation_passed': passed, 'results': results,
-                   'whole_kernel_linked': False, 'deployment_ready': False, 'device_operations': []}
+                   'whole_kernel_linked': kernel['whole_kernel_linked'],
+                   'full_upstream_make_build': False,
+                   'deployment_ready': False, 'device_operations': []}
         (ROOT / 'note10/private/cloud-source-result.json').write_text(json.dumps(summary, indent=2))
         print(json.dumps(summary), flush=True)
         if not passed:raise SystemExit('Selected source compilation or generation remains incomplete; see diagnostics')

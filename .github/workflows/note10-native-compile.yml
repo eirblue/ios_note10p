@@ -53,6 +53,9 @@ jobs:
             note10/private/windows-xnu/generated-extra/*.log
             note10/private/windows-xnu/link-audit-result.json
             note10/private/windows-xnu/link-audit.log
+            note10/private/windows-xnu/kernel-link-result.json
+            note10/private/windows-xnu/kernel-link.log
+            note10/private/windows-xnu/kernel-undefined.log
             note10/private/windows-xnu/symbol-audit.log
             note10/private/windows-xnu/public-dependencies-result.json
             note10/private/windows-xnu/public-dependencies.log
