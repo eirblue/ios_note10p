@@ -217,3 +217,29 @@ Exynos SoC MASTER 및 플랫폼 archive 입력 분리:
 - GitHub macos-26 수동 compile workflow 및 source-only 진단 수집 준비. PC에서 workflow/입력 3종 대조, 실제 Mac job 미실행.
 - gh auth status는 로그아웃. 사용자 직접 GitHub 로그인과 사용할 저장소 지정이 필요한 다음 단계. 기기 조작·원격 push/dispatch 없음.
 - 상세 xnu26/NATIVE-WINDOWS.md, xnu26/CLOUD.md. 전체 커널 링크·부팅 이미지는 여전히 없음.
+
+
+## 2026-10-21: 실제 macOS 소스 생성·컴파일·부분 링크
+
+- 사용자 GitHub 기기 인증 완료 및 지정한 eirblue/ios_note10p에 공개 소스만 업로드했다.
+- Xcode 26.6 / Apple Clang 21.0.0에서 XNU builtin 2종 지원을 확인했다.
+- KDK의 SDK/KernelSupport 실제 선언, 고정 커밋 libdispatch 선언을 사용한다. 임시 타입/빈 함수로 오류를 숨기지 않았다.
+- 실제 Mach MIG 헤더 68개, 선택 Mach/보조 RPC C, BSD syscall/ioconf, DriverKit IIG 19개를 생성했다.
+- 생성 코드 포함 C 903/903, C++ 129/129, assembly 19/19개 컴파일을 확인했다.
+- genassym.c에서 148개 구조체 상수를 생성했다. 원본 sed recipe와 비교했다.
+- 1,051개 객체를 Apple ld -r로 결합했다. 외부 정의 심볼 27,092개, 미해결 이름 316개다.
+- 실제 실행: https://github.com/eirblue/ios_note10p/actions/runs/39531554122 . 자세한 범위는 xnu26/LINK.md.
+- 현재 native 선택에는 start/arm_init/arm_vm_init/pmap_bootstrap이 없다. 별도 ARM 후보 소스를 검사 중이다.
+- 완성된 Exynos 플랫폼 archive, 전체 XNU 링크, 부팅 이미지, iOS 사용자 공간 통합 및 실기기 부팅은 미완료다.
+- 이번 단계의 ADB·재부팅·기기 쓰기·언락·플래시는 없다. original firmware/IPSW/기기 덤프/SDK/인증 정보는 업로드하지 않았다.
+
+
+## 2026-10-21: 실험용 ARM64 실행형 링크 성공
+
+- 검증 실행: https://github.com/eirblue/ios_note10p/actions/runs/39559172237 (`71b5960`).
+- C 904/904, C++ 129/129, assembly 19/19, 별도 ARM 후보 15/15, firehose 1개와 메타데이터 3개 컴파일.
+- 실제 SleepToken 선언과 저장 공간·genassym 조건을 맞췄다. 구조체 상수 149개를 원본 sed와 대조했다.
+- 원본 VM 별칭 6개 및 실제 arm64 커널 compiler runtime을 연결했다. 임시 성공 함수로 대체하지 않았다.
+- 1,071개 객체 부분 링크 후, XNU 원본 배치 옵션으로 18,505,624-byte arm64 MH_EXECUTE를 링크했다. 미해결 심볼과 동적 라이브러리 명령은 없다.
+- 이 실행은 전체 upstream Make/커널 컬렉션/KPI/계측 재현이 아니다. 보드 입력은 합성이며 실제 부팅·부팅 이미지·드라이버·사용자 공간은 미완료다.
+- 로컬 PC 검사 28/28 통과 및 Windows genassym 149개 생성 확인. 실기기 조작은 없다. 자세한 범위: xnu26/LINK.md.

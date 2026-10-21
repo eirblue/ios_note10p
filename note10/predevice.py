@@ -127,7 +127,7 @@ def main():
     steps.append({'name': 'reviewable-inputs-unchanged', 'passed': before == after})
     blockers = [
         {'id': 'kernel-build', 'state': 'missing',
-         'detail': 'Native config/headers and selected C objects exist. Apple compiler builtins are available in the designated macOS CI. Complete selected generated inputs, hardware platform archive and whole Exynos kernel link remain incomplete; local Windows checks do not establish remote kernel completion.'},
+         'detail': 'Native configuration, generated inputs and source compilation are exercised by macOS CI. Complete upstream Make reproduction, verified hardware platform support and a validated Exynos kernel remain incomplete; local Windows checks do not establish remote kernel completion.'},
         {'id': 'boot-memory-contract', 'state': 'unverified',
          'detail': 'Entry EL, load/reserved RAM, MMU/cache/granule capabilities and diagnostic recovery are unknown.'},
         {'id': 'gic-handoff', 'state': 'missing',

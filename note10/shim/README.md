@@ -3,7 +3,8 @@
 Exynos 보드 header에 캐시·페이지 크기를 임의로 지정하지 않기 위해 초기 privileged 진단 코드를 준비했다.
 SM-N976N의 Android cache sysfs 조회에서는 읽을 항목이 나오지 않았다.
 이전 Android 사용자 모드 MMFR0 값도 커널 보정 가능성이 있어 실제 16KiB 지원의 근거로 사용하지 않는다.
-보드 header/MASTER profile은 아직 작성 완료하지 않았다.
+입력형 보드 header와 MASTER profile은 작성했으며, cache/page 값은 합성 검사 입력이다.
+실제 초기 진입과 하드웨어 값은 아직 확인하지 못했다.
 
 ## 구현
 

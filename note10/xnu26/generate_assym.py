@@ -56,6 +56,7 @@ def main():
               'synthetic_board_inputs': True, 'whole_kernel_build': False}
     (private / 'genassym-result.json').write_text(json.dumps(report, indent=2))
     print(json.dumps({'genassym_compiled': passed, 'constants': len(constants)}), flush=True)
+    if not passed:raise SystemExit('Native genassym compilation failed; assembly must not use stale offsets')
 
 
 if __name__ == '__main__':main()

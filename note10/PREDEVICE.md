@@ -21,14 +21,14 @@ C:\Python314\python.exe note10/predevice.py
 - XNU 선택·timer·IRQ bridge·bootstrap 패치를 재생성하고 합성 검사를 실행한다.
 - bootstrap 통합 검사에서는 실제 binder/GIC core/MMIO/IRQ handler를 함께 링크한다.
   DT·CPU 레지스터·MMIO·커널 서비스는 합성이므로 실제 인터럽트 전달 증거는 아니다.
-- 패치 7개/18개 파일을 격리 소스에 순차 적용·복원하고 원본 보존을 검사한다.
-- 입력형 Exynos 보드 헤더 22종 및 실제 bootstrap/IRQ C 파일의 Mach-O 객체 4개를 검사한다.
+- 패치 9개/28개 파일을 격리 소스에 순차 적용·복원하고 원본 보존을 검사한다.
+- 입력형 Exynos 보드 헤더 23종 및 실제 bootstrap/IRQ C 파일의 Mach-O 객체 4개를 검사한다.
   cache/page 값은 합성 입력이며 실측 보드 설정이 아니다. 상세 [xnu26/BOARD.md](xnu26/BOARD.md).
 - SoC MASTER 설정 텍스트 3종과 플랫폼 archive 입력의 GNU Make 검사 17종을 실행한다.
-  실제 XNU config 도구·전체 링크를 실행한 것은 아니다. 상세 [xnu26/MASTER.md](xnu26/MASTER.md).
+  이 MASTER 부품 검사는 설정 선택을 검증한다. 실제 config 생성과 원격 링크 진단은 별도 단계다. 상세 [xnu26/MASTER.md](xnu26/MASTER.md).
 - 이어서 실제 XNU config 도구의 Windows 빌드·24개 native 구성 생성·907개 source export·실제 C 파일 10개 컴파일을 검증한다.
-  별도 전체 C audit는 585/863개 컴파일·278개 실패 및 생성 C 40개 미준비 상태다. 상세 [xnu26/NATIVE-WINDOWS.md](xnu26/NATIVE-WINDOWS.md).
-- 준비한 수동 macOS CI의 형태와 입력 생성 부분을 PC에서 검사한다. 실제 원격 실행은 하지 않는다. [인증 단계](xnu26/CLOUD.md).
+  Windows 전체 C audit 결과는 과거 기록이며, Apple 전용 builtin이 없는 호스트의 한계를 포함한다. 상세 [xnu26/NATIVE-WINDOWS.md](xnu26/NATIVE-WINDOWS.md).
+- 수동 macOS CI의 형태와 입력 생성 부분을 PC에서 검사한다. 인증·원격 실행은 이미 진행했으며 [원격 검증](xnu26/CLOUD.md)과 [링크 결과](xnu26/LINK.md)에 별도로 기록한다.
 - 실제 XNU 헤더로 include 순서 회귀를 검사한다. VMAPPLE 대조군만 syntax 통과하며,
   Exynos의 `processor not supported` 실패는 미해결 보드 설정의 증거로 유지한다. 상세 [xnu26/HEADERS.md](xnu26/HEADERS.md).
 - 소스·문서·패치 입력 해시를 전후 비교한다. 생성기가 패치 바이트를 바꾸면 검사는 실패한다.
@@ -45,7 +45,7 @@ C:\Python314\python.exe note10/predevice.py
 
 | 조건 | 현재 상태 / 필요한 증거 |
 |---|---|
-| 전체 커널 | native config/header 생성·일부 C 컴파일 완료. Apple builtin·나머지 코드/생성 입력·플랫폼 archive·C++/ASM·전체 링크 미완료 |
+| 전체 커널 | native config/header·선택 생성 코드와 C/C++/ASM 컴파일을 원격 검증한다. 실제 하드웨어 플랫폼·전체 upstream Make 재현·검증된 Exynos 커널은 미완료 |
 | 메모리·진입 계약 | 실제 진입 EL, 안전한 RAM/예약 영역, MMU/cache/granule 및 진단 회수 경로 미확정 |
 | GIC handoff | 사전 초기화된 상태의 실제 생산자·소유권·priority/trigger 설정 미확정 |
 | 사용자 공간 | PAC 키/예외/loader 연결 및 iOS 프로세스 실행 미완료 |

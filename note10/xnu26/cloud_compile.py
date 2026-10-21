@@ -140,6 +140,8 @@ def main():
                        cwd=ROOT, env=env, check=True)
         subprocess.run([sys.executable, str(Path(__file__).parent / 'audit_link_inputs.py')],
                        cwd=ROOT, env=env, check=True)
+        subprocess.run([sys.executable, str(Path(__file__).parent / 'archive_platform_candidates.py')],
+                       cwd=ROOT, env=env, check=True)
         subprocess.run([sys.executable, str(Path(__file__).parent / 'link_experimental_kernel.py')],
                        cwd=ROOT, env=env, check=True)
         results = []

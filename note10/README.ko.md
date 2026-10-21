@@ -5,7 +5,7 @@
 활성 설정은 [target.json](target.json), Samsung 펌웨어 관측은 [HARDWARE.md](HARDWARE.md)를 본다.
 이전 iOS 27 분석·검사 결과는 별도 역사 기록으로 보존한다.
 현재 단계는 **하드웨어 분석 및 호환성·초기 플랫폼 부품 구현**이다. Android에서 부품 검사는 수행했지만,
-Note10+용 XNU 커널/부팅 이미지나 iOS 실행 결과는 없다. 최신 진행은 [STATUS.md](STATUS.md)를 본다.
+합성 보드 입력을 사용한 ARM64 XNU 실행형 링크는 성공했다. Samsung 부팅 이미지와 실제 iOS 실행 결과는 없다. 최신 진행은 [STATUS.md](STATUS.md)를 본다.
 
 실기기 적용 전까지의 현재 PC 작업 범위·재현 명령과 미완료 조건은 [PREDEVICE.md](PREDEVICE.md)에 있다.
 

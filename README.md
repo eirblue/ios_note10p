@@ -2,15 +2,15 @@
 
 Target: Samsung SM-N976N (Exynos 9825), iPhone18,1 iOS 26.5.2 / 23F84.
 
-This is an experimental source tree. There is no bootable Note10 iOS image,
-completed XNU link, or verified iOS boot on this device.
+This is an experimental source tree. An experimental arm64 XNU source-object executable link has succeeded.
+There is no bootable Note10 iOS image or verified iOS boot on this device.
 
 - [Current status](note10/STATUS.md)
 - [Korean project guide](note10/README.ko.md)
 - [Manual macOS compile audit](note10/xnu26/CLOUD.md)
 - [Pre-device validation and blockers](note10/PREDEVICE.md)
 
-The manual Actions workflow compiles source and retains diagnostics only.
+The manual Actions workflow compiles source and retains diagnostics plus labelled experimental source-built outputs.
 Firmware, IPSW contents, SDK headers, device dumps and credentials are excluded.
 
 Reference project: https://github.com/ch1tmdgus/ios-v60 at

@@ -58,6 +58,8 @@ def main():
     defined, references = symbols(result.stdout)
     unresolved = {n: sorted(set(v)) for n, v in references.items() if n not in defined}
     before_aliases = len(unresolved)
+    entry_names = ('__start', '_start_first_cpu', '_arm_init', '_arm_vm_init', '_pmap_bootstrap', '_PE_init_platform')
+    entry_inputs = {n: n in defined for n in entry_names}
     configured = json.loads((private / 'configure-result.json').read_text())
     source = ROOT / configured['source_directory']
     aliases = {}; alias_inputs = []; alias_provenance = {}
@@ -115,8 +117,8 @@ def main():
               'skipped_generated_inputs': skipped, 'defined_external_symbols': len(defined),
               'unresolved_external_symbols': unresolved,
               'unresolved_note': 'Includes weak/optional imports; absence from this partial set is not an ABI proof.',
-              'entry_architecture_symbols_present': {n: n in defined for n in
-                  ('__start', '_start_first_cpu', '_arm_init', '_arm_vm_init', '_pmap_bootstrap', '_PE_init_platform')},
+              'entry_architecture_symbols_in_input_objects': entry_inputs,
+              'entry_architecture_symbols_external_after_merge': {n: n in defined for n in entry_names},
               'relocatable_merge_passed': linked.returncode == 0, 'merge_command': command,
               'partial_object_sha256': hashlib.sha256(partial.read_bytes()).hexdigest() if linked.returncode == 0 else None,
               'whole_kernel_linked': False, 'platform_archive_supplied': False,

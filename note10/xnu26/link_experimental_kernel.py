@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import re
 import shlex
+import shutil
 import struct
 import subprocess
 import sys
@@ -53,9 +54,23 @@ def main():
         flags, variables = layout_flags(definition.read_text())
         tools = json.loads((ROOT / 'note10/private/cloud-toolchain-result.json').read_text())
         output = private / 'note10-experimental.macho'
+        filelist = private / 'source-objects.filelist'
+        platform = json.loads((private / 'platform-archive-result.json').read_text())
+        platform_flags = []
+        if platform['archive_created']:
+            archive = private / 'libNote10.architecture-candidates.a'
+            if hashlib.sha256(archive.read_bytes()).hexdigest() != platform['archive_sha256']:
+                raise ValueError('Architecture archive changed after creation')
+            excluded = {s.replace('/', '_') + '.o' for s in platform['objects']}
+            selected = [p for p in filelist.read_text().splitlines() if Path(p).name not in excluded]
+            if len(selected) + len(excluded) != len(filelist.read_text().splitlines()):
+                raise ValueError('Architecture archive replacement did not match source object set')
+            filelist = private / 'kernel-selected-objects.filelist'
+            filelist.write_text('\n'.join(selected) + '\n')
+            platform_flags = ['-rdynamic', '-Wl,-force_load,' + str(archive)]
         command = [tools['compiler'], '--target=arm64-apple-ios26.5.2',
                    '-mcpu=generic', '-march=armv8.2-a+crypto', '-isysroot', tools['sdk'],
-                   *flags, '-Wl,-filelist,' + str(private / 'source-objects.filelist'),
+                   *flags, *platform_flags, '-Wl,-filelist,' + str(filelist),
                    '-Wl,-alias_list,' + str(private / 'selected-aliases.exp')]
         runtime = inputs['compiler_kernel_runtime']
         if runtime['selected']:command.append(runtime['file'])
@@ -63,6 +78,7 @@ def main():
         result = subprocess.run(command, capture_output=True, text=True, timeout=180)
         (private / 'kernel-link.log').write_text(result.stdout + result.stderr)
         report.update({'attempted': True, 'command': command, 'returncode': result.returncode,
+                       'architecture_candidate_archive_supplied': platform['archive_created'],
                        'upstream_layout_sha256': hashlib.sha256(definition.read_bytes()).hexdigest(),
                        'layout_variables': variables,
                        'virtual_addresses_are_physical_load_contract': False})
@@ -80,11 +96,25 @@ def main():
                 offset += length
             nm = subprocess.run(['xcrun', 'nm', '-u', str(output)], capture_output=True, text=True, check=True)
             (private / 'kernel-undefined.log').write_text(nm.stdout + nm.stderr)
+            all_symbols = subprocess.check_output(['xcrun', 'nm', str(output)], text=True)
+            (private / 'kernel-symbols.log').write_text(all_symbols)
+            present = {line.split()[-1] for line in all_symbols.splitlines() if line.split()}
+            entries = {n: n in present for n in ('__start', '_start_first_cpu', '_arm_init',
+                        '_arm_vm_init', '_pmap_bootstrap', '_PE_init_platform')}
             report.update({'whole_kernel_linked': not dynamic and not nm.stdout.strip(),
                            'mach_o_type': 'MH_EXECUTE', 'architecture': 'arm64',
                            'dynamic_library_load_commands': dynamic, 'segments': segments,
                            'undefined_symbol_output': nm.stdout,
+                           'entry_architecture_symbols_present': entries,
                            'output_sha256': hashlib.sha256(raw).hexdigest(), 'output_size': len(raw)})
+            if not all(entries.values()):raise ValueError('Expected architecture entry symbols absent from executable')
+            if report['whole_kernel_linked']:
+                exported = ROOT / 'note10/private/native-built-artifacts'
+                exported.mkdir(exist_ok=True)
+                shutil.copyfile(output, exported / output.name)
+                if platform['archive_created']:
+                    shutil.copyfile(archive, exported / archive.name)
+                (exported / 'build-manifest.json').write_text(json.dumps(report, indent=2))
     (private / 'kernel-link-result.json').write_text(json.dumps(report, indent=2))
     print(json.dumps({k: report[k] for k in ('attempted', 'whole_kernel_linked', 'deployment_ready')}), flush=True)
 

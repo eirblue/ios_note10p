@@ -56,6 +56,9 @@ jobs:
             note10/private/windows-xnu/kernel-link-result.json
             note10/private/windows-xnu/kernel-link.log
             note10/private/windows-xnu/kernel-undefined.log
+            note10/private/windows-xnu/kernel-symbols.log
+            note10/private/windows-xnu/platform-archive-result.json
+            note10/private/windows-xnu/platform-archive.log
             note10/private/windows-xnu/symbol-audit.log
             note10/private/windows-xnu/public-dependencies-result.json
             note10/private/windows-xnu/public-dependencies.log
@@ -65,3 +68,11 @@ jobs:
             note10/private/windows-xnu/configured/**/config.log
             note10/private/windows-xnu/objects/DEVELOPMENT/*-result.json
             note10/private/windows-xnu/objects/DEVELOPMENT/*.log
+      - name: Collect experimental native build
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: note10-experimental-native-build
+          retention-days: 7
+          if-no-files-found: warn
+          path: note10/private/native-built-artifacts/
