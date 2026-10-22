@@ -20,3 +20,6 @@ establish boot success on Note10. Individual upstream license notices and the
 QARMA LGPL license are retained in the corresponding source files/directories.
 
 First device observation: [RAM-only TWRP probe](note10/device_test/README.ko.md). It collects real hardware facts; it does not execute XNU or flash partitions.
+
+
+PC boot contract checks now compare real public XNU C ABI bytes, validate explicit synthetic placement, and exercise the linked SecureDT parser. [Details](note10/xnu26/BOOT-CONTRACT.md). No deployable image or physical boot is established.

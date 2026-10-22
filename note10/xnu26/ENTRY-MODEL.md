@@ -25,7 +25,9 @@ on Unicorn's initially zero-filled memory.
 A negative case placed boot arguments elsewhere in otherwise modeled RAM. The
 table validator correctly found that they were outside the kernel's initial
 bootstrap mappings. It is not sufficient to choose any unused RAM address.
-This compiled 16K configuration initially uses a 32 MiB bootstrap block.
+This compiled 16K configuration uses 32 MiB bootstrap blocks. Startup maps
+multiple blocks from the block containing the image header; memory earlier than
+that is excluded. The producer conservatively keeps metadata in the first block.
 The sample addresses in the report are synthetic and must not be used as device
 load addresses. An actual loader must reserve and validate placement explicitly.
 
@@ -67,8 +69,14 @@ python note10/xnu26/test_linked_entry.py PATH_TO_NATIVE_BUILD
 The review currently uses the saved run 39560904016 and pinned public XNU source.
 It checks the executable hash before correlating findings.
 
-Remaining PC work includes a validated placement/boot-argument producer, Exynos
-device-tree conversion, entry/handoff and diagnostic-log implementation, and PAC
+Remaining PC work includes Exynos device-tree conversion, entry/handoff and
+diagnostic-log implementation, and PAC
 integration with XNU's loader/traps/process keys. Device observations are needed
 to finalize actual RAM reservations, entry state and hardware ownership; they do
 not prevent preparation and synthetic testing of these components.
+
+The subsequent [boot contract work](BOOT-CONTRACT.md) supplies a bounded
+boot-argument producer, explicit synthetic placement checker and raw ADT codec.
+It compares actual C ABI bytes and executes the linked SecureDT functions.
+The entry test now uses that producer and also walks every segment's endpoints.
+Actual memory reservation, board DT conversion and CPU handoff remain unfinished.

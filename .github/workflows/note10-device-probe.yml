@@ -21,6 +21,10 @@ jobs:
         run: |
           python3 note10/device_test/test_probe.py
           dash -n note10/device_test/collect.sh
+      - name: Test PC boot contract and bounded ADT format
+        run: |
+          python3 note10/xnu26/test_boot_contract.py
+          python3 note10/xnu26/test_boot_adt.py
       - name: Collect diagnostic package and test report
         uses: actions/upload-artifact@v4
         with:

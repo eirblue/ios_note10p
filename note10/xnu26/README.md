@@ -81,3 +81,5 @@ Apple Clang을 위한 [수동 macOS CI](CLOUD.md)를 준비했지만 사용자 G
 완성 커널·Note10 부팅 이미지·iOS 실기기 부팅 결과는 없다. [원격 검사](CLOUD.md)는 인증 후 실행됐다.
 
 Additional PC-only linked-entry and instruction review: [ENTRY-MODEL.md](ENTRY-MODEL.md). This does not require a phone connection or establish hardware boot success.
+
+Boot argument serialization, actual C ABI comparison, placement checks and linked SecureDT parser tests: [BOOT-CONTRACT.md](BOOT-CONTRACT.md). These remain PC-only components, not an installable image.

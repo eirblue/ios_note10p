@@ -11,6 +11,7 @@ from pathlib import Path
 import struct
 from audit_kernel_instructions import image_layout
 from verify_experimental_artifact import verify
+from boot_contract import Region, PAGE, encode_boot_args, validate_placement
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -37,14 +38,16 @@ def run_case(directory, ram_base, outside_bootstrap_block=False):
     # Prime the four pages that start.s must clear; zero-filled emulated RAM
     # would otherwise hide a broken initialization loop.
     uc.mem_write(tables,b'\xa5'*0x10000)
-    # The actual entry initially maps only its bootstrap block, not all RAM.
-    # Reserve a synthetic gap before the image in that same 32 MiB block.
+    # Startup excludes memory before the block containing the image header.
+    # Keep metadata in that first block under the conservative producer policy.
     arguments = ram_base+0x2000000 if outside_bootstrap_block else (physical_image & ~0x1ffffff)+0x4000
     uc.mem_map(arguments,0x10000)
-    boot_args = bytearray(1152)
-    struct.pack_into('<HH',boot_args,0,2,2)
-    struct.pack_into('<4Q',boot_args,8,virtual_ram,ram_base,0x40000000,physical_image+rounded)
-    struct.pack_into('<QQ',boot_args,1136,0,0x40000000)
+    if not outside_bootstrap_block:
+        validate_placement(ram=Region(ram_base,0x40000000),reserved=[],occupied=[],
+                           kernel=Region(physical_image,rounded),
+                           arguments=Region(arguments,PAGE),top_of_kernel=physical_image+rounded)
+    boot_args = encode_boot_args(virtual_base=virtual_ram,physical_base=ram_base,
+                                 memory_size=0x40000000,top_of_kernel=physical_image+rounded)
     uc.mem_write(arguments,bytes(boot_args));uc.reg_write(regs.UC_ARM64_REG_X0,arguments)
     pc = ram_base+int(checked['entry_virtual_address'],16)-virtual_ram
     md = Cs(CS_ARCH_ARM64,CS_MODE_LITTLE_ENDIAN)
@@ -125,11 +128,20 @@ def run_case(directory, ram_base, outside_bootstrap_block=False):
                   'boot_args_identity':args_identity,'boot_args_virtual':args_virtual}
     if translations != {'identity_entry':pc,'kernel_entry':pc,'boot_args_identity':arguments,'boot_args_virtual':arguments}:
         raise ValueError('Bootstrap tables do not map synthetic entry/arguments as expected')
+    endpoints = []
+    for segment in checked['segments']:
+        if not segment['virtual_size']: continue
+        for va in (segment['virtual_address'],segment['virtual_address']+segment['virtual_size']-1):
+            pa = ram_base+va-virtual_ram
+            if walk(va,True) != pa or walk(pa,False) != pa:
+                raise ValueError('Kernel segment endpoint outside actual bootstrap mapping')
+            endpoints.append(hex(va))
     return {'synthetic_ram_base':hex(ram_base),'synthetic_kernel_physical':hex(physical_image),
             'synthetic_boot_args_physical':hex(arguments),'instructions':count,'stop':stop,
             'system_operations':dict(operations),'register_writes':writes,
             'store_count':len(stores),'stored_bytes':stored_bytes,
             'bootstrap_table_pages_primed_and_cleared':4,
+            'segment_virtual_and_identity_endpoints_checked':endpoints,
             'store_range':[hex(min(stores)),hex(max(stores))],
             'translations':{k:hex(v) for k,v in translations.items()},'passed':True}
 
