@@ -79,3 +79,5 @@ Apple Clang을 위한 [수동 macOS CI](CLOUD.md)를 준비했지만 사용자 G
 컴파일되고 1,051개 객체가 부분 결합됐다. Mach 헤더 68개, BSD/IIG 입력, 구조체 offset 148개를
 실제 도구로 생성했다. [전체 링크 경계](LINK.md)에 기록한 미해결 외부 심볼은 316개이며,
 완성 커널·Note10 부팅 이미지·iOS 실기기 부팅 결과는 없다. [원격 검사](CLOUD.md)는 인증 후 실행됐다.
+
+Additional PC-only linked-entry and instruction review: [ENTRY-MODEL.md](ENTRY-MODEL.md). This does not require a phone connection or establish hardware boot success.
