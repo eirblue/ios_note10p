@@ -4,6 +4,7 @@ Build feasibility only. No phone access, image packaging or deployment.
 Uses the public defconfig, never a private device capture.
 """
 import hashlib
+import argparse
 import json
 import os
 from pathlib import Path
@@ -19,13 +20,14 @@ REPOSITORY = 'corsicanu/android_kernel_samsung_universal9820'
 OUT = ROOT / 'note10/private/handoff-kernel'
 
 
-def main():
+def main(caps=False):
     if not sys.platform.startswith('linux'): raise RuntimeError('Linux CI host required')
     OUT.mkdir(parents=True,exist_ok=True)
     report = {'source_repository':REPOSITORY,'source_commit':COMMIT,
               'public_defconfig':'exynos9820-d2x_defconfig','build_passed':False,
               'device_operations':[],'deployment_ready':False,'device_boot_tested':False,
               'scope':'Linux shutdown-host build feasibility; not XNU or an installable image',
+              'builtin_cpu_diagnostic':caps,
               'commands':[]}
     def run(arguments, log_name, timeout=120):
         report['commands'].append(arguments)
@@ -56,6 +58,15 @@ def main():
                     raise ValueError('Unexpected kernel archive path')
             tree.extractall(parent,filter='data')
         source=parent/expected;objects=OUT/'objects'
+        if caps:
+            import shutil
+            driver=Path(__file__).with_name('linux_caps.c')
+            target=source/'drivers/misc/note10_handoff_caps.c'
+            if target.exists():raise ValueError('Unexpected existing diagnostic source')
+            shutil.copyfile(driver,target)
+            with (source/'drivers/misc/Makefile').open('a') as build:
+                build.write('\n# Note10 privileged capability diagnostic; no handoff execution\nobj-y += note10_handoff_caps.o\n')
+            report['diagnostic_source_sha256']=hashlib.sha256(driver.read_bytes()).hexdigest()
         defconfig=source/'arch/arm64/configs/exynos9820-d2x_defconfig'
         report['public_defconfig_sha256']=hashlib.sha256(defconfig.read_bytes()).hexdigest()
         make=['make','-C',str(source),'O='+str(objects),'ARCH=arm64',
@@ -79,6 +90,7 @@ def main():
             raise ValueError('Requested kexec dependencies did not survive Kconfig')
         (OUT/'handoff.config').write_bytes(config.read_bytes())
         report['effective_config_sha256']=hashlib.sha256(config.read_bytes()).hexdigest()
+        if caps:run([*make,'drivers/misc/note10_handoff_caps.o'],'04-caps-object.log')
         run([*make,'-j'+str(min(os.cpu_count() or 2,8)),'Image'],'04-build.log',timeout=1500)
         image=objects/'arch/arm64/boot/Image'
         with image.open('rb') as stream:header=stream.read(64)
@@ -104,4 +116,7 @@ def main():
         print(json.dumps({key:report[key] for key in ('build_passed','deployment_ready','source_commit')}),flush=True)
 
 
-if __name__=='__main__':main()
+if __name__=='__main__':
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--caps',action='store_true',help='Include built-in per-CPU printk diagnostic for a future manual boot')
+    main(caps=parser.parse_args().caps)

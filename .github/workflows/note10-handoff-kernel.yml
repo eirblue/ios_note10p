@@ -2,6 +2,11 @@ name: Note10 temporary handoff kernel build
 
 on:
   workflow_dispatch:
+    inputs:
+      caps:
+        description: Include built-in privileged CPU diagnostic for a future manual boot
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -25,7 +30,13 @@ jobs:
         env:
           PLATFORM_VERSION: '11'
           ANDROID_MAJOR_VERSION: r
-        run: python note10/device_test/build_handoff_kernel.py
+          NOTE10_CAPS: ${{ inputs.caps }}
+        run: |
+          if [ "$NOTE10_CAPS" = true ]; then
+            python note10/device_test/build_handoff_kernel.py --caps
+          else
+            python note10/device_test/build_handoff_kernel.py
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
