@@ -98,6 +98,21 @@ class ProbeTests(unittest.TestCase):
         self.assertFalse(r['boot_contract_verified']);self.assertFalse(r['xnu_executed'])
         self.assertIsNone(r['safe_xnu_load_address_selected'])
 
+    def test_disabled_kernel_config_is_observed_not_missing(self):
+        capture(self.root)
+        (self.root/'config.gz').write_bytes(gzip.compress(
+            b'# CONFIG_KEXEC is not set\nCONFIG_ARM64_4K_PAGES=y\n'
+            b'# CONFIG_ARM64_16K_PAGES is not set\n'))
+        config = analysis.analyze(self.root)['kernel_config']
+        self.assertEqual(config['CONFIG_KEXEC'], 'n')
+        self.assertEqual(config['CONFIG_ARM64_16K_PAGES'], 'n')
+        self.assertEqual(config['CONFIG_ARM64_4K_PAGES'], 'y')
+        self.assertEqual(config['CONFIG_KEXEC_FILE'], 'not observed')
+        (self.root/'config.gz').write_bytes(gzip.compress(
+            b'CONFIG_KEXEC=y\n# CONFIG_KEXEC is not set\n'))
+        with self.assertRaisesRegex(ValueError, 'Conflicting kernel config'):
+            analysis.analyze(self.root)
+
     def test_tree_fallback_does_not_invent_memreserve(self):
         capture(self.root);(self.root/'live.dtb').unlink()
         with tarfile.open(self.root/'live-tree.tar','w') as archive:

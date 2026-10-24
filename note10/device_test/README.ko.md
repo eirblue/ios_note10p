@@ -62,6 +62,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\note10\device_test\run
 - recovery Linux의 iomem/meminfo/config, 커널 로그, CPU cache sysfs 값.
 - 관측 실패와 주소 가림을 그대로 기록한다. 동적 예약 영역을 추측하여 채우지 않는다.
 - KEXEC 설정이 보여도 XNU로 넘어가는 로더가 구현·검증됐다는 의미는 아니다.
+- `# CONFIG_KEXEC is not set`은 `n`으로 기록한다. 해당 커널에서는 표준 kexec 실행 경로를 바로 사용할 수 없다.
+- recovery의 `CONFIG_ARM64_16K_PAGES=n`은 이 Linux 빌드 설정이며, CPU의 16K granule 지원 불가를 뜻하지 않는다.
 - 스크립트는 새 `/tmp` 세션에만 쓴다. 파티션 접근/마운트/플래시/재부팅/모듈 적재/kexec는 실행하지 않는다.
 
 raw DT와 커널 로그에는 기기 식별 정보가 포함될 수 있다. 원본은 PC private 경로에 보관하며 자동 업로드하지 않는다.

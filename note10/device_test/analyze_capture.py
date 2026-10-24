@@ -114,7 +114,14 @@ def analyze(directory):
     if compressed:
         with gzip.GzipFile(fileobj=io.BytesIO(compressed)) as stream:decoded = stream.read(8*1024*1024+1)
         if len(decoded) > 8*1024*1024:raise ValueError('Expanded kernel config exceeds limit')
-        config = dict(re.findall(r'^(CONFIG_[A-Z0-9_]+)=(.*)$', decoded.decode(errors='replace'), re.M))
+        for line in decoded.decode(errors='replace').splitlines():
+            assignment = re.fullmatch(r'(CONFIG_[A-Z0-9_]+)=(.*)', line)
+            disabled = re.fullmatch(r'# (CONFIG_[A-Z0-9_]+) is not set', line)
+            if not assignment and not disabled:continue
+            key, value = assignment.groups() if assignment else (disabled.group(1), 'n')
+            if key in config and config[key] != value:
+                raise ValueError('Conflicting kernel config values: ' + key)
+            config[key] = value
     iomem = read(directory/'iomem.txt', 4*1024*1024).decode(errors='replace')
     observed_iomem = [{'start':hex(int(a,16)), 'end_inclusive':hex(int(b,16)), 'name':label.strip()}
                       for a,b,label in re.findall(r'^\s*([0-9a-fA-F]+)-([0-9a-fA-F]+)\s*:\s*(.*)$', iomem, re.M)]

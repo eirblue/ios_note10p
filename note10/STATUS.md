@@ -296,3 +296,14 @@ Exynos SoC MASTER 및 플랫폼 archive 입력 분리:
 - 합성 ADT에 GIC handoff를 만들어 넣지 않았다. 실제 Linux DT 변환·CPU/캐시/MMU 전환·GIC 소유권·로그 경로는 미완료다.
 - recovery 교체 시 TWRP가 사라질 수 있고 boot 변경도 AVB/부팅 조건에 영향을 받는다. TWRP 재진입을 보장하지 않는다. 현재 파티션 쓰기·기기 접근·플래시는 없다.
 - 상세: xnu26/BOOT-CONTRACT.md. deployment_ready=false를 유지한다.
+
+## 2026-10-25: TWRP 실기기 진단 수집 완료
+
+- 사용자 보고로 언락·TWRP 설치 완료를 반영했다. 실제 ADB에서 d2x/exynos9825, TWRP 3.7.0_9-1, root 셸을 확인했다.
+- RAM 전용 collector가 실제 live DT·iomem·config·dmesg 등을 수집했고 PC private 경로로 회수했다. collector 명령 모두 exit code 0, 원본 25개 파일의 로컬 해시를 기록했다. 원본은 업로드하지 않는다.
+- DT memory 노드 8개·고정 예약 노드 16개·reg 없는 동적 예약 노드 4개를 관측했다. iomem은 실제 주소를 표시하지만 현재 빈/예약 가능한 RAM을 증명하지 않는다.
+- GIC distributor/CPU interface 후보 주소, 26MHz 타이머/PPI 30, PSCI SMC가 실제 선택된 DT 선언과 일치했다. 하드웨어 레지스터 상태·소유권 handoff는 미검증이다.
+- 현재 recovery Linux의 CONFIG_KEXEC=n을 확인했다. 현재 TWRP에서 표준 kexec로 XNU를 RAM 실행하는 경로는 바로 사용할 수 없다.
+- Kconfig의 명시적 `is not set`을 미관측과 구분하도록 분석기를 수정했다. 충돌 설정 거부를 포함한 진단 PC 시험 11개를 통과했다.
+- recovery는 4K 빌드다. CPU 전체의 16K 지원·초기 EL/MMU/cache 상태는 이 결과로 확정하지 않는다. cache sysfs 관측은 확보되지 않았다.
+- 안전 XNU 로드 주소·실제 handoff·XNU 기기 실행은 미완료다. 기기 파티션 쓰기·재부팅·모듈 적재·kexec·플래시는 수행하지 않았다.
