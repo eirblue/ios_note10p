@@ -38,3 +38,20 @@ python note10/device_test/decode_linux_caps.py FUTURE_CAPTURED_DMESG
 recovery를 보존하려면 별도의 boot용 ramdisk/패키징이 필요하다.
 기기에서 관측한 vbmeta 헤더에는 verification-disabled flag가 있으나 실제 부팅 검증 동작을 보장하지 않는다.
 이 도구는 vbmeta를 변경하지 않고 플래시 파일/복원 명령도 만들지 않는다.
+
+## 별도 boot 프로토타입 생성기
+
+`prepare_linux_boot.py`는 성공한 `--caps` 커널 빌드, 검증된 기기 백업 5개,
+공식 d2x TWRP 원본과 SHA-256으로 고정한 Android 12 AOSP mkbootimg가 있어야 동작한다.
+참조 도구: https://android.googlesource.com/platform/system/tools/mkbootimg/+/android-12.0.0_r1/mkbootimg.py
+도구 SHA-256: `2a8d05d34110f66c463668f43fc812ce2e46e66459c347eaadb080271df69aa8`.
+
+현재 boot/recovery의 헤더·주소 호환 여부와 실제 boot 파티션 크기를 검사한다.
+공식 TWRP ramdisk는 그대로 쓰며, boot 경로의 별도 DTB/DTBO 파티션 사용을 전제로
+embedded recovery_dtbo는 포함하지 않는다. 이 DT 선택 방식의 실제 부팅 검증은 아직 필요하다.
+커널/ramdisk 바이트와 결과 크기를 재검사하고 출력은 PC private 경로에만 생성한다.
+기존 파일은 덮어쓰지 않는다. 아직 성공한 커널 입력이 없으면 이미지를 만들지 않는다.
+
+생성돼도 `deployment_ready=false`인 **임시 Linux 진단 boot 프로토타입**이다.
+이 생성기에는 ADB·플래시·TWRP 교체·vbmeta 수정 기능이 없다.
+현재 커널·모든 복구 영역을 지우는 설치 프로그램이나 iOS ROM으로 해석하면 안 된다.

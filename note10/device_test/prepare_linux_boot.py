@@ -1,0 +1,135 @@
+"""Prepare a PC-only boot-partition prototype using pinned AOSP mkbootimg.
+
+Never flashes or accesses ADB. Keeps the recovery partition separate. A built
+file is not evidence that Samsung will boot it or that recovery reentry works.
+"""
+import argparse
+import hashlib
+import json
+from pathlib import Path
+import struct
+import subprocess
+import sys
+
+ROOT=Path(__file__).resolve().parents[2]
+sys.path.insert(0,str(ROOT/'note10'))
+from inspect_firmware import boot_header
+
+MKBOOTIMG_SHA256='2a8d05d34110f66c463668f43fc812ce2e46e66459c347eaadb080271df69aa8'
+TWRP_SHA256='e8de29b03fc3eab95f51663b08b2f848e168854a15f8a598a1f80d216f4794df'
+KERNEL_COMMIT='55f042627bb7030c93550faafa117674d32b21d1'
+
+
+def payload_size(kernel_size,ramdisk_size,page,partition_size):
+    if any(type(n) is not int or n<0 for n in (kernel_size,ramdisk_size,page,partition_size)):
+        raise ValueError('Invalid image size input')
+    if not kernel_size or not ramdisk_size or page not in (2048,4096,8192,16384):
+        raise ValueError('Unsupported prototype sizes or page')
+    align=lambda n:(n+page-1)//page*page
+    size=page+align(kernel_size)+align(ramdisk_size)
+    if size>partition_size:raise ValueError('Prototype exceeds actual boot partition')
+    return size
+
+
+def read_verified_backup(directory):
+    manifest=json.loads((directory/'backup-manifest.json').read_text())
+    if manifest.get('complete') is not True or manifest.get('partition_writes') is not False:
+        raise ValueError('Completed read-only boot backup required')
+    result={}
+    for item in manifest['partitions']:
+        name=item['partition']
+        if name not in ('boot','recovery','dtb','dtbo','vbmeta') or name in result or item['file']!=name+'.img':
+            raise ValueError('Unexpected backup component')
+        path=directory/item['file']
+        if path.is_symlink() or not 0<item['size']<=128*1024*1024:raise ValueError('Unsafe backup component')
+        data=path.read_bytes()
+        if len(data)!=item['size'] or hashlib.sha256(data).hexdigest()!=item['sha256']:
+            raise ValueError('Backup bytes differ from verified manifest')
+        if item.get('remote_hash_before_and_after_match') is not True:raise ValueError('Unverified backup transfer')
+        result[name]=data
+    if len(result)!=5:raise ValueError('All five boot components required')
+    if not manifest.get('bootloader','').startswith('N976N'):raise ValueError('N976N backup required')
+    return result
+
+
+def prepare(backup,kernel_build,twrp,mkbootimg,output):
+    if not output.resolve().is_relative_to((ROOT/'note10/private').resolve()):
+        raise ValueError('Prototype output must remain in private workspace')
+    if output.exists() or output.with_suffix('.partial').exists():raise ValueError('Output already exists')
+    if hashlib.sha256(mkbootimg.read_bytes()).hexdigest()!=MKBOOTIMG_SHA256:
+        raise ValueError('Expected pinned Android 12 AOSP mkbootimg script')
+    official=twrp.read_bytes()
+    if hashlib.sha256(official).hexdigest()!=TWRP_SHA256:raise ValueError('Expected verified official d2x TWRP')
+    parts=read_verified_backup(backup)
+    if not parts['recovery'].startswith(official):raise ValueError('Existing recovery does not match reference TWRP')
+    build=json.loads((kernel_build/'build-result.json').read_text())
+    if build.get('build_passed') is not True or build.get('builtin_cpu_diagnostic') is not True:
+        raise ValueError('Successful CPU-diagnostic Linux build required')
+    if build.get('source_commit')!=KERNEL_COMMIT or build.get('public_defconfig')!='exynos9820-d2x_defconfig':
+        raise ValueError('Unexpected kernel source or target')
+    kernel=kernel_build/'Image';data=kernel.read_bytes()
+    if hashlib.sha256(data).hexdigest()!=build['image_sha256'] or len(data)!=build['image_size']:
+        raise ValueError('Kernel image differs from build report')
+    if len(data)<64 or data[56:60]!=b'ARM\x64':raise ValueError('Not an ARM64 Linux Image')
+    config=(kernel_build/'handoff.config').read_bytes()
+    if hashlib.sha256(config).hexdigest()!=build['effective_config_sha256']:
+        raise ValueError('Config differs from kernel build report')
+    required={'CONFIG_RD_LZMA=y','CONFIG_KEXEC=y','CONFIG_KEXEC_CORE=y','CONFIG_ARM64_4K_PAGES=y'}
+    if not required.issubset(config.decode().splitlines()):
+        raise ValueError('Kernel lacks required ramdisk/kexec/page configuration')
+    boot=boot_header(parts['boot']);recovery=boot_header(official)
+    if boot['header_version']!=1 or recovery['header_version']!=1 or boot['page_size']!=recovery['page_size']:
+        raise ValueError('Expected observed matching v1 boot headers')
+    if boot['recovery_dtbo_size'] or boot['second_size'] or recovery['second_size']:
+        raise ValueError('Unexpected boot-only payload layout')
+    for field in ('kernel_addr','tags_addr'):
+        if boot[field]!=recovery[field]:raise ValueError('Boot/recovery load fields differ')
+    if struct.unpack_from('<Q',data,8)[0]!=recovery['arm64_text_offset']:
+        raise ValueError('Linux text offset differs from known recovery kernel')
+    vbmeta=parts['vbmeta']
+    if vbmeta[:4]!=b'AVB0' or not struct.unpack_from('>I',vbmeta,120)[0]&2:
+        raise ValueError('Observed verification-disabled vbmeta header required; no vbmeta changes performed')
+    start=recovery['ramdisk_file_offset'];ramdisk=official[start:start+recovery['ramdisk_size']]
+    size=payload_size(len(data),len(ramdisk),boot['page_size'],len(parts['boot']))
+    output.parent.mkdir(exist_ok=True,parents=True)
+    rd=output.with_suffix('.ramdisk.lzma')
+    if rd.exists():raise ValueError('Refusing to overwrite ramdisk staging input')
+    rd.write_bytes(ramdisk)
+    partial=output.with_suffix('.partial')
+    # Boot uses the backed-up separate DTB/DTBO partitions. No embedded
+    # recovery_dtbo is copied; this is an unbooted boot-only prototype.
+    command=[sys.executable,'-X','utf8',str(mkbootimg),'--header_version','1',
+             '--kernel',str(kernel),'--ramdisk',str(rd),'--base','0',
+             '--kernel_offset',hex(boot['kernel_addr']),
+             '--ramdisk_offset',hex(recovery['ramdisk_addr']),
+             '--tags_offset',hex(boot['tags_addr']),'--pagesize',str(boot['page_size']),
+             '--board',recovery['name'],'--cmdline',recovery['cmdline'],
+             '--os_version',recovery['os_version'],'--os_patch_level',recovery['security_patch_month'],
+             '--output',str(partial)]
+    subprocess.run(command,check=True,capture_output=True,timeout=60)
+    packed=partial.read_bytes();header=boot_header(packed)
+    if len(packed)!=size or header['kernel_sha256']!=build['image_sha256']:
+        raise ValueError('Packed image does not match size/kernel contract')
+    if packed[header['ramdisk_file_offset']:header['ramdisk_file_offset']+header['ramdisk_size']]!=ramdisk:
+        raise ValueError('Packed ramdisk differs from reference')
+    if header['recovery_dtbo_size']!=0:raise ValueError('Unexpected embedded recovery DTBO')
+    partial.rename(output)
+    report={'prototype_created':True,'kind':'temporary Linux diagnostic boot; not XNU/iOS',
+            'file':str(output),'size':len(packed),'boot_partition_size':len(parts['boot']),
+            'sha256':hashlib.sha256(packed).hexdigest(),'kernel_build_sha256':build['image_sha256'],
+            'aosp_mkbootimg_sha256':MKBOOTIMG_SHA256,'reference_ramdisk_sha256':hashlib.sha256(ramdisk).hexdigest(),
+            'embedded_recovery_dtbo':False,'requires_existing_dtb_dtbo_partitions':True,
+            'device_boot_tested':False,'recovery_reentry_verified_after_install':False,
+            'deployment_ready':False,'partition_writes':False,'device_operations':[],
+            'scope':'PC format/size validation only; Samsung runtime DT selection and boot behavior remain unverified',
+            'command':command}
+    output.with_suffix('.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
+    return report
+
+
+if __name__=='__main__':
+    parser=argparse.ArgumentParser(description=__doc__)
+    for name in ('backup','kernel-build','twrp','mkbootimg','output'):parser.add_argument('--'+name,type=Path,required=True)
+    args=parser.parse_args()
+    result=prepare(args.backup,args.kernel_build,args.twrp,args.mkbootimg,args.output)
+    print(json.dumps({k:result[k] for k in ('prototype_created','size','boot_partition_size','deployment_ready')}))
