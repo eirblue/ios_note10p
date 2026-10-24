@@ -1,0 +1,39 @@
+name: Note10 temporary handoff kernel build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  kernel:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install Linux cross compiler and kernel host dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y clang-14 gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi make bc bison flex libssl-dev libelf-dev
+      - name: Build the pinned public d2x source with legacy kexec
+        env:
+          PLATFORM_VERSION: '11'
+          ANDROID_MAJOR_VERSION: r
+        run: python note10/device_test/build_handoff_kernel.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: note10-handoff-kernel-pc-only
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            note10/private/handoff-kernel/build-result.json
+            note10/private/handoff-kernel/*.log
+            note10/private/handoff-kernel/*.config
+            note10/private/handoff-kernel/Image
