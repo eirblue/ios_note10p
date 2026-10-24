@@ -1,0 +1,41 @@
+name: Note10 entry adapter PC checks
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  transfer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install PC instruction-model tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y clang lld
+          python -m pip install unicorn==2.1.4 capstone==5.0.9
+      - name: Compile the actual ARM64 entry adapter
+        run: |
+          mkdir -p note10/private/xnu-transfer
+          clang --target=aarch64-none-elf -march=armv8.2-a -Wall -Wextra -Werror -c note10/shim/xnu_transfer.S -o note10/private/xnu-transfer/transfer.o
+          ld.lld -T note10/shim/cap_link.ld note10/private/xnu-transfer/transfer.o -o note10/private/xnu-transfer/transfer.elf
+      - name: Test adapter and read-only backup guards
+        run: |
+          python note10/shim/test_transfer.py
+          python note10/device_test/test_backup_boot.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: note10-entry-adapter-research-only
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            note10/private/xnu-transfer/transfer.elf
+            note10/private/xnu-transfer/test-result.json

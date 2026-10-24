@@ -307,3 +307,14 @@ Exynos SoC MASTER 및 플랫폼 archive 입력 분리:
 - Kconfig의 명시적 `is not set`을 미관측과 구분하도록 분석기를 수정했다. 충돌 설정 거부를 포함한 진단 PC 시험 11개를 통과했다.
 - recovery는 4K 빌드다. CPU 전체의 16K 지원·초기 EL/MMU/cache 상태는 이 결과로 확정하지 않는다. cache sysfs 관측은 확보되지 않았다.
 - 안전 XNU 로드 주소·실제 handoff·XNU 기기 실행은 미완료다. 기기 파티션 쓰기·재부팅·모듈 적재·kexec·플래시는 수행하지 않았다.
+
+## 2026-10-25: 부팅 구성 백업과 XNU 인자 전달 연결
+
+- 실제 boot/recovery가 별도 블록 노드인 것을 확인했다. boot ramdisk 0, recovery에는 TWRP ramdisk가 있다. boot 교체 후 TWRP 재진입까지 검증한 것은 아니다.
+- boot/recovery/dtb/dtbo/vbmeta 5개를 새 PC private 세션에 읽기 전용 백업했다. 각 파일의 기기 전송 전후 SHA-256 및 PC 파일 해시가 같았다. 기존 recovery의 공식 TWRP IMG 범위가 원본과 바이트 일치했다.
+- 백업 도구는 N976N bootloader와 고정 allowlist·크기·중복 노드·checksum을 검사한다. 7개 PC 시험 통과. 전체 Android/사용자 데이터/EFS 백업이나 복원 시험은 아니다.
+- recovery uname 접미사와 일치하는 공개 kernel commit 55f042627bb7030c93550faafa117674d32b21d1을 찾았다. 실행 바이너리 재현 빌드 일치는 아직 입증하지 않았다.
+- 해당 소스의 kexec tail이 x0-x3을 0으로 지우므로 별도 XNU boot_args 연결이 필요함을 확인했다. 현재 TWRP의 CONFIG_KEXEC=n은 그대로다.
+- EL1 및 SCTLR M/C/I 꺼짐을 전제로 하는 stack 없는 전달 어댑터 ELF를 작성했다. 잘못된 상태/descriptor를 거부하며, MMU/cache 종료·CPU/장치 정지·RAM 예약·GIC 초기화는 수행하지 않는다.
+- 실제 어셈블리 명령을 합성 모델에서 54종 검사했다. 실제 링크 XNU 앞에 연결한 두 RAM 배치에서 각각 24,999개 명령 후 MMU 활성화 직전에 정지했고, kernel store/세그먼트 매핑 검사를 유지했다.
+- 상세 shim/TRANSFER.md. Android 부팅 이미지·설치 ZIP은 만들지 않았고, 기기 쓰기·재부팅·모듈 적재·XNU 실행은 없다.

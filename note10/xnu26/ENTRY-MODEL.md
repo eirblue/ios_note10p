@@ -80,3 +80,9 @@ boot-argument producer, explicit synthetic placement checker and raw ADT codec.
 It compares actual C ABI bytes and executes the linked SecureDT functions.
 The entry test now uses that producer and also walks every segment's endpoints.
 Actual memory reservation, board DT conversion and CPU handoff remain unfinished.
+
+The optional `--adapter ELF` path now starts with x0-x3 cleared and executes the
+[post-shutdown entry adapter](../shim/TRANSFER.md) before the actual XNU entry.
+Both synthetic RAM layouts execute 24,999 instructions through the same pre-MMU
+stop, retaining the kernel table-store and segment-endpoint checks. This does
+not run Linux shutdown/kexec or prove a usable handoff on the current recovery.

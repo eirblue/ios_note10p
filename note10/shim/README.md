@@ -53,3 +53,6 @@ ELF는 `note10/private/cap-probe/cap-probe.elf`에 생성한다. 기기용 부�
 [Arm CCSIDR_EL1 register](https://support.arm.com/documentation/ddi0601/2026-09/AArch64-Registers/CCSIDR-EL1--Current-Cache-Size-ID-Register),
 [Arm Trusted Firmware의 MMFR0 field 정의](https://github.com/ARM-software/arm-trusted-firmware/blob/master/include/arch/aarch64/arch.h).
 CCSIDR line parameter를 cache 전체 용량이나 실제 microarchitecture의 직접 증거로 확대 해석하지 않는다.
+
+별도 [XNU 인자 전달 어댑터 및 읽기 전용 백업](TRANSFER.md)을 추가했다. 종료된 CPU 상태를
+전제로 한 PC 연구 구성 요소이며, 현재 CONFIG_KEXEC=n인 TWRP에 실행 경로를 제공하지 않는다.

@@ -9,6 +9,7 @@ import hashlib
 import json
 from pathlib import Path
 import struct
+import sys
 from audit_kernel_instructions import image_layout
 from verify_experimental_artifact import verify
 from boot_contract import Region, PAGE, encode_boot_args, validate_placement
@@ -16,7 +17,7 @@ from boot_contract import Region, PAGE, encode_boot_args, validate_placement
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def run_case(directory, ram_base, outside_bootstrap_block=False):
+def run_case(directory, ram_base, outside_bootstrap_block=False, transfer_elf=None):
     from unicorn import Uc, UC_ARCH_ARM64, UC_MODE_ARM, UC_HOOK_CODE, UC_HOOK_MEM_WRITE
     from unicorn import arm64_const as regs
     from capstone import Cs, CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN
@@ -50,6 +51,22 @@ def run_case(directory, ram_base, outside_bootstrap_block=False):
                                  memory_size=0x40000000,top_of_kernel=physical_image+rounded)
     uc.mem_write(arguments,bytes(boot_args));uc.reg_write(regs.UC_ARM64_REG_X0,arguments)
     pc = ram_base+int(checked['entry_virtual_address'],16)-virtual_ram
+    adapter_record = None
+    if transfer_elf is not None:
+        sys.path.insert(0,str(ROOT/'note10/shim'))
+        from test_cap_entry import elf
+        adapter_segments,adapter_symbols = elf(transfer_elf.read_bytes())
+        adapter_base = arguments+0x8000
+        for va,memsize,payload in adapter_segments:
+            if va+memsize > 0x4000:raise ValueError('Adapter exceeds synthetic allocation')
+            uc.mem_write(adapter_base+va,payload)
+        adapter_record=adapter_base+adapter_symbols['n10_transfer_record']
+        uc.mem_write(adapter_record+16,struct.pack('<QQ',arguments,pc))
+        pc_start=adapter_base+adapter_symbols['_start']
+        # The real recovery's kexec tail clears x0-x3; require the adapter to
+        # supply x0 rather than inheriting the test's direct-entry argument.
+        for index in range(4):uc.reg_write(getattr(regs,'UC_ARM64_REG_X'+str(index)),0)
+    else:pc_start=pc
     md = Cs(CS_ARCH_ARM64,CS_MODE_LITTLE_ENDIAN)
     state = {'currentel':4,'clidr_el1':0,'ctr_el0':0x8444c004,'sctlr_el1':0,
              'midr_el1':0x410fd050,'id_aa64mmfr0_el1':0x100000,'csselr_el1':0}
@@ -86,15 +103,20 @@ def run_case(directory, ram_base, outside_bootstrap_block=False):
         else:return
         engine.reg_write(regs.UC_ARM64_REG_PC,address+4)
     stores = []; stored_bytes = 0
+    adapter_stores = []
     def write(engine,access,address,size,number,_):
         nonlocal stored_bytes
+        if adapter_record is not None and adapter_record+48 <= address and address+size <= adapter_record+64:
+            adapter_stores.append(address);return
         if not physical_image <= address or address+size > physical_image+rounded:
             raise ValueError('Startup store left modeled kernel RAM: '+hex(address))
         stores.append(address);stored_bytes += size
     uc.hook_add(UC_HOOK_CODE,instruction);uc.hook_add(UC_HOOK_MEM_WRITE,write)
-    try:uc.emu_start(pc,physical_image+rounded,count=100000)
+    try:uc.emu_start(pc_start,physical_image+rounded,count=100000)
     except Exception as error:raise ValueError(str(error)+'\n'+'\n'.join(recent)) from error
     if not stop:raise ValueError('Entry failed to reach modeled MMU boundary\n'+'\n'.join(recent))
+    if adapter_record is not None and struct.unpack('<Q',uc.mem_read(adapter_record+48,8))[0]!=1:
+        raise ValueError('Adapter did not report its attempted entry branch')
     table_bytes = bytes(uc.mem_read(tables,0x10000))
     if b'\xa5'*8 in table_bytes:raise ValueError('Bootstrap table initialization left stale descriptors')
     if bytes(uc.mem_read(arguments,len(boot_args))) != boot_args:raise ValueError('Entry changed boot arguments')
@@ -140,6 +162,7 @@ def run_case(directory, ram_base, outside_bootstrap_block=False):
             'synthetic_boot_args_physical':hex(arguments),'instructions':count,'stop':stop,
             'system_operations':dict(operations),'register_writes':writes,
             'store_count':len(stores),'stored_bytes':stored_bytes,
+            'adapter_status_store_count':len(adapter_stores),
             'bootstrap_table_pages_primed_and_cleared':4,
             'segment_virtual_and_identity_endpoints_checked':endpoints,
             'store_range':[hex(min(stores)),hex(max(stores))],
@@ -148,10 +171,11 @@ def run_case(directory, ram_base, outside_bootstrap_block=False):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__);parser.add_argument('directory',type=Path)
+    parser.add_argument('--adapter',type=Path,help='PC-only post-shutdown entry adapter ELF')
     args = parser.parse_args()
-    cases = [run_case(args.directory,base) for base in (0x80000000,0x100000000)]
+    cases = [run_case(args.directory,base,transfer_elf=args.adapter) for base in (0x80000000,0x100000000)]
     negative = False
-    try:run_case(args.directory,0x80000000,outside_bootstrap_block=True)
+    try:run_case(args.directory,0x80000000,outside_bootstrap_block=True,transfer_elf=args.adapter)
     except ValueError as error:
         if str(error) != 'Boot arguments outside actual bootstrap mapping':raise
         negative = True
@@ -164,6 +188,8 @@ if __name__ == '__main__':
             'cpu_cache_view':'Synthetic CLIDR=0; real cache maintenance not exercised',
             'unmapped_boot_args_negative_case_rejected':negative,
             'hardware_verified':False,'device_operations':[],'deployment_ready':False}
-    (ROOT/'note10/private/linked-entry-test-result.json').write_text(json.dumps(result,indent=2))
+    if args.adapter is not None:result['adapter_sha256']=hashlib.sha256(args.adapter.read_bytes()).hexdigest()
+    output='adapter-linked-entry-test-result.json' if args.adapter is not None else 'linked-entry-test-result.json'
+    (ROOT/'note10/private'/output).write_text(json.dumps(result,indent=2))
     print(json.dumps({'passed':True,'cases':len(cases),'instructions':[c['instructions'] for c in cases],
                       'stop':'before_mmu_enable','hardware_verified':False}))

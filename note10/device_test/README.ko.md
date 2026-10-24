@@ -69,6 +69,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\note10\device_test\run
 raw DT와 커널 로그에는 기기 식별 정보가 포함될 수 있다. 원본은 PC private 경로에 보관하며 자동 업로드하지 않는다.
 PC 시험은 합성 DT·수집 파일시스템·ADB 응답으로 검증한 것이며, 실기기 실행 성공을 대신하지 않는다.
 
+별도 `backup_boot.py --read`는 boot/recovery/dtb/dtbo/vbmeta의 읽기 전용 PC 백업을 제공한다.
+수집 ZIP/기본 run-probe.ps1에는 포함된 동작이 아니다. [범위·검증·한계](../shim/TRANSFER.md)를 따른다.
+
 ## 빌드·검증
 
 ```powershell
