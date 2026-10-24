@@ -17,6 +17,9 @@ class CapsTests(unittest.TestCase):
         result=decode(sample());self.assertTrue(result['all_target_cpus_support_16k'])
         self.assertEqual(result['cpus'][0]['caches'][0]['maintenance_line_bytes'],64)
         self.assertEqual(result['cpus'][0]['caches'][1]['maintenance_line_bytes'],128)
+        self.assertEqual(result['cpus'][0]['ctr_data_minimum_line_bytes'],64)
+        self.assertEqual(result['cpus'][0]['physical_address_bits'],32)
+        self.assertFalse(result['cpus'][0]['compiled_40bit_ips_supported'])
         self.assertFalse(result['boot_contract_verified'])
 
     def test_partial_cpu_set_does_not_prove_full_support(self):

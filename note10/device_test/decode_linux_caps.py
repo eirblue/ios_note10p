@@ -57,8 +57,13 @@ def decode(text):
             if kind in (1,3):expected.add((level<<1)|1)
         if {s for c,s in caches if c==cpu}!=expected:raise ValueError('Incomplete cache selector coverage')
         granule=(item['mmfr0']>>20)&15
+        pa_bits={0:32,1:36,2:40,3:42,4:44,5:48,6:52}.get(item['mmfr0']&15)
         result.append({'cpu':cpu,'registers':{k:hex(v) for k,v in item.items() if k!='cpu'},
                        'stage1_16k_supported':True if granule in (1,2) else False if granule==0 else None,
+                       'physical_address_bits':pa_bits,
+                       'compiled_40bit_ips_supported':None if pa_bits is None else pa_bits>=40,
+                       'ctr_instruction_minimum_line_bytes':4<<(item['ctr']&15),
+                       'ctr_data_minimum_line_bytes':4<<((item['ctr']>>16)&15),
                        'caches':[{'selector':s,'ccsidr':hex(caches[cpu,s]),
                                   'maintenance_line_bytes':1<<((caches[cpu,s]&7)+4)} for s in sorted(expected)]})
     supports=[c['stage1_16k_supported'] for c in result]
