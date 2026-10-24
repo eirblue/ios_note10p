@@ -58,6 +58,17 @@ def main(caps=False):
                     raise ValueError('Unexpected kernel archive path')
             tree.extractall(parent,filter='data')
         source=parent/expected;objects=OUT/'objects'
+        # The shipped-blob rule uses an object-relative .incbin path even
+        # when make's VPATH found the real binary in the source tree. Prefer
+        # that existing source binary, leaving generated .ihex outputs alone.
+        firmware_make=source/'firmware/Makefile'
+        firmware_text=firmware_make.read_text()
+        old='$(call cmd,fwbin,$(patsubst %.gen.S,%,$@))'
+        new='$(call cmd,fwbin,$(if $(wildcard $(srctree)/$(patsubst %.gen.S,%,$@)),$(srctree)/$(patsubst %.gen.S,%,$@),$(patsubst %.gen.S,%,$@)))'
+        if firmware_text.count(old)!=1:raise ValueError('Unexpected pinned firmware rule')
+        firmware_make.write_text(firmware_text.replace(old,new))
+        report['firmware_rule_source_path_fix']=True
+        report['firmware_makefile_patched_sha256']=hashlib.sha256(firmware_make.read_bytes()).hexdigest()
         if caps:
             import shutil
             driver=Path(__file__).with_name('linux_caps.c')
@@ -76,7 +87,10 @@ def main(caps=False):
               # Debian keeps prefixed tools in /usr/bin and unprefixed cross
               # aliases here; using /usr/bin would select the x86 assembler.
               'GCC_TOOLCHAIN_DIR=/usr/aarch64-linux-gnu/bin/',
-              'HOSTCC=gcc','HOSTCFLAGS=-Wno-error=deprecated-declarations','KCFLAGS=-Wno-error']
+              # Avoid DWARF5 forms unsupported by this source's objdump-based
+              # scripts. Do not disable -Werror globally: cc-option probes
+              # must reject unsupported compiler switches correctly.
+              'HOSTCC=gcc','HOSTCFLAGS=-Wno-error=deprecated-declarations','KCFLAGS=-gdwarf-4']
         run([*make,'exynos9820-d2x_defconfig'],'01-configure.log')
         config=objects/'.config'
         original=config.read_bytes();(OUT/'public-baseline.config').write_bytes(original)
