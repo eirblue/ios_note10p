@@ -61,6 +61,10 @@ def main():
         make=['make','-C',str(source),'O='+str(objects),'ARCH=arm64',
               'CC=clang-14','CROSS_COMPILE=aarch64-linux-gnu-',
               'CLANG_TRIPLE=aarch64-linux-gnu-','CROSS_COMPILE_ARM32=arm-linux-gnueabi-',
+              # This older Makefile derives --prefix from elfedit's directory.
+              # Debian keeps prefixed tools in /usr/bin and unprefixed cross
+              # aliases here; using /usr/bin would select the x86 assembler.
+              'GCC_TOOLCHAIN_DIR=/usr/aarch64-linux-gnu/bin/',
               'HOSTCC=gcc','HOSTCFLAGS=-Wno-error=deprecated-declarations','KCFLAGS=-Wno-error']
         run([*make,'exynos9820-d2x_defconfig'],'01-configure.log')
         config=objects/'.config'
