@@ -83,3 +83,7 @@ embedded recovery_dtbo는 포함하지 않는다. 이 DT 선택 방식의 실제
 TWRP 화면이 떠도 `Reboot > Recovery`로 시작한 원래 커널과 구분해야 한다.
 `collect_phase2.py`는 `4.14.113-note10-handoff-pc` 및 KEXEC 설정을 확인하고,
 dmesg·config·live DT를 PC private 경로로 읽어 CPU 진단을 해독한다. 자동 설치·재부팅은 없다.
+
+후속 [XNU용 초기 RAM 예약 진단](RESERVATION.md)은 내장 idle init을 사용하므로
+System 부팅 후 TWRP UI/ADB가 없다. 이 모드는 `note10-reservation-*.zip`으로 구분한다.
+사용자가 기존 recovery로 돌아온 뒤 별도 `collect_reservation.py`로 이전 부팅 로그를 회수한다.

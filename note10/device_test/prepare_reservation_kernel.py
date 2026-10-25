@@ -1,8 +1,29 @@
 """Prepare pinned-source early reservation and an original minimal initramfs."""
 import hashlib
 from pathlib import Path
+import zlib
 
 INIT_SHA='cc990de7d8222f56fd71519c8b5dbf87a50abd4131e9eeb49ba78c04e3b6e3f3'
+
+
+def verify_embedded_init(image,archive):
+    if not archive.startswith(b'070701') or not 0<len(archive)<=2*1024*1024:
+        raise ValueError('Invalid expected initramfs archive')
+    offset=image.find(archive)
+    if offset>=0:return {'embedded_initramfs_verified':True,'encoding':'raw','image_offset':offset}
+    start=0;attempts=0
+    while True:
+        offset=image.find(b'\x1f\x8b\x08',start)
+        if offset<0:break
+        attempts+=1
+        if attempts>4096:raise ValueError('Too many compressed image candidates')
+        start=offset+3
+        decoder=zlib.decompressobj(31)
+        try:data=decoder.decompress(image[offset:offset+2*1024*1024],2*1024*1024)
+        except zlib.error:continue
+        if decoder.eof and data==archive:
+            return {'embedded_initramfs_verified':True,'encoding':'gzip','image_offset':offset}
+    raise ValueError('Expected original initramfs not found in actual kernel Image')
 
 
 def cpio(init):

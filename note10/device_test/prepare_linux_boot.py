@@ -80,12 +80,15 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output):
     if not required.issubset(config.decode().splitlines()):
         raise ValueError('Kernel lacks required ramdisk/kexec/page configuration')
     builtin=build.get('builtin_idle_init') is True
+    embedded_check=None
     if builtin:
         if build.get('early_xnu_reservation') is not True or 'CONFIG_INITRAMFS_FORCE=y' not in config.decode().splitlines():
             raise ValueError('Built-in reservation init must be forced')
         for name,key in (('minimal-init.elf','minimal_init_elf_sha256'),('initramfs.cpio','initramfs_cpio_sha256')):
             if hashlib.sha256((kernel_build/name).read_bytes()).hexdigest()!=build[key]:
                 raise ValueError('Built-in init artifact differs from report')
+        from prepare_reservation_kernel import verify_embedded_init
+        embedded_check=verify_embedded_init(data,(kernel_build/'initramfs.cpio').read_bytes())
     boot=boot_header(parts['boot']);recovery=boot_header(official)
     if boot['header_version']!=1 or recovery['header_version']!=1 or boot['page_size']!=recovery['page_size']:
         raise ValueError('Expected observed matching v1 boot headers')
@@ -147,6 +150,7 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output):
             'reference_ramdisk_sha256':None if builtin else hashlib.sha256(ramdisk).hexdigest(),
             'builtin_idle_init':builtin,'early_xnu_reservation':build.get('early_xnu_reservation') is True,
             'external_ramdisk_included':bool(ramdisk),
+            'embedded_initramfs_check':embedded_check,
             'embedded_recovery_dtbo':False,'requires_existing_dtb_dtbo_partitions':True,
             'preserved_boot_os_version':boot['os_version'],
             'preserved_boot_security_patch_month':boot['security_patch_month'],

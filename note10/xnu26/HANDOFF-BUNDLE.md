@@ -67,3 +67,8 @@ unit fixture와 통합 모델의 주소는 **합성 입력**이며 기기의 사
 별도 boot-partition Linux 진단 시험은 initrd 전달 문제로 Android root에 진입했다.
 그 이미지나 이 PC bundle을 XNU/iOS 설치 이미지로 취급하지 않는다. 기기 변경은 수행하지 않았다.
 `deployment_ready=false`, `physical_reservation_verified=false`를 유지한다.
+
+별도 [초기 RAM 예약 진단](../device_test/RESERVATION.md)에서 Linux memblock 예약과
+내장 최소 initramfs를 추가했다. 실제 성공은 다음 수동 시험 로그로 확인하며,
+그 이전 부팅의 예약 주소를 현재 recovery의 유효 주소로 취급하지 않는다.
+동일한 256MiB 크기의 추가 합성 모델은 24,807개 명령/8,202회 kernel store를 통과했다.

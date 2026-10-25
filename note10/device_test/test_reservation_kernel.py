@@ -1,8 +1,9 @@
 from pathlib import Path
 import struct
+import gzip
 import tempfile
 import unittest
-from prepare_reservation_kernel import cpio,prepare
+from prepare_reservation_kernel import cpio,prepare,verify_embedded_init
 from run_probe import ROOT
 
 
@@ -29,6 +30,14 @@ class ReservationBuildTests(unittest.TestCase):
     def test_invalid_init_is_refused(self):
         for value in (b'',b'\x7fELF\x02\x01'+bytes(58),b'x'*(1024*1024+1)):
             with self.assertRaises(ValueError):cpio(value)
+
+    def test_actual_image_must_contain_exact_archive(self):
+        init=bytearray(80);init[:6]=b'\x7fELF\x02\x01';init[18:20]=b'\xb7\x00'
+        archive=cpio(bytes(init))
+        self.assertEqual(verify_embedded_init(b'prefix'+archive+b'tail',archive)['encoding'],'raw')
+        self.assertEqual(verify_embedded_init(b'prefix'+gzip.compress(archive)+b'tail',archive)['encoding'],'gzip')
+        for image in (b'no archive',gzip.compress(archive)[:-8],gzip.compress(archive+b'modified')):
+            with self.assertRaises(ValueError):verify_embedded_init(image,archive)
 
     def test_changed_kernel_source_refused_before_mutation(self):
         parent=ROOT/'note10/private/reservation-tests';parent.mkdir(parents=True,exist_ok=True)

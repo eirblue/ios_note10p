@@ -20,13 +20,15 @@ jobs:
       - name: Install PC instruction-model tools
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y clang lld
+          sudo apt-get install -y clang lld linux-libc-dev-arm64-cross
           python -m pip install unicorn==2.1.4 capstone==5.0.9
       - name: Compile the actual ARM64 entry adapter
         run: |
           mkdir -p note10/private/xnu-transfer
           clang --target=aarch64-none-elf -march=armv8.2-a -Wall -Wextra -Werror -c note10/shim/xnu_transfer.S -o note10/private/xnu-transfer/transfer.o
           ld.lld -T note10/shim/cap_link.ld note10/private/xnu-transfer/transfer.o -o note10/private/xnu-transfer/transfer.elf
+          clang --target=aarch64-linux-gnu -I /usr/aarch64-linux-gnu/include -D__ASSEMBLY__ -c note10/device_test/minimal_init.S -o note10/private/xnu-transfer/minimal-init.o
+          ld.lld --build-id=none -static -e _start note10/private/xnu-transfer/minimal-init.o -o note10/private/xnu-transfer/minimal-init.elf
       - name: Test adapter and read-only backup guards
         run: |
           python note10/shim/test_transfer.py
@@ -38,6 +40,8 @@ jobs:
           python note10/xnu26/test_boot_contract.py
           python note10/xnu26/test_handoff_bundle.py
           python note10/device_test/test_reservation_kernel.py
+          python note10/device_test/test_reservation_decode.py
+          python note10/device_test/test_minimal_init.py note10/private/xnu-transfer/minimal-init.elf --report note10/private/xnu-transfer/minimal-init-model.json
       - uses: actions/upload-artifact@v4
         with:
           name: note10-entry-adapter-research-only
@@ -46,3 +50,5 @@ jobs:
           path: |
             note10/private/xnu-transfer/transfer.elf
             note10/private/xnu-transfer/test-result.json
+            note10/private/xnu-transfer/minimal-init.elf
+            note10/private/xnu-transfer/minimal-init-model.json

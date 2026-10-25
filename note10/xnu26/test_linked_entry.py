@@ -17,7 +17,7 @@ from boot_contract import Region, PAGE, encode_boot_args, validate_placement
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def run_case(directory, ram_base, outside_bootstrap_block=False, transfer_elf=None, handoff_bundle=None):
+def run_case(directory, ram_base, outside_bootstrap_block=False, transfer_elf=None, handoff_bundle=None,ram_size=0x40000000):
     from unicorn import Uc, UC_ARCH_ARM64, UC_MODE_ARM, UC_HOOK_CODE, UC_HOOK_MEM_WRITE
     from unicorn import arm64_const as regs
     from capstone import Cs, CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN
@@ -32,7 +32,7 @@ def run_case(directory, ram_base, outside_bootstrap_block=False, transfer_elf=No
     if handoff_bundle is not None:
         from handoff_bundle import load
         bundle,buffers=load(handoff_bundle,kernel_sha256=checked['sha256'])
-        if bundle['plan']['ram']!={'start':ram_base,'size':0x40000000} or bundle['plan']['virtual_base']!=virtual_ram:
+        if bundle['plan']['ram']!={'start':ram_base,'size':ram_size} or bundle['plan']['virtual_base']!=virtual_ram:
             raise ValueError('Bundle does not match this explicit RAM model')
         kernel_buffer=next(b for b in bundle['buffers'] if b['file']=='kernel.mem')
         if kernel_buffer['physical_address']!=physical_image or kernel_buffer['size']!=rounded:
@@ -75,11 +75,11 @@ def run_case(directory, ram_base, outside_bootstrap_block=False, transfer_elf=No
             raise ValueError('This model requires contiguous metadata pages')
     uc.mem_map(arguments,0x10000)
     if not outside_bootstrap_block:
-        validate_placement(ram=Region(ram_base,0x40000000),reserved=[],occupied=[],
+        validate_placement(ram=Region(ram_base,ram_size),reserved=[],occupied=[],
                            kernel=Region(physical_image,rounded),
                            arguments=Region(arguments,PAGE),top_of_kernel=physical_image+rounded)
     boot_args = encode_boot_args(virtual_base=virtual_ram,physical_base=ram_base,
-                                 memory_size=0x40000000,top_of_kernel=physical_image+rounded)
+                                 memory_size=ram_size,top_of_kernel=physical_image+rounded)
     if bundle is not None:boot_args=buffers['boot-args.mem'][:1152]
     uc.mem_write(arguments,bytes(boot_args));uc.reg_write(regs.UC_ARM64_REG_X0,arguments)
     pc = ram_base+int(checked['entry_virtual_address'],16)-virtual_ram
@@ -209,7 +209,7 @@ def run_case(directory, ram_base, outside_bootstrap_block=False, transfer_elf=No
             if walk(va,True) != pa or walk(pa,False) != pa:
                 raise ValueError('Kernel segment endpoint outside actual bootstrap mapping')
             endpoints.append(hex(va))
-    return {'synthetic_ram_base':hex(ram_base),'synthetic_kernel_physical':hex(physical_image),
+    return {'synthetic_ram_base':hex(ram_base),'synthetic_ram_size':hex(ram_size),'synthetic_kernel_physical':hex(physical_image),
             'synthetic_boot_args_physical':hex(arguments),'instructions':count,'stop':stop,
             'system_operations':dict(operations),'register_writes':writes,
             'store_count':len(stores),'stored_bytes':stored_bytes,
