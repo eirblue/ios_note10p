@@ -22,12 +22,16 @@ OUT = ROOT / 'note10/private/handoff-kernel'
 
 def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manifest=None):
     if not sys.platform.startswith('linux'): raise RuntimeError('Linux CI host required')
+    if os.environ.get('PLATFORM_VERSION')!='11' or os.environ.get('ANDROID_MAJOR_VERSION')!='r':
+        raise ValueError('Pinned Samsung build requires PLATFORM_VERSION=11 and ANDROID_MAJOR_VERSION=r')
     if reserve and not caps:raise ValueError('Reservation diagnostic requires caps/initramfs handling')
     if window_access and not reserve:raise ValueError('Window access requires the same-boot reservation diagnostic')
     if (xnu_payload is None)!=(xnu_manifest is None):raise ValueError('XNU payload and manifest must be paired')
     if xnu_payload is not None and not window_access:raise ValueError('XNU staging requires the opt-in window diagnostic')
     OUT.mkdir(parents=True,exist_ok=True)
     report = {'source_repository':REPOSITORY,'source_commit':COMMIT,
+              'platform_version':os.environ['PLATFORM_VERSION'],
+              'android_major_version':os.environ['ANDROID_MAJOR_VERSION'],
               'public_defconfig':'exynos9820-d2x_defconfig','build_passed':False,
               'device_operations':[],'deployment_ready':False,'device_boot_tested':False,
               'scope':'Linux shutdown-host build feasibility; not XNU or an installable image',
