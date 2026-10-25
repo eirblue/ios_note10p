@@ -30,3 +30,14 @@ register APIs and real SHA256 (24 cases). Contract tests check the pinned source
 patch and strict evidence decoder (5 cases). Physical device behavior remains
 pending the manual v6 test. Use workflow inputs caps, reserve, window_access,
 xnu_stage, cpu_cache and pm_timer. Installation and reboot remain manual.
+
+## v6 prepared manual test
+
+[Kernel run 40211700065](https://github.com/eirblue/ios_note10p/actions/runs/40211700065)
+passed with the opt-in PM/timer diagnostic, 21 CPU/cache model cases, 24 PM/timer
+actual-C model cases and 5 pinned-patch/decoder contract tests. A private BOOT
+diagnostic and original-BOOT rollback pair was staged in TWRP RAM and passed
+ZIP hash, native updater syntax and five current partition baseline checks.
+The current BOOT baseline is the completed v5 diagnostic. Physical v6 device
+PM behavior, timer restoration and recovery reentry still await manual testing.
+No installation or reboot was performed by the preparation tools.
