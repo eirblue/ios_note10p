@@ -411,3 +411,12 @@ Exynos SoC MASTER 및 플랫폼 archive 입력 분리:
 - 별도 명시적 Unicorn max 모델에서 LSE LDADD를 포함해 1,021,267개 명령을 실행했다. startup 4,670개 항목의 정렬·원본 내용 보존, LOCKS 단계 1,006개 콜백의 순서·인자와 cursor/phase를 확인했다. 실제 Exynos CPU 모델 또는 물리 원자성 검증을 의미하지 않는다.
 - 정상 경로, 실제 missing-clock/missing-reg panic, stale event-state 거부 및 이전 회귀 검사가 CI에서 통과했다: https://github.com/eirblue/ios_note10p/actions/runs/40174526056 (`904f893`). 상세 xnu26/EARLY-C-MODEL.md.
 - 전달 adapter는 CNTFRQ=26MHz 및 CNTKCTL EVENTI 선택 비트 0을 요구하고 위반 시 status=5로 거부한다. 실제 어셈블리 81개 사례를 검사했다. 기존 설치 ZIP과 ELF는 보존했다. 이 단계에서 기기 접근·파티션 쓰기·재부팅은 없다.
+
+## 2026-10-25: CPU·캐시·DRAM의 VM 진입 PC 검사
+
+- 실제 cpu_init/processor_bootstrap 및 DRAM 파싱을 거쳐 arm_vm_init 호출 직전까지 1,053,279개 명령을 실행했다. configured ARM64 ABI로 CPU 유형·running/deadline, 캐시 기하·valid, DRAM 전역 값과 초기 physical page number를 확인했다.
+- DRAM 속성이 없으면 실제 panic, 선택한 CCSIDR 입력이 없으면 모형 오류로 거부했다. 기존 진입·타이머·startup·권한 검사와 함께 CI가 통과했다: https://github.com/eirblue/ios_note10p/actions/runs/40175688715 (`96d8c1f`). 캐시/CPU/시계 입력은 합성이며 실기기 초기화 성공을 의미하지 않는다.
+- 실제 adapter/XNU entry의 DAIFSet 효과를 상태에 반영하고, 정상 시험은 별도 DAIF 성공값을 주입하지 않는다. 반복 명령 해석만 주소+실제 opcode로 캐시하며 모든 fetch·메모리 접근 검사는 유지한다.
+- 별도 VM 본문 탐색에서 실제 no-random-seed panic을 확인했고, 공개된 PC 전용 시드로 256바이트 복사와 ADT의 정확한 삭제 경계를 검사했다. entropy 품질이나 후속 PRNG/VM 초기화 완료를 검증한 것은 아니다. 하드웨어 시드 준비 상태는 false다.
+- 시드 실제 명령 시험은 정상 복사/삭제, 누락 시 실제 panic, 전부 0인 입력의 실제 반환 0을 통과했다. 전부 0인 사례는 PE callback 반환에서 거부하며 후속 caller panic은 실행하지 않았다. 별도 경계/손상 fixture 검사 5개도 통과했다. CI는 entry/VM/seed 세 작업이 독립 배치를 구성해 병렬 실행하도록 분리했다.
+- ADB 연결 목록이 비어 있어 기기 파티션 재검사·예약 v2 RAM 전송·수동 설치 시험은 진행하지 못했다. 기존 진단/복구 ZIP은 유지한다. 설치 가능한 XNU/iOS ROM이나 실기기 XNU 부팅 성공은 아직 없다.

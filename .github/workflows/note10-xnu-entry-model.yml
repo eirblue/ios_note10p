@@ -11,6 +11,10 @@ jobs:
   entry:
     runs-on: ubuntu-latest
     timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        model: [entry, vm, seed]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -36,18 +40,28 @@ jobs:
           clang --target=aarch64-none-elf -march=armv8.2-a -Wall -Wextra -Werror -c note10/shim/xnu_transfer.S -o note10/private/xnu-transfer/transfer.o
           ld.lld -T note10/shim/cap_link.ld note10/private/xnu-transfer/transfer.o -o note10/private/xnu-transfer/transfer.elf
       - name: Verify actual instructions with software VA aliases
+        if: matrix.model == 'entry'
         run: |
           python note10/xnu26/test_stage1_access.py
           python note10/xnu26/test_early_c_state.py
           python note10/shim/test_transfer.py
           python note10/xnu26/test_post_mmu_entry.py --kernel-build note10/private/entry-model-kernel --adapter note10/private/xnu-transfer/transfer.elf --output note10/private/post-mmu-model
           python note10/xnu26/test_early_c_entry.py --kernel-build note10/private/entry-model-kernel --adapter note10/private/xnu-transfer/transfer.elf --output note10/private/early-c-model
-          python note10/xnu26/test_vm_entry.py --kernel-build note10/private/entry-model-kernel --adapter note10/private/xnu-transfer/transfer.elf --handoff-bundle note10/private/early-c-model/case-0 --output note10/private/vm-entry-model
           python note10/xnu26/test_materialized_entry.py --kernel-build note10/private/entry-model-kernel --adapter note10/private/xnu-transfer/transfer.elf --output note10/private/pre-mmu-regression
+      - name: Verify CPU cache and DRAM initialization to VM boundary
+        if: matrix.model == 'vm'
+        run: |
+          python note10/xnu26/test_early_c_state.py
+          python note10/xnu26/test_vm_entry.py --kernel-build note10/private/entry-model-kernel --adapter note10/private/xnu-transfer/transfer.elf --output note10/private/vm-entry-model
+      - name: Verify actual seed consumption with predictable PC inputs
+        if: matrix.model == 'seed'
+        run: |
+          python note10/xnu26/test_seed_fixture.py
+          python note10/xnu26/test_seed_entry.py --kernel-build note10/private/entry-model-kernel --adapter note10/private/xnu-transfer/transfer.elf --output note10/private/seed-model
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: note10-xnu-entry-model-research-only
+          name: note10-xnu-${{ matrix.model }}-model-research-only
           retention-days: 7
           if-no-files-found: warn
           path: |
@@ -58,3 +72,5 @@ jobs:
             note10/private/early-c-model/missing-cpu-panic.json
             note10/private/vm-entry-model/result.json
             note10/private/vm-entry-model/missing-dram-panic.json
+            note10/private/seed-model/result.json
+            note10/private/seed-model/missing-seed-panic.json

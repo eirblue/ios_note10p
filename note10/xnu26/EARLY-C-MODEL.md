@@ -111,3 +111,27 @@ ID_AA64DFR0=0은 디버그 기능을 선언하지 않은 합성 입력이며 기
 ```text
 python note10/xnu26/test_vm_entry.py --kernel-build NATIVE_BUILD --adapter TIMER_ADAPTER_ELF --handoff-bundle EARLY_C_OUTPUT/case-0 --output PRIVATE_NEW_VM_DIRECTORY
 ```
+
+handoff-bundle 인자는 선택 사항이다. 생략하면 기존 실행 사례와 같은 합성 1GiB 배치를
+독립적으로 구성한다. CI의 entry/VM/seed 작업은 서로의 실기기 결과나 실행 버퍼를 기다리지 않는다.
+
+## 부팅 시드 소비 경계 (PC 전용)
+
+VM 본문 탐색에서 실제 `no random seed` panic을 관측했다. XNU는 `/chosen/random-seed`에서
+256바이트를 요청한다. 공개된 예측 가능한 PC fixture를 넣은 시험은 실제
+`PE_get_random_seed` 반환까지 1,058,021개 명령을 실행했다. 반환값과 목적지 256바이트,
+ADT 시드의 정확한 zeroing 및 다른 ADT bytes 보존을 검사한다.
+
+이 단계에서만 canonical ADT를 구조적으로 파싱해 찾은 해당 property의 데이터 범위에
+store를 허용한다. boot_args·ADT 헤더·다른 property로 범위를 넓히지 않는다. 물리/가상
+복사본 동기화 및 모든 메모리 접근 검사는 유지한다. 시드 값의 중복 byte pattern을 검색해
+주소를 추정하지 않는다. 경계·내용 손상에 대한 별도 작은 fixture 검사도 둔다.
+
+이는 시드 전달 인터페이스 시험이다. PC 시드는 비밀이나 entropy가 아니며 **실기기에
+사용할 수 없다**. 후속 PRNG 초기화·entropy 품질·모든 임시 복사본의 삭제를 검증하지 않았다.
+VM 본문 일부에 진입했지만 VM 초기화 완료나 실제 하드웨어 부팅을 뜻하지 않는다.
+
+```text
+python note10/xnu26/test_seed_fixture.py
+python note10/xnu26/test_seed_entry.py --kernel-build NATIVE_BUILD --adapter TIMER_ADAPTER_ELF --output PRIVATE_NEW_SEED_DIRECTORY
+```

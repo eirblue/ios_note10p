@@ -31,7 +31,7 @@ def continue_entry(*,uc,md,state,stop,symbols,physical_image,rounded,arguments,
                    expected_timebase=None,cache_inputs=None):
     from unicorn import UC_HOOK_CODE,UC_HOOK_MEM_WRITE,UC_HOOK_MEM_READ
     from unicorn import arm64_const as regs
-    if c_phase not in ('first-call','platform','platform-return','topology','topology-return','thread','thread-return','startup','startup-return','vm'):
+    if c_phase not in ('first-call','platform','platform-return','topology','topology-return','thread','thread-return','startup','startup-return','vm','seed-return'):
         raise ValueError('Unknown C continuation boundary')
     descriptor_faults=('mapping','af','pxn','readonly','table-pxn','table-readonly','el0-writable')
     if fault not in (None,'argument','wxn','epd',*descriptor_faults):raise ValueError('Unknown PC fault injection')
@@ -95,7 +95,11 @@ def continue_entry(*,uc,md,state,stop,symbols,physical_image,rounded,arguments,
     if fault=='epd':state['tcr_el1']|=1<<23
     start=int(stop['address'],16)+4
     operations=Counter();recent=deque(maxlen=20);count=0;entry=None;boundary=None;platform_return=None;topology_return=None
-    thread_return=None;startup_return=None
+    thread_return=None;startup_return=None;seed_return=None;seed_call=None
+    seed_region=None
+    if c_phase=='seed-return':
+        from seed_fixture import locate
+        seed_region=locate(uc,boot_args)
     stores=[];reads=0;fetches=0;pending=[];calls=[];decoded={}
     def flush_stores(engine):
         for address,size in pending:
@@ -121,7 +125,7 @@ def continue_entry(*,uc,md,state,stop,symbols,physical_image,rounded,arguments,
         register=gpr(name)
         return uc.reg_read(register) if register is not None else 0
     def instruction(engine,address,size,_):
-        nonlocal count,entry,boundary,fetches,platform_return,topology_return,thread_return,startup_return,sp_select
+        nonlocal count,entry,boundary,fetches,platform_return,topology_return,thread_return,startup_return,sp_select,seed_return,seed_call
         flush_stores(engine)
         count+=1
         translate(address,4,'fetch');fetches+=1
@@ -130,6 +134,10 @@ def continue_entry(*,uc,md,state,stop,symbols,physical_image,rounded,arguments,
         if ins is None:
             ins=next(md.disasm(opcode,address));decoded[key]=ins
         recent.append(hex(address)+' '+ins.mnemonic+' '+ins.op_str)
+        if seed_return is not None and address==seed_return:
+            boundary={'reason':'after_PE_get_random_seed','address':hex(address),
+                      'returned_bytes':engine.reg_read(regs.UC_ARM64_REG_X0)}
+            engine.emu_stop();return
         if startup_return is not None and address==startup_return:
             boundary={'reason':'after_kernel_startup_bootstrap','address':hex(address)}
             engine.emu_stop();return
@@ -162,7 +170,9 @@ def continue_entry(*,uc,md,state,stop,symbols,physical_image,rounded,arguments,
                     'x1':hex(engine.reg_read(regs.UC_ARM64_REG_X1)),
                     'x2':hex(engine.reg_read(regs.UC_ARM64_REG_X2))}
             calls.append(record)
-            if len(calls)>(32768 if c_phase in ('startup-return','vm') else 4096):raise ValueError('C continuation call budget exceeded')
+            if len(calls)>(32768 if c_phase in ('startup-return','vm','seed-return') else 4096):raise ValueError('C continuation call budget exceeded')
+            if c_phase=='seed-return' and '_PE_get_random_seed' in names:
+                seed_return=address+4;seed_call=record
             if c_phase=='vm' and '_arm_vm_init' in names:
                 boundary={'reason':'before_arm_vm_init',**record}
                 engine.emu_stop();return
@@ -226,7 +236,9 @@ def continue_entry(*,uc,md,state,stop,symbols,physical_image,rounded,arguments,
     def write(engine,access,address,size,value,_):
         physical=translate(address,size,'write')
         if address<virtual_ram:raise ValueError('Post-MMU store used physical alias')
-        if not physical_image<=physical or physical+size>physical_image+rounded:
+        in_kernel=physical_image<=physical and physical+size<=physical_image+rounded
+        in_seed=seed_region is not None and seed_region['address']<=address and address+size<=seed_region['address']+seed_region['length']
+        if not in_kernel and not in_seed:
             raise ValueError('Post-MMU store left virtual kernel RAM')
         if size>16:raise ValueError('Unsupported post-MMU store size')
         # Read actual bytes after the instruction, including full SIMD stores
@@ -239,7 +251,7 @@ def continue_entry(*,uc,md,state,stop,symbols,physical_image,rounded,arguments,
     hook=uc.hook_add(UC_HOOK_CODE,instruction);memory_hook=uc.hook_add(UC_HOOK_MEM_WRITE,write)
     read_hook=uc.hook_add(UC_HOOK_MEM_READ,load)
     try:
-        budget=10000 if c_phase=='first-call' else (2000000 if c_phase in ('startup-return','vm') else 500000)
+        budget=10000 if c_phase=='first-call' else (2000000 if c_phase in ('startup-return','vm','seed-return') else 500000)
         uc.emu_start(start,physical_image+rounded,count=budget)
         flush_stores(uc)
     except ModelPanic:raise
@@ -262,7 +274,7 @@ def continue_entry(*,uc,md,state,stop,symbols,physical_image,rounded,arguments,
         from early_c_state import inspect
         early_state=inspect(uc,kernel_raw,symbols,kernel_segments,boot_args,calls,stores,
                             expected_timebase,state.get('cntkctl_el1'))
-        if c_phase in ('topology-return','thread','thread-return','startup','startup-return','vm'):
+        if c_phase in ('topology-return','thread','thread-return','startup','startup-return','vm','seed-return'):
             from early_c_state import inspect_single_cpu
             early_state['single_cpu_fixture']=inspect_single_cpu(uc,symbols)
             if state.get('tpidr_el0')!=0 or state.get('tpidrro_el0')!=0:
@@ -270,16 +282,20 @@ def continue_entry(*,uc,md,state,stop,symbols,physical_image,rounded,arguments,
         if c_phase=='thread-return':
             from early_c_state import inspect_thread
             early_state['bootstrap_thread']=inspect_thread(uc,symbols,kernel_raw,calls)
-        if c_phase in ('startup','startup-return','vm'):
+        if c_phase in ('startup','startup-return','vm','seed-return'):
             if expected_timebase is None:raise ValueError('Startup state requires explicit timebase')
             from early_c_state import inspect_startup
             early_state['startup']=inspect_startup(uc,symbols,state,expected_timebase)
-        if c_phase in ('startup-return','vm'):
+        if c_phase in ('startup-return','vm','seed-return'):
             from early_c_state import inspect_startup_entries
             early_state['startup_entries']=inspect_startup_entries(uc,kernel_raw,symbols,calls)
         if c_phase=='vm':
             from early_c_state import inspect_vm_boundary
             early_state['vm_boundary']=inspect_vm_boundary(uc,symbols,boot_args,cache_inputs,state)
+        if c_phase=='seed-return':
+            from seed_fixture import inspect as inspect_seed
+            early_state['seed_consumption']=inspect_seed(uc,seed_region,int(seed_call['x0'],16),
+                                                       int(seed_call['x1'],16),boundary['returned_bytes'])
     return {'passed':True,'instructions':count,'arm_init_entry':entry,'stop':boundary,
             'early_c_state':early_state,
             'c_phase':c_phase,'calls_observed':calls,
@@ -288,6 +304,7 @@ def continue_entry(*,uc,md,state,stop,symbols,physical_image,rounded,arguments,
             'distinct_instruction_decodes':len(decoded),
             'modeled_system_operations':dict(operations),'exception_stack':hex(expected_exception_stack),
             'mmu_enable_executed':False,'hardware_verified':False,'c_initialization_completed':False,
+            'vm_initialization_entered':c_phase=='seed-return','vm_initialization_completed':False,
             'stage1_permission_subset_checked':True,'complete_stage1_fault_model':False,
             'cache_tlb_coherence_tested':False,
             'el1_permission_subset_checked':['AF','AP','APTable','PXN','PXNTable','EL0-write-XN','WXN','PAN','EPD'],

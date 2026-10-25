@@ -4,7 +4,7 @@ from functools import partial
 import json
 from pathlib import Path
 from boot_adt import encode
-from early_c_fixture import clock_tree
+from early_c_fixture import clock_tree,single_cpu_plan
 from handoff_bundle import ROOT,build
 from post_mmu_model import continue_entry,ModelPanic,ModelExecutionError
 from test_linked_entry import run_case
@@ -21,7 +21,7 @@ def test(directory,adapter,bundle,output):
     if not output.resolve().is_relative_to((ROOT/'note10/private').resolve()) or output.exists():
         raise ValueError('Fresh private output required')
     if verify(directory)['sha256']!=KERNEL_SHA256:raise ValueError('Reviewed native kernel required')
-    plan=json.loads((bundle/'handoff.json').read_text())['plan']
+    plan=json.loads((bundle/'handoff.json').read_text())['plan'] if bundle is not None else single_cpu_plan(directory)
     if plan['ram']!={'start':0x80000000,'size':0x40000000}:
         raise ValueError('This PC fixture requires declared 1GiB at 0x80000000')
     output.mkdir(parents=True,exist_ok=False)
@@ -62,6 +62,7 @@ def test(directory,adapter,bundle,output):
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
-    for name in ('kernel-build','adapter','handoff-bundle','output'):parser.add_argument('--'+name,type=Path,required=True)
+    for name in ('kernel-build','adapter','output'):parser.add_argument('--'+name,type=Path,required=True)
+    parser.add_argument('--handoff-bundle',type=Path)
     args=parser.parse_args();result=test(args.kernel_build,args.adapter,args.handoff_bundle,args.output)
     print(json.dumps(result))
