@@ -318,3 +318,17 @@ Exynos SoC MASTER 및 플랫폼 archive 입력 분리:
 - EL1 및 SCTLR M/C/I 꺼짐을 전제로 하는 stack 없는 전달 어댑터 ELF를 작성했다. 잘못된 상태/descriptor를 거부하며, MMU/cache 종료·CPU/장치 정지·RAM 예약·GIC 초기화는 수행하지 않는다.
 - 실제 어셈블리 명령을 합성 모델에서 54종 검사했다. 실제 링크 XNU 앞에 연결한 두 RAM 배치에서 각각 24,999개 명령 후 MMU 활성화 직전에 정지했고, kernel store/세그먼트 매핑 검사를 유지했다.
 - 상세 shim/TRANSFER.md. Android 부팅 이미지·설치 ZIP은 만들지 않았고, 기기 쓰기·재부팅·모듈 적재·XNU 실행은 없다.
+
+## 2026-10-25: 수동 Linux 커널 시험 설치 직전 준비 완료
+
+- 공개 d2x 소스로 KEXEC 및 built-in CPU 진단을 포함한 전체 Linux Image를 빌드했다. 최종 성공: https://github.com/eirblue/ios_note10p/actions/runs/40146021101 (`640d4ff`).
+- Image 46,350,348 bytes, SHA-256 `5c7fa6f04e241644a6d8935d13ff2536bbe46f34aee5419a0de83318a16ce261`. 원래 TWRP 커널과 동일 바이너리라는 뜻은 아니다.
+- 진단 빌드는 normal boot의 skip_initramfs 때문에 외부 initrd가 버려지지 않도록 해당 parser를 수정했다. 실제 Image 안의 진단 표식을 확인했다. 실제 bootloader의 initrd 전달은 미검증이다.
+- 공식 TWRP ramdisk·고정 AOSP mkbootimg·읽기 전용 기기 백업을 사용해 별도 BOOT 시험 이미지를 만들었다. 57,317,392 bytes로 실제 BOOT 57,671,680 bytes 안에 들어간다.
+- 원래 BOOT의 보드/OS/보안 패치 월과 Samsung 식별 표식을 유지했다. stale AVB 푸터·서명은 복사하지 않았다. 별도 DTB/DTBO와 기존 vbmeta는 변경하지 않는다. 실제 부팅 검증·DT 선택은 미검증이다.
+- private 경로에 수동 TWRP 진단 설치 ZIP 및 원래 BOOT 복구 ZIP을 생성했다. 정확한 bootloader·블록 노드·크기·기존 비BOOT 해시를 검사한 후 BOOT 하나만 쓰고 전체 해시를 검증한다. 자동 재부팅·포맷은 없다.
+- 최종 ZIP 두 개를 실제 TWRP의 새 RAM 폴더에 전송하고 원격 해시·네이티브 unzip 읽기·셸 구문 검사를 통과했다. 설치기는 실행하지 않았다. 실제 5개 부팅 파티션 해시는 원래 백업과 모두 일치했다.
+- 전달 어댑터 54종 및 백업/decoder/boot/설치기 PC 검사 18개, 총 72개 통과: https://github.com/eirblue/ios_note10p/actions/runs/40147168707 (`d780cab`). 설치기 쓰기는 PC 일반 파일에서만 시험했다.
+- PC에 ZIP 재전송·부팅 후 로그 수집 실행 파일과 설치/복구 안내서를 준비했다. 재부팅하면 RAM ZIP은 사라지며 PC 복사본으로 재전송한다. 설치·복구는 사용자가 TWRP에서 직접 실행해야 한다.
+- 준비 완료는 **임시 Linux 커널 수동 시험 패키지**에 한정된다. 새 커널의 실제 부팅·화면·USB·recovery 재진입 및 BOOT 복원은 아직 시험하지 않았다. XNU/iOS 설치 이미지·기기 실행·하드웨어 handoff는 미완료다.
+- 상세 device_test/LINUX-CAPS.md. 원본 기기 백업·생성 이미지·설치 ZIP은 업로드하지 않았다. 에이전트의 파티션 쓰기·재부팅·모듈 적재·kexec·XNU 실행은 없다.
