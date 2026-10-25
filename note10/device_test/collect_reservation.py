@@ -36,7 +36,11 @@ def collect(packages,kernel_build,adb):
     logs={}
     for name,remote in (('last_kmsg.txt','/proc/last_kmsg'),('console-ramoops-0','/sys/fs/pstore/console-ramoops-0'),
                         ('dmesg-ramoops-0','/sys/fs/pstore/dmesg-ramoops-0')):
-        try:data=adb.call('exec-out','cat',remote,timeout=60)
+        try:
+            # Some recovery adbd versions return success for exec-out even
+            # when cat fails. Never classify a missing-file error as a log.
+            adb.call('shell','test','-r',remote)
+            data=adb.call('exec-out','cat',remote,timeout=60)
         except RuntimeError:continue
         if not 0<len(data)<=16*1024*1024:continue
         (out/name).write_bytes(data);logs[name]=data
