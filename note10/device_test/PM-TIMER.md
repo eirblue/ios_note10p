@@ -71,3 +71,13 @@ Conflicting, duplicate, wrong-ID or earlier-interval copies cannot corroborate i
 Local validation executes 32 actual PM/timer C cases, 21 CPU/cache C cases,
 8 source/decoder contracts and 18 collector cases. The PM framework and hardware
 register APIs remain modeled; v7 hardware behavior awaits manual testing.
+
+## v7 kernel build
+
+[Kernel run 40240561031](https://github.com/eirblue/ios_note10p/actions/runs/40240561031)
+passed from source ffc31fb, including the 21 CPU/cache and 32 PM/timer actual-C
+model cases and 8 pinned-source/decoder contract cases. A private diagnostic
+and original-BOOT rollback pair was created, staged in TWRP RAM and verified
+against ZIP hashes, native updater syntax and the five current partition hashes.
+Final device readiness is pending charging; no agent installation or reboot
+occurred. Physical v7 PM/timer results and recovery reentry remain unverified.
