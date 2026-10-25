@@ -7,6 +7,7 @@ No CPU translation, TLB/cache correctness, hardware handoff or C initialization
 success is implied by reaching a C entry/call boundary.
 """
 from collections import Counter,deque
+import struct
 
 PAGE=0x4000
 
@@ -20,6 +21,21 @@ def continue_entry(*,uc,md,state,stop,symbols,physical_image,rounded,arguments,
     uc.hook_del(code_hook);uc.hook_del(write_hook)
     delta=virtual_ram-ram_base
     mappings=[(physical_image,rounded),(arguments,0x10000)]
+    if fault=='mapping':
+        # Corrupt the actual emulated L2 descriptor, rather than substituting
+        # a guessed walker result. The already-checked bootstrap uses L1/L2
+        # tables and 32MiB blocks for this linked 16K kernel.
+        virtual=physical_image+delta
+        bits=64-((state['tcr_el1']>>16)&63)
+        root=state['ttbr1_el1']&0x0000ffffffffc000
+        slot=(virtual>>36)&((1<<(bits-36))-1)
+        table_desc=struct.unpack('<Q',uc.mem_read(root+slot*8,8))[0]
+        if table_desc&3!=3:raise ValueError('Fault fixture requires a real L1 table')
+        table=table_desc&0x0000ffffffffc000
+        leaf=table+((virtual>>25)&2047)*8
+        descriptor=struct.unpack('<Q',uc.mem_read(leaf,8))[0]
+        if descriptor&3!=1:raise ValueError('Fault fixture requires a real L2 block')
+        uc.mem_write(leaf,struct.pack('<Q',descriptor^(1<<25)))
     pages=0
     for physical,size in mappings:
         virtual=physical+delta
@@ -27,7 +43,6 @@ def continue_entry(*,uc,md,state,stop,symbols,physical_image,rounded,arguments,
             for last in (0,PAGE-1):
                 address=virtual+offset+last
                 actual=walk(address,True)
-                if fault=='mapping':actual+=PAGE
                 if actual!=physical+offset+last:raise ValueError('VA alias differs from bootstrap translation')
             pages+=1
         uc.mem_map(virtual,size)

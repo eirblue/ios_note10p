@@ -86,3 +86,8 @@ The optional `--adapter ELF` path now starts with x0-x3 cleared and executes the
 Both synthetic RAM layouts execute 24,999 instructions through the same pre-MMU
 stop, retaining the kernel table-store and segment-endpoint checks. This does
 not run Linux shutdown/kexec or prove a usable handoff on the current recovery.
+
+An optional [software VA continuation](POST-MMU-MODEL.md) now executes the linked
+return to `_arm_init` and its first-call boundary. It validates copied aliases
+against the generated tables, while leaving the MMU/cache/TLB transition modeled.
+The default pre-MMU boundary and checks above remain unchanged.

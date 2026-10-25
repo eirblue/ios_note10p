@@ -19,7 +19,7 @@
 - 기존 MMU 이전 명령: 24,999 / 24,999 / 24,807개.
 - 추가 실행: 각 51개 명령, instruction fetch 51회, 데이터 read 1회, kernel store 18회.
 - 가상 별칭 페이지 1,199개 확인; boot_args와 스택 전달 검사 통과.
-- 잘못된 mapping 및 잘못된 boot_args 포인터 주입은 거부.
+- 실제 모형 RAM의 L2 descriptor 주소 비트 손상 및 잘못된 boot_args 포인터 주입은 거부.
 - 기존 continuation 없는 세 사례도 원래 명령 수와 MMU 이전 정지를 유지.
 
 주소는 합성 입력이다. 실제 예약 주소로 사용하면 안 된다. 기존 실측 CPU capacity profile과
