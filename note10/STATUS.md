@@ -444,5 +444,13 @@ Exynos SoC MASTER 및 플랫폼 archive 입력 분리:
 - 두 패턴 전체 쓰기·읽기, 전체 zeroing/readback 완료, 불일치 0, status 0이다. 따라서 같은 Linux 부팅의 캐시 활성 RAM 접근 진단은 통과했다.
 - 현재 BOOT 해시는 v3 payload와 일치하고 recovery/DTB/DTBO/vbmeta는 원본 해시와 일치한다. 로그·파티션 기록은 `note10/private/device-observations/`에만 저장했다.
 - 약 169초의 `Fatal exception in interrupt`는 `hard_reset_hook_callback` 경로에서 기록됐다. 이는 접근 검사 완료 후의 hard-reset hook 기록이며 XNU 실행이나 임의의 메모리 오류로 해석하지 않는다. N10INIT1 IDLE 표식은 없고 CPU capability 진단 필드는 손상되어 해석하지 않았다.
-- XNU memory image를 새 부팅의 예약 영역에 복사하고 source/destination SHA-256·zero tail을 검사하는 opt-in Linux staging path, strict N10XNU1 decoder, artifact materializer 및 수동 ZIP metadata 연결을 준비했다. 현재는 PC source 단계이며 Linux kernel CI compile, BOOT 크기 prototype, 실기기 로그 검증은 아직 없다. 기존 `handoff_bundle.py`는 PC용 배치 모델만 제공한다. 동적 entry/boot_args 배치, live DT 변환, CPU/DMA 정지, cache/MMU/GIC 인계도 미완료다.
+- XNU memory image를 새 부팅의 예약 영역에 복사하고 source/destination SHA-256·zero tail을 검사하는 opt-in Linux staging path, strict N10XNU1 decoder, artifact materializer 및 수동 ZIP metadata 연결을 준비했다. 후속 빌드와 수동 패키지 준비 결과는 다음 절에 기록했다. 기존 `handoff_bundle.py`는 PC용 배치 모델만 제공한다. 동적 entry/boot_args 배치, live DT 변환, CPU/DMA 정지, cache/MMU/GIC 인계도 미완료다.
 - 검증 범위는 캐시가 켜진 Linux의 예약 RAM 접근까지다. cache/MMU 전환, XNU 진입, iOS 구동 증거가 아니다. 자동 설치·재부팅·파티션 쓰기·kexec·XNU 실행은 수행하지 않았다.
+
+## 2026-10-25: XNU RAM 적재 진단 v4 수동 시험 준비
+
+- 실험용 source-built Mach-O에서 19,578,880-byte memory image를 만들고, 현재 부팅의 예약 영역에 복사·SHA256 readback·zero-tail 검사를 수행하는 Linux 커널을 빌드했다. XNU로 분기하지 않는다.
+- 전체 Linux CI 성공: https://github.com/eirblue/ios_note10p/actions/runs/40202988576 (`03862d7`). Image 52,576,268 bytes이며 내장 CPIO와 XNU payload 포함 여부를 검증했다. Samsung 환경변수는 모든 build step에 적용하고 builder에서도 검사한다.
+- 실제 적재 C 코드의 PC RAM 검증 17개 사례가 통과했다. 정상 적재, 예약·매핑 거부, 파일·할당·해시 오류, 복사 후 오류 시 scrub을 검사했다. Linux API는 모델이며 해시는 실제 SHA256이다. source/payload 해시를 해당 커널 보고서와 대조했다.
+- 새 BOOT prototype은 52,580,368 bytes로 실제 57,671,680-byte BOOT 파티션에 들어간다. v3 BOOT를 현재 기준으로 묶은 진단 ZIP과 원본 BOOT 복원 ZIP을 비공개 로컬에 생성하고 TWRP RAM에 전송했다. ZIP 2개 해시·네이티브 설치 스크립트 문법·현재 5개 파티션 대조를 통과했다.
+- 수동 설치 대기다. v4의 실기기 payload 적재, TWRP 재진입, XNU 실행은 아직 확인되지 않았다. 원시 로그·백업·설치 ZIP·기기 주소는 공개 저장소에 포함하지 않는다.
