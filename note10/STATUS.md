@@ -351,3 +351,12 @@ Exynos SoC MASTER 및 플랫폼 archive 입력 분리:
 - 실측 입력으로 실제 XNU patched headers assert 및 bootstrap/IRQ C 파일을 ARM64 Mach-O 객체 3개로 컴파일했다. VMAPPLE generated dependencies를 사용한 구성 요소 검사이며 전체 kernel build가 아니다.
 - 실제 링크 XNU와 전달 adapter를 합성 RAM 두 배치에서 각각 24,999개 명령 실행했다. 실제 TCR 0x226511a511의 16K/40bit가 8개 CPU 실측 capacity를 통과했고, MMU 활성화 전에 정지했다. 실기기 handoff·MMU 전환은 없다.
 - 관측 불일치/변조/누락·TCR 불일치·출력 경로 거부 등 새 PC 시험 6개를 통과했다. 상세 xnu26/OBSERVED.md. XNU 하드웨어 실행과 iOS 설치 이미지는 미완료다.
+
+## 2026-10-25: Mach-O 메모리 버퍼·부팅 인자·전달 adapter 묶음 구현
+
+- 실제 검증된 XNU Mach-O 세그먼트로 19,578,880바이트 memory image를 생성했다. BSS·빈 영역·padding을 0으로 만들고 원본 파일 바이트를 유지한다.
+- boot_args/ADT/adapter를 별도 16K page로 만들며 64바이트 record에 실제 변환된 entry/argument 주소를 연결한다. adapter까지 RAM/예약/점유/충돌 검사에 포함했다.
+- ARM64 ELF 표·범위·entry·writable record를 검사하고 relocation/dynamic dependency/W+X를 거부한다. bundle 로드는 파일 해시와 계획·인자 바이트·ADT·descriptor를 재검증한다.
+- 생성한 네 버퍼를 직접 명령 모델에 넣었다. 실제 원본 kernel/adapter와 BSS, ADT 보존 및 첫/끝 매핑을 추가 검증했다. 두 합성 RAM 배치에서 각각 24,999개 명령과 8,250회 kernel store 후 MMU 활성화 전에 정지했다.
+- 실제 빌드 adapter ELF와 bundle 부정 사례를 포함한 새 PC 시험 7개, 기존 boot contract 8개를 통과했다. 실측 CPU capacity 비교도 통과했다. 상세 xnu26/HANDOFF-BUNDLE.md.
+- 실제 RAM 예약이나 kexec backend를 구현한 것은 아니다. PC bundle은 물리 예약/하드웨어 배포 주장을 거부한다. 실제 CPU/DMA/cache/MMU 종료·GIC 인계·XNU 기기 실행·설치용 iOS ROM은 미완료다. 기기 변경은 없다.

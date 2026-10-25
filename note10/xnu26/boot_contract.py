@@ -89,7 +89,7 @@ def encode_boot_args(*, virtual_base, physical_base, memory_size, top_of_kernel,
 
 
 def validate_placement(*, ram, reserved, occupied, kernel, arguments,
-                       device_tree=None, top_of_kernel):
+                       device_tree=None, adapter=None, top_of_kernel):
     """Reject conflicts; never choose addresses or infer free RAM from iomem.
 
     The caller must supply occupied ranges for the running recovery/loader,
@@ -100,6 +100,7 @@ def validate_placement(*, ram, reserved, occupied, kernel, arguments,
         raise ValueError('Explicit reservation and live occupancy lists required')
     allocations = {'kernel': kernel, 'arguments': arguments}
     if device_tree is not None: allocations['device_tree'] = device_tree
+    if adapter is not None: allocations['adapter'] = adapter
     if arguments.size < SIZE:
         raise ValueError('Boot arguments allocation is too small')
     if any(r.start % PAGE for r in allocations.values()) or kernel.size % PAGE:

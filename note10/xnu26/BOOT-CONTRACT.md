@@ -73,3 +73,9 @@ GIC/timer 소유권 이전과 진단 로그 경로가 여전히 필요하다. RA
 수동 Linux 커널 시험에서 얻은 8개 CPU의 16K·PA 폭·cache line 관측을
 해시로 묶어 보드 컴파일과 실제 XNU 진입 코드의 TCR 대조에 사용했다.
 [실행 결과·재현·한계](OBSERVED.md). RAM 예약이나 cache/MMU 전환 증거를 대신하지 않는다.
+
+## 로드 버퍼와 전달 record 생성
+
+Mach-O 메모리 배치·BSS zero·boot_args/ADT·adapter patch를 단일 producer로 묶고,
+생성된 네 버퍼를 실제 XNU 진입 명령 모델에서 직접 사용했다.
+[부품·검사·실제 예약과의 경계](HANDOFF-BUNDLE.md). adapter 영역도 배치 충돌 검사에 포함한다.

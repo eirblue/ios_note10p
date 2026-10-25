@@ -17,7 +17,7 @@ from boot_contract import Region, PAGE, encode_boot_args, validate_placement
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def run_case(directory, ram_base, outside_bootstrap_block=False, transfer_elf=None):
+def run_case(directory, ram_base, outside_bootstrap_block=False, transfer_elf=None, handoff_bundle=None):
     from unicorn import Uc, UC_ARCH_ARM64, UC_MODE_ARM, UC_HOOK_CODE, UC_HOOK_MEM_WRITE
     from unicorn import arm64_const as regs
     from capstone import Cs, CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN
@@ -28,12 +28,38 @@ def run_case(directory, ram_base, outside_bootstrap_block=False, transfer_elf=No
     physical_image = ram_base + image_base-virtual_ram
     span = max(s['virtual_address']+s['virtual_size'] for s in checked['segments'])-image_base
     rounded = (span+0x3fff)&~0x3fff
+    bundle=None;buffers=None
+    if handoff_bundle is not None:
+        from handoff_bundle import load
+        bundle,buffers=load(handoff_bundle,kernel_sha256=checked['sha256'])
+        if bundle['plan']['ram']!={'start':ram_base,'size':0x40000000} or bundle['plan']['virtual_base']!=virtual_ram:
+            raise ValueError('Bundle does not match this explicit RAM model')
+        kernel_buffer=next(b for b in bundle['buffers'] if b['file']=='kernel.mem')
+        if kernel_buffer['physical_address']!=physical_image or kernel_buffer['size']!=rounded:
+            raise ValueError('Bundle kernel placement differs from executable')
+        if bundle['xnu_entry_physical']!=ram_base+int(checked['entry_virtual_address'],16)-virtual_ram:
+            raise ValueError('Bundle entry differs from executable')
+        if transfer_elf is None or bundle['adapter_elf_sha256']!=hashlib.sha256(transfer_elf.read_bytes()).hexdigest():
+            raise ValueError('Bundle adapter source differs')
     uc = Uc(UC_ARCH_ARM64,UC_MODE_ARM)
     uc.mem_map(physical_image,rounded)
-    for segment in checked['segments']:
-        if not segment['file_size']:continue
-        pa = ram_base+segment['virtual_address']-virtual_ram
-        uc.mem_write(pa,raw[segment['file_offset']:segment['file_offset']+segment['file_size']])
+    if bundle is not None:
+        # Make copying the full buffer (including zero BSS) observable.
+        uc.mem_write(physical_image,b'\xa5'*rounded)
+        uc.mem_write(physical_image,buffers['kernel.mem'])
+        for segment in checked['segments']:
+            pa=ram_base+segment['virtual_address']-virtual_ram
+            count=segment['file_size'];offset=segment['file_offset']
+            if count and bytes(uc.mem_read(pa,count))!=raw[offset:offset+count]:
+                raise ValueError('Materialized kernel differs from source segment')
+            zero=segment['virtual_size']-count
+            if zero and any(uc.mem_read(pa+count,zero)):
+                raise ValueError('Materialized kernel BSS was not zeroed')
+    else:
+        for segment in checked['segments']:
+            if not segment['file_size']:continue
+            pa = ram_base+segment['virtual_address']-virtual_ram
+            uc.mem_write(pa,raw[segment['file_offset']:segment['file_offset']+segment['file_size']])
     symbols = {name:address for address,name in image_layout(raw)[2]}
     tables = ram_base+symbols['_bootstrap_pagetables']-virtual_ram
     # Prime the four pages that start.s must clear; zero-filled emulated RAM
@@ -42,6 +68,11 @@ def run_case(directory, ram_base, outside_bootstrap_block=False, transfer_elf=No
     # Startup excludes memory before the block containing the image header.
     # Keep metadata in that first block under the conservative producer policy.
     arguments = ram_base+0x2000000 if outside_bootstrap_block else (physical_image & ~0x1ffffff)+0x4000
+    if bundle is not None:
+        if outside_bootstrap_block:raise ValueError('A materialized bundle cannot be silently relocated')
+        arguments=bundle['boot_args_physical']
+        if bundle['plan']['device_tree_address']!=arguments+PAGE or bundle['plan']['adapter_address']!=arguments+2*PAGE:
+            raise ValueError('This model requires contiguous metadata pages')
     uc.mem_map(arguments,0x10000)
     if not outside_bootstrap_block:
         validate_placement(ram=Region(ram_base,0x40000000),reserved=[],occupied=[],
@@ -49,6 +80,7 @@ def run_case(directory, ram_base, outside_bootstrap_block=False, transfer_elf=No
                            arguments=Region(arguments,PAGE),top_of_kernel=physical_image+rounded)
     boot_args = encode_boot_args(virtual_base=virtual_ram,physical_base=ram_base,
                                  memory_size=0x40000000,top_of_kernel=physical_image+rounded)
+    if bundle is not None:boot_args=buffers['boot-args.mem'][:1152]
     uc.mem_write(arguments,bytes(boot_args));uc.reg_write(regs.UC_ARM64_REG_X0,arguments)
     pc = ram_base+int(checked['entry_virtual_address'],16)-virtual_ram
     adapter_record = None
@@ -66,6 +98,17 @@ def run_case(directory, ram_base, outside_bootstrap_block=False, transfer_elf=No
         # The real recovery's kexec tail clears x0-x3; require the adapter to
         # supply x0 rather than inheriting the test's direct-entry argument.
         for index in range(4):uc.reg_write(getattr(regs,'UC_ARM64_REG_X'+str(index)),0)
+        if bundle is not None:
+            from handoff_bundle import materialize_adapter
+            canonical,relative_start,relative_record=materialize_adapter(transfer_elf.read_bytes())
+            canonical=bytearray(canonical)
+            struct.pack_into('<QQ',canonical,relative_record+16,arguments,pc)
+            if bytes(canonical)!=buffers['adapter.mem'] or bundle['adapter_entry_physical']!=adapter_base+relative_start or bundle['adapter_record_physical']!=adapter_base+relative_record:
+                raise ValueError('Materialized adapter differs from source ELF')
+            for name in ('boot-args.mem','device-tree.mem','adapter.mem'):
+                item=next(b for b in bundle['buffers'] if b['file']==name)
+                uc.mem_write(item['physical_address'],buffers[name])
+            adapter_record=bundle['adapter_record_physical'];pc_start=bundle['adapter_entry_physical']
     else:pc_start=pc
     md = Cs(CS_ARCH_ARM64,CS_MODE_LITTLE_ENDIAN)
     state = {'currentel':4,'clidr_el1':0,'ctr_el0':0x8444c004,'sctlr_el1':0,
@@ -150,6 +193,14 @@ def run_case(directory, ram_base, outside_bootstrap_block=False, transfer_elf=No
                   'boot_args_identity':args_identity,'boot_args_virtual':args_virtual}
     if translations != {'identity_entry':pc,'kernel_entry':pc,'boot_args_identity':arguments,'boot_args_virtual':arguments}:
         raise ValueError('Bootstrap tables do not map synthetic entry/arguments as expected')
+    if bundle is not None:
+        dt=bundle['plan']['device_tree_address'];length=bundle['device_tree_length']
+        virtual_dt=virtual_ram+dt-ram_base
+        for delta in (0,length-1):
+            if walk(dt+delta,False)!=dt+delta or walk(virtual_dt+delta,True)!=dt+delta:
+                raise ValueError('Materialized ADT outside bootstrap mappings')
+        if bytes(uc.mem_read(dt,PAGE))!=buffers['device-tree.mem']:
+            raise ValueError('Entry changed materialized ADT')
     endpoints = []
     for segment in checked['segments']:
         if not segment['virtual_size']: continue

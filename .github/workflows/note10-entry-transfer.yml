@@ -35,6 +35,8 @@ jobs:
           python note10/device_test/test_linux_boot.py
           python note10/device_test/test_boot_test_packages.py
           python note10/xnu26/test_observed_profile.py
+          python note10/xnu26/test_boot_contract.py
+          python note10/xnu26/test_handoff_bundle.py
       - uses: actions/upload-artifact@v4
         with:
           name: note10-entry-adapter-research-only
