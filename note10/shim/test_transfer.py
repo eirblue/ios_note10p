@@ -3,6 +3,7 @@
 Stops at the target branch, before running a kernel. No hardware is accessed.
 """
 import hashlib
+import argparse
 import json
 from pathlib import Path
 import struct
@@ -14,7 +15,7 @@ from capstone import Cs, CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def case(raw, base, *, el=4, sctlr=0, patch=None):
+def case(raw, base, *, el=4, sctlr=0, cntkctl=0, cntfrq=26000000, patch=None):
     segments,symbols = elf(raw)
     engine=Uc(UC_ARCH_ARM64,UC_MODE_ARM);engine.mem_map(base,0x10000)
     for va,_,data in segments:engine.mem_write(base+va,data)
@@ -39,6 +40,8 @@ def case(raw, base, *, el=4, sctlr=0, patch=None):
             dst,reg=operands
             if reg=='currentel':value=el
             elif reg=='sctlr_el1' and el==4:value=sctlr
+            elif reg=='cntkctl_el1' and el==4:value=cntkctl
+            elif reg=='cntfrq_el0' and el==4:value=cntfrq
             else:raise ValueError('Unexpected privileged read: '+reg)
             uc.reg_write(getattr(regs,'UC_ARM64_REG_'+dst.upper()),value)
         elif ins.mnemonic=='msr':
@@ -63,7 +66,9 @@ def case(raw, base, *, el=4, sctlr=0, patch=None):
 
 
 def main():
-    binary=ROOT/'note10/private/xnu-transfer/transfer.elf';raw=binary.read_bytes()
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--elf',type=Path,default=ROOT/'note10/private/xnu-transfer/transfer.elf')
+    binary=parser.parse_args().elf;raw=binary.read_bytes()
     results=[]
     malformed=[lambda b:b.__setitem__(slice(0,8),b'BADMAGIC'),
                lambda b:struct.pack_into('<I',b,8,2),lambda b:struct.pack_into('<I',b,12,63)]
@@ -72,6 +77,12 @@ def main():
         malformed.append(lambda b,o=offset,v=value:struct.pack_into('<Q',b,o,v))
     for base in (0x100000,0x4000000,0x100000000):
         good=case(raw,base);assert good['status']==1 and good['stopped']=='target';results.append(good)
+        for value in (3,12):
+            result=case(raw,base,cntkctl=value);assert result['status']==1 and result['stopped']=='target';results.append(result)
+        for value in (0x10,0x40,0x80,0xf0):
+            result=case(raw,base,cntkctl=value);assert result['status']==5 and result['stopped']=='halt';results.append(result)
+        for frequency in (0,24000000,52000000):
+            result=case(raw,base,cntfrq=frequency);assert result['status']==5 and result['stopped']=='halt';results.append(result)
         for value in (1,4,0x1000,0x1005):
             result=case(raw,base,sctlr=value);assert result['status']==4 and result['stopped']=='halt';results.append(result)
         for el in (8,12):
@@ -79,7 +90,7 @@ def main():
         for patch in malformed:
             result=case(raw,base,patch=patch);assert result['status']==3 and result['stopped']=='halt';results.append(result)
     report={'passed':True,'cases':len(results),'elf_sha256':hashlib.sha256(raw).hexdigest(),
-            'scope':'Actual instructions; synthetic EL1/EL2/EL3, SCTLR and DAIF; target branch only',
+            'scope':'Actual instructions; synthetic EL1/EL2/EL3, SCTLR, CNTKCTL/CNTFRQ and DAIF; target branch only',
             'hardware_verified':False,'xnu_executed':False,'deployment_ready':False,'device_operations':[]}
     (binary.parent/'test-result.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
     print(json.dumps(report))

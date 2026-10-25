@@ -10,7 +10,7 @@ from test_linked_entry import run_case
 from verify_experimental_artifact import verify
 
 
-def run(directory,adapter,output,profile=None,continuation=None):
+def run(directory,adapter,output,profile=None,continuation=None,model_tree=None):
     if not output.resolve().is_relative_to((ROOT/'note10/private').resolve()):raise ValueError('Private model output required')
     if output.exists():raise ValueError('Refusing existing materialization model output')
     checked=verify(directory)
@@ -18,7 +18,8 @@ def run(directory,adapter,output,profile=None,continuation=None):
     base,kernel=materialize_kernel(raw,checked['segments'])
     output.mkdir(parents=True,exist_ok=False)
     # Explicit parser fixture only: no fabricated GIC handoff/ownership.
-    adt=output/'model.adt';adt.write_bytes(encode(Node('device-tree',children=[Node('chosen',{'boot-args':b'debug=0x14e\0'})])))
+    adt=output/'model.adt';adt.write_bytes(encode(model_tree if model_tree is not None else
+        Node('device-tree',children=[Node('chosen',{'boot-args':b'debug=0x14e\0'})])))
     observations=load_observations(profile) if profile else None
     cases=[]
     for index,(ram,size) in enumerate(((0x80000000,0x40000000),(0x100000000,0x40000000),
@@ -39,7 +40,7 @@ def run(directory,adapter,output,profile=None,continuation=None):
     result={'passed':True,'cases':cases,'kernel_sha256':checked['sha256'],
             'materialized_buffers_executed_in_pc_model':True,'physical_reservation_verified':False,
             'hardware_verified':False,'deployment_ready':False,'device_operations':[],
-            'scope':('Real XNU instructions and generated buffers; software VA aliases; stops before first C call' if continuation else
+            'scope':('Real XNU instructions and generated buffers; software VA aliases; see continuation stop boundary' if continuation else
                      'Real XNU instructions and generated buffers; synthetic RAM/register/cache/TLB; stops before MMU enable')}
     (output/'result.json').write_text(json.dumps(result,indent=2),encoding='utf-8')
     return result

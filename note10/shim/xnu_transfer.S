@@ -22,6 +22,17 @@ _start:
     mov x6, #0x1005
     tst x5, x6
     b.ne .Lbad_state
+    /* The reviewed XNU WFE setup ORs its event selector into CNTKCTL.
+     * Refuse an inherited selector instead of silently selecting wrong bits.
+     * This checks inputs only; it does not program a timer or prove GIC state. */
+    mrs x5, CNTKCTL_EL1
+    tst x5, #0xf0
+    b.ne .Lbad_timer
+    mrs x5, CNTFRQ_EL0
+    movz x6, #0xba80
+    movk x6, #0x18c, lsl #16 /* 26,000,000 Hz: measured SM-N976N target */
+    cmp x5, x6
+    b.ne .Lbad_timer
     ldr x5, [x4]
     adr x6, .Lmagic
     ldr x6, [x6]
@@ -61,6 +72,9 @@ _start:
     b .Lfail
 .Lbad_state:
     mov x5, #4
+    b .Lfail
+.Lbad_timer:
+    mov x5, #5
 .Lfail:
     str x5, [x4, #48]
     dsb sy
@@ -83,5 +97,5 @@ n10_transfer_record:
     .quad 0 /* actual XNU entry physical address; zero refuses transfer */
     .quad 0 /* flags: all currently unsupported */
     .quad 0 /* reserved */
-    .quad 0 /* status: 1=branch attempted, 2=EL, 3=record, 4=SCTLR refusal */
+    .quad 0 /* status: 1=branch attempted, 2=EL, 3=record, 4=SCTLR, 5=timer */
     .quad 0 /* observed SCTLR_EL1, when entered at EL1 */

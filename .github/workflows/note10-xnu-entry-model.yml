@@ -38,7 +38,10 @@ jobs:
       - name: Verify actual instructions with software VA aliases
         run: |
           python note10/xnu26/test_stage1_access.py
+          python note10/xnu26/test_early_c_state.py
+          python note10/shim/test_transfer.py
           python note10/xnu26/test_post_mmu_entry.py --kernel-build note10/private/entry-model-kernel --adapter note10/private/xnu-transfer/transfer.elf --output note10/private/post-mmu-model
+          python note10/xnu26/test_early_c_entry.py --kernel-build note10/private/entry-model-kernel --adapter note10/private/xnu-transfer/transfer.elf --output note10/private/early-c-model
           python note10/xnu26/test_materialized_entry.py --kernel-build note10/private/entry-model-kernel --adapter note10/private/xnu-transfer/transfer.elf --output note10/private/pre-mmu-regression
       - uses: actions/upload-artifact@v4
         if: always()
@@ -49,3 +52,6 @@ jobs:
           path: |
             note10/private/post-mmu-model/result.json
             note10/private/pre-mmu-regression/result.json
+            note10/private/early-c-model/result.json
+            note10/private/early-c-model/missing-clock-panic.json
+            note10/private/early-c-model/missing-cpu-panic.json

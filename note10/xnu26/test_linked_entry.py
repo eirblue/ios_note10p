@@ -112,7 +112,8 @@ def run_case(directory, ram_base, outside_bootstrap_block=False, transfer_elf=No
     else:pc_start=pc
     md = Cs(CS_ARCH_ARM64,CS_MODE_LITTLE_ENDIAN)
     state = {'currentel':4,'clidr_el1':0,'ctr_el0':0x8444c004,'sctlr_el1':0,
-             'midr_el1':0x410fd050,'id_aa64mmfr0_el1':0x100000,'csselr_el1':0}
+             'midr_el1':0x410fd050,'id_aa64mmfr0_el1':0x100000,'csselr_el1':0,
+             'cntkctl_el1':0,'cntfrq_el0':26000000}
     writes = []; operations = Counter(); recent = deque(maxlen=16)
     count = 0; stop = None; sp_select = 0; banked_sp = {0:0,1:0}
     def gpr(name):
@@ -223,7 +224,8 @@ def run_case(directory, ram_base, outside_bootstrap_block=False, transfer_elf=No
         result['continuation']=continuation(uc=uc,md=md,state=state,stop=stop,symbols=symbols,
             physical_image=physical_image,rounded=rounded,arguments=arguments,boot_args=boot_args,
             virtual_ram=virtual_ram,ram_base=ram_base,walk=walk,
-            code_hook=code_hook,write_hook=write_hook,banked_sp=banked_sp,sp_select=sp_select)
+            code_hook=code_hook,write_hook=write_hook,banked_sp=banked_sp,sp_select=sp_select,
+            kernel_raw=raw,kernel_segments=checked['segments'])
     return result
 
 
