@@ -421,3 +421,10 @@ Exynos SoC MASTER 및 플랫폼 archive 입력 분리:
 - 시드 실제 명령 시험은 정상 복사/삭제, 누락 시 실제 panic, 전부 0인 입력의 실제 반환 0을 통과했다. 전부 0인 사례는 PE callback 반환에서 거부하며 후속 caller panic은 실행하지 않았다. 별도 경계/손상 fixture 검사 5개도 통과했다. CI는 entry/VM/seed 세 작업이 독립 배치를 구성해 병렬 실행하도록 분리했다.
 - 세 병렬 CI 작업 모두 성공했다: https://github.com/eirblue/ios_note10p/actions/runs/40176478650 (`cdf4924`). 기존 진입 회귀와 CPU/DRAM 정상·누락 경로, 시드 복사/삭제·누락·zero 입력 검사를 함께 확인했다. 이 결과는 PC 모델 검증이며 실제 XNU 부팅 증거가 아니다.
 - ADB 연결 목록이 비어 있어 기기 파티션 재검사·예약 v2 RAM 전송·수동 설치 시험은 진행하지 못했다. 기존 진단/복구 ZIP은 유지한다. 설치 가능한 XNU/iOS ROM이나 실기기 XNU 부팅 성공은 아직 없다.
+
+## 2026-10-25: 예약 v2 실기기 시험 통과
+
+- 사용자가 v2 진단을 직접 설치·부팅한 뒤 기존 TWRP로 돌아왔다. 검증된 Image 내부 빌드 ID와 일치하는 정상 N10RAM2 프레임 29개에서 256MiB, 65,536페이지 전체 PageReserved 및 invalid PFN=0을 확인했다. 손상된 프레임의 값을 복원하지 않았다.
+- 현재 BOOT는 v2 진단 payload 전체 해시와 일치한다. recovery/DTB/DTBO/vbmeta도 원본 백업의 전체 해시와 일치한다. 에이전트는 로그·해시 읽기만 수행했다.
+- 패닉 호출 경로에 버튼 재시작용 hard_reset_hook_callback이 기록됐다. idle PID1 marker와 완전한 CPU capability 기록은 이번 로그에서 확인하지 못했다. 이를 init 성공이나 전체 Linux 부팅 성공으로 확대 해석하지 않는다.
+- 검증된 것은 이전 Linux 부팅의 allocator 제외다. 해당 물리 주소는 현재 TWRP에서 사용하거나 다음 부팅에 고정하지 않는다. RAM 쓰기/읽기, DMA·CPU 정지, cache/MMU/GIC 인계 및 XNU 실행은 아직 미검증이다.

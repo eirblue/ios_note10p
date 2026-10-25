@@ -11,6 +11,10 @@ on:
         description: Reserve XNU RAM early and use a built-in minimal idle init; no Android root
         type: boolean
         default: false
+      window_access:
+        description: Test writes and reads only within this boot's checked reservation; no XNU execution
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -36,8 +40,13 @@ jobs:
           ANDROID_MAJOR_VERSION: r
           NOTE10_CAPS: ${{ inputs.caps }}
           NOTE10_RESERVE: ${{ inputs.reserve }}
+          NOTE10_WINDOW_ACCESS: ${{ inputs.window_access }}
         run: |
-          if [ "$NOTE10_RESERVE" = true ]; then
+          if [ "$NOTE10_WINDOW_ACCESS" = true ]; then
+            python note10/device_test/test_window_access_decode.py
+            python note10/device_test/test_window_access_core.py --output note10/private/window-access-core-ci
+            python note10/device_test/build_handoff_kernel.py --caps --reserve --window-access
+          elif [ "$NOTE10_RESERVE" = true ]; then
             python note10/device_test/build_handoff_kernel.py --caps --reserve
           elif [ "$NOTE10_CAPS" = true ]; then
             python note10/device_test/build_handoff_kernel.py --caps
@@ -57,3 +66,4 @@ jobs:
             note10/private/handoff-kernel/Image
             note10/private/handoff-kernel/minimal-init.elf
             note10/private/handoff-kernel/initramfs.cpio
+            note10/private/window-access-core-ci/result.json

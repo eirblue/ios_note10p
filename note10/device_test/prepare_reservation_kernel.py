@@ -48,7 +48,7 @@ def cpio(init):
     return bytes(output)
 
 
-def prepare(source,output,run):
+def prepare(source,output,run,window_access=False):
     here=Path(__file__).resolve().parent
     path=source/'arch/arm64/mm/init.c';raw=path.read_bytes()
     if hashlib.sha256(raw).hexdigest()!=INIT_SHA:raise ValueError('Pinned arm64 memblock source differs')
@@ -59,6 +59,25 @@ def prepare(source,output,run):
     target=path.with_name('note10_xnu_reserve.c')
     if target.exists():raise ValueError('Existing reservation extension')
     extension=(here/'xnu_reserve.c').read_bytes()
+    access_report={}
+    if window_access:
+        needle=b'static int __init note10_check_xnu_window(void)'
+        marker=b'    /* Reserved pages remain excluded from Linux'
+        if extension.count(needle)!=1 or extension.count(marker)!=1:
+            raise ValueError('Unexpected access diagnostic insertion points')
+        files={'note10_xnu_window_access.c':here/'xnu_window_access.c',
+               'note10_window_access_core.h':here/'window_access_core.h'}
+        if any(path.with_name(name).exists() for name in files):
+            raise ValueError('Existing access diagnostic extension')
+        for name,original in files.items():path.with_name(name).write_bytes(original.read_bytes())
+        access_report={'window_access_diagnostic':True,'window_access_evidence_version':1,
+                       'window_access_sources_sha256':{name:hashlib.sha256(original.read_bytes()).hexdigest()
+                                                       for name,original in files.items()},
+                       'physical_window_access_tested_on_device':False,'xnu_executed':False}
+        extension=extension.replace(needle,b'#include "note10_xnu_window_access.c"\n\n'+needle)
+        extension=extension.replace(marker,b'    note10_test_xnu_window_access(reserved, count, invalid);\n\n'+marker)
+        extension=extension.replace(b'Reservation diagnostic only: does not write the window or execute XNU.',
+                                    b'Reservation and opt-in cached RAM access test; never executes XNU.')
     evidence_id=uuid.uuid4().hex
     target.write_bytes(('#define N10_RESERVE_BUILD_ID "'+evidence_id+'"\n').encode()+extension)
     text=text.replace(declaration,'#include "note10_xnu_reserve.c"\n\n'+declaration)
@@ -72,7 +91,7 @@ def prepare(source,output,run):
     init=elf.read_bytes()
     if len(init)<64 or init[18:20]!=b'\xb7\x00':raise ValueError('Not an ARM64 init ELF')
     archive=output/'initramfs.cpio';archive.write_bytes(cpio(init))
-    return {'early_xnu_reservation':True,'builtin_idle_init':True,
+    return {**access_report,'early_xnu_reservation':True,'builtin_idle_init':True,
             'reservation_evidence_id':evidence_id,'reservation_evidence_version':2,
             'reservation_source_sha256':hashlib.sha256(extension).hexdigest(),
             'patched_arm64_init_sha256':hashlib.sha256(path.read_bytes()).hexdigest(),

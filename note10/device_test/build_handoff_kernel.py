@@ -20,9 +20,10 @@ REPOSITORY = 'corsicanu/android_kernel_samsung_universal9820'
 OUT = ROOT / 'note10/private/handoff-kernel'
 
 
-def main(caps=False,reserve=False):
+def main(caps=False,reserve=False,window_access=False):
     if not sys.platform.startswith('linux'): raise RuntimeError('Linux CI host required')
     if reserve and not caps:raise ValueError('Reservation diagnostic requires caps/initramfs handling')
+    if window_access and not reserve:raise ValueError('Window access requires the same-boot reservation diagnostic')
     OUT.mkdir(parents=True,exist_ok=True)
     report = {'source_repository':REPOSITORY,'source_commit':COMMIT,
               'public_defconfig':'exynos9820-d2x_defconfig','build_passed':False,
@@ -93,7 +94,8 @@ def main(caps=False,reserve=False):
         defconfig=source/'arch/arm64/configs/exynos9820-d2x_defconfig'
         if reserve:
             from prepare_reservation_kernel import prepare
-            report.update(prepare(source,OUT,run))
+            report.update(prepare(source,OUT,run,window_access=window_access))
+            if window_access:report['scope']='Linux same-boot reserved RAM pattern/readback diagnostic; no XNU branch'
         report['public_defconfig_sha256']=hashlib.sha256(defconfig.read_bytes()).hexdigest()
         make=['make','-C',str(source),'O='+str(objects),'ARCH=arm64',
               'CC=clang-14','CROSS_COMPILE=aarch64-linux-gnu-',
@@ -158,4 +160,5 @@ if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--caps',action='store_true',help='Include built-in per-CPU printk diagnostic for a future manual boot')
     parser.add_argument('--reserve',action='store_true',help='Early XNU RAM reservation diagnostic with original built-in idle PID1')
-    args=parser.parse_args();main(caps=args.caps,reserve=args.reserve)
+    parser.add_argument('--window-access',action='store_true',help='Opt-in write/read/scrub of this boot\'s checked reservation; no XNU execution')
+    args=parser.parse_args();main(caps=args.caps,reserve=args.reserve,window_access=args.window_access)
