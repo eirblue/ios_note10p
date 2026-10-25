@@ -71,6 +71,17 @@ def main(caps=False):
         report['firmware_makefile_patched_sha256']=hashlib.sha256(firmware_make.read_bytes()).hexdigest()
         if caps:
             import shutil
+            # Samsung normal boot can append skip_initramfs. This diagnostic
+            # must use the supplied TWRP initrd rather than mount Android root.
+            initramfs=source/'init/initramfs.c'
+            initramfs_text=initramfs.read_text()
+            original_skip='\tdo_skip_initramfs = 1;'
+            if initramfs_text.count(original_skip)!=1:
+                raise ValueError('Unexpected pinned skip_initramfs parser')
+            initramfs.write_text(initramfs_text.replace(original_skip,
+                '\tpr_info("N10CAP1: keeping diagnostic initramfs\\n");'))
+            report['diagnostic_preserves_external_initramfs']=True
+            report['initramfs_patched_sha256']=hashlib.sha256(initramfs.read_bytes()).hexdigest()
             driver=Path(__file__).with_name('linux_caps.c')
             target=source/'drivers/misc/note10_handoff_caps.c'
             if target.exists():raise ValueError('Unexpected existing diagnostic source')

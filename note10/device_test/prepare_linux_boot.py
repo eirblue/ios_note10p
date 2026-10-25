@@ -65,6 +65,8 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output):
     build=json.loads((kernel_build/'build-result.json').read_text())
     if build.get('build_passed') is not True or build.get('builtin_cpu_diagnostic') is not True:
         raise ValueError('Successful CPU-diagnostic Linux build required')
+    if build.get('diagnostic_preserves_external_initramfs') is not True:
+        raise ValueError('Diagnostic must preserve external initramfs in normal boot')
     if build.get('source_commit')!=KERNEL_COMMIT or build.get('public_defconfig')!='exynos9820-d2x_defconfig':
         raise ValueError('Unexpected kernel source or target')
     kernel=kernel_build/'Image';data=kernel.read_bytes()
@@ -117,6 +119,9 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output):
     report={'prototype_created':True,'kind':'temporary Linux diagnostic boot; not XNU/iOS',
             'file':str(output),'size':len(packed),'boot_partition_size':len(parts['boot']),
             'sha256':hashlib.sha256(packed).hexdigest(),'kernel_build_sha256':build['image_sha256'],
+            'backup_manifest_sha256':hashlib.sha256((backup/'backup-manifest.json').read_bytes()).hexdigest(),
+            'original_boot_sha256':hashlib.sha256(parts['boot']).hexdigest(),
+            'existing_recovery_partition_sha256':hashlib.sha256(parts['recovery']).hexdigest(),
             'aosp_mkbootimg_sha256':MKBOOTIMG_SHA256,'reference_ramdisk_sha256':hashlib.sha256(ramdisk).hexdigest(),
             'embedded_recovery_dtbo':False,'requires_existing_dtb_dtbo_partitions':True,
             'device_boot_tested':False,'recovery_reentry_verified_after_install':False,

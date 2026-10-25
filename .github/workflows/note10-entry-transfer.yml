@@ -33,6 +33,7 @@ jobs:
           python note10/device_test/test_backup_boot.py
           python note10/device_test/test_linux_caps.py
           python note10/device_test/test_linux_boot.py
+          python note10/device_test/test_boot_test_packages.py
       - uses: actions/upload-artifact@v4
         with:
           name: note10-entry-adapter-research-only
