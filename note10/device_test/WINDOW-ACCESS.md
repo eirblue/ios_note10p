@@ -80,3 +80,14 @@ relocatable memory image, builds the pinned Linux source, and emits a research-o
 artifact. A separate local packaging step is still required to pair the Image
 with this device's private backup and create a BOOT-only manual test/rollback ZIP.
 No workflow step installs, reboots, flashes, or executes XNU on the phone.
+
+## Logs containing several boots
+
+The collector preserves the full raw log. If intact zero-time Linux boot banners
+are present, it requires the last banner to match the exact verified Image banner
+and selects the contiguous suffix beginning there. Selection offsets and SHA256
+are recorded alongside the raw hash. It never searches older boots for a passing
+result. With no intact boundary, it applies the existing strict decoders to the
+whole input. Duplicate sequences within the selected input remain an error, and
+evidence families cannot be assembled from different boot intervals. Corrupted
+characters are not repaired.

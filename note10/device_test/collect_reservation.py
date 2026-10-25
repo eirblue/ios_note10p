@@ -13,6 +13,27 @@ from run_probe import ROOT,Adb,preflight
 from stage_phase2 import verify_packages
 
 
+def select_latest_boot(data,expected_banner):
+    """Select one contiguous boot using an intact zero-time Linux banner.
+
+    Never combine frames across boots or search backwards for a passing boot.
+    With no intact boundary, retain the whole input and its duplicate checks.
+    """
+    headers=list(re.finditer(
+        rb'(?m)^[ \t]*(?:<[0-9]+>)?\[\s*0\.000000\][^\r\n]*?(Linux version [^\r\n]*)',data))
+    offset=0
+    if headers:
+        latest=headers[-1]
+        if latest.group(1)!=expected_banner.encode('ascii'):
+            raise ValueError('Latest intact boot-start banner differs from verified Image')
+        offset=latest.start()
+    selected=data[offset:]
+    return selected,{'method':'latest-intact-zero-time-banner' if headers else 'whole-log-no-intact-boundary',
+                     'intact_boot_start_count':len(headers),'byte_start':offset,'byte_end':len(data),
+                     'selected_sha256':hashlib.sha256(selected).hexdigest(),
+                     'older_pass_fallback':False,'corrupted_bytes_repaired':False}
+
+
 def collect(packages,kernel_build,adb):
     records=verify_packages(packages)
     if {r['file'] for r in records}!={'note10-reservation-diagnostic.zip','note10-reservation-rollback.zip'}:
@@ -68,12 +89,19 @@ def collect(packages,kernel_build,adb):
             'previous_boot_reservation_observed':False,
             'window_access_required':access,'previous_boot_window_access_observed':False,
             'xnu_payload_stage_required':xnu_stage,'previous_boot_xnu_payload_stage_observed':False,
-            'logs_sha256':{n:hashlib.sha256(d).hexdigest() for n,d in logs.items()},'decode_failures':{}}
+            'logs_sha256':{n:hashlib.sha256(d).hexdigest() for n,d in logs.items()},
+            'log_selections':{},'decode_failures':{}}
     for name,data in logs.items():
-        text=data.decode(errors='replace')
-        if evidence_id is None and banner not in text:
-            report['decode_failures'][name]='Exact source build banner not observed';continue
         try:
+            selected,selection=select_latest_boot(data,banner)
+            report['log_selections'][name]=selection
+            if selection['byte_start']:
+                selected_name=name+'.selected-boot.txt'
+                (out/selected_name).write_bytes(selected)
+                selection['selected_file']=selected_name
+            text=selected.decode(errors='replace')
+            if evidence_id is None and banner not in text:
+                raise ValueError('Exact source build banner not observed')
             observation=decode_frames(text,evidence_id) if evidence_id else decode(text)
             report['previous_boot_reservation_observed']=True
             (out/'reservation-observation.json').write_text(json.dumps(observation,indent=2),encoding='utf-8')

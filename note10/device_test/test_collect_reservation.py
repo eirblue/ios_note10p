@@ -66,6 +66,7 @@ class CollectorTests(unittest.TestCase):
                     preflight.assert_not_called();return
                 result=collector.collect(packages,build,adb)
             self.assertEqual(set(result['logs_sha256']),{'last_kmsg.txt'})
+            self.assertEqual((Path(result['directory'])/'last_kmsg.txt').read_bytes(),log.encode())
             self.assertFalse(result['partition_writes']);self.assertFalse(result['rebooted'])
             self.assertFalse(any(call[:2]==('exec-out','cat') and 'pstore' in call[-1] for call in adb.calls))
             return result
@@ -112,6 +113,40 @@ class CollectorTests(unittest.TestCase):
 
     def test_access_without_build_id_refused_before_device_access(self):
         self.run_fixture('',version2=False,access=True)
+
+    def boot_header(self,banner='Linux version 4.14.113-note10-reserve-pc (fixture)'):
+        return '<5>[    0.000000]  [0: swapper: 0] '+banner+'\n'
+
+    def test_merged_boots_use_latest_complete_boundary_preserving_raw(self):
+        first=self.boot_header()+self.frame(0)+self.frame(1)
+        latest=self.boot_header()+self.frame(0)+self.frame(1)
+        result=self.run_fixture(first+latest)
+        self.assertTrue(result['diagnostic_passed'])
+        selected=result['log_selections']['last_kmsg.txt']
+        self.assertEqual(selected['byte_start'],len(first.encode()))
+        self.assertEqual(selected['selected_sha256'],hashlib.sha256(latest.encode()).hexdigest())
+        self.assertFalse(selected['older_pass_fallback'])
+
+    def test_latest_incomplete_boot_cannot_fall_back_to_older_pass(self):
+        first=self.boot_header()+self.frame(0)+self.frame(1)
+        latest=self.boot_header()+self.frame(0)
+        self.assertFalse(self.run_fixture(first+latest)['diagnostic_passed'])
+
+    def test_newer_wrong_banner_refused_even_with_matching_frame_id(self):
+        first=self.boot_header()+self.frame(0)+self.frame(1)
+        latest=self.boot_header('Linux version 4.14.113-note10-reserve-pc (other)')+self.frame(0)+self.frame(1)
+        result=self.run_fixture(first+latest)
+        self.assertFalse(result['diagnostic_passed'])
+        self.assertIn('banner differs',result['decode_failures']['last_kmsg.txt'])
+
+    def test_duplicate_frames_inside_selected_boot_still_refused(self):
+        latest=self.boot_header()+self.frame(0)+self.frame(1)+self.frame(0)
+        self.assertFalse(self.run_fixture(latest)['diagnostic_passed'])
+
+    def test_evidence_families_cannot_be_joined_across_boots(self):
+        first=self.boot_header()+self.frame(0)+self.frame(1)+self.access_frame(0)+self.access_frame(1)
+        latest=self.boot_header()+self.frame(0)+self.frame(1)+self.xnu_frame(0)+self.xnu_frame(1)
+        self.assertFalse(self.run_fixture(first+latest,access=True,xnu_stage=True)['diagnostic_passed'])
 
 
 if __name__=='__main__':unittest.main()
