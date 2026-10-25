@@ -360,3 +360,16 @@ Exynos SoC MASTER 및 플랫폼 archive 입력 분리:
 - 생성한 네 버퍼를 직접 명령 모델에 넣었다. 실제 원본 kernel/adapter와 BSS, ADT 보존 및 첫/끝 매핑을 추가 검증했다. 두 합성 RAM 배치에서 각각 24,999개 명령과 8,250회 kernel store 후 MMU 활성화 전에 정지했다.
 - 실제 빌드 adapter ELF와 bundle 부정 사례를 포함한 새 PC 시험 7개, 기존 boot contract 8개를 통과했다. 실측 CPU capacity 비교도 통과했다. 상세 xnu26/HANDOFF-BUNDLE.md.
 - 실제 RAM 예약이나 kexec backend를 구현한 것은 아니다. PC bundle은 물리 예약/하드웨어 배포 주장을 거부한다. 실제 CPU/DMA/cache/MMU 종료·GIC 인계·XNU 기기 실행·설치용 iOS ROM은 미완료다. 기기 변경은 없다.
+
+## 2026-10-25: XNU용 초기 RAM 예약 진단 커널과 다음 수동 시험 준비
+
+- 별도 Linux 확장에서 기존 kernel/initrd·DT reserved memory·CMA 예약 뒤 memblock free range를 찾아 256MiB/32MiB 정렬 영역을 예약하도록 구현했다. 범위/RAM/기존 예약 검사를 거쳐 late initcall에서 PFN 65,536개의 valid/PageReserved 상태를 기록한다. window 데이터 쓰기·XNU branch는 없다.
+- 외부 TWRP initrd 전달에 의존하지 않도록 자체 static ARM64 PID1과 dev/console만 든 CPIO를 내장했다. CMDLINE_EXTEND/rdinit=/init 및 INITRAMFS_FORCE를 사용한다. 첫 Kconfig 실패 후 실제 의존성을 확인해 수정했다. bootloader 하드웨어 인자는 유지한다.
+- 전체 Linux Image 빌드 성공: https://github.com/eirblue/ios_note10p/actions/runs/40160441675 (`50aca0d`). Image 46,350,348 bytes, SHA-256 `bdfe101c3f6f808415777458f8af6218c5e5f3c5c87e2aa882a3e1d0a6fd7f11`.
+- 다운로드한 실제 Image의 gzip 스트림을 풀어 자체 CPIO와 전체 바이트가 일치함을 확인했다. 실제 PID1 ELF는 PC에서 write→ppoll 반복만 실행했다. 파일 열기·mount·reboot·kexec/XNU 호출은 없다.
+- 높은 합성 PA 및 256MiB 창에서도 생성된 XNU 버퍼를 실제 명령 모델에 넣었다. 추가 사례는 24,807개 명령/8,202회 kernel store 후 MMU 활성화 전에 멈췄다. 기존 두 1GiB 사례도 유지했다. 실제 free RAM 주소 선정의 증거는 아니다.
+- 최신 PC CI 성공: https://github.com/eirblue/ios_note10p/actions/runs/40161149833 (`fed95bd`). 어댑터·단위 검사 99개와 실제 최소 PID1 명령 모델을 통과했다. 실제 기기 RAM 예약은 아직 시험하지 않았다.
+- 외부 ramdisk 없는 BOOT 시험 이미지 46,354,448 bytes를 만들고 별도 reservation 진단/원본 BOOT 복구 ZIP을 생성했다. 원래 보드/OS/패치 월·Samsung 표식을 유지하고 stale AVB footer는 복사하지 않는다.
+- 실제 TWRP의 새 RAM 폴더로 최종 ZIP 2개를 전송하고 네이티브 unzip·셸 구문·원격 해시를 확인했다. 기기 5개 부팅 파티션은 원래 백업과 모두 일치한다. 설치/재부팅은 사용자 직접 조작 단계로 남겼다.
+- 이 BOOT의 최소 PID1에는 TWRP UI/ADB가 없다. 사용자가 System 부팅을 관찰한 뒤 기존 recovery로 돌아오면 로그를 회수한다. decoder는 이전 Linux boot 문맥에만 유효한 예약으로 표시하며, 재부팅 후 그 주소 재사용을 허용하지 않는다.
+- 상세 device_test/RESERVATION.md. 실제 CPU/DMA/cache/MMU 종료·GIC 인계·live load backend·XNU 실행은 여전히 미완료다. Android 정상 복구도 중단된 상태다. 에이전트는 기기 파티션 쓰기·재부팅을 수행하지 않았다.

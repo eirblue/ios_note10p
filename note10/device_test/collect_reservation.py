@@ -49,7 +49,9 @@ def collect(packages,kernel_build,adb):
         (out/'reservation-observation.json').write_text(json.dumps(observation,indent=2),encoding='utf-8')
         report.update(previous_boot_reservation_observed=True,evidence_file=name,
                       idle_init_marker_observed='N10INIT1 IDLE ' in text,
-                      android_root_mount_message_observed='VFS: Mounted root' in text)
+                      android_root_mount_message_observed='VFS: Mounted root' in text,
+                      kernel_panic_observed='Kernel panic' in text,
+                      init_execution_failure_observed='Failed to execute /init' in text or 'No working init found' in text)
         try:
             caps=decode_caps(text)
             (out/'cpu-capabilities.json').write_text(json.dumps(caps,indent=2),encoding='utf-8')
