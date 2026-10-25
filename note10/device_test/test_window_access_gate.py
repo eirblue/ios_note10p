@@ -36,7 +36,7 @@ static int virt_addr_valid(const void *p) {
              (mode == 9 && p == buffer + N10_WINDOW_SIZE / 8 - 1));
 }
 static phys_addr_t virt_to_phys(const void *p) {
-    phys_addr_t address = n10_window_base + (const unsigned char *)p - (const unsigned char *)buffer;
+    phys_addr_t address = n10_window_base + (u64)((const unsigned char *)p - (const unsigned char *)buffer);
     if ((mode == 10 && p == buffer) ||
         (mode == 11 && p == buffer + N10_WINDOW_SIZE / 8 - 1)) address += 8;
     return address;
