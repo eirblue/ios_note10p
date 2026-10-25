@@ -71,6 +71,6 @@ Current source additionally requires CNTFRQ_EL0=26,000,000 and clear CNTKCTL_EL1
 EVENTI selector bits [7:4]. A mismatch returns status 5 before branching to XNU.
 The guard does not reset those registers or quiesce Linux/devices. The actual
 assembly instruction suite now covers 81 cases across three placements.
-uild_transfer.ps1 -OutputDirectory PRIVATE_NEW_DIRECTORY and
-	est_transfer.py --elf PRIVATE_NEW_DIRECTORY/transfer.elf preserve older ELFs
+`build_transfer.ps1 -OutputDirectory PRIVATE_NEW_DIRECTORY` and
+`test_transfer.py --elf PRIVATE_NEW_DIRECTORY/transfer.elf` preserve older ELFs
 and their bundle hashes. Existing diagnostic ZIPs are unchanged.

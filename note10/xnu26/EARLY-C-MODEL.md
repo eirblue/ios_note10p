@@ -57,14 +57,13 @@ python note10/xnu26/test_early_c_entry.py --kernel-build NATIVE_BUILD --adapter 
 
 ## 초기 스레드와 시간 변환 추가 검증 (2026-10-25)
 
-	hread_bootstrap 반환까지 실제 239,922개 명령을 실행했다. 실제 configured ARM64
-헤더를 컴파일한 arly_c_abi.json을 기준으로 thread 전체 1,680바이트가 template 복사에
+`thread_bootstrap` 반환까지 실제 239,922개 명령을 실행했다. 실제 configured ARM64
+헤더를 컴파일한 `early_c_abi.json`을 기준으로 thread 전체 1,680바이트가 template 복사에
 ctid=1,048,575와 priority=95 변경만 더한 결과인지 검사한다. 이 시점의 active=false와
 미할당 CPU 포인터도 검사한다. memcpy의 실제 X0/X1/X2 인자가 목적지/template/1,680과
-일치해야 한다. ABI 재검증 도구는 erify_early_c_abi.py이며 Windows configured 소스가 필요하다.
+일치해야 한다. ABI 재검증 도구는 `verify_early_c_abi.py`이며 Windows configured 소스가 필요하다.
 
-machine_set_current_thread, cpu_bootstrap, 
-tclock_early_init 및 실제 timebase_callback
+`machine_set_current_thread`, `cpu_bootstrap`, `rtclock_early_init` 및 실제 timebase_callback
 이후, kernel_startup_bootstrap 호출 직전까지 240,463개 명령을 실행했다. thread의
 CpuDatap과 CPU의 active-thread backpointer, TPIDR_EL1 및 preemption_count=0을 검사한다.
 26MHz 입력에서 실제 RTClockData 결과는 초 divisor=26,000,000, 마이크로초 divisor=26,
