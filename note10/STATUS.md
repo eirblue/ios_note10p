@@ -419,4 +419,5 @@ Exynos SoC MASTER 및 플랫폼 archive 입력 분리:
 - 실제 adapter/XNU entry의 DAIFSet 효과를 상태에 반영하고, 정상 시험은 별도 DAIF 성공값을 주입하지 않는다. 반복 명령 해석만 주소+실제 opcode로 캐시하며 모든 fetch·메모리 접근 검사는 유지한다.
 - 별도 VM 본문 탐색에서 실제 no-random-seed panic을 확인했고, 공개된 PC 전용 시드로 256바이트 복사와 ADT의 정확한 삭제 경계를 검사했다. entropy 품질이나 후속 PRNG/VM 초기화 완료를 검증한 것은 아니다. 하드웨어 시드 준비 상태는 false다.
 - 시드 실제 명령 시험은 정상 복사/삭제, 누락 시 실제 panic, 전부 0인 입력의 실제 반환 0을 통과했다. 전부 0인 사례는 PE callback 반환에서 거부하며 후속 caller panic은 실행하지 않았다. 별도 경계/손상 fixture 검사 5개도 통과했다. CI는 entry/VM/seed 세 작업이 독립 배치를 구성해 병렬 실행하도록 분리했다.
+- 세 병렬 CI 작업 모두 성공했다: https://github.com/eirblue/ios_note10p/actions/runs/40176478650 (`cdf4924`). 기존 진입 회귀와 CPU/DRAM 정상·누락 경로, 시드 복사/삭제·누락·zero 입력 검사를 함께 확인했다. 이 결과는 PC 모델 검증이며 실제 XNU 부팅 증거가 아니다.
 - ADB 연결 목록이 비어 있어 기기 파티션 재검사·예약 v2 RAM 전송·수동 설치 시험은 진행하지 못했다. 기존 진단/복구 ZIP은 유지한다. 설치 가능한 XNU/iOS ROM이나 실기기 XNU 부팅 성공은 아직 없다.

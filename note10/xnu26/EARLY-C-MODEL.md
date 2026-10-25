@@ -135,3 +135,7 @@ VM 본문 일부에 진입했지만 VM 초기화 완료나 실제 하드웨어 �
 python note10/xnu26/test_seed_fixture.py
 python note10/xnu26/test_seed_entry.py --kernel-build NATIVE_BUILD --adapter TIMER_ADAPTER_ELF --output PRIVATE_NEW_SEED_DIRECTORY
 ```
+
+진입·VM·시드 세 독립 작업의 CI가 모두 통과했다:
+https://github.com/eirblue/ios_note10p/actions/runs/40176478650 (`cdf4924`).
+로컬 및 CI 모두 기기 설치·재부팅·파티션 쓰기를 수행하지 않았다.
