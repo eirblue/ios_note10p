@@ -27,6 +27,10 @@ on:
         description: Offline/restore secondary CPUs, maintain caches and compare per-CPU payload reads; requires xnu_stage
         type: boolean
         default: false
+      pm_timer:
+        description: Devices-only suspend/resume test and restored per-CPU timer normalization; requires cpu_cache
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -57,7 +61,15 @@ jobs:
           NOTE10_WINDOW_ACCESS: ${{ inputs.window_access }}
           NOTE10_XNU_STAGE: ${{ inputs.xnu_stage }}
           NOTE10_CPU_CACHE: ${{ inputs.cpu_cache }}
+          NOTE10_PM_TIMER: ${{ inputs.pm_timer }}
         run: |
+          if [ "$NOTE10_PM_TIMER" = true ] && [ "$NOTE10_CPU_CACHE" != true ]; then
+            echo "pm_timer requires cpu_cache=true" >&2
+            exit 2
+          fi
+          if [ "$NOTE10_PM_TIMER" = true ]; then
+            python note10/device_test/test_pm_timer_contract.py --report note10/private/handoff-kernel/pm-source-model.json
+          fi
           if [ "$NOTE10_CPU_CACHE" = true ] && [ "$NOTE10_XNU_STAGE" != true ]; then
             echo "cpu_cache requires xnu_stage=true" >&2
             exit 2
@@ -101,6 +113,7 @@ jobs:
         if: inputs.xnu_stage
         env:
           NOTE10_CPU_CACHE: ${{ inputs.cpu_cache }}
+          NOTE10_PM_TIMER: ${{ inputs.pm_timer }}
         run: |
           count="$(find note10/private/xnu-input -name note10-experimental.macho -type f | wc -l)"
           [ "$count" -eq 1 ]
@@ -110,6 +123,10 @@ jobs:
           if [ "$NOTE10_CPU_CACHE" = true ]; then
             python note10/device_test/test_cpu_cache_native.py --payload note10/private/xnu-stage-payload/kernel.mem --output note10/private/handoff-kernel/cpu-cache-model
             EXTRA+=(--cpu-cache)
+          fi
+          if [ "$NOTE10_PM_TIMER" = true ]; then
+            python note10/device_test/test_pm_timer_native.py --payload note10/private/xnu-stage-payload/kernel.mem --cpu-model note10/private/handoff-kernel/cpu-cache-model --output note10/private/handoff-kernel/pm-timer-model
+            EXTRA+=(--pm-timer)
           fi
           python note10/device_test/build_handoff_kernel.py --caps --reserve --window-access \
             --xnu-payload note10/private/xnu-stage-payload/kernel.mem \
@@ -129,5 +146,9 @@ jobs:
             note10/private/handoff-kernel/initramfs.cpio
             note10/private/handoff-kernel/cpu-cache-model/result.json
             note10/private/handoff-kernel/cpu-cache-model/compile.log
+            note10/private/handoff-kernel/cpu-cache-model/mode-0.txt
+            note10/private/handoff-kernel/pm-timer-model/result.json
+            note10/private/handoff-kernel/pm-timer-model/compile.log
+            note10/private/handoff-kernel/pm-source-model.json
             note10/private/window-access-core-ci/result.json
             note10/private/window-access-gate-ci/result.json

@@ -135,6 +135,10 @@ unzip() { "$TEST_PYTHON" -c 'import zipfile,sys;sys.stdout.buffer.write(zipfile.
                       window_access=True,xnu_stage=True,cpu_cache=True).decode()
         self.assertIn('Temporarily offlines secondary CPUs',batch)
         self.assertIn('No DMA/MMU shutdown or XNU branch.',batch)
+        pm=updater(mode='diagnostic',bootloader='N976NTEST',partitions=records,
+                   payload_sha='b'*64,current_boot_sha='c'*64,reservation=True,
+                   window_access=True,xnu_stage=True,cpu_cache=True,pm_timer=True).decode()
+        self.assertIn('Low-level sleep is blocked.',pm)
         with self.assertRaisesRegex(ValueError,'XNU staging'):
             updater(mode='diagnostic',bootloader='N976NKSU2HWH5',partitions=records,
                     payload_sha='b'*64,current_boot_sha='c'*64,reservation=True,xnu_stage=True)

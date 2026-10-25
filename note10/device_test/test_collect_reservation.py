@@ -43,7 +43,7 @@ class CollectorTests(unittest.TestCase):
               f'sha256={"a"*64} status=0')
         return f'N10XNU1 {body} checksum={checksum(body.encode()):08x}\n'
 
-    def run_fixture(self,log,*,version2=True,missing_image_id=False,access=False,xnu_stage=False,cpu_cache=False):
+    def run_fixture(self,log,*,version2=True,missing_image_id=False,access=False,xnu_stage=False,cpu_cache=False,pm_timer=False):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);build=root/'build';build.mkdir();packages=root/'packages';packages.mkdir()
             image=b'Linux version 4.14.113-note10-reserve-pc (fixture)\0'
@@ -54,10 +54,11 @@ class CollectorTests(unittest.TestCase):
             if access:report.update(window_access_diagnostic=True,window_access_evidence_version=1)
             if xnu_stage:report.update(xnu_payload_stage_diagnostic=True,xnu_payload_size=16384,xnu_payload_sha256='a'*64)
             if cpu_cache:report.update(cpu_cache_roundtrip_diagnostic=True,cpu_cache_evidence_version=1)
+            if pm_timer:report.update(pm_timer_diagnostic=True,pm_timer_evidence_version=1)
             (build/'build-result.json').write_text(json.dumps(report))
             (packages/'package-result.json').write_text(json.dumps({'kernel_image_sha256':digest,
                 'window_access_diagnostic':access,'xnu_payload_stage_diagnostic':xnu_stage,
-                'cpu_cache_roundtrip_diagnostic':cpu_cache,
+                'cpu_cache_roundtrip_diagnostic':cpu_cache,'pm_timer_diagnostic':pm_timer,
                 'xnu_payload_size':16384 if xnu_stage else None,'xnu_payload_sha256':'a'*64 if xnu_stage else None}))
             records=[{'file':'note10-reservation-'+kind+'.zip'} for kind in ('diagnostic','rollback')]
             adb=FakeAdb(log.encode())
@@ -159,6 +160,35 @@ class CollectorTests(unittest.TestCase):
         result=self.run_fixture(text+summary(0)+summary(1)+snapshots(),access=True,xnu_stage=True,cpu_cache=True)
         self.assertTrue(result['diagnostic_passed'])
         self.assertTrue(result['previous_boot_cpu_cache_roundtrip_observed'])
+
+    def test_pm_scope_requires_its_own_complete_chain(self):
+        from test_cpu_cache_decode import summary,snapshots
+        from test_pm_timer_contract import pm,timers
+        text=self.frame(0)+self.frame(1)+self.access_frame(0)+self.access_frame(1)+self.xnu_frame(0)+self.xnu_frame(1)
+        text+=summary(0)+summary(1)+snapshots()
+        result=self.run_fixture(text,access=True,xnu_stage=True,cpu_cache=True,pm_timer=True)
+        self.assertTrue(result['previous_boot_cpu_cache_roundtrip_observed'])
+        self.assertFalse(result['diagnostic_passed'])
+        result=self.run_fixture(text+pm(0)+pm(1)+timers(),access=True,xnu_stage=True,cpu_cache=True,pm_timer=True)
+        self.assertTrue(result['diagnostic_passed'])
+        self.assertTrue(result['previous_boot_pm_timer_observed'])
+
+    def test_damaged_start_banner_needs_exact_in_interval_panic_banner_and_id(self):
+        start=self.boot_header('Linux version 4.14.113-note10-reserve+pc (fixture)')
+        exact='<0>[  123.000000] I[0:swapper:0] linux_banner: Linux version 4.14.113-note10-reserve-pc (fixture)\n'
+        log=start+self.frame(0)+self.frame(1)+exact
+        result=self.run_fixture(log)
+        self.assertTrue(result['diagnostic_passed'])
+        self.assertTrue(result['log_selections']['last_kmsg.txt']['exact_panic_banner_corroboration'])
+        self.assertFalse(result['log_selections']['last_kmsg.txt']['start_banner_matches_image'])
+        self.assertFalse(self.run_fixture(log.replace(exact,exact.replace('(fixture)','(other)')))['diagnostic_passed'])
+        self.assertFalse(self.run_fixture(start+exact)['diagnostic_passed'])
+
+    def test_old_panic_banner_cannot_corroborate_new_boot(self):
+        old=self.boot_header()+self.frame(0)+self.frame(1)
+        old+='<0>[  123.000000] I[0:swapper:0] linux_banner: Linux version 4.14.113-note10-reserve-pc (fixture)\n'
+        latest=self.boot_header('Linux version other')+self.frame(0)+self.frame(1)
+        self.assertFalse(self.run_fixture(old+latest)['diagnostic_passed'])
 
 
 if __name__=='__main__':unittest.main()

@@ -68,7 +68,7 @@ static void n10_sample_cpu(void *memory)
     ++sample->seen;
 }
 
-static void n10_test_cpu_cache(void)
+static unsigned int n10_test_cpu_cache(void)
 {
     const size_t length = N10_XNU_PAYLOAD_SIZE;
     const size_t words = N10_XNU_PAYLOAD_SIZE / sizeof(u64);
@@ -169,7 +169,7 @@ report:
         pr_info("N10QUI1 %s checksum=%08x\n", frame, n10_frame_checksum(frame, count));
     }
     if (status)
-        return;
+        return status;
     for (cpu = 0; cpu < 8; ++cpu) {
         struct n10_cpu_sample *sample = &n10_cpu_samples[cpu];
         for (sequence = 0; sequence < 8; ++sequence) {
@@ -184,4 +184,5 @@ report:
             pr_info("N10CPU2 %s checksum=%08x\n", frame, n10_frame_checksum(frame, count));
         }
     }
+    return 0;
 }

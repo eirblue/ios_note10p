@@ -52,10 +52,11 @@ def cpio(init, xnu_payload=None):
     return bytes(output)
 
 
-def prepare(source,output,run,window_access=False,xnu_payload=None,xnu_manifest=None,cpu_cache=False):
+def prepare(source,output,run,window_access=False,xnu_payload=None,xnu_manifest=None,cpu_cache=False,pm_timer=False):
     here=Path(__file__).resolve().parent
     if cpu_cache and xnu_payload is None:
         raise ValueError('CPU/cache roundtrip requires verified XNU payload staging')
+    if pm_timer and not cpu_cache:raise ValueError('PM/timer diagnostic requires CPU/cache batch')
     if (xnu_payload is None)!=(xnu_manifest is None):
         raise ValueError('XNU stage payload and manifest must be supplied together')
     if xnu_payload is not None and not window_access:
@@ -107,9 +108,9 @@ def prepare(source,output,run,window_access=False,xnu_payload=None,xnu_manifest=
         digest_bytes=','.join('0x'+digest[i:i+2] for i in range(0,64,2))
         generated.write_text('#define N10_XNU_PAYLOAD_SIZE '+str(len(payload))+'ULL\n'+
                              '#define N10_XNU_PAYLOAD_SHA256_BYTES {'+digest_bytes+'}\n',encoding='ascii')
-        source=path.with_name('note10_xnu_payload_stage.c')
-        if source.exists():raise ValueError('Unexpected existing XNU stage extension')
-        source.write_bytes((here/'xnu_payload_stage.c').read_bytes())
+        stage_source=path.with_name('note10_xnu_payload_stage.c')
+        if stage_source.exists():raise ValueError('Unexpected existing XNU stage extension')
+        stage_source.write_bytes((here/'xnu_payload_stage.c').read_bytes())
         include=b'#include "note10_xnu_payload_stage.c"\n'
         stage_call=b'    n10_stage_xnu_payload(reserved, count, invalid);\n'
         marker=b'    /* Reserved pages remain excluded from Linux'
@@ -141,6 +142,15 @@ def prepare(source,output,run,window_access=False,xnu_payload=None,xnu_manifest=
             b'    if (n10_stage_xnu_payload(reserved, count, invalid))\n        return 0;\n    n10_test_cpu_cache();\n')
         access_report.update(cpu_cache_roundtrip_diagnostic=True,cpu_cache_evidence_version=1,
             cpu_cache_source_sha256=hashlib.sha256(cache_source.read_bytes()).hexdigest())
+    if pm_timer:
+        from prepare_pm_diagnostic import prepare as prepare_pm
+        access_report.update(prepare_pm(source))
+        path.with_name('note10_pm_timer_roundtrip.c').write_bytes((here/'pm_timer_roundtrip.c').read_bytes())
+        include=b'#include "note10_cpu_cache_roundtrip.c"\n'
+        extension=extension.replace(include,include+b'#include "note10_pm_timer_roundtrip.c"\n')
+        call_cpu=b'    n10_test_cpu_cache();\n'
+        if extension.count(call_cpu)!=1:raise ValueError('Unexpected CPU/cache prerequisite insertion')
+        extension=extension.replace(call_cpu,b'    if (n10_test_cpu_cache())\n        return 0;\n    n10_start_pm_timer();\n')
     evidence_id=uuid.uuid4().hex
     target.write_bytes(('#define N10_RESERVE_BUILD_ID "'+evidence_id+'"\n').encode()+extension)
     text=text.replace(declaration,'#include "note10_xnu_reserve.c"\n\n'+declaration)

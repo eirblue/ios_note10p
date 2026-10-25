@@ -9,12 +9,13 @@ from decode_reservation import decode,decode_frames
 from decode_window_access import decode as decode_access
 from decode_xnu_stage import decode as decode_xnu_stage
 from decode_cpu_cache import decode as decode_cpu_cache
+from decode_pm_timer import decode as decode_pm_timer
 from decode_linux_caps import decode as decode_caps
 from run_probe import ROOT,Adb,preflight
 from stage_phase2 import verify_packages
 
 
-def select_latest_boot(data,expected_banner):
+def select_latest_boot(data,expected_banner,allow_panic_corroboration=False):
     """Select one contiguous boot using an intact zero-time Linux banner.
 
     Never combine frames across boots or search backwards for a passing boot.
@@ -22,15 +23,21 @@ def select_latest_boot(data,expected_banner):
     """
     headers=list(re.finditer(
         rb'(?m)^[ \t]*(?:<[0-9]+>)?\[\s*0\.000000\][^\r\n]*?(Linux version [^\r\n]*)',data))
-    offset=0
+    offset=0;corroborated=False
     if headers:
         latest=headers[-1]
         if latest.group(1)!=expected_banner.encode('ascii'):
-            raise ValueError('Latest intact boot-start banner differs from verified Image')
+            panic_banners=re.findall(rb'(?m)^<[0-9]+>\[\s*[0-9]+\.[0-9]+\][^\r\n]* linux_banner: (Linux version [^\r\n]*)',data[latest.start():])
+            if (not allow_panic_corroboration or not panic_banners or
+                any(value!=expected_banner.encode('ascii') for value in panic_banners)):
+                raise ValueError('Latest intact boot-start banner differs from verified Image')
+            corroborated=True
         offset=latest.start()
     selected=data[offset:]
     return selected,{'method':'latest-intact-zero-time-banner' if headers else 'whole-log-no-intact-boundary',
                      'intact_boot_start_count':len(headers),'byte_start':offset,'byte_end':len(data),
+                     'start_banner_matches_image':not corroborated if headers else None,
+                     'exact_panic_banner_corroboration':corroborated,
                      'selected_sha256':hashlib.sha256(selected).hexdigest(),
                      'older_pass_fallback':False,'corrupted_bytes_repaired':False}
 
@@ -50,6 +57,8 @@ def collect(packages,kernel_build,adb):
     access=result.get('window_access_diagnostic') is True
     xnu_stage=result.get('xnu_payload_stage_diagnostic') is True
     cpu_cache=result.get('cpu_cache_roundtrip_diagnostic') is True
+    pm_timer=result.get('pm_timer_diagnostic') is True
+    if pm_timer and (not cpu_cache or result.get('pm_timer_evidence_version')!=1):raise ValueError('Invalid PM/timer batch contract')
     if cpu_cache and not xnu_stage:raise ValueError('CPU/cache batch requires XNU staging')
     if cpu_cache and result.get('cpu_cache_evidence_version')!=1:raise ValueError('Unsupported CPU/cache evidence version')
     if xnu_stage and not access:raise ValueError('XNU staging requires the verified window-access diagnostic')
@@ -61,6 +70,7 @@ def collect(packages,kernel_build,adb):
         raise ValueError('Diagnostic package scope differs from this kernel build')
     if (paired.get('cpu_cache_roundtrip_diagnostic') is True)!=cpu_cache:
         raise ValueError('CPU/cache package and kernel scope differ')
+    if (paired.get('pm_timer_diagnostic') is True)!=pm_timer:raise ValueError('PM/timer package and kernel scope differ')
     if xnu_stage and (paired.get('xnu_payload_sha256')!=result.get('xnu_payload_sha256') or
                       paired.get('xnu_payload_size')!=result.get('xnu_payload_size')):
         raise ValueError('XNU payload package and kernel build differ')
@@ -96,11 +106,12 @@ def collect(packages,kernel_build,adb):
             'window_access_required':access,'previous_boot_window_access_observed':False,
             'xnu_payload_stage_required':xnu_stage,'previous_boot_xnu_payload_stage_observed':False,
             'cpu_cache_roundtrip_required':cpu_cache,'previous_boot_cpu_cache_roundtrip_observed':False,
+            'pm_timer_required':pm_timer,'previous_boot_pm_timer_observed':False,
             'logs_sha256':{n:hashlib.sha256(d).hexdigest() for n,d in logs.items()},
             'log_selections':{},'decode_failures':{}}
     for name,data in logs.items():
         try:
-            selected,selection=select_latest_boot(data,banner)
+            selected,selection=select_latest_boot(data,banner,allow_panic_corroboration=evidence_id is not None)
             report['log_selections'][name]=selection
             if selection['byte_start']:
                 selected_name=name+'.selected-boot.txt'
@@ -127,6 +138,9 @@ def collect(packages,kernel_build,adb):
                 cpu_observation=decode_cpu_cache(text,evidence_id,result['xnu_payload_sha256'],result['xnu_payload_size'])
                 report['previous_boot_cpu_cache_roundtrip_observed']=True
                 observation['cpu_cache_roundtrip']=cpu_observation
+            if pm_timer:
+                observation['pm_timer']=decode_pm_timer(text,evidence_id,result['xnu_payload_sha256'],result['xnu_payload_size'])
+                report['previous_boot_pm_timer_observed']=True
         except ValueError as error:
             report['decode_failures'][name]=str(error);continue
         (out/'reservation-observation.json').write_text(json.dumps(observation,indent=2),encoding='utf-8')
@@ -144,7 +158,8 @@ def collect(packages,kernel_build,adb):
     report['diagnostic_passed']=(report['previous_boot_reservation_observed'] and
                                  (not access or report['previous_boot_window_access_observed']) and
                                  (not xnu_stage or report['previous_boot_xnu_payload_stage_observed']) and
-                                 (not cpu_cache or report['previous_boot_cpu_cache_roundtrip_observed']))
+                                 (not cpu_cache or report['previous_boot_cpu_cache_roundtrip_observed']) and
+                                 (not pm_timer or report['previous_boot_pm_timer_observed']))
     (out/'capture-result.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
     return report
 

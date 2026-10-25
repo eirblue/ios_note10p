@@ -20,7 +20,7 @@ REPOSITORY = 'corsicanu/android_kernel_samsung_universal9820'
 OUT = ROOT / 'note10/private/handoff-kernel'
 
 
-def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manifest=None,cpu_cache=False):
+def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manifest=None,cpu_cache=False,pm_timer=False):
     if not sys.platform.startswith('linux'): raise RuntimeError('Linux CI host required')
     if os.environ.get('PLATFORM_VERSION')!='11' or os.environ.get('ANDROID_MAJOR_VERSION')!='r':
         raise ValueError('Pinned Samsung build requires PLATFORM_VERSION=11 and ANDROID_MAJOR_VERSION=r')
@@ -29,6 +29,7 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
     if (xnu_payload is None)!=(xnu_manifest is None):raise ValueError('XNU payload and manifest must be paired')
     if xnu_payload is not None and not window_access:raise ValueError('XNU staging requires the opt-in window diagnostic')
     if cpu_cache and xnu_payload is None:raise ValueError('CPU/cache roundtrip requires XNU data staging')
+    if pm_timer and not cpu_cache:raise ValueError('PM/timer requires CPU/cache batch')
     OUT.mkdir(parents=True,exist_ok=True)
     report = {'source_repository':REPOSITORY,'source_commit':COMMIT,
               'platform_version':os.environ['PLATFORM_VERSION'],
@@ -102,7 +103,7 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
         if reserve:
             from prepare_reservation_kernel import prepare
             report.update(prepare(source,OUT,run,window_access=window_access,
-                                  xnu_payload=xnu_payload,xnu_manifest=xnu_manifest,cpu_cache=cpu_cache))
+                                  xnu_payload=xnu_payload,xnu_manifest=xnu_manifest,cpu_cache=cpu_cache,pm_timer=pm_timer))
             if window_access:report['scope']='Linux same-boot reserved RAM pattern/readback diagnostic; no XNU branch'
             if xnu_payload is not None:
                 report['scope']='Experimental XNU memory-image data staging and SHA256 readback in this boot reservation; no XNU branch'
@@ -138,6 +139,7 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
         if reserve:required+=('CONFIG_INITRAMFS_FORCE=y','CONFIG_CMDLINE_EXTEND=y','CONFIG_CMDLINE="rdinit=/init"')
         if xnu_payload is not None:required+=('CONFIG_CRYPTO=y','CONFIG_CRYPTO_HASH=y','CONFIG_CRYPTO_SHA256=y')
         if cpu_cache:required+=('CONFIG_HOTPLUG_CPU=y','CONFIG_SMP=y','CONFIG_PM_SLEEP_SMP=y')
+        if pm_timer:required+=('CONFIG_SUSPEND=y','CONFIG_PM_SLEEP_DEBUG=y','CONFIG_PM_DEBUG=y')
         missing=[line for line in required if line not in configured.splitlines()]
         if missing:raise ValueError('Required Kconfig options missing: '+', '.join(missing))
         report['effective_config_sha256']=hashlib.sha256(config.read_bytes()).hexdigest()
@@ -164,6 +166,8 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             if b'N10XNU1' not in target.read_bytes():raise ValueError('XNU stage evidence marker missing from Linux Image')
         if cpu_cache and any(marker not in target.read_bytes() for marker in (b'N10QUI1',b'N10CPU2')):
             raise ValueError('CPU/cache evidence markers missing from Linux Image')
+        if pm_timer and any(marker not in target.read_bytes() for marker in (b'N10PMT1',b'N10TMR1')):
+            raise ValueError('PM/timer evidence markers missing from Linux Image')
         report.update(build_passed=True,image_size=target.stat().st_size,
                       image_sha256=hashlib.file_digest(target.open('rb'),'sha256').hexdigest(),
                       arm64_text_offset=hex(text_offset),arm64_header_image_size=image_size,arm64_flags=hex(flags))
@@ -185,5 +189,6 @@ if __name__=='__main__':
     parser.add_argument('--xnu-payload',type=Path,help='Verified experimental XNU kernel.mem for data-only RAM staging')
     parser.add_argument('--xnu-payload-manifest',type=Path,help='Hash-bound manifest from materialize_stage_payload.py')
     parser.add_argument('--cpu-cache',action='store_true',help='Opt-in CPU offline/online, cache maintenance and per-CPU payload reads')
+    parser.add_argument('--pm-timer',action='store_true',help='Devices-only PM test and restored per-CPU event-stream normalization')
     args=parser.parse_args();main(caps=args.caps,reserve=args.reserve,window_access=args.window_access,
-                                  xnu_payload=args.xnu_payload,xnu_manifest=args.xnu_payload_manifest,cpu_cache=args.cpu_cache)
+                                  xnu_payload=args.xnu_payload,xnu_manifest=args.xnu_payload_manifest,cpu_cache=args.cpu_cache,pm_timer=args.pm_timer)

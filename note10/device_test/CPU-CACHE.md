@@ -46,3 +46,16 @@ A private manual diagnostic/rollback pair has been prepared against the current
 v4 BOOT baseline and passed RAM ZIP, native updater syntax and partition hash
 checks. Physical CPU offline/restore and coherence results remain pending the
 human-triggered v5 test.
+
+## v5 device result (2026-10-26)
+
+The manual v5 test passed reservation, full RAM write/read/scrub, XNU data
+staging and CPU/cache evidence in one latest boot interval. CPU online masks
+were ff -> 1 -> ff; all eight CPUs returned matching complete-payload read
+fingerprints. Payload SHA256 remained unchanged. BOOT matched the diagnostic
+and the other four monitored partitions matched their originals. The intact
+panic banner corroborated a damaged start banner in the same interval; only
+original checksummed build-bound frames were accepted. Legacy init/CPU records
+remain unproven. This does not establish DMA shutdown or XNU execution.
+
+The next batch is [devices-only PM and timer restoration](PM-TIMER.md).
