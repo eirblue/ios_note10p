@@ -24,6 +24,13 @@ def verify_packages(directory):
                 raise ValueError('Invalid/duplicate archive members')
             meta=json.loads(archive.read('manifest.json'))
             if meta['writes']!=['boot'] or meta['automatic_reboot'] is not False:raise ValueError('Unexpected installer scope')
+            if meta.get('xnu_payload_stage_diagnostic') is True and (
+                meta.get('window_access_diagnostic') is not True or meta.get('test_purpose')!='xnu-payload-stage' or
+                not re.fullmatch(r'[0-9a-f]{64}',meta.get('xnu_payload_sha256','')) or
+                type(meta.get('xnu_payload_size')) is not int):
+                raise ValueError('Incomplete XNU data-stage package contract')
+            if meta.get('mode')=='rollback' and meta.get('xnu_payload_stage_diagnostic',False) is not False:
+                raise ValueError('Rollback package cannot claim XNU staging')
             if hashlib.sha256(archive.read('META-INF/com/google/android/update-binary')).hexdigest()!=meta['updater_sha256']:
                 raise ValueError('Updater integrity mismatch')
             if hashlib.sha256(archive.read('boot.img')).hexdigest()!=meta['payload_sha256']:

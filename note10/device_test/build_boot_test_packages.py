@@ -12,8 +12,9 @@ import zipfile
 from prepare_linux_boot import ROOT, read_verified_backup
 
 
-def updater(*, mode, bootloader, partitions, payload_sha, current_boot_sha,reservation=False,window_access=False):
+def updater(*, mode, bootloader, partitions, payload_sha, current_boot_sha,reservation=False,window_access=False,xnu_stage=False):
     if window_access and not reservation:raise ValueError('RAM access requires the reservation diagnostic')
+    if xnu_stage and not window_access:raise ValueError('XNU staging requires the RAM access diagnostic')
     if mode not in ('diagnostic','rollback') or not re.fullmatch(r'N976N[A-Z0-9]+',bootloader):
         raise ValueError('Unexpected package mode or bootloader')
     if not re.fullmatch(r'[0-9a-f]{64}',payload_sha) or not re.fullmatch(r'[0-9a-f]{64}',current_boot_sha):
@@ -51,6 +52,8 @@ case "$(getprop ro.product.device)" in d2x|d2xks) ;; *) abort "Expected d2x" ;; 
         script+='ui "RAM reservation test with built-in idle init: no TWRP UI or ADB after System boot."\n'
     if mode=='diagnostic' and window_access:
         script+='ui "Writes patterns to 256MiB of this boot\'s checked reserved RAM, reads back and clears it. No XNU branch."\n'
+    if mode=='diagnostic' and xnu_stage:
+        script+='ui "Copies an experimental XNU memory image into this boot\'s reserved RAM and verifies SHA256 readback. It does not execute XNU."\n'
     for item in partitions:
         name=item['partition'];node=item['block_node']
         script+='[ "$(readlink -f /dev/block/by-name/'+name+')" = "'+node+'" ] || abort "Unexpected '+name+' block node"\n'
@@ -107,6 +110,12 @@ def build(backup,prototype,output,current_packages=None):
         current_boot=candidates[0]['payload_sha256']
     reservation=metadata.get('early_xnu_reservation') is True
     window_access=metadata.get('window_access_diagnostic') is True
+    xnu_stage=metadata.get('xnu_payload_stage_diagnostic') is True
+    xnu_sha=metadata.get('xnu_payload_sha256') if xnu_stage else None
+    xnu_size=metadata.get('xnu_payload_size') if xnu_stage else None
+    if xnu_stage and (not window_access or not re.fullmatch(r'[0-9a-f]{64}',metadata.get('xnu_payload_sha256','')) or
+                      type(metadata.get('xnu_payload_size')) is not int):
+        raise ValueError('XNU payload staging metadata is incomplete')
     if window_access and not reservation:raise ValueError('RAM access requires reserved RAM and idle init')
     if reservation and metadata.get('builtin_idle_init') is not True:raise ValueError('Reservation test needs built-in idle init')
     padded=raw+bytes(len(parts['boot'])-len(raw))
@@ -117,17 +126,25 @@ def build(backup,prototype,output,current_packages=None):
             'backup_manifest_sha256':metadata['backup_manifest_sha256'],
             'expected_current_boot_sha256':current_boot,
             'window_access_diagnostic':window_access,
+            'xnu_payload_stage_diagnostic':xnu_stage,
+            'xnu_payload_sha256':metadata.get('xnu_payload_sha256') if xnu_stage else None,
+            'xnu_payload_size':metadata.get('xnu_payload_size') if xnu_stage else None,
             'builder_device_operations':[],'device_boot_tested':False,'deployment_ready':False,'packages':[]}
     for mode,payload in (('diagnostic',padded),('rollback',parts['boot'])):
         digest=hashlib.sha256(payload).hexdigest()
         script=updater(mode=mode,bootloader=manifest['bootloader'],partitions=manifest['partitions'],
-                       payload_sha=digest,current_boot_sha=current_boot,reservation=reservation,window_access=window_access)
+                       payload_sha=digest,current_boot_sha=current_boot,reservation=reservation,
+                       window_access=window_access,xnu_stage=xnu_stage and mode=='diagnostic')
         metadata={'mode':mode,'writes':['boot'],'payload_sha256':digest,'payload_size':len(payload),
                   'updater_sha256':hashlib.sha256(script).hexdigest(),
                   'preserves_on_disk':['recovery','dtb','dtbo','vbmeta'],'automatic_reboot':False,
                   'recovery_reentry_guaranteed':False,'scope':'Human-triggered TWRP install only; not executed by builder'}
-        metadata['test_purpose']='ram-window-access' if window_access else ('ram-reservation' if reservation else 'cpu-caps')
+        metadata['test_purpose']=('xnu-payload-stage' if xnu_stage and mode=='diagnostic' else
+                                  ('ram-window-access' if window_access else ('ram-reservation' if reservation else 'cpu-caps')))
         metadata['window_access_diagnostic']=window_access and mode=='diagnostic'
+        metadata['xnu_payload_stage_diagnostic']=xnu_stage and mode=='diagnostic'
+        metadata['xnu_payload_sha256']=xnu_sha if xnu_stage and mode=='diagnostic' else None
+        metadata['xnu_payload_size']=xnu_size if xnu_stage and mode=='diagnostic' else None
         target=output/(('note10-reservation-' if reservation else 'note10-phase2-')+mode+'.zip')
         files={'META-INF/com/google/android/update-binary':script,
                'META-INF/com/google/android/updater-script':b'# BOOT-only manual test/rollback\n',

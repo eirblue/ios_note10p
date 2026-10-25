@@ -20,10 +20,12 @@ REPOSITORY = 'corsicanu/android_kernel_samsung_universal9820'
 OUT = ROOT / 'note10/private/handoff-kernel'
 
 
-def main(caps=False,reserve=False,window_access=False):
+def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manifest=None):
     if not sys.platform.startswith('linux'): raise RuntimeError('Linux CI host required')
     if reserve and not caps:raise ValueError('Reservation diagnostic requires caps/initramfs handling')
     if window_access and not reserve:raise ValueError('Window access requires the same-boot reservation diagnostic')
+    if (xnu_payload is None)!=(xnu_manifest is None):raise ValueError('XNU payload and manifest must be paired')
+    if xnu_payload is not None and not window_access:raise ValueError('XNU staging requires the opt-in window diagnostic')
     OUT.mkdir(parents=True,exist_ok=True)
     report = {'source_repository':REPOSITORY,'source_commit':COMMIT,
               'public_defconfig':'exynos9820-d2x_defconfig','build_passed':False,
@@ -94,8 +96,11 @@ def main(caps=False,reserve=False,window_access=False):
         defconfig=source/'arch/arm64/configs/exynos9820-d2x_defconfig'
         if reserve:
             from prepare_reservation_kernel import prepare
-            report.update(prepare(source,OUT,run,window_access=window_access))
+            report.update(prepare(source,OUT,run,window_access=window_access,
+                                  xnu_payload=xnu_payload,xnu_manifest=xnu_manifest))
             if window_access:report['scope']='Linux same-boot reserved RAM pattern/readback diagnostic; no XNU branch'
+            if xnu_payload is not None:
+                report['scope']='Experimental XNU memory-image data staging and SHA256 readback in this boot reservation; no XNU branch'
         report['public_defconfig_sha256']=hashlib.sha256(defconfig.read_bytes()).hexdigest()
         make=['make','-C',str(source),'O='+str(objects),'ARCH=arm64',
               'CC=clang-14','CROSS_COMPILE=aarch64-linux-gnu-',
@@ -124,6 +129,7 @@ def main(caps=False,reserve=False,window_access=False):
         required=('CONFIG_KEXEC=y','CONFIG_KEXEC_CORE=y','CONFIG_PM_SLEEP_SMP=y','CONFIG_ARM64_4K_PAGES=y')
         (OUT/'handoff.config').write_bytes(config.read_bytes())
         if reserve:required+=('CONFIG_INITRAMFS_FORCE=y','CONFIG_CMDLINE_EXTEND=y','CONFIG_CMDLINE="rdinit=/init"')
+        if xnu_payload is not None:required+=('CONFIG_CRYPTO=y','CONFIG_CRYPTO_HASH=y','CONFIG_CRYPTO_SHA256=y')
         missing=[line for line in required if line not in configured.splitlines()]
         if missing:raise ValueError('Required Kconfig options missing: '+', '.join(missing))
         report['effective_config_sha256']=hashlib.sha256(config.read_bytes()).hexdigest()
@@ -143,6 +149,11 @@ def main(caps=False,reserve=False,window_access=False):
         shutil.copyfile(image,target)
         if reserve and target.read_bytes().count(report['reservation_evidence_id'].encode())!=1:
             raise ValueError('Unique reservation evidence ID not embedded in Image')
+        if xnu_payload is not None:
+            from prepare_reservation_kernel import verify_embedded_init
+            embedded=verify_embedded_init(target.read_bytes(),(OUT/'initramfs.cpio').read_bytes())
+            report['xnu_payload_initramfs_verified']=embedded['embedded_initramfs_verified']
+            if b'N10XNU1' not in target.read_bytes():raise ValueError('XNU stage evidence marker missing from Linux Image')
         report.update(build_passed=True,image_size=target.stat().st_size,
                       image_sha256=hashlib.file_digest(target.open('rb'),'sha256').hexdigest(),
                       arm64_text_offset=hex(text_offset),arm64_header_image_size=image_size,arm64_flags=hex(flags))
@@ -161,4 +172,7 @@ if __name__=='__main__':
     parser.add_argument('--caps',action='store_true',help='Include built-in per-CPU printk diagnostic for a future manual boot')
     parser.add_argument('--reserve',action='store_true',help='Early XNU RAM reservation diagnostic with original built-in idle PID1')
     parser.add_argument('--window-access',action='store_true',help='Opt-in write/read/scrub of this boot\'s checked reservation; no XNU execution')
-    args=parser.parse_args();main(caps=args.caps,reserve=args.reserve,window_access=args.window_access)
+    parser.add_argument('--xnu-payload',type=Path,help='Verified experimental XNU kernel.mem for data-only RAM staging')
+    parser.add_argument('--xnu-payload-manifest',type=Path,help='Hash-bound manifest from materialize_stage_payload.py')
+    args=parser.parse_args();main(caps=args.caps,reserve=args.reserve,window_access=args.window_access,
+                                  xnu_payload=args.xnu_payload,xnu_manifest=args.xnu_payload_manifest)

@@ -7,6 +7,7 @@ import re
 import uuid
 from decode_reservation import decode,decode_frames
 from decode_window_access import decode as decode_access
+from decode_xnu_stage import decode as decode_xnu_stage
 from decode_linux_caps import decode as decode_caps
 from run_probe import ROOT,Adb,preflight
 from stage_phase2 import verify_packages
@@ -25,8 +26,22 @@ def collect(packages,kernel_build,adb):
         raise ValueError('Kernel source artifact and package differ')
     evidence_id=result.get('reservation_evidence_id')
     access=result.get('window_access_diagnostic') is True
+    xnu_stage=result.get('xnu_payload_stage_diagnostic') is True
+    if xnu_stage and not access:raise ValueError('XNU staging requires the verified window-access diagnostic')
+    paired=json.loads((packages/'package-result.json').read_text(encoding='utf-8'))
+    if paired.get('kernel_image_sha256')!=digest:
+        raise ValueError('Diagnostic packages do not match this kernel Image')
+    if (paired.get('window_access_diagnostic') is True)!=access or \
+       (paired.get('xnu_payload_stage_diagnostic') is True)!=xnu_stage:
+        raise ValueError('Diagnostic package scope differs from this kernel build')
+    if xnu_stage and (paired.get('xnu_payload_sha256')!=result.get('xnu_payload_sha256') or
+                      paired.get('xnu_payload_size')!=result.get('xnu_payload_size')):
+        raise ValueError('XNU payload package and kernel build differ')
     if access and (evidence_id is None or result.get('window_access_evidence_version')!=1):
         raise ValueError('Window access requires build-bound reservation and access evidence versions')
+    if xnu_stage and (result.get('xnu_payload_size') is None or
+                      not re.fullmatch(r'[0-9a-f]{64}',result.get('xnu_payload_sha256',''))):
+        raise ValueError('XNU staging requires a build-bound payload size and SHA256')
     if evidence_id is not None:
         if (result.get('reservation_evidence_version')!=2 or
             not re.fullmatch(r'[0-9a-f]{32}',evidence_id) or image.count(evidence_id.encode())!=1):
@@ -52,6 +67,7 @@ def collect(packages,kernel_build,adb):
             'partition_writes':False,'rebooted':False,'xnu_executed':False,
             'previous_boot_reservation_observed':False,
             'window_access_required':access,'previous_boot_window_access_observed':False,
+            'xnu_payload_stage_required':xnu_stage,'previous_boot_xnu_payload_stage_observed':False,
             'logs_sha256':{n:hashlib.sha256(d).hexdigest() for n,d in logs.items()},'decode_failures':{}}
     for name,data in logs.items():
         text=data.decode(errors='replace')
@@ -61,12 +77,21 @@ def collect(packages,kernel_build,adb):
             observation=decode_frames(text,evidence_id) if evidence_id else decode(text)
             report['previous_boot_reservation_observed']=True
             (out/'reservation-observation.json').write_text(json.dumps(observation,indent=2),encoding='utf-8')
-            if access:observation=decode_access(text,evidence_id)
+            if access:
+                observation=decode_access(text,evidence_id)
+                report['previous_boot_window_access_observed']=True
+            if xnu_stage:
+                stage_observation=decode_xnu_stage(text,evidence_id,result['xnu_payload_sha256'],
+                                                   result['xnu_payload_size'])
+                report['previous_boot_xnu_payload_stage_observed']=True
+                report['xnu_payload_stage_observation']=stage_observation
+                observation['xnu_payload_stage']=stage_observation
+                observation['xnu_payload_executed']=False
+                observation['kernel_to_xnu_transfer_verified']=False
         except ValueError as error:
             report['decode_failures'][name]=str(error);continue
         (out/'reservation-observation.json').write_text(json.dumps(observation,indent=2),encoding='utf-8')
         report.update(previous_boot_reservation_observed=True,evidence_file=name,
-                      previous_boot_window_access_observed=access,
                       idle_init_marker_observed='N10INIT1 IDLE ' in text,
                       android_root_mount_message_observed='VFS: Mounted root' in text,
                       kernel_panic_observed='Kernel panic' in text,
@@ -77,7 +102,9 @@ def collect(packages,kernel_build,adb):
             report['observed_cpus']=caps['observed_cpus']
         except ValueError as error:report['cpu_decode_failure']=str(error)
         break
-    report['diagnostic_passed']=report['previous_boot_reservation_observed'] and (not access or report['previous_boot_window_access_observed'])
+    report['diagnostic_passed']=(report['previous_boot_reservation_observed'] and
+                                 (not access or report['previous_boot_window_access_observed']) and
+                                 (not xnu_stage or report['previous_boot_xnu_payload_stage_observed']))
     (out/'capture-result.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
     return report
 
@@ -88,6 +115,7 @@ if __name__=='__main__':
     args=parser.parse_args();r=collect(args.packages,args.kernel_build,Adb(ROOT/'host-tools/platform-tools/adb.exe'))
     print(json.dumps({'directory':r['directory'],'previous_boot_reservation_observed':r['previous_boot_reservation_observed'],
                       'previous_boot_window_access_observed':r['previous_boot_window_access_observed'],
+                      'previous_boot_xnu_payload_stage_observed':r['previous_boot_xnu_payload_stage_observed'],
                       'diagnostic_passed':r['diagnostic_passed'],
                       'partition_writes':False,'xnu_executed':False}))
     if not r['diagnostic_passed']:raise SystemExit(1)

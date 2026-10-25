@@ -123,5 +123,16 @@ unzip() { "$TEST_PYTHON" -c 'import zipfile,sys;sys.stdout.buffer.write(zipfile.
     def test_reject_unsafe_contract_input(self):
         with self.assertRaises(ValueError):updater(mode='wrong',bootloader='N976NTEST',partitions=[],payload_sha='0'*64,current_boot_sha='0'*64)
 
+    def test_xnu_stage_package_is_explicitly_non_executing(self):
+        records=[{'partition':name,'block_node':f'/dev/block/sda{i}','size':512,'sha256':'a'*64}
+                 for i,name in enumerate(('boot','recovery','dtb','dtbo','vbmeta'),14)]
+        script=updater(mode='diagnostic',bootloader='N976NKSU2HWH5',partitions=records,
+                       payload_sha='b'*64,current_boot_sha='c'*64,reservation=True,
+                       window_access=True,xnu_stage=True).decode()
+        self.assertIn('verifies SHA256 readback. It does not execute XNU.',script)
+        with self.assertRaisesRegex(ValueError,'XNU staging'):
+            updater(mode='diagnostic',bootloader='N976NKSU2HWH5',partitions=records,
+                    payload_sha='b'*64,current_boot_sha='c'*64,reservation=True,xnu_stage=True)
+
 
 if __name__=='__main__':unittest.main()

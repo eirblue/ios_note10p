@@ -55,3 +55,28 @@ ownership, MMU transition, executable XNU entry, VM initialization or iOS boot.
 Its physical addresses are historical evidence after reboot, not live recovery
 RAM authorization. The installed access kernel still requires a separate manual
 device test; a successful source build or PC test does not establish that result.
+
+## Experimental XNU data-stage extension
+
+The optional `--xnu-payload` build mode extends this diagnostic after the cached
+RAM pattern test. It reads a bounded `kernel.mem` from the built-in initramfs,
+checks its build-bound SHA-256, zeroes the current boot's reserved window, copies
+the data-only experimental XNU memory image there, and compares a second SHA-256
+readback. It verifies that the unused tail remains zero. A failure after copying
+scrubs the reserved window. Complete results are emitted as checksummed N10XNU1
+records and must match the payload size/hash from the exact Linux Image and paired
+manual package.
+
+This is a RAM staging diagnostic only. The currently available source-built Mach-O
+is experimental and does not represent a complete upstream XNU build. Its bytes
+are never branched to or interpreted on the phone. The diagnostic does not create
+boot_args or a device-specific ADT and does not stop Linux CPUs/devices or transfer
+cache, MMU, timer, or GIC ownership. It cannot establish that XNU can boot.
+
+Build workflow: set `window_access=true`, `xnu_stage=true`, and select the
+successful artifact run containing `note10-experimental-native-build`. The
+workflow downloads that artifact, validates its Mach-O manifest, produces a
+relocatable memory image, builds the pinned Linux source, and emits a research-only
+artifact. A separate local packaging step is still required to pair the Image
+with this device's private backup and create a BOOT-only manual test/rollback ZIP.
+No workflow step installs, reboots, flashes, or executes XNU on the phone.

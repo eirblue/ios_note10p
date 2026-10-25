@@ -15,9 +15,18 @@ on:
         description: Test writes and reads only within this boot's checked reservation; no XNU execution
         type: boolean
         default: false
+      xnu_stage:
+        description: Copy an experimental XNU memory image into reserved RAM and verify SHA256; never execute it
+        type: boolean
+        default: false
+      xnu_artifact_run_id:
+        description: Successful run containing note10-experimental-native-build (used only when xnu_stage is true)
+        type: string
+        default: '39560904016'
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   kernel:
@@ -41,8 +50,23 @@ jobs:
           NOTE10_CAPS: ${{ inputs.caps }}
           NOTE10_RESERVE: ${{ inputs.reserve }}
           NOTE10_WINDOW_ACCESS: ${{ inputs.window_access }}
+          NOTE10_XNU_STAGE: ${{ inputs.xnu_stage }}
         run: |
-          if [ "$NOTE10_WINDOW_ACCESS" = true ]; then
+          if [ "$NOTE10_XNU_STAGE" = true ]; then
+            if [ "$NOTE10_WINDOW_ACCESS" != true ]; then
+              echo "xnu_stage requires window_access=true" >&2
+              exit 2
+            fi
+            python note10/device_test/test_window_access_decode.py
+            python note10/device_test/test_window_access_core.py --output note10/private/window-access-core-ci
+            python note10/device_test/test_window_access_gate.py --output note10/private/window-access-gate-ci
+            python note10/device_test/test_xnu_payload_stage.py
+            python note10/device_test/test_collect_reservation.py
+            python note10/device_test/test_boot_test_packages.py
+            python note10/device_test/test_reservation_kernel.py
+            python note10/device_test/test_reservation_decode.py
+            python note10/device_test/test_window_access_decode.py
+          elif [ "$NOTE10_WINDOW_ACCESS" = true ]; then
             python note10/device_test/test_window_access_decode.py
             python note10/device_test/test_window_access_core.py --output note10/private/window-access-core-ci
             python note10/device_test/test_window_access_gate.py --output note10/private/window-access-gate-ci
@@ -54,6 +78,24 @@ jobs:
           else
             python note10/device_test/build_handoff_kernel.py
           fi
+      - name: Download verified experimental XNU artifact
+        if: inputs.xnu_stage
+        uses: actions/download-artifact@v4
+        with:
+          name: note10-experimental-native-build
+          run-id: ${{ inputs.xnu_artifact_run_id }}
+          github-token: ${{ github.token }}
+          path: note10/private/xnu-input
+      - name: Materialize XNU data-only RAM payload
+        if: inputs.xnu_stage
+        run: |
+          count="$(find note10/private/xnu-input -name note10-experimental.macho -type f | wc -l)"
+          [ "$count" -eq 1 ]
+          ARTIFACT_DIR="$(dirname "$(find note10/private/xnu-input -name note10-experimental.macho -print -quit)")"
+          python note10/xnu26/materialize_stage_payload.py --artifact "$ARTIFACT_DIR" --output note10/private/xnu-stage-payload
+          python note10/device_test/build_handoff_kernel.py --caps --reserve --window-access \
+            --xnu-payload note10/private/xnu-stage-payload/kernel.mem \
+            --xnu-payload-manifest note10/private/xnu-stage-payload/payload-manifest.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:

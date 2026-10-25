@@ -22,19 +22,29 @@ def check(packages,kernel_build,backup,core_model,gate_model,init_model,adb):
     try:
         records=verify_packages(packages)
         diagnostic=next(r for r in records if r['mode']=='diagnostic')
-        if diagnostic.get('test_purpose')!='ram-window-access' or diagnostic.get('window_access_diagnostic') is not True:
+        if diagnostic.get('test_purpose') not in ('ram-window-access','xnu-payload-stage') or diagnostic.get('window_access_diagnostic') is not True:
             raise ValueError('RAM-access diagnostic pair required')
         paired=json.loads((packages/'package-result.json').read_text())
         build=json.loads((kernel_build/'build-result.json').read_text())
         if not (build.get('build_passed') is True and build.get('window_access_diagnostic') is True and
                 build.get('window_access_evidence_version')==1 and build.get('reservation_evidence_version')==2):
             raise ValueError('Successful opt-in access kernel build required')
+        xnu_stage=paired.get('xnu_payload_stage_diagnostic') is True
+        if xnu_stage!=(build.get('xnu_payload_stage_diagnostic') is True):
+            raise ValueError('Package and kernel XNU-stage scope differs')
+        if xnu_stage and (paired.get('xnu_payload_sha256')!=build.get('xnu_payload_sha256') or
+                          paired.get('xnu_payload_size')!=build.get('xnu_payload_size') or
+                          diagnostic.get('xnu_payload_sha256')!=build.get('xnu_payload_sha256') or
+                          diagnostic.get('xnu_payload_size')!=build.get('xnu_payload_size') or
+                          build.get('xnu_payload_initramfs_verified') is not True):
+            raise ValueError('Package XNU payload differs from the current kernel Image')
         image=(kernel_build/'Image').read_bytes();digest=hashlib.sha256(image).hexdigest()
         if digest!=build['image_sha256'] or digest!=paired['kernel_image_sha256']:
             raise ValueError('Kernel build/package mismatch')
         identity=build['reservation_evidence_id']
         if not re.fullmatch(r'[0-9a-f]{32}',identity) or image.count(identity.encode())!=1 or b'N10MEM1' not in image:
             raise ValueError('Expected unique build ID and access marker in Image')
+        if xnu_stage and b'N10XNU1' not in image:raise ValueError('XNU stage evidence marker missing from Image')
         embedded=verify_embedded_init(image,(kernel_build/'initramfs.cpio').read_bytes())
         core=json.loads(core_model.read_text());gate=json.loads(gate_model.read_text());init=json.loads(init_model.read_text())
         sources=build['window_access_sources_sha256']
@@ -83,7 +93,11 @@ def check(packages,kernel_build,backup,core_model,gate_model,init_model,adb):
                       native_checks=native,partition_checks=checks,kernel_image_sha256=digest,
                       build_evidence_id=identity,embedded_initramfs_check=embedded,
                       core_model_cases=len(core['cases']),gate_model_cases=len(gate['cases']),
-                      scope='Read-only device readiness for manual same-boot cached RAM write/read/scrub test')
+                      xnu_payload_stage_diagnostic=xnu_stage,
+                      xnu_payload_sha256=build.get('xnu_payload_sha256') if xnu_stage else None,
+                      xnu_payload_size=build.get('xnu_payload_size') if xnu_stage else None,
+                      scope=('Read-only readiness for manual same-boot XNU-data staging/readback test'
+                             if xnu_stage else 'Read-only device readiness for manual same-boot cached RAM write/read/scrub test'))
     except Exception as error:
         report['failure']=str(error);target.write_text(json.dumps(report,indent=2));raise
     target.write_text(json.dumps(report,indent=2));return report

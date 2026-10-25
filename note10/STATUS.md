@@ -437,3 +437,12 @@ Exynos SoC MASTER 및 플랫폼 archive 입력 분리:
 - 회귀 CI 성공: https://github.com/eirblue/ios_note10p/actions/runs/40189794445 (`b1f142d`). core/wrapper 시험 소스 해시가 실제 커널에 포함한 소스 해시와 일치한다.
 - PC에서 BOOT-only 진단·원본 BOOT 복구 ZIP을 생성하고 현재 TWRP RAM에 전송했다. 실제 ZIP 해시·네이티브 updater 구문·현재 BOOT(v2)와 원본 non-BOOT 4개 파티션 대조를 통과했다. 수동 설치 대기이며 에이전트의 설치·재부팅·파티션 쓰기는 없다. 새 진단의 실기기 RAM 접근 및 재진입 결과는 아직 없다.
 - 별도로 검증된 v2 과거 영역의 크기/정렬을 PC에만 재생하여 실제 XNU 버퍼 배치와 VM 호출 직전까지 1,053,279개 명령을 확인했다. 현재 TWRP RAM 사용이나 하드웨어 MMU/XNU 실행의 증거가 아니다. 상세 device_test/WINDOW-ACCESS.md.
+
+## 2026-10-25: RAM 접근 진단 v3 실기기 통과
+
+- 사용자가 v3 BOOT 진단을 직접 설치·부팅한 뒤 기존 TWRP로 돌아왔다. 읽기 전용 로그 수집에서 빌드 ID가 일치하는 N10RAM2 예약 기록 32개와 N10MEM1 접근 기록 30개를 확인했다.
+- 두 패턴 전체 쓰기·읽기, 전체 zeroing/readback 완료, 불일치 0, status 0이다. 따라서 같은 Linux 부팅의 캐시 활성 RAM 접근 진단은 통과했다.
+- 현재 BOOT 해시는 v3 payload와 일치하고 recovery/DTB/DTBO/vbmeta는 원본 해시와 일치한다. 로그·파티션 기록은 `note10/private/device-observations/`에만 저장했다.
+- 약 169초의 `Fatal exception in interrupt`는 `hard_reset_hook_callback` 경로에서 기록됐다. 이는 접근 검사 완료 후의 hard-reset hook 기록이며 XNU 실행이나 임의의 메모리 오류로 해석하지 않는다. N10INIT1 IDLE 표식은 없고 CPU capability 진단 필드는 손상되어 해석하지 않았다.
+- XNU memory image를 새 부팅의 예약 영역에 복사하고 source/destination SHA-256·zero tail을 검사하는 opt-in Linux staging path, strict N10XNU1 decoder, artifact materializer 및 수동 ZIP metadata 연결을 준비했다. 현재는 PC source 단계이며 Linux kernel CI compile, BOOT 크기 prototype, 실기기 로그 검증은 아직 없다. 기존 `handoff_bundle.py`는 PC용 배치 모델만 제공한다. 동적 entry/boot_args 배치, live DT 변환, CPU/DMA 정지, cache/MMU/GIC 인계도 미완료다.
+- 검증 범위는 캐시가 켜진 Linux의 예약 RAM 접근까지다. cache/MMU 전환, XNU 진입, iOS 구동 증거가 아니다. 자동 설치·재부팅·파티션 쓰기·kexec·XNU 실행은 수행하지 않았다.
