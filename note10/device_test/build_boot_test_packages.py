@@ -92,6 +92,9 @@ def build(backup,prototype,output):
     padded=raw+bytes(len(parts['boot'])-len(raw))
     output.mkdir(parents=True,exist_ok=False)
     result={'scope':'Manual BOOT-only Linux test and paired Android BOOT rollback; not full device backup',
+            'manual_test_packages_created':True,'prototype_sha256':metadata['sha256'],
+            'kernel_image_sha256':metadata['kernel_build_sha256'],
+            'backup_manifest_sha256':metadata['backup_manifest_sha256'],
             'builder_device_operations':[],'device_boot_tested':False,'deployment_ready':False,'packages':[]}
     for mode,payload in (('diagnostic',padded),('rollback',parts['boot'])):
         digest=hashlib.sha256(payload).hexdigest()

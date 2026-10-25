@@ -72,6 +72,10 @@ PC 시험은 합성 DT·수집 파일시스템·ADB 응답으로 검증한 것�
 별도 `backup_boot.py --read`는 boot/recovery/dtb/dtbo/vbmeta의 읽기 전용 PC 백업을 제공한다.
 수집 ZIP/기본 run-probe.ps1에는 포함된 동작이 아니다. [범위·검증·한계](../shim/TRANSFER.md)를 따른다.
 
+BOOT만 교체하는 별도 수동 Linux 진단·원래 BOOT 복구 패키지는
+[2단계 안내](LINUX-CAPS.md#수동-boot-시험-패키지)를 따른다. 1단계 RAM 수집 ZIP과 달리
+이 설치 ZIP은 사용자가 TWRP에서 실행하면 BOOT에 쓴다. XNU/iOS ROM은 아니다.
+
 ## 빌드·검증
 
 ```powershell

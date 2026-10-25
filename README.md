@@ -25,4 +25,6 @@ First device observation: [RAM-only TWRP probe](note10/device_test/README.ko.md)
 PC boot contract checks now compare real public XNU C ABI bytes, validate explicit synthetic placement, and exercise the linked SecureDT parser. [Details](note10/xnu26/BOOT-CONTRACT.md). No deployable image or physical boot is established.
 
 
-[Post-shutdown XNU entry adapter and read-only boot backups](note10/shim/TRANSFER.md): PC-tested argument transfer only. Current TWRP has kexec disabled; no bootable or flashable deployment is provided.
+[Post-shutdown XNU entry adapter and read-only boot backups](note10/shim/TRANSFER.md): PC-tested argument transfer only. The original TWRP kernel has kexec disabled; XNU deployment remains incomplete.
+
+[Manual Linux diagnostic BOOT test and paired rollback packages](note10/device_test/LINUX-CAPS.md#수동-boot-시험-패키지) are separate from XNU/iOS. The host tools prepare and stage private packages; a human must install them in TWRP. No successful physical boot is established.

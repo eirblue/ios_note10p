@@ -76,7 +76,7 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output):
     config=(kernel_build/'handoff.config').read_bytes()
     if hashlib.sha256(config).hexdigest()!=build['effective_config_sha256']:
         raise ValueError('Config differs from kernel build report')
-    required={'CONFIG_RD_LZMA=y','CONFIG_KEXEC=y','CONFIG_KEXEC_CORE=y','CONFIG_ARM64_4K_PAGES=y'}
+    required={'CONFIG_BLK_DEV_INITRD=y','CONFIG_RD_LZMA=y','CONFIG_KEXEC=y','CONFIG_KEXEC_CORE=y','CONFIG_ARM64_4K_PAGES=y'}
     if not required.issubset(config.decode().splitlines()):
         raise ValueError('Kernel lacks required ramdisk/kexec/page configuration')
     boot=boot_header(parts['boot']);recovery=boot_header(official)
@@ -105,16 +105,27 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output):
              '--kernel_offset',hex(boot['kernel_addr']),
              '--ramdisk_offset',hex(recovery['ramdisk_addr']),
              '--tags_offset',hex(boot['tags_addr']),'--pagesize',str(boot['page_size']),
-             '--board',recovery['name'],'--cmdline',recovery['cmdline'],
-             '--os_version',recovery['os_version'],'--os_patch_level',recovery['security_patch_month'],
+             '--board',boot['name'],'--cmdline',recovery['cmdline'],
+             '--os_version',boot['os_version'],'--os_patch_level',boot['security_patch_month'],
              '--output',str(partial)]
     subprocess.run(command,check=True,capture_output=True,timeout=60)
     packed=partial.read_bytes();header=boot_header(packed)
     if len(packed)!=size or header['kernel_sha256']!=build['image_sha256']:
         raise ValueError('Packed image does not match size/kernel contract')
+    if any(header[field]!=boot[field] for field in ('name','os_version','security_patch_month','kernel_addr','tags_addr','page_size')):
+        raise ValueError('Packed BOOT metadata differs from paired original')
     if packed[header['ramdisk_file_offset']:header['ramdisk_file_offset']+header['ramdisk_size']]!=ramdisk:
         raise ValueError('Packed ramdisk differs from reference')
     if header['recovery_dtbo_size']!=0:raise ValueError('Unexpected embedded recovery DTBO')
+    # Preserve the non-cryptographic Samsung BOOT trailer observed immediately
+    # after the original aligned payload. Never copy its stale AVB hash/footer.
+    trailer=b'SEANDROIDENFORCE'
+    original_end=boot['second_file_offset']
+    if parts['boot'][original_end:original_end+len(trailer)]!=trailer:
+        raise ValueError('Expected observed Samsung BOOT trailer')
+    if len(packed)+len(trailer)>len(parts['boot']):raise ValueError('BOOT trailer exceeds partition')
+    packed+=trailer
+    partial.write_bytes(packed)
     partial.rename(output)
     report={'prototype_created':True,'kind':'temporary Linux diagnostic boot; not XNU/iOS',
             'file':str(output),'size':len(packed),'boot_partition_size':len(parts['boot']),
@@ -124,6 +135,9 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output):
             'existing_recovery_partition_sha256':hashlib.sha256(parts['recovery']).hexdigest(),
             'aosp_mkbootimg_sha256':MKBOOTIMG_SHA256,'reference_ramdisk_sha256':hashlib.sha256(ramdisk).hexdigest(),
             'embedded_recovery_dtbo':False,'requires_existing_dtb_dtbo_partitions':True,
+            'preserved_boot_os_version':boot['os_version'],
+            'preserved_boot_security_patch_month':boot['security_patch_month'],
+            'samsung_boot_trailer_preserved':True,'original_avb_footer_copied':False,
             'device_boot_tested':False,'recovery_reentry_verified_after_install':False,
             'deployment_ready':False,'partition_writes':False,'device_operations':[],
             'scope':'PC format/size validation only; Samsung runtime DT selection and boot behavior remain unverified',
