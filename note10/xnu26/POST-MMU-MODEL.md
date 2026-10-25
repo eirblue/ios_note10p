@@ -38,3 +38,27 @@ python note10/xnu26/test_post_mmu_entry.py --kernel-build NATIVE_BUILD --adapter
 
 로컬의 실측 capacity 비교 포함 모델 및 공개 artifact 기반 CI 모두 통과했다.
 최종 CI: https://github.com/eirblue/ios_note10p/actions/runs/40167184145 (`6a4ba1d`).
+
+## EL1 접근 권한 부분 검사
+
+후속 `stage1_access.py`는 실제 descriptor의 AF/AP, 상위 APTable/PXNTable,
+PXN, WXN, PAN 및 EPD 조건을 명령 fetch/read/store마다 검사한다.
+EL0 쓰기 가능 영역의 EL1 실행 금지 및 상위 APTable의 EL0 접근 차단도 반영한다.
+PAN은 명시적 모형 입력이며 정상 진입 시험에서는 0이다. 실기기 PSTATE를 읽은 결과가 아니다.
+
+지원 범위는 검토한 16K granule·47bit VA·40bit PA의 little-endian EL1 stage-1,
+canonical untagged 주소, HA/HD/HPD 비활성 구성이다. 다른 granule/폭, LPA2·EPAN·
+자동 AF/dirty 갱신·hierarchy 무시 등 지원하지 않는 조건은 거부한다.
+접근이 16K 경계를 넘으면 양쪽 페이지를 확인한다. 지원 범위에서는 물리 주소가 연속이어야 한다.
+EL0 실행이나 stage-2, memory type, alignment, 전체 fault syndrome, cache/TLB 동작은 모델링하지 않는다.
+
+별도 descriptor fixture 12개 단위 검사와 실제 모형 테이블을 변경하는 오류 주입을 추가했다.
+전체 명령 모델의 오류 사례는 주소 변환/인자, AF/PXN/RO, 상위 PXN/RO,
+WXN/EPD/EL0-write-XN의 10개다. 정상 3개 배치의 추가 51개 명령은 유지한다.
+전체 MMU 모델 또는 실제 권한 예외 처리를 구현한 것으로 표시하지 않는다.
+
+기준 정의와 규칙:
+
+- [고정 XNU proc_reg.h](https://github.com/apple-oss-distributions/xnu/blob/ac9718fb1af618d5ce8678d0dc6e8a58f252216f/osfmk/arm64/proc_reg.h)의 descriptor/control bit 정의.
+- [Arm 공식 보호 기법 문서](https://developer.arm.com/-/media/Arm%20Developer%20Community/PDF/Learn%20the%20Architecture/Providing%20protection%20for%20complex%20software.pdf)의 EL0 쓰기 영역에 대한 EL1 실행 금지 설명.
+- [QEMU의 Arm page-table walker](https://github.com/qemu/qemu/blob/master/target/arm/ptw.c)의 APTable 결합 및 EL1 permission 처리와 대조했다. QEMU 자체를 실행하거나 전체 구현과 differential testing한 것은 아니다.

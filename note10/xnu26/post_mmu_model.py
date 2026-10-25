@@ -8,6 +8,7 @@ success is implied by reaching a C entry/call boundary.
 """
 from collections import Counter,deque
 import struct
+from stage1_access import check_access
 
 PAGE=0x4000
 
@@ -17,11 +18,12 @@ def continue_entry(*,uc,md,state,stop,symbols,physical_image,rounded,arguments,
                    banked_sp,sp_select,fault=None):
     from unicorn import UC_HOOK_CODE,UC_HOOK_MEM_WRITE,UC_HOOK_MEM_READ
     from unicorn import arm64_const as regs
-    if fault not in (None,'argument','mapping'):raise ValueError('Unknown PC fault injection')
+    descriptor_faults=('mapping','af','pxn','readonly','table-pxn','table-readonly','el0-writable')
+    if fault not in (None,'argument','wxn','epd',*descriptor_faults):raise ValueError('Unknown PC fault injection')
     uc.hook_del(code_hook);uc.hook_del(write_hook)
     delta=virtual_ram-ram_base
     mappings=[(physical_image,rounded),(arguments,0x10000)]
-    if fault=='mapping':
+    if fault in descriptor_faults:
         # Corrupt the actual emulated L2 descriptor, rather than substituting
         # a guessed walker result. The already-checked bootstrap uses L1/L2
         # tables and 32MiB blocks for this linked 16K kernel.
@@ -35,7 +37,12 @@ def continue_entry(*,uc,md,state,stop,symbols,physical_image,rounded,arguments,
         leaf=table+((virtual>>25)&2047)*8
         descriptor=struct.unpack('<Q',uc.mem_read(leaf,8))[0]
         if descriptor&3!=1:raise ValueError('Fault fixture requires a real L2 block')
-        uc.mem_write(leaf,struct.pack('<Q',descriptor^(1<<25)))
+        if fault=='table-pxn':uc.mem_write(root+slot*8,struct.pack('<Q',table_desc|(1<<59)))
+        elif fault=='table-readonly':uc.mem_write(root+slot*8,struct.pack('<Q',table_desc|(1<<62)))
+        else:
+            changed={'mapping':descriptor^(1<<25),'af':descriptor&~(1<<10),
+                     'pxn':descriptor|(1<<53),'readonly':descriptor|(1<<7),'el0-writable':descriptor|(1<<6)}[fault]
+            uc.mem_write(leaf,struct.pack('<Q',changed))
     pages=0
     for physical,size in mappings:
         virtual=physical+delta
@@ -60,10 +67,12 @@ def continue_entry(*,uc,md,state,stop,symbols,physical_image,rounded,arguments,
     # Keep Unicorn's MMU state untouched. The SCTLR write and its effect are
     # modeled explicitly; only the subsequent linked instructions execute.
     state=dict(state);state['sctlr_el1']=int(stop['sctlr_value'],16)
+    if fault=='wxn':state['sctlr_el1']|=1<<19
+    if fault=='epd':state['tcr_el1']|=1<<23
     start=int(stop['address'],16)+4
     operations=Counter();recent=deque(maxlen=20);count=0;entry=None;boundary=None
     stores=[];reads=0;fetches=0
-    def translate(address,size):
+    def translate(address,size,access):
         high=address>=virtual_ram
         physical=address-delta if high else address
         if not any(first<=physical and physical+size<=first+length for first,length in mappings):
@@ -71,6 +80,9 @@ def continue_entry(*,uc,md,state,stop,symbols,physical_image,rounded,arguments,
         for last in (0,size-1):
             if walk(address+last,high)!=physical+last:
                 raise ValueError('Access differs from actual bootstrap translation')
+        checked=check_access(lambda p:struct.unpack('<Q',uc.mem_read(p,8))[0],state,
+                             address,size,high,access,pan=False)
+        if checked['physical_address']!=physical:raise ValueError('Permission walker / address walker mismatch')
         return physical
     def gpr(name):
         if name=='xzr':return None
@@ -82,7 +94,7 @@ def continue_entry(*,uc,md,state,stop,symbols,physical_image,rounded,arguments,
     def instruction(engine,address,size,_):
         nonlocal count,entry,boundary,fetches
         count+=1
-        translate(address,4);fetches+=1
+        translate(address,4,'fetch');fetches+=1
         ins=next(md.disasm(bytes(engine.mem_read(address,4)),address))
         recent.append(hex(address)+' '+ins.mnemonic+' '+ins.op_str)
         if address==target:
@@ -114,7 +126,7 @@ def continue_entry(*,uc,md,state,stop,symbols,physical_image,rounded,arguments,
         else:return
         engine.reg_write(regs.UC_ARM64_REG_PC,address+4)
     def write(engine,access,address,size,value,_):
-        physical=translate(address,size)
+        physical=translate(address,size,'write')
         if address<virtual_ram:raise ValueError('Post-MMU store used physical alias')
         if not physical_image<=physical or physical+size>physical_image+rounded:
             raise ValueError('Post-MMU store left virtual kernel RAM')
@@ -125,7 +137,7 @@ def continue_entry(*,uc,md,state,stop,symbols,physical_image,rounded,arguments,
         stores.append((address,size))
     def load(engine,access,address,size,value,_):
         nonlocal reads
-        translate(address,size);reads+=1
+        translate(address,size,'read');reads+=1
     hook=uc.hook_add(UC_HOOK_CODE,instruction);memory_hook=uc.hook_add(UC_HOOK_MEM_WRITE,write)
     read_hook=uc.hook_add(UC_HOOK_MEM_READ,load)
     try:uc.emu_start(start,physical_image+rounded,count=10000)
@@ -142,5 +154,8 @@ def continue_entry(*,uc,md,state,stop,symbols,physical_image,rounded,arguments,
             'translated_instruction_fetches':fetches,'translated_data_reads':reads,
             'modeled_system_operations':dict(operations),'exception_stack':hex(expected_exception_stack),
             'mmu_enable_executed':False,'hardware_verified':False,'c_initialization_completed':False,
-            'stage1_permission_faults_modeled':False,'cache_tlb_coherence_tested':False,
+            'stage1_permission_subset_checked':True,'complete_stage1_fault_model':False,
+            'cache_tlb_coherence_tested':False,
+            'el1_permission_subset_checked':['AF','AP','APTable','PXN','PXNTable','EL0-write-XN','WXN','PAN','EPD'],
+            'synthetic_pan':False,
             'scope':'Linked instructions with page-table-checked software VA aliases; modeled SCTLR/register/barriers'}

@@ -37,6 +37,7 @@ jobs:
           ld.lld -T note10/shim/cap_link.ld note10/private/xnu-transfer/transfer.o -o note10/private/xnu-transfer/transfer.elf
       - name: Verify actual instructions with software VA aliases
         run: |
+          python note10/xnu26/test_stage1_access.py
           python note10/xnu26/test_post_mmu_entry.py --kernel-build note10/private/entry-model-kernel --adapter note10/private/xnu-transfer/transfer.elf --output note10/private/post-mmu-model
           python note10/xnu26/test_materialized_entry.py --kernel-build note10/private/entry-model-kernel --adapter note10/private/xnu-transfer/transfer.elf --output note10/private/pre-mmu-regression
       - uses: actions/upload-artifact@v4

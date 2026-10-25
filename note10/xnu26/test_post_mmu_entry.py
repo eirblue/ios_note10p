@@ -26,7 +26,13 @@ def test(directory,adapter,output,profile=None):
     (output/'result.json').write_text(json.dumps(result,indent=2))
     negatives=[]
     for fault,expected in (('mapping','VA alias differs from bootstrap translation'),
-                           ('argument','C entry received wrong virtual boot_args')):
+                           ('argument','C entry received wrong virtual boot_args'),
+                           ('af','Access flag not set'),('pxn','EL1 execute permission denied'),
+                           ('readonly','EL1 write to read-only mapping'),
+                           ('table-pxn','EL1 execute permission denied'),
+                           ('table-readonly','EL1 write to read-only mapping'),
+                           ('wxn','EL1 execute permission denied'),('epd','Translation walk disabled'),
+                           ('el0-writable','EL1 execute permission denied')):
         try:
             run_case(directory,0x80000000,transfer_elf=adapter,handoff_bundle=output/'case-0',
                      continuation=partial(continue_entry,fault=fault))
