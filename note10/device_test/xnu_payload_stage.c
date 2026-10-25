@@ -29,13 +29,16 @@ static int n10_sha256(const u8 *data, size_t length, u8 digest[32])
         return -ENOMEM;
     }
     desc->tfm = tfm;
+    desc->flags = 0;
     error = crypto_shash_digest(desc, data, length, digest);
     kfree(desc);
     crypto_free_shash(tfm);
     return error;
 }
 
-static void n10_stage_xnu_payload(void)
+static void n10_stage_xnu_payload(unsigned long reserved,
+                                 unsigned long pages,
+                                 unsigned long invalid)
 {
     struct file *file;
     loff_t position = 0, file_size;
@@ -50,7 +53,9 @@ static void n10_stage_xnu_payload(void)
     int result, i;
     bool wrote = false;
 
-    if (n10_window_status != 1 || !n10_window_base ||
+    if (n10_window_status != 1 || invalid || reserved != pages ||
+        pages != (N10_WINDOW_SIZE >> PAGE_SHIFT) ||
+        !n10_window_base || (n10_window_base & (N10_WINDOW_ALIGN - 1)) ||
         n10_window_base > N10_WINDOW_LIMIT - N10_WINDOW_SIZE ||
         length == 0 || length > N10_WINDOW_SIZE || length % PAGE_SIZE) {
         status = 1;

@@ -109,10 +109,10 @@ def prepare(source,output,run,window_access=False,xnu_payload=None,xnu_manifest=
         if source.exists():raise ValueError('Unexpected existing XNU stage extension')
         source.write_bytes((here/'xnu_payload_stage.c').read_bytes())
         include=b'#include "note10_xnu_payload_stage.c"\n'
-        call=b'    n10_stage_xnu_payload();\n'
+        stage_call=b'    n10_stage_xnu_payload(reserved, count, invalid);\n'
         marker=b'    /* Reserved pages remain excluded from Linux'
         if extension.count(marker)!=1:raise ValueError('Unexpected reservation staging insertion point')
-        extension=extension.replace(marker,call+marker)
+        extension=extension.replace(marker,stage_call+marker)
         extension=extension.replace(b'#include "note10_xnu_window_access.c"\n',
                                     b'#include "note10_xnu_window_access.c"\n'+include)
         access_report.update(xnu_payload_stage_diagnostic=True,

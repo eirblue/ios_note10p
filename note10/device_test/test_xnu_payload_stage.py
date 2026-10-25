@@ -1,8 +1,13 @@
 """PC checks for data-only XNU RAM staging records and initramfs packaging."""
 import unittest
+import hashlib
+import json
+from pathlib import Path
+import tempfile
+from unittest.mock import patch
 from decode_reservation import checksum
 from decode_xnu_stage import decode
-from prepare_reservation_kernel import cpio
+from prepare_reservation_kernel import cpio, prepare
 
 ID='0123456789abcdef0123456789abcdef'
 SHA='a'*64
@@ -36,6 +41,33 @@ def parse_newc(data):
 
 
 class XnuStageTests(unittest.TestCase):
+    def test_stage_preparation_preserves_memblock_insertion(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);source=root/'source';output=root/'output'
+            output.mkdir();init_c=source/'arch/arm64/mm/init.c'
+            init_c.parent.mkdir(parents=True)
+            raw=b'void __init arm64_memblock_init(void)\n{\n\tmemblock_allow_resize();\n}\n'
+            init_c.write_bytes(raw)
+            payload=b'K'*0x4000;payload_path=root/'kernel.mem';payload_path.write_bytes(payload)
+            manifest=root/'payload-manifest.json'
+            digest=hashlib.sha256(payload).hexdigest()
+            manifest.write_text(json.dumps(dict(schema=1,purpose='xnu-data-only-ram-stage',
+                source_kind='experimental-source-built-arm64-macho',payload_file='kernel.mem',
+                payload_size=len(payload),payload_sha256=digest,source_macho_sha256='b'*64,
+                physical_address=None,physical_reservation_verified=False,
+                deployment_ready=False,xnu_executed=False)))
+            def run(command,log):
+                elf=bytearray(64);elf[:6]=b'\x7fELF\x02\x01';elf[18:20]=b'\xb7\x00'
+                Path(command[command.index('-o')+1]).write_bytes(elf)
+            with patch('prepare_reservation_kernel.INIT_SHA',hashlib.sha256(raw).hexdigest()):
+                result=prepare(source,output,run,window_access=True,
+                               xnu_payload=payload_path,xnu_manifest=manifest)
+            self.assertIn('\tnote10_reserve_xnu_window();\n\n\tmemblock_allow_resize();',init_c.read_text())
+            extension=init_c.with_name('note10_xnu_reserve.c').read_text()
+            self.assertIn('n10_stage_xnu_payload(reserved, count, invalid);',extension)
+            self.assertTrue(result['xnu_payload_stage_diagnostic'])
+            self.assertEqual(parse_newc((output/'initramfs.cpio').read_bytes())['xnu/kernel.mem'],payload)
+
     def test_two_bound_readback_frames(self):
         result=decode(reservation()+stage(0)+stage(1),ID,SHA,0x4000)
         self.assertTrue(result['previous_boot_xnu_payload_stage_observed'])
