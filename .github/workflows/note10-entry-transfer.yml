@@ -37,6 +37,7 @@ jobs:
           python note10/xnu26/test_observed_profile.py
           python note10/xnu26/test_boot_contract.py
           python note10/xnu26/test_handoff_bundle.py
+          python note10/device_test/test_reservation_kernel.py
       - uses: actions/upload-artifact@v4
         with:
           name: note10-entry-adapter-research-only

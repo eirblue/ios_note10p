@@ -20,8 +20,9 @@ REPOSITORY = 'corsicanu/android_kernel_samsung_universal9820'
 OUT = ROOT / 'note10/private/handoff-kernel'
 
 
-def main(caps=False):
+def main(caps=False,reserve=False):
     if not sys.platform.startswith('linux'): raise RuntimeError('Linux CI host required')
+    if reserve and not caps:raise ValueError('Reservation diagnostic requires caps/initramfs handling')
     OUT.mkdir(parents=True,exist_ok=True)
     report = {'source_repository':REPOSITORY,'source_commit':COMMIT,
               'public_defconfig':'exynos9820-d2x_defconfig','build_passed':False,
@@ -90,6 +91,9 @@ def main(caps=False):
                 build.write('\n# Note10 privileged capability diagnostic; no handoff execution\nobj-y += note10_handoff_caps.o\n')
             report['diagnostic_source_sha256']=hashlib.sha256(driver.read_bytes()).hexdigest()
         defconfig=source/'arch/arm64/configs/exynos9820-d2x_defconfig'
+        if reserve:
+            from prepare_reservation_kernel import prepare
+            report.update(prepare(source,OUT,run))
         report['public_defconfig_sha256']=hashlib.sha256(defconfig.read_bytes()).hexdigest()
         make=['make','-C',str(source),'O='+str(objects),'ARCH=arm64',
               'CC=clang-14','CROSS_COMPILE=aarch64-linux-gnu-',
@@ -106,16 +110,21 @@ def main(caps=False):
         config=objects/'.config'
         original=config.read_bytes();(OUT/'public-baseline.config').write_bytes(original)
         run([str(source/'scripts/config'),'--file',str(config),'--enable','KEXEC',
-             '--set-str','LOCALVERSION','-note10-handoff-pc','--disable','LOCALVERSION_AUTO'],
+             '--set-str','LOCALVERSION','-note10-reserve-pc' if reserve else '-note10-handoff-pc','--disable','LOCALVERSION_AUTO'],
             '02-enable-kexec.log')
+        if reserve:
+            run([str(source/'scripts/config'),'--file',str(config),'--set-str','INITRAMFS_SOURCE',
+                 str(OUT/'initramfs.cpio'),'--enable','INITRAMFS_FORCE'],'02-initramfs.log')
         run([*make,'olddefconfig'],'03-olddefconfig.log')
         configured=config.read_text()
         required=('CONFIG_KEXEC=y','CONFIG_KEXEC_CORE=y','CONFIG_PM_SLEEP_SMP=y','CONFIG_ARM64_4K_PAGES=y')
+        if reserve:required+=('CONFIG_INITRAMFS_FORCE=y',)
         if not all(line in configured.splitlines() for line in required):
             raise ValueError('Requested kexec dependencies did not survive Kconfig')
         (OUT/'handoff.config').write_bytes(config.read_bytes())
         report['effective_config_sha256']=hashlib.sha256(config.read_bytes()).hexdigest()
         if caps:run([*make,'drivers/misc/note10_handoff_caps.o'],'04-caps-object.log')
+        if reserve:run([*make,'arch/arm64/mm/init.o'],'04-reservation-object.log')
         run([*make,'-j'+str(min(os.cpu_count() or 2,8)),'Image'],'04-build.log',timeout=1500)
         image=objects/'arch/arm64/boot/Image'
         with image.open('rb') as stream:header=stream.read(64)
@@ -144,4 +153,5 @@ def main(caps=False):
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--caps',action='store_true',help='Include built-in per-CPU printk diagnostic for a future manual boot')
-    main(caps=parser.parse_args().caps)
+    parser.add_argument('--reserve',action='store_true',help='Early XNU RAM reservation diagnostic with original built-in idle PID1')
+    args=parser.parse_args();main(caps=args.caps,reserve=args.reserve)

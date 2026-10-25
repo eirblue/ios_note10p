@@ -7,6 +7,10 @@ on:
         description: Include built-in privileged CPU diagnostic for a future manual boot
         type: boolean
         default: false
+      reserve:
+        description: Reserve XNU RAM early and use a built-in minimal idle init; no Android root
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -31,8 +35,11 @@ jobs:
           PLATFORM_VERSION: '11'
           ANDROID_MAJOR_VERSION: r
           NOTE10_CAPS: ${{ inputs.caps }}
+          NOTE10_RESERVE: ${{ inputs.reserve }}
         run: |
-          if [ "$NOTE10_CAPS" = true ]; then
+          if [ "$NOTE10_RESERVE" = true ]; then
+            python note10/device_test/build_handoff_kernel.py --caps --reserve
+          elif [ "$NOTE10_CAPS" = true ]; then
             python note10/device_test/build_handoff_kernel.py --caps
           else
             python note10/device_test/build_handoff_kernel.py
@@ -48,3 +55,5 @@ jobs:
             note10/private/handoff-kernel/*.log
             note10/private/handoff-kernel/*.config
             note10/private/handoff-kernel/Image
+            note10/private/handoff-kernel/minimal-init.elf
+            note10/private/handoff-kernel/initramfs.cpio
