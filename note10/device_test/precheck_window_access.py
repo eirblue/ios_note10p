@@ -30,6 +30,18 @@ def check(packages,kernel_build,backup,core_model,gate_model,init_model,adb):
                 build.get('window_access_evidence_version')==1 and build.get('reservation_evidence_version')==2):
             raise ValueError('Successful opt-in access kernel build required')
         xnu_stage=paired.get('xnu_payload_stage_diagnostic') is True
+        cpu_cache=paired.get('cpu_cache_roundtrip_diagnostic') is True
+        if cpu_cache!=(build.get('cpu_cache_roundtrip_diagnostic') is True) or \
+           cpu_cache!=(diagnostic.get('cpu_cache_roundtrip_diagnostic') is True):
+            raise ValueError('CPU/cache diagnostic package and kernel scope differ')
+        if cpu_cache:
+            model=json.loads((kernel_build/'cpu-cache-model/result.json').read_text())
+            source_sha=hashlib.sha256(Path(__file__).with_name('cpu_cache_roundtrip.c').read_bytes()).hexdigest()
+            if (not xnu_stage or model.get('passed') is not True or len(model.get('cases',[]))<10 or
+                model.get('source_sha256')!=source_sha or model.get('source_sha256')!=build.get('cpu_cache_source_sha256') or
+                model.get('payload_sha256')!=build.get('xnu_payload_sha256') or
+                model.get('payload_size')!=build.get('xnu_payload_size')):
+                raise ValueError('Actual CPU/cache C model does not match this kernel and payload')
         if xnu_stage!=(build.get('xnu_payload_stage_diagnostic') is True):
             raise ValueError('Package and kernel XNU-stage scope differs')
         if xnu_stage and (paired.get('xnu_payload_sha256')!=build.get('xnu_payload_sha256') or
@@ -45,6 +57,8 @@ def check(packages,kernel_build,backup,core_model,gate_model,init_model,adb):
         if not re.fullmatch(r'[0-9a-f]{32}',identity) or image.count(identity.encode())!=1 or b'N10MEM1' not in image:
             raise ValueError('Expected unique build ID and access marker in Image')
         if xnu_stage and b'N10XNU1' not in image:raise ValueError('XNU stage evidence marker missing from Image')
+        if cpu_cache and any(marker not in image for marker in (b'N10QUI1',b'N10CPU2')):
+            raise ValueError('CPU/cache diagnostic markers missing from Image')
         embedded=verify_embedded_init(image,(kernel_build/'initramfs.cpio').read_bytes())
         core=json.loads(core_model.read_text());gate=json.loads(gate_model.read_text());init=json.loads(init_model.read_text())
         sources=build['window_access_sources_sha256']
@@ -94,6 +108,7 @@ def check(packages,kernel_build,backup,core_model,gate_model,init_model,adb):
                       build_evidence_id=identity,embedded_initramfs_check=embedded,
                       core_model_cases=len(core['cases']),gate_model_cases=len(gate['cases']),
                       xnu_payload_stage_diagnostic=xnu_stage,
+                      cpu_cache_roundtrip_diagnostic=cpu_cache,
                       xnu_payload_sha256=build.get('xnu_payload_sha256') if xnu_stage else None,
                       xnu_payload_size=build.get('xnu_payload_size') if xnu_stage else None,
                       scope=('Read-only readiness for manual same-boot XNU-data staging/readback test'

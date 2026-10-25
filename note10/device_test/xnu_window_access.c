@@ -9,7 +9,7 @@
 #define N10_ACCESS_RESCHED() cond_resched()
 #include "note10_window_access_core.h"
 
-static void __init note10_test_xnu_window_access(unsigned long reserved,
+static unsigned int __init note10_test_xnu_window_access(unsigned long reserved,
                                                 unsigned long pages,
                                                 unsigned long invalid)
 {
@@ -44,4 +44,5 @@ report:
             result.rounds, result.status);
         pr_info("N10MEM1 %s checksum=%08x\n", frame, n10_frame_checksum(frame, length));
     }
+    return result.status;
 }

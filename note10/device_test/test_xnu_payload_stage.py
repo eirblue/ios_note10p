@@ -41,7 +41,7 @@ def parse_newc(data):
 
 
 class XnuStageTests(unittest.TestCase):
-    def test_stage_preparation_preserves_memblock_insertion(self):
+    def test_stage_preparation_preserves_memblock_insertion(self,cpu_cache=False):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);source=root/'source';output=root/'output'
             output.mkdir();init_c=source/'arch/arm64/mm/init.c'
@@ -61,12 +61,20 @@ class XnuStageTests(unittest.TestCase):
                 Path(command[command.index('-o')+1]).write_bytes(elf)
             with patch('prepare_reservation_kernel.INIT_SHA',hashlib.sha256(raw).hexdigest()):
                 result=prepare(source,output,run,window_access=True,
-                               xnu_payload=payload_path,xnu_manifest=manifest)
+                               xnu_payload=payload_path,xnu_manifest=manifest,cpu_cache=cpu_cache)
             self.assertIn('\tnote10_reserve_xnu_window();\n\n\tmemblock_allow_resize();',init_c.read_text())
             extension=init_c.with_name('note10_xnu_reserve.c').read_text()
-            self.assertIn('n10_stage_xnu_payload(reserved, count, invalid);',extension)
+            self.assertIn('n10_stage_xnu_payload(reserved, count, invalid)',extension)
             self.assertTrue(result['xnu_payload_stage_diagnostic'])
+            if cpu_cache:
+                self.assertTrue(result['cpu_cache_roundtrip_diagnostic'])
+                self.assertIn('if (note10_test_xnu_window_access(',extension)
+                self.assertIn('if (n10_stage_xnu_payload(',extension)
+                self.assertIn('n10_test_cpu_cache();',extension)
             self.assertEqual(parse_newc((output/'initramfs.cpio').read_bytes())['xnu/kernel.mem'],payload)
+
+    def test_cpu_cache_preparation_preserves_prerequisites(self):
+        self.test_stage_preparation_preserves_memblock_insertion(cpu_cache=True)
 
     def test_two_bound_readback_frames(self):
         result=decode(reservation()+stage(0)+stage(1),ID,SHA,0x4000)

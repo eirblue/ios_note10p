@@ -12,9 +12,10 @@ import zipfile
 from prepare_linux_boot import ROOT, read_verified_backup
 
 
-def updater(*, mode, bootloader, partitions, payload_sha, current_boot_sha,reservation=False,window_access=False,xnu_stage=False):
+def updater(*, mode, bootloader, partitions, payload_sha, current_boot_sha,reservation=False,window_access=False,xnu_stage=False,cpu_cache=False):
     if window_access and not reservation:raise ValueError('RAM access requires the reservation diagnostic')
     if xnu_stage and not window_access:raise ValueError('XNU staging requires the RAM access diagnostic')
+    if cpu_cache and not xnu_stage:raise ValueError('CPU/cache roundtrip requires XNU staging')
     if mode not in ('diagnostic','rollback') or not re.fullmatch(r'N976N[A-Z0-9]+',bootloader):
         raise ValueError('Unexpected package mode or bootloader')
     if not re.fullmatch(r'[0-9a-f]{64}',payload_sha) or not re.fullmatch(r'[0-9a-f]{64}',current_boot_sha):
@@ -54,6 +55,8 @@ case "$(getprop ro.product.device)" in d2x|d2xks) ;; *) abort "Expected d2x" ;; 
         script+='ui "Writes patterns to 256MiB of this boot\'s checked reserved RAM, reads back and clears it. No XNU branch."\n'
     if mode=='diagnostic' and xnu_stage:
         script+='ui "Copies an experimental XNU memory image into this boot\'s reserved RAM and verifies SHA256 readback. It does not execute XNU."\n'
+    if mode=='diagnostic' and cpu_cache:
+        script+='ui "Temporarily offlines secondary CPUs, maintains payload caches, restores CPUs and checks per-CPU reads. No DMA/MMU shutdown or XNU branch."\n'
     for item in partitions:
         name=item['partition'];node=item['block_node']
         script+='[ "$(readlink -f /dev/block/by-name/'+name+')" = "'+node+'" ] || abort "Unexpected '+name+' block node"\n'
@@ -111,6 +114,8 @@ def build(backup,prototype,output,current_packages=None):
     reservation=metadata.get('early_xnu_reservation') is True
     window_access=metadata.get('window_access_diagnostic') is True
     xnu_stage=metadata.get('xnu_payload_stage_diagnostic') is True
+    cpu_cache=metadata.get('cpu_cache_roundtrip_diagnostic') is True
+    if cpu_cache and not xnu_stage:raise ValueError('CPU/cache roundtrip needs XNU staging')
     xnu_sha=metadata.get('xnu_payload_sha256') if xnu_stage else None
     xnu_size=metadata.get('xnu_payload_size') if xnu_stage else None
     if xnu_stage and (not window_access or not re.fullmatch(r'[0-9a-f]{64}',metadata.get('xnu_payload_sha256','')) or
@@ -127,6 +132,7 @@ def build(backup,prototype,output,current_packages=None):
             'expected_current_boot_sha256':current_boot,
             'window_access_diagnostic':window_access,
             'xnu_payload_stage_diagnostic':xnu_stage,
+            'cpu_cache_roundtrip_diagnostic':cpu_cache,
             'xnu_payload_sha256':metadata.get('xnu_payload_sha256') if xnu_stage else None,
             'xnu_payload_size':metadata.get('xnu_payload_size') if xnu_stage else None,
             'builder_device_operations':[],'device_boot_tested':False,'deployment_ready':False,'packages':[]}
@@ -134,7 +140,8 @@ def build(backup,prototype,output,current_packages=None):
         digest=hashlib.sha256(payload).hexdigest()
         script=updater(mode=mode,bootloader=manifest['bootloader'],partitions=manifest['partitions'],
                        payload_sha=digest,current_boot_sha=current_boot,reservation=reservation,
-                       window_access=window_access,xnu_stage=xnu_stage and mode=='diagnostic')
+                       window_access=window_access,xnu_stage=xnu_stage and mode=='diagnostic',
+                       cpu_cache=cpu_cache and mode=='diagnostic')
         metadata={'mode':mode,'writes':['boot'],'payload_sha256':digest,'payload_size':len(payload),
                   'updater_sha256':hashlib.sha256(script).hexdigest(),
                   'preserves_on_disk':['recovery','dtb','dtbo','vbmeta'],'automatic_reboot':False,
@@ -143,6 +150,7 @@ def build(backup,prototype,output,current_packages=None):
                                   ('ram-window-access' if window_access else ('ram-reservation' if reservation else 'cpu-caps')))
         metadata['window_access_diagnostic']=window_access and mode=='diagnostic'
         metadata['xnu_payload_stage_diagnostic']=xnu_stage and mode=='diagnostic'
+        metadata['cpu_cache_roundtrip_diagnostic']=cpu_cache and mode=='diagnostic'
         metadata['xnu_payload_sha256']=xnu_sha if xnu_stage and mode=='diagnostic' else None
         metadata['xnu_payload_size']=xnu_size if xnu_stage and mode=='diagnostic' else None
         target=output/(('note10-reservation-' if reservation else 'note10-phase2-')+mode+'.zip')

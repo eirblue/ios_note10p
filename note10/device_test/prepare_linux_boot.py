@@ -158,6 +158,7 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output):
             'builtin_idle_init':builtin,'early_xnu_reservation':build.get('early_xnu_reservation') is True,
             'window_access_diagnostic':build.get('window_access_diagnostic') is True,
             'xnu_payload_stage_diagnostic':xnu_stage,
+            'cpu_cache_roundtrip_diagnostic':build.get('cpu_cache_roundtrip_diagnostic') is True,
             'xnu_payload_sha256':build.get('xnu_payload_sha256') if xnu_stage else None,
             'xnu_payload_size':build.get('xnu_payload_size') if xnu_stage else None,
             'external_ramdisk_included':bool(ramdisk),

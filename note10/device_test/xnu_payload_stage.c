@@ -36,7 +36,7 @@ static int n10_sha256(const u8 *data, size_t length, u8 digest[32])
     return error;
 }
 
-static void n10_stage_xnu_payload(unsigned long reserved,
+static unsigned int n10_stage_xnu_payload(unsigned long reserved,
                                  unsigned long pages,
                                  unsigned long invalid)
 {
@@ -130,4 +130,5 @@ report:
                 n10_frame_checksum(frame, count));
     }
     vfree(staging);
+    return status;
 }

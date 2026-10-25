@@ -52,8 +52,10 @@ def cpio(init, xnu_payload=None):
     return bytes(output)
 
 
-def prepare(source,output,run,window_access=False,xnu_payload=None,xnu_manifest=None):
+def prepare(source,output,run,window_access=False,xnu_payload=None,xnu_manifest=None,cpu_cache=False):
     here=Path(__file__).resolve().parent
+    if cpu_cache and xnu_payload is None:
+        raise ValueError('CPU/cache roundtrip requires verified XNU payload staging')
     if (xnu_payload is None)!=(xnu_manifest is None):
         raise ValueError('XNU stage payload and manifest must be supplied together')
     if xnu_payload is not None and not window_access:
@@ -124,6 +126,21 @@ def prepare(source,output,run,window_access=False,xnu_payload=None,xnu_manifest=
         payload_report={'xnu_payload':str(xnu_payload),'xnu_payload_size':len(payload),
                         'xnu_payload_sha256':digest,'xnu_source_macho_sha256':manifest['source_macho_sha256'],
                         'xnu_payload_stage_diagnostic':True}
+    if cpu_cache:
+        cache_source=here/'cpu_cache_roundtrip.c'
+        path.with_name('note10_cpu_cache_roundtrip.c').write_bytes(cache_source.read_bytes())
+        include=b'#include "note10_xnu_payload_stage.c"\n'
+        extension=extension.replace(include,include+b'#include "note10_cpu_cache_roundtrip.c"\n')
+        access_call=b'    note10_test_xnu_window_access(reserved, count, invalid);\n'
+        payload_call=b'    n10_stage_xnu_payload(reserved, count, invalid);\n'
+        if extension.count(access_call)!=1 or extension.count(payload_call)!=1:
+            raise ValueError('Unexpected prerequisite calls for CPU/cache batch')
+        extension=extension.replace(access_call,
+            b'    if (note10_test_xnu_window_access(reserved, count, invalid))\n        return 0;\n')
+        extension=extension.replace(payload_call,
+            b'    if (n10_stage_xnu_payload(reserved, count, invalid))\n        return 0;\n    n10_test_cpu_cache();\n')
+        access_report.update(cpu_cache_roundtrip_diagnostic=True,cpu_cache_evidence_version=1,
+            cpu_cache_source_sha256=hashlib.sha256(cache_source.read_bytes()).hexdigest())
     evidence_id=uuid.uuid4().hex
     target.write_bytes(('#define N10_RESERVE_BUILD_ID "'+evidence_id+'"\n').encode()+extension)
     text=text.replace(declaration,'#include "note10_xnu_reserve.c"\n\n'+declaration)

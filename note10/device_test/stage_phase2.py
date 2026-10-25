@@ -31,6 +31,9 @@ def verify_packages(directory):
                 raise ValueError('Incomplete XNU data-stage package contract')
             if meta.get('mode')=='rollback' and meta.get('xnu_payload_stage_diagnostic',False) is not False:
                 raise ValueError('Rollback package cannot claim XNU staging')
+            if meta.get('cpu_cache_roundtrip_diagnostic') is True and (
+                meta.get('xnu_payload_stage_diagnostic') is not True or meta.get('mode')!='diagnostic'):
+                raise ValueError('CPU/cache diagnostic must explicitly require XNU staging')
             if hashlib.sha256(archive.read('META-INF/com/google/android/update-binary')).hexdigest()!=meta['updater_sha256']:
                 raise ValueError('Updater integrity mismatch')
             if hashlib.sha256(archive.read('boot.img')).hexdigest()!=meta['payload_sha256']:

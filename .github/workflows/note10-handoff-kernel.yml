@@ -23,6 +23,10 @@ on:
         description: Successful run containing note10-experimental-native-build (used only when xnu_stage is true)
         type: string
         default: '39560904016'
+      cpu_cache:
+        description: Offline/restore secondary CPUs, maintain caches and compare per-CPU payload reads; requires xnu_stage
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -52,7 +56,12 @@ jobs:
           NOTE10_RESERVE: ${{ inputs.reserve }}
           NOTE10_WINDOW_ACCESS: ${{ inputs.window_access }}
           NOTE10_XNU_STAGE: ${{ inputs.xnu_stage }}
+          NOTE10_CPU_CACHE: ${{ inputs.cpu_cache }}
         run: |
+          if [ "$NOTE10_CPU_CACHE" = true ] && [ "$NOTE10_XNU_STAGE" != true ]; then
+            echo "cpu_cache requires xnu_stage=true" >&2
+            exit 2
+          fi
           if [ "$NOTE10_XNU_STAGE" = true ]; then
             if [ "$NOTE10_WINDOW_ACCESS" != true ]; then
               echo "xnu_stage requires window_access=true" >&2
@@ -62,6 +71,7 @@ jobs:
             python note10/device_test/test_window_access_core.py --output note10/private/window-access-core-ci
             python note10/device_test/test_window_access_gate.py --output note10/private/window-access-gate-ci
             python note10/device_test/test_xnu_payload_stage.py
+            python note10/device_test/test_cpu_cache_decode.py
             python note10/device_test/test_collect_reservation.py
             python note10/device_test/test_boot_test_packages.py
             python note10/device_test/test_reservation_kernel.py
@@ -89,14 +99,21 @@ jobs:
           path: note10/private/xnu-input
       - name: Materialize XNU data-only RAM payload
         if: inputs.xnu_stage
+        env:
+          NOTE10_CPU_CACHE: ${{ inputs.cpu_cache }}
         run: |
           count="$(find note10/private/xnu-input -name note10-experimental.macho -type f | wc -l)"
           [ "$count" -eq 1 ]
           ARTIFACT_DIR="$(dirname "$(find note10/private/xnu-input -name note10-experimental.macho -print -quit)")"
           python note10/xnu26/materialize_stage_payload.py --artifact "$ARTIFACT_DIR" --output note10/private/xnu-stage-payload
+          EXTRA=()
+          if [ "$NOTE10_CPU_CACHE" = true ]; then
+            python note10/device_test/test_cpu_cache_native.py --payload note10/private/xnu-stage-payload/kernel.mem --output note10/private/handoff-kernel/cpu-cache-model
+            EXTRA+=(--cpu-cache)
+          fi
           python note10/device_test/build_handoff_kernel.py --caps --reserve --window-access \
             --xnu-payload note10/private/xnu-stage-payload/kernel.mem \
-            --xnu-payload-manifest note10/private/xnu-stage-payload/payload-manifest.json
+            --xnu-payload-manifest note10/private/xnu-stage-payload/payload-manifest.json "${EXTRA[@]}"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -110,5 +127,7 @@ jobs:
             note10/private/handoff-kernel/Image
             note10/private/handoff-kernel/minimal-init.elf
             note10/private/handoff-kernel/initramfs.cpio
+            note10/private/handoff-kernel/cpu-cache-model/result.json
+            note10/private/handoff-kernel/cpu-cache-model/compile.log
             note10/private/window-access-core-ci/result.json
             note10/private/window-access-gate-ci/result.json

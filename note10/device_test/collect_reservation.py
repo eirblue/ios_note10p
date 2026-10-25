@@ -8,6 +8,7 @@ import uuid
 from decode_reservation import decode,decode_frames
 from decode_window_access import decode as decode_access
 from decode_xnu_stage import decode as decode_xnu_stage
+from decode_cpu_cache import decode as decode_cpu_cache
 from decode_linux_caps import decode as decode_caps
 from run_probe import ROOT,Adb,preflight
 from stage_phase2 import verify_packages
@@ -48,6 +49,9 @@ def collect(packages,kernel_build,adb):
     evidence_id=result.get('reservation_evidence_id')
     access=result.get('window_access_diagnostic') is True
     xnu_stage=result.get('xnu_payload_stage_diagnostic') is True
+    cpu_cache=result.get('cpu_cache_roundtrip_diagnostic') is True
+    if cpu_cache and not xnu_stage:raise ValueError('CPU/cache batch requires XNU staging')
+    if cpu_cache and result.get('cpu_cache_evidence_version')!=1:raise ValueError('Unsupported CPU/cache evidence version')
     if xnu_stage and not access:raise ValueError('XNU staging requires the verified window-access diagnostic')
     paired=json.loads((packages/'package-result.json').read_text(encoding='utf-8'))
     if paired.get('kernel_image_sha256')!=digest:
@@ -55,6 +59,8 @@ def collect(packages,kernel_build,adb):
     if (paired.get('window_access_diagnostic') is True)!=access or \
        (paired.get('xnu_payload_stage_diagnostic') is True)!=xnu_stage:
         raise ValueError('Diagnostic package scope differs from this kernel build')
+    if (paired.get('cpu_cache_roundtrip_diagnostic') is True)!=cpu_cache:
+        raise ValueError('CPU/cache package and kernel scope differ')
     if xnu_stage and (paired.get('xnu_payload_sha256')!=result.get('xnu_payload_sha256') or
                       paired.get('xnu_payload_size')!=result.get('xnu_payload_size')):
         raise ValueError('XNU payload package and kernel build differ')
@@ -89,6 +95,7 @@ def collect(packages,kernel_build,adb):
             'previous_boot_reservation_observed':False,
             'window_access_required':access,'previous_boot_window_access_observed':False,
             'xnu_payload_stage_required':xnu_stage,'previous_boot_xnu_payload_stage_observed':False,
+            'cpu_cache_roundtrip_required':cpu_cache,'previous_boot_cpu_cache_roundtrip_observed':False,
             'logs_sha256':{n:hashlib.sha256(d).hexdigest() for n,d in logs.items()},
             'log_selections':{},'decode_failures':{}}
     for name,data in logs.items():
@@ -116,6 +123,10 @@ def collect(packages,kernel_build,adb):
                 observation['xnu_payload_stage']=stage_observation
                 observation['xnu_payload_executed']=False
                 observation['kernel_to_xnu_transfer_verified']=False
+            if cpu_cache:
+                cpu_observation=decode_cpu_cache(text,evidence_id,result['xnu_payload_sha256'],result['xnu_payload_size'])
+                report['previous_boot_cpu_cache_roundtrip_observed']=True
+                observation['cpu_cache_roundtrip']=cpu_observation
         except ValueError as error:
             report['decode_failures'][name]=str(error);continue
         (out/'reservation-observation.json').write_text(json.dumps(observation,indent=2),encoding='utf-8')
@@ -132,7 +143,8 @@ def collect(packages,kernel_build,adb):
         break
     report['diagnostic_passed']=(report['previous_boot_reservation_observed'] and
                                  (not access or report['previous_boot_window_access_observed']) and
-                                 (not xnu_stage or report['previous_boot_xnu_payload_stage_observed']))
+                                 (not xnu_stage or report['previous_boot_xnu_payload_stage_observed']) and
+                                 (not cpu_cache or report['previous_boot_cpu_cache_roundtrip_observed']))
     (out/'capture-result.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
     return report
 
