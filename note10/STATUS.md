@@ -428,3 +428,12 @@ Exynos SoC MASTER 및 플랫폼 archive 입력 분리:
 - 현재 BOOT는 v2 진단 payload 전체 해시와 일치한다. recovery/DTB/DTBO/vbmeta도 원본 백업의 전체 해시와 일치한다. 에이전트는 로그·해시 읽기만 수행했다.
 - 패닉 호출 경로에 버튼 재시작용 hard_reset_hook_callback이 기록됐다. idle PID1 marker와 완전한 CPU capability 기록은 이번 로그에서 확인하지 못했다. 이를 init 성공이나 전체 Linux 부팅 성공으로 확대 해석하지 않는다.
 - 검증된 것은 이전 Linux 부팅의 allocator 제외다. 해당 물리 주소는 현재 TWRP에서 사용하거나 다음 부팅에 고정하지 않는다. RAM 쓰기/읽기, DMA·CPU 정지, cache/MMU/GIC 인계 및 XNU 실행은 아직 미검증이다.
+
+## 2026-10-25: 다음 RAM 접근 진단 설치 준비
+
+- 같은 부팅에서 새로 확보·검사한 예약 영역에 두 개의 상반 패턴을 쓰고 읽은 뒤 전체 zeroing/readback을 하는 opt-in Linux 진단을 만들었다. 예약/PFN/범위/linear-map 검사를 통과해야 실행하며 과거 물리 주소를 입력받지 않는다. XNU로 분기하지 않는다.
+- 실제 core C의 PC 버퍼 시험 12개와 실제 wrapper/checksum C의 모형 시험 13개가 통과했다. 예약·매핑 거부 11개 경로는 buffer read/write가 0회였다. 데이터 불일치 뒤에도 scrub을 수행했다. 프레임 판정과 수집기는 예약-only 성공을 RAM 접근 성공으로 취급하지 않는다.
+- 전체 커널 빌드 성공: https://github.com/eirblue/ios_note10p/actions/runs/40188747894 (`113d074`). Image 46,350,348 bytes, SHA-256 `9ad212692ae020cde2ca6b25fa27118e825c7b54d25d89a380e1107a4df915fd`. 실제 Image의 build ID/접근 marker와 내장 CPIO 및 실제 init ELF 명령을 확인했다.
+- 회귀 CI 성공: https://github.com/eirblue/ios_note10p/actions/runs/40189794445 (`b1f142d`). core/wrapper 시험 소스 해시가 실제 커널에 포함한 소스 해시와 일치한다.
+- PC에서 BOOT-only 진단·원본 BOOT 복구 ZIP을 생성하고 현재 TWRP RAM에 전송했다. 실제 ZIP 해시·네이티브 updater 구문·현재 BOOT(v2)와 원본 non-BOOT 4개 파티션 대조를 통과했다. 수동 설치 대기이며 에이전트의 설치·재부팅·파티션 쓰기는 없다. 새 진단의 실기기 RAM 접근 및 재진입 결과는 아직 없다.
+- 별도로 검증된 v2 과거 영역의 크기/정렬을 PC에만 재생하여 실제 XNU 버퍼 배치와 VM 호출 직전까지 1,053,279개 명령을 확인했다. 현재 TWRP RAM 사용이나 하드웨어 MMU/XNU 실행의 증거가 아니다. 상세 device_test/WINDOW-ACCESS.md.
