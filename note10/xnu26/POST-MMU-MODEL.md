@@ -37,7 +37,7 @@ python note10/xnu26/test_post_mmu_entry.py --kernel-build NATIVE_BUILD --adapter
 커널 해시나 첫 호출 경계가 바뀌면 별도 검토 후 검증 계약을 갱신해야 한다.
 
 로컬의 실측 capacity 비교 포함 모델 및 공개 artifact 기반 CI 모두 통과했다.
-최종 CI: https://github.com/eirblue/ios_note10p/actions/runs/40167184145 (`6a4ba1d`).
+기존 가상 진입 CI: https://github.com/eirblue/ios_note10p/actions/runs/40167184145 (`6a4ba1d`).
 
 ## EL1 접근 권한 부분 검사
 
@@ -62,3 +62,6 @@ WXN/EPD/EL0-write-XN의 10개다. 정상 3개 배치의 추가 51개 명령은 �
 - [고정 XNU proc_reg.h](https://github.com/apple-oss-distributions/xnu/blob/ac9718fb1af618d5ce8678d0dc6e8a58f252216f/osfmk/arm64/proc_reg.h)의 descriptor/control bit 정의.
 - [Arm 공식 보호 기법 문서](https://developer.arm.com/-/media/Arm%20Developer%20Community/PDF/Learn%20the%20Architecture/Providing%20protection%20for%20complex%20software.pdf)의 EL0 쓰기 영역에 대한 EL1 실행 금지 설명.
 - [QEMU의 Arm page-table walker](https://github.com/qemu/qemu/blob/master/target/arm/ptw.c)의 APTable 결합 및 EL1 permission 처리와 대조했다. QEMU 자체를 실행하거나 전체 구현과 differential testing한 것은 아니다.
+
+권한 보강 CI도 통과했다: https://github.com/eirblue/ios_note10p/actions/runs/40168931459 (`33ee78f`).
+단위 검사 12개, 실제 명령 모델 정상 3개 배치 및 오류 주입 10개, 기존 MMU 이전 회귀 3개를 확인했다.

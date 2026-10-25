@@ -395,3 +395,11 @@ Exynos SoC MASTER 및 플랫폼 archive 입력 분리:
 - 실제 모형 L2 descriptor의 주소 비트 손상과 잘못된 boot_args 포인터를 거부했다. 기존 continuation 없는 3개 사례도 24,999/24,999/24,807개 명령 및 이전 정지 경계를 유지했다.
 - 검증 kernel SHA를 고정하고 첫 호출 경계가 바뀌면 거부한다. 새 수동 CI도 성공했다: https://github.com/eirblue/ios_note10p/actions/runs/40167184145 (`6a4ba1d`). 공개 source-built artifact만 사용하며 기기 로그·observed profile·설치 ZIP은 업로드하지 않는다.
 - 상세 xnu26/POST-MMU-MODEL.md. 실제 MMU/cache/TLB 전환·permission fault·Linux CPU/DMA 종료·GIC/timer 인계·XNU 하드웨어 실행은 미검증이다. 이번 작업에서 기기 접근·설치·재부팅이나 기존 설치 ZIP 변경은 없다.
+
+## 2026-10-25: EL1 접근 권한의 PC 부분 검사
+
+- `stage1_access.py`를 추가해 실제 모형 descriptor의 AF/AP, 상위 APTable/PXNTable, PXN/WXN/PAN/EPD 및 EL0-write-XN을 명령 fetch/read/store마다 검사한다. APTable의 EL0 접근 차단과 RO 상속을 적용하며, 경계 접근은 양쪽 16K 페이지를 확인한다.
+- 검토한 little-endian 16K/47bit VA/40bit PA·canonical 주소·HA/HD/HPD 비활성 구성으로 제한한다. 자동 AF/dirty 갱신, LPA2/EPAN, 다른 구성은 거부한다. PAN=0은 정상 진입 모형의 명시적 입력이며 실측 PSTATE가 아니다.
+- 별도 descriptor fixture 검사 12개, 실제 링크 XNU 정상 3개 배치와 실제 모형 테이블/레지스터/인자를 변경한 오류 사례 10개를 통과했다. 기존 추가 51개 명령과 `_static_if_init` 호출 직전 경계를 유지한다. 기존 MMU 이전 3개 회귀 사례도 통과했다.
+- CI 성공: https://github.com/eirblue/ios_note10p/actions/runs/40168931459 (`33ee78f`). 상세 xnu26/POST-MMU-MODEL.md에 기준 공개 소스와 지원 범위를 기록했다.
+- 완전한 MMU 또는 실제 permission fault 처리 모델은 아니다. stage-2, memory type, alignment 및 syndrome 전체, cache/TLB, 기기 XNU 실행은 검증하지 않았다. 기기 접근이나 기존 시험 ZIP 변경은 없다.
