@@ -39,3 +39,10 @@ Workflow inputs: `window_access=true`, `xnu_stage=true`, `cpu_cache=true`.
 The local BOOT-only diagnostic ZIP explicitly identifies CPU state changes and
 is paired with the original BOOT rollback. Builders only produce artifacts;
 staging helpers only copy RAM files. Installation and reboot remain manual.
+
+The opt-in Linux build and 21 actual-C PC model cases passed in
+[run 40206140366](https://github.com/eirblue/ios_note10p/actions/runs/40206140366).
+A private manual diagnostic/rollback pair has been prepared against the current
+v4 BOOT baseline and passed RAM ZIP, native updater syntax and partition hash
+checks. Physical CPU offline/restore and coherence results remain pending the
+human-triggered v5 test.

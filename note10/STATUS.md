@@ -462,3 +462,11 @@ Exynos SoC MASTER 및 플랫폼 archive 입력 분리:
 - 전체 원본 로그는 여러 부팅의 중복 sequence 때문에 최초 수집에서 거부됐다. 수집기를 보완해 마지막의 온전한 0초 Linux 배너가 검증한 Image 배너와 정확히 일치할 때만 그 이후의 연속 구간을 선택한다. 원본·선택 범위·SHA를 보존하며, 이전 성공 부팅으로 돌아가거나 손상된 문자를 복원하지 않는다. 같은 구간 안의 중복이나 최신 부팅의 불완전한 기록은 계속 거부한다. 수집기 계약 검사 13개 통과.
 - 최신 구간은 약 2.61초에 적재 성공을 기록했고 약 47초에 hard_reset_hook_callback 경로의 panic이 남았다. idle-init 표식과 정상 CPU capability 파싱은 확인되지 않아 해당 항목의 성공으로 확대하지 않는다.
 - v4는 예약·RAM 접근·XNU 데이터 적재를 한 부팅에 검사했다. 이후에도 같은 실행 환경에서 가능한 진단은 묶어 수집하되, CPU/DMA 정지와 cache/MMU/GIC 전환·XNU 진입은 별도의 검증 경계를 유지한다. 실제 XNU 실행 및 iOS 부팅은 아직 미검증이다.
+
+## 2026-10-26: v5 CPU·캐시 통합 실기기 시험 준비
+
+- 선행 RAM·XNU 적재가 성공하면 Linux 보조 CPU 정지, payload cache clean/invalidate와 SHA256 재검사, CPU 복귀, 8개 CPU의 전체 payload 읽기와 EL/MMU/timer 상태 기록, 최종 SHA256 검사를 한 부팅에 수행하는 opt-in 진단을 추가했다. CPU 정지 시도 뒤에는 실패 경로에서도 복귀 함수를 호출한다. 선행 검사 실패 시 이후 단계는 실행하지 않는다.
+- 실제 CPU/cache C의 PC 모델 21개, RAM wrapper 13개, core 12개 및 적재 C 17개 사례가 통과했다. Linux CPU/cache/register API는 모델이며 real SHA256과 실제 payload 전체 읽기를 사용했다. strict CPU decoder 6개, collector 14개, kernel preparation 6개 및 package 6개 검사도 통과했다.
+- 전체 Linux CI 성공: https://github.com/eirblue/ios_note10p/actions/runs/40206140366 (`524286b`). Image 52,576,268 bytes, SHA256 `a86dac6ccd27ac00a095def4a84825dfcf8265644d5a82bada4a114bd1771dbf`. 내장 CPIO·진단 marker 및 CPU/cache 모델의 소스·payload 해시 binding을 확인했다.
+- 실제 BOOT 크기 검증 후 현재 v4 BOOT를 설치 전 기준으로 묶은 진단·원본 복원 ZIP을 비공개 로컬에 생성하고 TWRP RAM에 전송했다. ZIP 2개 해시·네이티브 updater 문법·현재 5개 파티션 검사를 통과했다. 설치·재부팅은 수동 단계다.
+- 이번 진단은 실제 CPU 상태를 바꾸므로 정지·복귀 도중 멈출 수 있으며 새 동작과 TWRP 재진입은 아직 실기기 시험 전이다. Linux MMU/cache는 유지하고 DMA/GIC 인계 및 XNU branch는 포함하지 않는다. 상세 [CPU-CACHE.md](device_test/CPU-CACHE.md).
