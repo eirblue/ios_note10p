@@ -35,3 +35,6 @@ python note10/xnu26/test_post_mmu_entry.py --kernel-build NATIVE_BUILD --adapter
 새 GitHub 수동 workflow는 기존 공개 소스 빌드 run 39560904016의 artifact를 읽고 동일 모델을 실행한다.
 그 artifact의 보존 기간이 끝나면 해당 workflow는 다운로드에서 실패하며, 다른 바이너리를 자동 대체하지 않는다.
 커널 해시나 첫 호출 경계가 바뀌면 별도 검토 후 검증 계약을 갱신해야 한다.
+
+로컬의 실측 capacity 비교 포함 모델 및 공개 artifact 기반 CI 모두 통과했다.
+최종 CI: https://github.com/eirblue/ios_note10p/actions/runs/40167184145 (`6a4ba1d`).

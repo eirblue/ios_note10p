@@ -386,3 +386,12 @@ Exynos SoC MASTER 및 플랫폼 archive 입력 분리:
 - v2 전체 커널 빌드 성공: https://github.com/eirblue/ios_note10p/actions/runs/40162958220 (`88a97da`). Image 46,350,348 bytes, SHA-256 `8b16ccf9287b8f3bb97708875724d56eede31a3e91d0d5307f1bec307e568a01`. 빌드 고유 ID가 실제 Image에 한 번 포함됨을 확인했다.
 - 실제 Image 내부 CPIO와 원본 archive를 대조했고 실제 init ELF 명령 모델도 통과했다. BOOT prototype 46,354,448 bytes 및 진단/원본 BOOT 복구 ZIP을 PC private에 완성했다. 패키지 SHA/CRC와 PC 셸 구문 검사를 통과했다.
 - 빌드 완료 시 ADB transport가 없어 새 ZIP의 TWRP RAM 전송 및 현재 기기 재검사는 미완료다. 전송·검사·로그 회수용 PC 실행 파일과 수동 안내서를 준비했다. PC 패키지 준비와 실제 기기 설치 직전 상태를 별도 필드로 구분한다. v2 기기 시험 및 XNU 실행은 아직 없다.
+
+## 2026-10-25: 실기기 결과와 독립적인 XNU C 진입 PC 검증
+
+- 기존 adapter→XNU 모델에 선택적 continuation을 추가했다. 기존 기본 동작은 MMU 활성화 직전 정지를 유지한다. continuation은 실제 MMU 활성화 명령을 실행하지 않고, 생성된 실제 페이지 테이블로 확인한 소프트웨어 VA 별칭을 사용한다.
+- 실제 Mach-O/생성 버퍼로 3개 합성 RAM 배치에서 `_arm_init` 가상 주소 진입과 x0 boot_args, interrupt/exception stack 전달을 확인했다. 각 사례는 기존 경계 이후 51개 명령을 실행해 첫 C 호출 `_static_if_init` 직전에 멈췄다. 호출 자체와 C 초기화 완료는 시험하지 않았다.
+- 사례마다 별칭 페이지 1,199개와 fetch 51회/read 1회/store 18회의 주소 변환을 대조했다. 물리/가상 store 복사본은 검사기가 동기화하므로 hardware cache/TLB coherence 증거가 아니다.
+- 실제 모형 L2 descriptor의 주소 비트 손상과 잘못된 boot_args 포인터를 거부했다. 기존 continuation 없는 3개 사례도 24,999/24,999/24,807개 명령 및 이전 정지 경계를 유지했다.
+- 검증 kernel SHA를 고정하고 첫 호출 경계가 바뀌면 거부한다. 새 수동 CI도 성공했다: https://github.com/eirblue/ios_note10p/actions/runs/40167184145 (`6a4ba1d`). 공개 source-built artifact만 사용하며 기기 로그·observed profile·설치 ZIP은 업로드하지 않는다.
+- 상세 xnu26/POST-MMU-MODEL.md. 실제 MMU/cache/TLB 전환·permission fault·Linux CPU/DMA 종료·GIC/timer 인계·XNU 하드웨어 실행은 미검증이다. 이번 작업에서 기기 접근·설치·재부팅이나 기존 설치 ZIP 변경은 없다.
