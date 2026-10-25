@@ -149,6 +149,7 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output):
             'aosp_mkbootimg_sha256':MKBOOTIMG_SHA256,
             'reference_ramdisk_sha256':None if builtin else hashlib.sha256(ramdisk).hexdigest(),
             'builtin_idle_init':builtin,'early_xnu_reservation':build.get('early_xnu_reservation') is True,
+            'window_access_diagnostic':build.get('window_access_diagnostic') is True,
             'external_ramdisk_included':bool(ramdisk),
             'embedded_initramfs_check':embedded_check,
             'embedded_recovery_dtbo':False,'requires_existing_dtb_dtbo_partitions':True,

@@ -30,7 +30,14 @@ class CollectorTests(unittest.TestCase):
               'pages=65536 reserved=65536 invalid=0 shift=12')
         return f'N10RAM2 {body} checksum={checksum(body.encode()):08x}\n'
 
-    def run_fixture(self,log,*,version2=True,missing_image_id=False):
+    def access_frame(self,seq,**changes):
+        values={'words':33554432,'written':67108864,'checked':67108864,'zeroed':33554432,
+                'zero_checked':33554432,'mismatches':0,'rounds':2,'status':0}
+        values.update(changes)
+        body=f'id={self.identity} seq={seq} base=a00000000 size=10000000 '+' '.join(k+'='+str(v) for k,v in values.items())
+        return 'N10MEM1 '+body+f' checksum={checksum(body.encode()):08x}\n'
+
+    def run_fixture(self,log,*,version2=True,missing_image_id=False,access=False):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);build=root/'build';build.mkdir();packages=root/'packages';packages.mkdir()
             image=b'Linux version 4.14.113-note10-reserve-pc (fixture)\0'
@@ -38,14 +45,15 @@ class CollectorTests(unittest.TestCase):
             digest=hashlib.sha256(image).hexdigest();(build/'Image').write_bytes(image)
             report={'build_passed':True,'early_xnu_reservation':True,'image_sha256':digest}
             if version2:report.update(reservation_evidence_version=2,reservation_evidence_id=self.identity)
+            if access:report.update(window_access_diagnostic=True,window_access_evidence_version=1)
             (build/'build-result.json').write_text(json.dumps(report))
             (packages/'package-result.json').write_text(json.dumps({'kernel_image_sha256':digest}))
             records=[{'file':'note10-reservation-'+kind+'.zip'} for kind in ('diagnostic','rollback')]
             adb=FakeAdb(log.encode())
             with patch.object(collector,'ROOT',root),patch.object(collector,'verify_packages',return_value=records), \
                  patch.object(collector,'preflight',return_value={'twrp_version':'fixture'}) as preflight:
-                if missing_image_id:
-                    with self.assertRaisesRegex(ValueError,'embedded'):collector.collect(packages,build,adb)
+                if missing_image_id or (access and not version2):
+                    with self.assertRaises(ValueError):collector.collect(packages,build,adb)
                     preflight.assert_not_called();return
                 result=collector.collect(packages,build,adb)
             self.assertEqual(set(result['logs_sha256']),{'last_kmsg.txt'})
@@ -69,6 +77,24 @@ class CollectorTests(unittest.TestCase):
              'N10RAM1 CHECK pages=65536 reserved=65536 invalid=0 shift=12\n')
         self.assertTrue(self.run_fixture(log,version2=False)['previous_boot_reservation_observed'])
         self.assertFalse(self.run_fixture(log.replace('(fixture)','(other)'),version2=False)['previous_boot_reservation_observed'])
+
+    def test_access_requires_its_own_complete_evidence(self):
+        base=self.frame(1)+self.frame(2)
+        result=self.run_fixture(base,access=True)
+        self.assertTrue(result['previous_boot_reservation_observed'])
+        self.assertFalse(result['previous_boot_window_access_observed'])
+        self.assertFalse(result['diagnostic_passed'])
+        result=self.run_fixture(base+self.access_frame(0)+self.access_frame(1),access=True)
+        self.assertTrue(result['diagnostic_passed']);self.assertTrue(result['previous_boot_window_access_observed'])
+
+    def test_access_failure_cannot_fall_back_to_reservation_pass(self):
+        log=self.frame(1)+self.frame(2)+self.access_frame(0)+self.access_frame(1,mismatches=1,status=2)
+        result=self.run_fixture(log,access=True)
+        self.assertTrue(result['previous_boot_reservation_observed'])
+        self.assertFalse(result['diagnostic_passed'])
+
+    def test_access_without_build_id_refused_before_device_access(self):
+        self.run_fixture('',version2=False,access=True)
 
 
 if __name__=='__main__':unittest.main()

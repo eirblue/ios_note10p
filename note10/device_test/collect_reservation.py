@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 import uuid
 from decode_reservation import decode,decode_frames
+from decode_window_access import decode as decode_access
 from decode_linux_caps import decode as decode_caps
 from run_probe import ROOT,Adb,preflight
 from stage_phase2 import verify_packages
@@ -23,6 +24,9 @@ def collect(packages,kernel_build,adb):
     if digest!=result['image_sha256'] or digest!=json.loads((packages/'package-result.json').read_text())['kernel_image_sha256']:
         raise ValueError('Kernel source artifact and package differ')
     evidence_id=result.get('reservation_evidence_id')
+    access=result.get('window_access_diagnostic') is True
+    if access and (evidence_id is None or result.get('window_access_evidence_version')!=1):
+        raise ValueError('Window access requires build-bound reservation and access evidence versions')
     if evidence_id is not None:
         if (result.get('reservation_evidence_version')!=2 or
             not re.fullmatch(r'[0-9a-f]{32}',evidence_id) or image.count(evidence_id.encode())!=1):
@@ -47,16 +51,22 @@ def collect(packages,kernel_build,adb):
     report={'directory':str(out),'twrp_version':state['twrp_version'],'kernel_image_sha256':digest,
             'partition_writes':False,'rebooted':False,'xnu_executed':False,
             'previous_boot_reservation_observed':False,
+            'window_access_required':access,'previous_boot_window_access_observed':False,
             'logs_sha256':{n:hashlib.sha256(d).hexdigest() for n,d in logs.items()},'decode_failures':{}}
     for name,data in logs.items():
         text=data.decode(errors='replace')
         if evidence_id is None and banner not in text:
             report['decode_failures'][name]='Exact source build banner not observed';continue
-        try:observation=decode_frames(text,evidence_id) if evidence_id else decode(text)
+        try:
+            observation=decode_frames(text,evidence_id) if evidence_id else decode(text)
+            report['previous_boot_reservation_observed']=True
+            (out/'reservation-observation.json').write_text(json.dumps(observation,indent=2),encoding='utf-8')
+            if access:observation=decode_access(text,evidence_id)
         except ValueError as error:
             report['decode_failures'][name]=str(error);continue
         (out/'reservation-observation.json').write_text(json.dumps(observation,indent=2),encoding='utf-8')
         report.update(previous_boot_reservation_observed=True,evidence_file=name,
+                      previous_boot_window_access_observed=access,
                       idle_init_marker_observed='N10INIT1 IDLE ' in text,
                       android_root_mount_message_observed='VFS: Mounted root' in text,
                       kernel_panic_observed='Kernel panic' in text,
@@ -67,6 +77,7 @@ def collect(packages,kernel_build,adb):
             report['observed_cpus']=caps['observed_cpus']
         except ValueError as error:report['cpu_decode_failure']=str(error)
         break
+    report['diagnostic_passed']=report['previous_boot_reservation_observed'] and (not access or report['previous_boot_window_access_observed'])
     (out/'capture-result.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
     return report
 
@@ -76,5 +87,7 @@ if __name__=='__main__':
     parser.add_argument('--packages',type=Path,required=True);parser.add_argument('--kernel-build',type=Path,required=True)
     args=parser.parse_args();r=collect(args.packages,args.kernel_build,Adb(ROOT/'host-tools/platform-tools/adb.exe'))
     print(json.dumps({'directory':r['directory'],'previous_boot_reservation_observed':r['previous_boot_reservation_observed'],
+                      'previous_boot_window_access_observed':r['previous_boot_window_access_observed'],
+                      'diagnostic_passed':r['diagnostic_passed'],
                       'partition_writes':False,'xnu_executed':False}))
-    if not r['previous_boot_reservation_observed']:raise SystemExit(1)
+    if not r['diagnostic_passed']:raise SystemExit(1)

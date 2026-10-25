@@ -45,6 +45,7 @@ jobs:
           if [ "$NOTE10_WINDOW_ACCESS" = true ]; then
             python note10/device_test/test_window_access_decode.py
             python note10/device_test/test_window_access_core.py --output note10/private/window-access-core-ci
+            python note10/device_test/test_window_access_gate.py --output note10/private/window-access-gate-ci
             python note10/device_test/build_handoff_kernel.py --caps --reserve --window-access
           elif [ "$NOTE10_RESERVE" = true ]; then
             python note10/device_test/build_handoff_kernel.py --caps --reserve
@@ -67,3 +68,4 @@ jobs:
             note10/private/handoff-kernel/minimal-init.elf
             note10/private/handoff-kernel/initramfs.cpio
             note10/private/window-access-core-ci/result.json
+            note10/private/window-access-gate-ci/result.json

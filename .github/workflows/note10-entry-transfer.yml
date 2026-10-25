@@ -42,6 +42,9 @@ jobs:
           python note10/device_test/test_reservation_kernel.py
           python note10/device_test/test_reservation_decode.py
           python note10/device_test/test_collect_reservation.py
+          python note10/device_test/test_window_access_decode.py
+          python note10/device_test/test_window_access_core.py --output note10/private/window-access-core-ci
+          python note10/device_test/test_window_access_gate.py --output note10/private/window-access-gate-ci
           python note10/device_test/test_minimal_init.py note10/private/xnu-transfer/minimal-init.elf --report note10/private/xnu-transfer/minimal-init-model.json
       - uses: actions/upload-artifact@v4
         with:
@@ -53,3 +56,5 @@ jobs:
             note10/private/xnu-transfer/test-result.json
             note10/private/xnu-transfer/minimal-init.elf
             note10/private/xnu-transfer/minimal-init-model.json
+            note10/private/window-access-core-ci/result.json
+            note10/private/window-access-gate-ci/result.json
