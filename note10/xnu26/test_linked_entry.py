@@ -166,12 +166,13 @@ def run_case(directory, ram_base, outside_bootstrap_block=False, transfer_elf=No
             'bootstrap_table_pages_primed_and_cleared':4,
             'segment_virtual_and_identity_endpoints_checked':endpoints,
             'store_range':[hex(min(stores)),hex(max(stores))],
-            'translations':{k:hex(v) for k,v in translations.items()},'passed':True}
+            'translations':{k:hex(v) for k,v in translations.items()},'tcr_el1':hex(tcr),'passed':True}
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__);parser.add_argument('directory',type=Path)
     parser.add_argument('--adapter',type=Path,help='PC-only post-shutdown entry adapter ELF')
+    parser.add_argument('--observed-profile',type=Path,help='Compare modeled TCR with hash-bound Linux CPU observations')
     args = parser.parse_args()
     cases = [run_case(args.directory,base,transfer_elf=args.adapter) for base in (0x80000000,0x100000000)]
     negative = False
@@ -189,7 +190,13 @@ if __name__ == '__main__':
             'unmapped_boot_args_negative_case_rejected':negative,
             'hardware_verified':False,'device_operations':[],'deployment_ready':False}
     if args.adapter is not None:result['adapter_sha256']=hashlib.sha256(args.adapter.read_bytes()).hexdigest()
+    if args.observed_profile is not None:
+        from observed_profile import load,check_tcr
+        profile=load(args.observed_profile)
+        result['observed_profile_sha256']=hashlib.sha256(args.observed_profile.read_bytes()).hexdigest()
+        result['observed_capacity_checks']=[check_tcr(profile,int(case['tcr_el1'],16)) for case in cases]
     output='adapter-linked-entry-test-result.json' if args.adapter is not None else 'linked-entry-test-result.json'
+    if args.observed_profile is not None:output='observed-'+output
     (ROOT/'note10/private'/output).write_text(json.dumps(result,indent=2))
     print(json.dumps({'passed':True,'cases':len(cases),'instructions':[c['instructions'] for c in cases],
                       'stop':'before_mmu_enable','hardware_verified':False}))

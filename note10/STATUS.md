@@ -332,3 +332,22 @@ Exynos SoC MASTER 및 플랫폼 archive 입력 분리:
 - PC에 ZIP 재전송·부팅 후 로그 수집 실행 파일과 설치/복구 안내서를 준비했다. 재부팅하면 RAM ZIP은 사라지며 PC 복사본으로 재전송한다. 설치·복구는 사용자가 TWRP에서 직접 실행해야 한다.
 - 준비 완료는 **임시 Linux 커널 수동 시험 패키지**에 한정된다. 새 커널의 실제 부팅·화면·USB·recovery 재진입 및 BOOT 복원은 아직 시험하지 않았다. XNU/iOS 설치 이미지·기기 실행·하드웨어 handoff는 미완료다.
 - 상세 device_test/LINUX-CAPS.md. 원본 기기 백업·생성 이미지·설치 ZIP은 업로드하지 않았다. 에이전트의 파티션 쓰기·재부팅·모듈 적재·kexec·XNU 실행은 없다.
+
+## 2026-10-25: 수동 시험 후 이전 커널 로그에서 실측 확보
+
+- 사용자가 BOOT 설치와 System 부팅을 직접 수행했다. 통신사 로고 후 재부팅 반복을 보고했으며 기존 TWRP로 돌아왔다.
+- BOOT 해시는 진단 payload와 일치하고 recovery/DTB/DTBO/vbmeta는 원래 백업과 일치했다. TWRP에서 `/proc/last_kmsg` 2MiB와 pstore 로그를 읽기 전용으로 PC에 보관했다.
+- last_kmsg에 `4.14.113-note10-handoff-pc` 배너와 완결된 N10CAP1 기록이 있다. 실제 진단 Linux 실행은 확인됐지만 TWRP 진단 환경의 정상 부팅 성공은 아니다.
+- 엄격 decoder가 CPU 8개·cache selector coverage·CSSELR 복원 기록을 통과했다. Linux privileged view에서 모두 EL1·16K stage-1 지원·40bit IPS 수용 가능으로 관측됐다. PA 폭은 CPU 4/5가 44bit, 나머지가 40bit다. 부트로더 진입 상태·XNU 실행 증거는 아니다.
+- 외부 initrd unpack 메시지는 없고 Android ext4 root가 마운트됐다. 약 53.65초에 bootchecker의 `sysrq: SysRq : Trigger a crash`와 `sysrq_handle_crash` PC, 이어서 kernel panic이 기록됐다. bootchecker가 crash를 요청한 조건과 bootloader의 initrd 미전달 여부는 추가 조사 대상이다.
+- 원래 BOOT 복구 ZIP의 payload가 원본 백업과 일치함을 재검증하고 새 TWRP RAM 폴더에 전송했다. 복구 설치·재부팅은 사용자의 다음 직접 조작 단계다. 에이전트는 파티션 쓰기·재부팅을 수행하지 않았다.
+
+## 2026-10-25: 실측 입력을 XNU 보드·진입 검사에 연결
+
+- 사용자 복구 설치 이후 boot/recovery/DTB/DTBO/vbmeta 5개 전체 해시가 백업과 일치함을 확인했다. 원래 Samsung kernel 배너에서도 zygote 반복 종료·bootchecker SysRq panic이 나타났다. Android 정상 복구는 미완료이며 사용자 지시로 해당 복구 작업을 중단했다.
+- Linux 진단 실측 원본 로그의 SHA-256·엄격 재해석·헤더 바이트를 연결하는 observed profile 생성/검증기를 추가했다. 원본 로그·개인 데이터는 업로드하지 않는다.
+- I/D 최소 라인 64 bytes·최대 관측 line 128 bytes·페이지 16K·최소 PA 폭 40bit로 생성했다. 기존 전체 실험 빌드의 입력 수치와 같지만 그 manifest의 합성 입력 표시를 바꾸지는 않는다.
+- raw MPIDR은 서로 다르나 CPU 1/6 affinity 필드가 겹친다. 자동 topology/PSCI ID를 만들지 않고 초기 XNU 단일 CPU 제한을 유지했다.
+- 실측 입력으로 실제 XNU patched headers assert 및 bootstrap/IRQ C 파일을 ARM64 Mach-O 객체 3개로 컴파일했다. VMAPPLE generated dependencies를 사용한 구성 요소 검사이며 전체 kernel build가 아니다.
+- 실제 링크 XNU와 전달 adapter를 합성 RAM 두 배치에서 각각 24,999개 명령 실행했다. 실제 TCR 0x226511a511의 16K/40bit가 8개 CPU 실측 capacity를 통과했고, MMU 활성화 전에 정지했다. 실기기 handoff·MMU 전환은 없다.
+- 관측 불일치/변조/누락·TCR 불일치·출력 경로 거부 등 새 PC 시험 6개를 통과했다. 상세 xnu26/OBSERVED.md. XNU 하드웨어 실행과 iOS 설치 이미지는 미완료다.

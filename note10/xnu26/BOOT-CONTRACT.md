@@ -67,3 +67,9 @@ Unicorn 2.1.4 / Capstone 5.0.9가 필요하다. 보고서와 객체는 `note10/p
 GIC/timer 소유권 이전과 진단 로그 경로가 여전히 필요하다. RAM에서 XNU로 전환하면
 실행 중인 TWRP도 계속 동작하는 것이 아니며, 실패 시 재부팅·재진입이 필요할 수 있다.
 현재 코드에는 실제 handoff 실행 경로가 없고 `deployment_ready=false`를 유지한다.
+
+## 실측 CPU capacity 연결
+
+수동 Linux 커널 시험에서 얻은 8개 CPU의 16K·PA 폭·cache line 관측을
+해시로 묶어 보드 컴파일과 실제 XNU 진입 코드의 TCR 대조에 사용했다.
+[실행 결과·재현·한계](OBSERVED.md). RAM 예약이나 cache/MMU 전환 증거를 대신하지 않는다.
