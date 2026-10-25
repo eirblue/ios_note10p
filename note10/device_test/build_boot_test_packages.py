@@ -74,7 +74,7 @@ unzip -p "$ZIP" boot.img > "$WORK/boot.img" || abort "Cannot extract BOOT payloa
     return script.encode('utf-8')
 
 
-def build(backup,prototype,output):
+def build(backup,prototype,output,current_packages=None):
     if not output.resolve().is_relative_to((ROOT/'note10/private').resolve()):raise ValueError('Private output required')
     if output.exists():raise ValueError('Package directory already exists')
     parts=read_verified_backup(backup)
@@ -91,6 +91,17 @@ def build(backup,prototype,output):
     if metadata.get('original_boot_sha256')!=original or metadata.get('existing_recovery_partition_sha256')!=hashlib.sha256(parts['recovery']).hexdigest():
         raise ValueError('Prototype baseline differs')
     if not 0<len(raw)<=len(parts['boot']):raise ValueError('Prototype exceeds BOOT partition')
+    current_boot=original
+    if current_packages is not None:
+        from stage_phase2 import verify_packages
+        previous=verify_packages(current_packages)
+        previous_result=json.loads((current_packages/'package-result.json').read_text())
+        if previous_result.get('backup_manifest_sha256')!=metadata['backup_manifest_sha256']:
+            raise ValueError('Previous diagnostic uses a different backup')
+        candidates=[p for p in previous if p['mode']=='diagnostic']
+        if len(candidates)!=1 or candidates[0]['payload_size']!=len(parts['boot']):
+            raise ValueError('Previous diagnostic partition size differs')
+        current_boot=candidates[0]['payload_sha256']
     reservation=metadata.get('early_xnu_reservation') is True
     if reservation and metadata.get('builtin_idle_init') is not True:raise ValueError('Reservation test needs built-in idle init')
     padded=raw+bytes(len(parts['boot'])-len(raw))
@@ -99,11 +110,12 @@ def build(backup,prototype,output):
             'manual_test_packages_created':True,'prototype_sha256':metadata['sha256'],
             'kernel_image_sha256':metadata['kernel_build_sha256'],
             'backup_manifest_sha256':metadata['backup_manifest_sha256'],
+            'expected_current_boot_sha256':current_boot,
             'builder_device_operations':[],'device_boot_tested':False,'deployment_ready':False,'packages':[]}
     for mode,payload in (('diagnostic',padded),('rollback',parts['boot'])):
         digest=hashlib.sha256(payload).hexdigest()
         script=updater(mode=mode,bootloader=manifest['bootloader'],partitions=manifest['partitions'],
-                       payload_sha=digest,current_boot_sha=original,reservation=reservation)
+                       payload_sha=digest,current_boot_sha=current_boot,reservation=reservation)
         metadata={'mode':mode,'writes':['boot'],'payload_sha256':digest,'payload_size':len(payload),
                   'updater_sha256':hashlib.sha256(script).hexdigest(),
                   'preserves_on_disk':['recovery','dtb','dtbo','vbmeta'],'automatic_reboot':False,
@@ -130,5 +142,6 @@ def build(backup,prototype,output):
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     for name in ('backup','prototype','output'):parser.add_argument('--'+name,type=Path,required=True)
-    args=parser.parse_args();report=build(args.backup,args.prototype,args.output)
+    parser.add_argument('--current-packages',type=Path,help='Verified prior diagnostic pair currently installed in BOOT')
+    args=parser.parse_args();report=build(args.backup,args.prototype,args.output,args.current_packages)
     print(json.dumps({'packages':len(report['packages']),'builder_device_operations':[],'deployment_ready':False}))

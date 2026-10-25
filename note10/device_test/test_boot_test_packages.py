@@ -4,6 +4,7 @@ No ADB/device access. Identity, block metadata and filesystem paths are modeled;
 payload extraction, SHA-256 and dd copies execute against real fixture bytes.
 """
 import hashlib
+import json
 import os
 import re
 from pathlib import Path
@@ -11,11 +12,44 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 import zipfile
-from build_boot_test_packages import updater,ROOT
+from build_boot_test_packages import updater,ROOT,build
 
 
 class PackageTests(unittest.TestCase):
+    def test_chain_to_verified_prior_diagnostic_and_reject_foreign_backup(self):
+        parent=ROOT/'note10/private/device-test';parent.mkdir(exist_ok=True,parents=True)
+        with tempfile.TemporaryDirectory(dir=parent) as name:
+            fs=Path(name);backup=fs/'backup';backup.mkdir()
+            parts={p:bytes([i])*512 for i,p in enumerate(('boot','recovery','dtb','dtbo','vbmeta'),1)}
+            records=[{'partition':p,'block_node':f'/dev/block/sda{i}',
+                      'size':512,'sha256':hashlib.sha256(raw).hexdigest()}
+                     for i,(p,raw) in enumerate(parts.items(),14)]
+            manifest=backup/'backup-manifest.json'
+            manifest.write_text(json.dumps({'bootloader':'N976NKSU2HWH5','partitions':records}))
+            prototype=fs/'fixture.img';prototype.write_bytes(b'fixture diagnostic bytes')
+            metadata={'prototype_created':True,'kind':'temporary Linux diagnostic boot; not XNU/iOS',
+                      'sha256':hashlib.sha256(prototype.read_bytes()).hexdigest(),'size':prototype.stat().st_size,
+                      'backup_manifest_sha256':hashlib.sha256(manifest.read_bytes()).hexdigest(),
+                      'original_boot_sha256':records[0]['sha256'],
+                      'existing_recovery_partition_sha256':records[1]['sha256'],
+                      'kernel_build_sha256':'a'*64}
+            prototype.with_suffix('.json').write_text(json.dumps(metadata))
+            with patch('build_boot_test_packages.read_verified_backup',return_value=parts):
+                first=build(backup,prototype,fs/'first')
+                second=build(backup,prototype,fs/'second',fs/'first')
+                self.assertEqual(second['expected_current_boot_sha256'],first['packages'][0]['payload_sha256'])
+                with zipfile.ZipFile(fs/'second/note10-phase2-diagnostic.zip') as archive:
+                    script=archive.read('META-INF/com/google/android/update-binary').decode()
+                    self.assertIn(first['packages'][0]['payload_sha256'],script)
+                foreign=json.loads((fs/'first/package-result.json').read_text())
+                foreign['backup_manifest_sha256']='f'*64
+                (fs/'first/package-result.json').write_text(json.dumps(foreign))
+                with self.assertRaisesRegex(ValueError,'different backup'):
+                    build(backup,prototype,fs/'refused',fs/'first')
+                self.assertFalse((fs/'refused').exists())
+
     def run_fixture(self, *, mode='diagnostic', device='d2x', damaged_boot=False,
                     damaged_recovery=False, corrupt_payload=False, persistent_tmp=False):
         parent=ROOT/'note10/private/device-test';parent.mkdir(exist_ok=True,parents=True)

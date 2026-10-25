@@ -5,6 +5,44 @@ from pathlib import Path
 import re
 
 
+def checksum(data):
+    value=2166136261
+    for byte in data:value=((value^byte)*16777619)&0xffffffff
+    return value
+
+
+def decode_frames(text,expected_id):
+    """Require two intact agreeing frames bound to the verified kernel Image.
+
+    Corrupted copies are ignored, never repaired. The checksum detects damage;
+    it is not authentication. The caller must verify the build artifact/ID.
+    """
+    if not re.fullmatch(r'[0-9a-f]{32}',expected_id):raise ValueError('Invalid build evidence ID')
+    pattern=(r'N10RAM2 (id=([0-9a-f]{32}) seq=([0-9]+) base=([0-9a-f]+) '
+             r'size=([0-9a-f]+) align=([0-9a-f]+) pages=([0-9]+) '
+             r'reserved=([0-9]+) invalid=([0-9]+) shift=([0-9]+)) checksum=([0-9a-f]{8})(?=\r?\n|$)')
+    valid={};observation=None
+    for match in re.finditer(pattern,text):
+        body,identity,sequence,base,size,align,pages,reserved,invalid,shift,digest=match.groups()
+        if identity!=expected_id or checksum(body.encode('ascii'))!=int(digest,16):continue
+        seq=int(sequence)
+        if seq>=32:raise ValueError('Unexpected evidence sequence')
+        # Reuse strict geometry validation; these strings come only from a
+        # complete checksummed frame, never a repaired or guessed log value.
+        item=decode('Linux version 4.14.113-note10-reserve-pc\n'
+                    f'N10RAM1 RESERVED base={base} size={size} align={align}\n'
+                    f'N10RAM1 CHECK pages={pages} reserved={reserved} invalid={invalid} shift={shift}\n')
+        if observation is not None and item!=observation:raise ValueError('Conflicting intact reservation frames')
+        observation=item
+        if seq in valid:raise ValueError('Duplicate evidence sequence / merged boot logs')
+        valid[seq]=body
+    if len(valid)<2:raise ValueError('At least two intact distinct matching build frames required')
+    observation.update(evidence_version=2,build_evidence_id=expected_id,
+                       intact_frame_count=len(valid),intact_sequences=sorted(valid),
+                       corrupted_frames_repaired=False)
+    return observation
+
+
 def decode(text):
     if re.findall(r'Linux version ([^\s\x00]+)',text)!=['4.14.113-note10-reserve-pc']:
         raise ValueError('Exactly one reservation-kernel boot log required')

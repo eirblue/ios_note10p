@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import re
 import uuid
-from decode_reservation import decode
+from decode_reservation import decode,decode_frames
 from decode_linux_caps import decode as decode_caps
 from run_probe import ROOT,Adb,preflight
 from stage_phase2 import verify_packages
@@ -22,6 +22,11 @@ def collect(packages,kernel_build,adb):
     digest=hashlib.sha256(image).hexdigest()
     if digest!=result['image_sha256'] or digest!=json.loads((packages/'package-result.json').read_text())['kernel_image_sha256']:
         raise ValueError('Kernel source artifact and package differ')
+    evidence_id=result.get('reservation_evidence_id')
+    if evidence_id is not None:
+        if (result.get('reservation_evidence_version')!=2 or
+            not re.fullmatch(r'[0-9a-f]{32}',evidence_id) or image.count(evidence_id.encode())!=1):
+            raise ValueError('Unique build evidence ID must be embedded in verified Image')
     banners=re.findall(rb'Linux version 4\.14\.113-note10-reserve-pc [^\x00\r\n]+',image)
     if len(banners)!=1:raise ValueError('Expected unique source kernel banner')
     banner=banners[0].decode('ascii')
@@ -41,9 +46,9 @@ def collect(packages,kernel_build,adb):
             'logs_sha256':{n:hashlib.sha256(d).hexdigest() for n,d in logs.items()},'decode_failures':{}}
     for name,data in logs.items():
         text=data.decode(errors='replace')
-        if banner not in text:
+        if evidence_id is None and banner not in text:
             report['decode_failures'][name]='Exact source build banner not observed';continue
-        try:observation=decode(text)
+        try:observation=decode_frames(text,evidence_id) if evidence_id else decode(text)
         except ValueError as error:
             report['decode_failures'][name]=str(error);continue
         (out/'reservation-observation.json').write_text(json.dumps(observation,indent=2),encoding='utf-8')

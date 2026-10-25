@@ -5,6 +5,7 @@
 #include <linux/init.h>
 #include <linux/memblock.h>
 #include <linux/mm.h>
+#include <linux/kernel.h>
 
 #define N10_WINDOW_SIZE (256ULL << 20)
 #define N10_WINDOW_ALIGN (32ULL << 20)
@@ -12,6 +13,16 @@
 
 static phys_addr_t n10_window_base;
 static int n10_window_status;
+
+/* Error detection for a complete ASCII evidence frame; not authentication. */
+static u32 n10_frame_checksum(const char *text, unsigned int length)
+{
+    u32 value = 2166136261U;
+    unsigned int i;
+    for (i = 0; i < length; ++i)
+        value = (value ^ (unsigned char)text[i]) * 16777619U;
+    return value;
+}
 
 static void __init note10_reserve_xnu_window(void)
 {
@@ -60,6 +71,24 @@ static int __init note10_check_xnu_window(void)
             count, reserved, invalid, (unsigned int)PAGE_SHIFT);
     if (reserved != count || invalid)
         pr_err("N10RAM1 FAILED stage=page-state\n");
+    /* Each copy includes geometry, state and an ID unique to this build.
+     * A reader must validate checksums and multiple agreeing sequences.
+     * Never repair corrupted text or infer a physical address from it.
+     */
+    {
+        unsigned int sequence;
+        char frame[256];
+        for (sequence = 0; sequence < 32; ++sequence) {
+            int length = scnprintf(frame, sizeof(frame),
+                "id=%s seq=%u base=%llx size=%llx align=%llx pages=%lu reserved=%lu invalid=%lu shift=%u",
+                N10_RESERVE_BUILD_ID, sequence,
+                (unsigned long long)n10_window_base,
+                N10_WINDOW_SIZE, N10_WINDOW_ALIGN,
+                count, reserved, invalid, (unsigned int)PAGE_SHIFT);
+            pr_info("N10RAM2 %s checksum=%08x\n", frame,
+                    n10_frame_checksum(frame, length));
+        }
+    }
     /* Reserved pages remain excluded from Linux's allocator until reboot.
      * This does not prove DMA quiescence or global SoC ownership.
      */

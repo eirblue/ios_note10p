@@ -139,6 +139,8 @@ def main(caps=False,reserve=False):
         # Copy only the completed output; retain object-tree logs for diagnosis.
         import shutil
         shutil.copyfile(image,target)
+        if reserve and target.read_bytes().count(report['reservation_evidence_id'].encode())!=1:
+            raise ValueError('Unique reservation evidence ID not embedded in Image')
         report.update(build_passed=True,image_size=target.stat().st_size,
                       image_sha256=hashlib.file_digest(target.open('rb'),'sha256').hexdigest(),
                       arm64_text_offset=hex(text_offset),arm64_header_image_size=image_size,arm64_flags=hex(flags))

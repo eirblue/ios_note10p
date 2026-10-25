@@ -2,6 +2,7 @@
 import hashlib
 from pathlib import Path
 import zlib
+import uuid
 
 INIT_SHA='cc990de7d8222f56fd71519c8b5dbf87a50abd4131e9eeb49ba78c04e3b6e3f3'
 
@@ -57,7 +58,9 @@ def prepare(source,output,run):
     if text.count(declaration)!=1 or text.count(call)!=1:raise ValueError('Unexpected reservation insertion points')
     target=path.with_name('note10_xnu_reserve.c')
     if target.exists():raise ValueError('Existing reservation extension')
-    extension=(here/'xnu_reserve.c').read_bytes();target.write_bytes(extension)
+    extension=(here/'xnu_reserve.c').read_bytes()
+    evidence_id=uuid.uuid4().hex
+    target.write_bytes(('#define N10_RESERVE_BUILD_ID "'+evidence_id+'"\n').encode()+extension)
     text=text.replace(declaration,'#include "note10_xnu_reserve.c"\n\n'+declaration)
     text=text.replace(call,'\tnote10_reserve_xnu_window();\n\n'+call)
     path.write_text(text)
@@ -70,6 +73,7 @@ def prepare(source,output,run):
     if len(init)<64 or init[18:20]!=b'\xb7\x00':raise ValueError('Not an ARM64 init ELF')
     archive=output/'initramfs.cpio';archive.write_bytes(cpio(init))
     return {'early_xnu_reservation':True,'builtin_idle_init':True,
+            'reservation_evidence_id':evidence_id,'reservation_evidence_version':2,
             'reservation_source_sha256':hashlib.sha256(extension).hexdigest(),
             'patched_arm64_init_sha256':hashlib.sha256(path.read_bytes()).hexdigest(),
             'minimal_init_source_sha256':hashlib.sha256(assembly.read_bytes()).hexdigest(),
