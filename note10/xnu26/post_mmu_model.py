@@ -19,13 +19,19 @@ class ModelPanic(ValueError):
         super().__init__('Actual XNU panic path: '+report['format'])
 
 
+class ModelExecutionError(ValueError):
+    def __init__(self,report):
+        self.report=report
+        super().__init__(report['error']+'\n'+'\n'.join(report['recent']))
+
+
 def continue_entry(*,uc,md,state,stop,symbols,physical_image,rounded,arguments,
                    boot_args,virtual_ram,ram_base,walk,code_hook,write_hook,
                    banked_sp,sp_select,kernel_raw,kernel_segments,fault=None,c_phase='first-call',register_inputs=None,
-                   expected_timebase=None):
+                   expected_timebase=None,cache_inputs=None):
     from unicorn import UC_HOOK_CODE,UC_HOOK_MEM_WRITE,UC_HOOK_MEM_READ
     from unicorn import arm64_const as regs
-    if c_phase not in ('first-call','platform','platform-return','topology','topology-return','thread','thread-return','startup','startup-return'):
+    if c_phase not in ('first-call','platform','platform-return','topology','topology-return','thread','thread-return','startup','startup-return','vm'):
         raise ValueError('Unknown C continuation boundary')
     descriptor_faults=('mapping','af','pxn','readonly','table-pxn','table-readonly','el0-writable')
     if fault not in (None,'argument','wxn','epd',*descriptor_faults):raise ValueError('Unknown PC fault injection')
@@ -77,15 +83,20 @@ def continue_entry(*,uc,md,state,stop,symbols,physical_image,rounded,arguments,
     # modeled explicitly; only the subsequent linked instructions execute.
     state=dict(state);state['sctlr_el1']=int(stop['sctlr_value'],16)
     register_inputs=dict(register_inputs or {})
-    if set(register_inputs)-{'cntkctl_el1','cntvct_el0'} or any(type(v) is not int or not 0<=v<1<<64 for v in register_inputs.values()):
+    if set(register_inputs)-{'cntkctl_el1','cntvct_el0','mpidr_el1','clidr_el1','ctr_el0','daif','id_aa64dfr0_el1'} or any(type(v) is not int or not 0<=v<1<<64 for v in register_inputs.values()):
         raise ValueError('Unsupported explicit register fixture')
+    if 'daif' in register_inputs and register_inputs['daif']&~0x3c0:
+        raise ValueError('DAIF fixture has reserved bits')
+    cache_inputs=dict(cache_inputs or {})
+    if any(type(k) is not int or k not in range(14) or type(v) is not int or not 0<=v<1<<32 for k,v in cache_inputs.items()):
+        raise ValueError('Unsupported explicit cache selector fixture')
     state.update(register_inputs)
     if fault=='wxn':state['sctlr_el1']|=1<<19
     if fault=='epd':state['tcr_el1']|=1<<23
     start=int(stop['address'],16)+4
     operations=Counter();recent=deque(maxlen=20);count=0;entry=None;boundary=None;platform_return=None;topology_return=None
     thread_return=None;startup_return=None
-    stores=[];reads=0;fetches=0;pending=[];calls=[]
+    stores=[];reads=0;fetches=0;pending=[];calls=[];decoded={}
     def flush_stores(engine):
         for address,size in pending:
             engine.mem_write(address-delta,bytes(engine.mem_read(address,size)))
@@ -110,11 +121,14 @@ def continue_entry(*,uc,md,state,stop,symbols,physical_image,rounded,arguments,
         register=gpr(name)
         return uc.reg_read(register) if register is not None else 0
     def instruction(engine,address,size,_):
-        nonlocal count,entry,boundary,fetches,platform_return,topology_return,thread_return,startup_return
+        nonlocal count,entry,boundary,fetches,platform_return,topology_return,thread_return,startup_return,sp_select
         flush_stores(engine)
         count+=1
         translate(address,4,'fetch');fetches+=1
-        ins=next(md.disasm(bytes(engine.mem_read(address,4)),address))
+        opcode=bytes(engine.mem_read(address,4));key=(address,opcode)
+        ins=decoded.get(key)
+        if ins is None:
+            ins=next(md.disasm(opcode,address));decoded[key]=ins
         recent.append(hex(address)+' '+ins.mnemonic+' '+ins.op_str)
         if startup_return is not None and address==startup_return:
             boundary={'reason':'after_kernel_startup_bootstrap','address':hex(address)}
@@ -148,7 +162,10 @@ def continue_entry(*,uc,md,state,stop,symbols,physical_image,rounded,arguments,
                     'x1':hex(engine.reg_read(regs.UC_ARM64_REG_X1)),
                     'x2':hex(engine.reg_read(regs.UC_ARM64_REG_X2))}
             calls.append(record)
-            if len(calls)>(32768 if c_phase=='startup-return' else 4096):raise ValueError('C continuation call budget exceeded')
+            if len(calls)>(32768 if c_phase in ('startup-return','vm') else 4096):raise ValueError('C continuation call budget exceeded')
+            if c_phase=='vm' and '_arm_vm_init' in names:
+                boundary={'reason':'before_arm_vm_init',**record}
+                engine.emu_stop();return
             if c_phase=='startup' and '_kernel_startup_bootstrap' in names:
                 boundary={'reason':'before_kernel_startup_bootstrap',**record}
                 engine.emu_stop();return
@@ -184,11 +201,22 @@ def continue_entry(*,uc,md,state,stop,symbols,physical_image,rounded,arguments,
         operands=[part.strip().lower() for part in ins.op_str.split(',')]
         if ins.mnemonic=='mrs':
             dst,reg=operands
+            if reg=='ccsidr_el1':
+                selector=state.get('csselr_el1')
+                if selector not in cache_inputs:raise ValueError('Missing explicit CCSIDR fixture for selector '+str(selector))
+                state[reg]=cache_inputs[selector]
             if reg not in state:raise ValueError('Unmodeled post-MMU register read: '+reg)
             engine.reg_write(gpr(dst),state[reg]);operations['modeled_mrs']+=1
         elif ins.mnemonic=='msr':
             reg,src=operands
-            if reg not in ('cpacr_el1','tpidr_el1','tpidr_el0','tpidrro_el0','contextidr_el1') and not (reg=='cntkctl_el1' and reg in register_inputs):
+            if reg=='spsel':
+                number=read(src)
+                if number not in (0,1):raise ValueError('Invalid modeled stack selection')
+                banked_sp[sp_select]=engine.reg_read(regs.UC_ARM64_REG_SP)
+                sp_select=number;engine.reg_write(regs.UC_ARM64_REG_SP,banked_sp[number])
+                state[reg]=number;operations['modeled_msr']+=1
+                engine.reg_write(regs.UC_ARM64_REG_PC,address+4);return
+            if reg not in ('cpacr_el1','tpidr_el1','tpidr_el0','tpidrro_el0','contextidr_el1','csselr_el1') and not (reg=='cntkctl_el1' and reg in register_inputs):
                 raise ValueError('Unexpected post-MMU register write: '+reg)
             state[reg]=read(src);operations['modeled_msr']+=1
         elif ins.mnemonic in ('dc','ic','tlbi','dsb','dmb','isb'):
@@ -211,14 +239,19 @@ def continue_entry(*,uc,md,state,stop,symbols,physical_image,rounded,arguments,
     hook=uc.hook_add(UC_HOOK_CODE,instruction);memory_hook=uc.hook_add(UC_HOOK_MEM_WRITE,write)
     read_hook=uc.hook_add(UC_HOOK_MEM_READ,load)
     try:
-        budget=10000 if c_phase=='first-call' else (2000000 if c_phase=='startup-return' else 500000)
+        budget=10000 if c_phase=='first-call' else (2000000 if c_phase in ('startup-return','vm') else 500000)
         uc.emu_start(start,physical_image+rounded,count=budget)
         flush_stores(uc)
     except ModelPanic:raise
-    except Exception as error:raise ValueError(str(error)+'\n'+'\n'.join(recent)) from error
+    except Exception as error:
+        raise ModelExecutionError({'error':str(error),'c_phase':c_phase,'instructions':count,
+                                   'calls_observed':calls,'recent':list(recent),
+                                   'modeled_register_state':dict(state),'hardware_verified':False}) from error
     finally:uc.hook_del(hook);uc.hook_del(memory_hook);uc.hook_del(read_hook)
     if entry is None or boundary is None:
         raise ValueError('Did not reach C boundary: '+c_phase+' instructions='+str(count)+'\n'+'\n'.join(recent))
+    if sp_select!=0 or banked_sp[1]!=expected_exception_stack:
+        raise ValueError('C boundary did not preserve exception stack and SP selection')
     if bytes(uc.mem_read(arguments,len(boot_args)))!=bytes(boot_args):
         raise ValueError('Physical boot_args changed')
     for address,size in stores:
@@ -229,7 +262,7 @@ def continue_entry(*,uc,md,state,stop,symbols,physical_image,rounded,arguments,
         from early_c_state import inspect
         early_state=inspect(uc,kernel_raw,symbols,kernel_segments,boot_args,calls,stores,
                             expected_timebase,state.get('cntkctl_el1'))
-        if c_phase in ('topology-return','thread','thread-return','startup','startup-return'):
+        if c_phase in ('topology-return','thread','thread-return','startup','startup-return','vm'):
             from early_c_state import inspect_single_cpu
             early_state['single_cpu_fixture']=inspect_single_cpu(uc,symbols)
             if state.get('tpidr_el0')!=0 or state.get('tpidrro_el0')!=0:
@@ -237,18 +270,22 @@ def continue_entry(*,uc,md,state,stop,symbols,physical_image,rounded,arguments,
         if c_phase=='thread-return':
             from early_c_state import inspect_thread
             early_state['bootstrap_thread']=inspect_thread(uc,symbols,kernel_raw,calls)
-        if c_phase in ('startup','startup-return'):
+        if c_phase in ('startup','startup-return','vm'):
             if expected_timebase is None:raise ValueError('Startup state requires explicit timebase')
             from early_c_state import inspect_startup
             early_state['startup']=inspect_startup(uc,symbols,state,expected_timebase)
-        if c_phase=='startup-return':
+        if c_phase in ('startup-return','vm'):
             from early_c_state import inspect_startup_entries
             early_state['startup_entries']=inspect_startup_entries(uc,kernel_raw,symbols,calls)
+        if c_phase=='vm':
+            from early_c_state import inspect_vm_boundary
+            early_state['vm_boundary']=inspect_vm_boundary(uc,symbols,boot_args,cache_inputs,state)
     return {'passed':True,'instructions':count,'arm_init_entry':entry,'stop':boundary,
             'early_c_state':early_state,
             'c_phase':c_phase,'calls_observed':calls,
             'aliased_pages_checked':pages,'virtual_kernel_store_count':len(stores),
             'translated_instruction_fetches':fetches,'translated_data_reads':reads,
+            'distinct_instruction_decodes':len(decoded),
             'modeled_system_operations':dict(operations),'exception_stack':hex(expected_exception_stack),
             'mmu_enable_executed':False,'hardware_verified':False,'c_initialization_completed':False,
             'stage1_permission_subset_checked':True,'complete_stage1_fault_model':False,
@@ -256,6 +293,7 @@ def continue_entry(*,uc,md,state,stop,symbols,physical_image,rounded,arguments,
             'el1_permission_subset_checked':['AF','AP','APTable','PXN','PXNTable','EL0-write-XN','WXN','PAN','EPD'],
             'synthetic_pan':False,
             'synthetic_register_inputs':register_inputs,
+            'synthetic_cache_inputs':cache_inputs,
             'final_explicit_registers':{key:state[key] for key in register_inputs},
             'synthetic_tpidr_el0':state.get('tpidr_el0'),
             'scope':'Linked instructions with page-table-checked software VA aliases; modeled SCTLR/register/barriers'}

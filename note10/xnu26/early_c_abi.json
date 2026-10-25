@@ -17,6 +17,15 @@
     "thread_cpu_data_offset": 568,
     "thread_preemption_offset": 576,
     "cpu_active_thread_offset": 48,
+    "cpu_type_offset": 4,
+    "cpu_subtype_offset": 8,
+    "cpu_running_offset": 105,
+    "cpu_rtclock_deadline_offset": 336,
+    "cache_valid_offset": 0,
+    "cache_line_offset": 28,
+    "cache_isize_offset": 8,
+    "cache_dsize_offset": 16,
+    "cache_l2size_offset": 36,
     "rtc_timebase_offset": 8,
     "startup_entry_size": 24,
     "startup_func_offset": 8,
@@ -28,6 +37,6 @@
     "thread_active_mask": 1
   },
   "kernel_sha256": "8584aec16c94eeb16b078cb18807f5b93b923c989c19afd78a778745d851454b",
-  "oracle_object_sha256": "6df4c01ab114e4f57060142ae92ac6ef8177497e29439353301be0008da3812a",
+  "oracle_object_sha256": "9d0d23e221502e63baae4b03442970f9a51ee6a9847739933c96f58f63529a7d",
   "scope": "Actual configured ARM64 C types compiled with saved local flags; not IPSW ABI or hardware boot"
 }

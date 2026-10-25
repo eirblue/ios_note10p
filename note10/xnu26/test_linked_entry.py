@@ -116,7 +116,7 @@ def run_case(directory, ram_base, outside_bootstrap_block=False, transfer_elf=No
     md = Cs(CS_ARCH_ARM64,CS_MODE_LITTLE_ENDIAN)
     state = {'currentel':4,'clidr_el1':0,'ctr_el0':0x8444c004,'sctlr_el1':0,
              'midr_el1':0x410fd050,'id_aa64mmfr0_el1':0x100000,'csselr_el1':0,
-             'cntkctl_el1':0,'cntfrq_el0':26000000}
+             'cntkctl_el1':0,'cntfrq_el0':26000000,'daif':0}
     writes = []; operations = Counter(); recent = deque(maxlen=16)
     count = 0; stop = None; sp_select = 0; banked_sp = {0:0,1:0}
     def gpr(name):
@@ -143,6 +143,10 @@ def run_case(directory, ram_base, outside_bootstrap_block=False, transfer_elf=No
             if reg == 'spsel':
                 banked_sp[sp_select]=engine.reg_read(regs.UC_ARM64_REG_SP)
                 sp_select=number;engine.reg_write(regs.UC_ARM64_REG_SP,banked_sp[number])
+            if reg in ('daifset','daifclr'):
+                if not 0<=number<=15:raise ValueError('Invalid DAIF immediate')
+                mask=number<<6
+                state['daif']=(state['daif']|mask) if reg=='daifset' else (state['daif']&~mask)
             state[reg]=number;writes.append({'register':reg,'value':hex(number)})
             operations['synthetic_msr']+=1
         elif ins.mnemonic in ('dc','ic','tlbi','dsb','dmb','isb'):
@@ -216,7 +220,7 @@ def run_case(directory, ram_base, outside_bootstrap_block=False, transfer_elf=No
             endpoints.append(hex(va))
     result={'synthetic_cpu_model':cpu_model or 'unicorn-default','synthetic_ram_base':hex(ram_base),'synthetic_ram_size':hex(ram_size),'synthetic_kernel_physical':hex(physical_image),
             'synthetic_boot_args_physical':hex(arguments),'instructions':count,'stop':stop,
-            'system_operations':dict(operations),'register_writes':writes,
+            'system_operations':dict(operations),'register_writes':writes,'modeled_daif_before_mmu':state['daif'],
             'store_count':len(stores),'stored_bytes':stored_bytes,
             'adapter_status_store_count':len(adapter_stores),
             'bootstrap_table_pages_primed_and_cleared':4,

@@ -25,6 +25,15 @@ EXPRESSIONS={
  'thread_cpu_data_offset':'__builtin_offsetof(struct thread,machine.CpuDatap)',
  'thread_preemption_offset':'__builtin_offsetof(struct thread,machine.preemption_count)',
  'cpu_active_thread_offset':'__builtin_offsetof(cpu_data_t,cpu_active_thread)',
+ 'cpu_type_offset':'__builtin_offsetof(cpu_data_t,cpu_type)',
+ 'cpu_subtype_offset':'__builtin_offsetof(cpu_data_t,cpu_subtype)',
+ 'cpu_running_offset':'__builtin_offsetof(cpu_data_t,cpu_running)',
+ 'cpu_rtclock_deadline_offset':'__builtin_offsetof(cpu_data_t,rtclock_timer.deadline)',
+ 'cache_valid_offset':'__builtin_offsetof(cache_info_t,c_valid)',
+ 'cache_line_offset':'__builtin_offsetof(cache_info_t,c_linesz)',
+ 'cache_isize_offset':'__builtin_offsetof(cache_info_t,c_isize)',
+ 'cache_dsize_offset':'__builtin_offsetof(cache_info_t,c_dsize)',
+ 'cache_l2size_offset':'__builtin_offsetof(cache_info_t,c_l2size)',
  'rtc_timebase_offset':'__builtin_offsetof(rtclock_data_t,rtc_timebase_const)',
  'startup_entry_size':'sizeof(struct startup_entry)',
  'startup_func_offset':'__builtin_offsetof(struct startup_entry,func)',
@@ -41,7 +50,7 @@ def main():
     source.write_text('#include <machine/static_if.h>\n#include <pexpert/pexpert.h>\n'
                       '#include <kern/thread.h>\n#include <machine/machine_routines.h>\n'
                       '#include <arm/cpu_topology.h>\n#include <kern/sched.h>\n'
-                      '#include <arm/cpu_data_internal.h>\n#include <arm/rtclock.h>\n'
+                      '#include <arm/cpu_data_internal.h>\n#include <arm/rtclock.h>\n#include <arm/cpuid.h>\n'
                       'const unsigned long long note10_early_layout[] = {'+', '.join(EXPRESSIONS.values())+'};\n'
                       'const struct thread note10_active_bit = {.active=1};\n')
     saved=json.loads((ROOT/'note10/private/windows-xnu/objects/DEVELOPMENT/compile-result.json').read_text())

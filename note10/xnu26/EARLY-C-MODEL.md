@@ -87,3 +87,27 @@ subsystem/rank 오름차순인지 확인한다. STARTUP_SUB_LOCKS=3까지 대상
 간접 콜백 순서·인자, startup_phase 및 다음 entry cursor를 대조한다. qsort 비교 함수와
 초기화 콜백 모두 실제 커널 명령이며 함수 반환을 대체하지 않는다. 이 추가 단계만
 명령 2,000,000개·호출 32,768회의 유한 실행 예산을 사용한다.
+
+## CPU 초기화와 VM 호출 경계 (PC 전용)
+
+단일 CPU·split-L1/L2 캐시·디버그 기능 없음·정지 카운터를 명시한 추가 fixture에서
+`cpu_init`, `processor_bootstrap` 및 DRAM 속성 파싱을 실행했다. `arm_vm_init` 호출 직전
+경계는 1,053,279개 명령이다. 실제 CPU 자료의 ARM64/V8 유형과 running flag,
+EndOfAllTime deadline, 캐시 정보의 valid/line/용량 및 DRAM 전역 변수·초기 page number를
+configured C ABI로 검사한다. fixture의 I/D 캐시는 각각 32KiB, L2는 1MiB, line은 64B다.
+이는 실제 코어의 캐시를 다시 측정한 결과가 아니다.
+
+레지스터 입력은 allowlist로 제한하며 CCSIDR은 실제 CSSELR 쓰기로 선택한 입력만 읽는다.
+입력이 없으면 거부한다. SP 선택을 실제 두 stack bank에 반영하고 경계에서 exception stack이
+유지되는지 검사한다. adapter와 XNU entry의 실제 DAIFSet 명령 효과를 모델 상태에 반영하므로
+정상 VM 시험은 별도 DAIF 성공값을 주입하지 않는다. 실제 인터럽트를 발생시키지는 않는다.
+ID_AA64DFR0=0은 디버그 기능을 선언하지 않은 합성 입력이며 기기 실측값이 아니다.
+
+매 instruction fetch와 메모리 접근의 테이블·권한 검사는 유지한다. 반복 명령의 해석만
+주소와 실제 4바이트 opcode를 키로 캐시하여 반복 qsort 비교의 PC 비용을 줄였다.
+코드 패치로 bytes가 바뀌면 다시 해석한다. `arm_vm_init` 본문·새 VM 테이블·할당기 동작은
+이 시험에 포함하지 않는다. 기기 실행·예약·캐시/MMU/GIC 인계는 여전히 별도 검증 대상이다.
+
+```text
+python note10/xnu26/test_vm_entry.py --kernel-build NATIVE_BUILD --adapter TIMER_ADAPTER_ELF --handoff-bundle EARLY_C_OUTPUT/case-0 --output PRIVATE_NEW_VM_DIRECTORY
+```

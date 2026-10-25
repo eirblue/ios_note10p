@@ -403,3 +403,11 @@ Exynos SoC MASTER 및 플랫폼 archive 입력 분리:
 - 별도 descriptor fixture 검사 12개, 실제 링크 XNU 정상 3개 배치와 실제 모형 테이블/레지스터/인자를 변경한 오류 사례 10개를 통과했다. 기존 추가 51개 명령과 `_static_if_init` 호출 직전 경계를 유지한다. 기존 MMU 이전 3개 회귀 사례도 통과했다.
 - CI 성공: https://github.com/eirblue/ios_note10p/actions/runs/40168931459 (`33ee78f`). 상세 xnu26/POST-MMU-MODEL.md에 기준 공개 소스와 지원 범위를 기록했다.
 - 완전한 MMU 또는 실제 permission fault 처리 모델은 아니다. stage-2, memory type, alignment 및 syndrome 전체, cache/TLB, 기기 XNU 실행은 검증하지 않았다. 기기 접근이나 기존 시험 ZIP 변경은 없다.
+
+## 2026-10-25: 초기 스레드·타이머·startup PC 실행
+
+- 실제 C 헤더의 ARM64 구조 배치를 컴파일해 기준 ABI를 만들었다. thread_bootstrap 반환 시 1,680바이트 template 복사와 ctid/priority 변경을 검사했다. 이후 CPU↔thread 포인터와 TPIDR_EL1, preemption_count=0을 확인했다.
+- 기본 PC CPU 모델의 세 RAM 배치에서 kernel_startup_bootstrap 호출 직전까지 각각 240,463개 명령을 실행했다. 실제 timebase_callback의 26MHz 결과는 초 divisor=26,000,000, 마이크로초 divisor=26, 나노초 환산 500/13이다. CNTVCT는 정지된 합성 입력이며 실제 시계 동작 증거가 아니다.
+- 별도 명시적 Unicorn max 모델에서 LSE LDADD를 포함해 1,021,267개 명령을 실행했다. startup 4,670개 항목의 정렬·원본 내용 보존, LOCKS 단계 1,006개 콜백의 순서·인자와 cursor/phase를 확인했다. 실제 Exynos CPU 모델 또는 물리 원자성 검증을 의미하지 않는다.
+- 정상 경로, 실제 missing-clock/missing-reg panic, stale event-state 거부 및 이전 회귀 검사가 CI에서 통과했다: https://github.com/eirblue/ios_note10p/actions/runs/40174526056 (`904f893`). 상세 xnu26/EARLY-C-MODEL.md.
+- 전달 adapter는 CNTFRQ=26MHz 및 CNTKCTL EVENTI 선택 비트 0을 요구하고 위반 시 status=5로 거부한다. 실제 어셈블리 81개 사례를 검사했다. 기존 설치 ZIP과 ELF는 보존했다. 이 단계에서 기기 접근·파티션 쓰기·재부팅은 없다.

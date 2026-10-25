@@ -201,3 +201,34 @@ def inspect_startup_entries(uc,raw,symbols,calls):
     if observed!=[(r[2],r[3]) for r in executed]:raise ValueError('Startup callback sequence/arguments differ')
     return {'entries_sorted':len(after),'callbacks_executed':len(executed),'completed_phase':phase,
             'immutable_entry_multiset_checked':True,'callback_order_and_arguments_checked':True}
+
+
+def inspect_vm_boundary(uc,symbols,boot_args,cache_inputs,state):
+    layout=json.loads(Path(__file__).with_name('early_c_abi.json').read_text())['layout']
+    def integer(address,size=4):return int.from_bytes(uc.mem_read(address,size),'little')
+    cpu=symbols['_percpu_slot_cpu_data']
+    if (integer(cpu+layout['cpu_type_offset']),integer(cpu+layout['cpu_subtype_offset']))!=(0x100000c,1):
+        raise ValueError('CPU type/subtype initialization differs')
+    if integer(cpu+layout['cpu_running_offset'],1)!=1 or integer(cpu+layout['cpu_rtclock_deadline_offset'],8)!=(1<<64)-1:
+        raise ValueError('CPU running/deadline initialization differs')
+    dram=struct.unpack_from('<QQ',boot_args,16)
+    if (integer(symbols['_gDramBase'],8),integer(symbols['_gDramSize'],8))!=dram:
+        raise ValueError('Actual DRAM globals disagree with declared boot memory fixture')
+    if integer(symbols['_pmap_first_pnum'])!=dram[0]>>14:
+        raise ValueError('Initial physical page number differs from DRAM base')
+    if not state.get('daif',0)&0x80:raise ValueError('VM fixture requires masked interrupts')
+    # This verifier deliberately supports only the declared split-L1/L2 fixture.
+    if state.get('clidr_el1')!=0x82000023 or set(cache_inputs)!={0,1,2}:
+        raise ValueError('Unsupported VM cache inspection fixture')
+    def geometry(value):return (1<<((value&7)+4))*(((value>>3)&1023)+1)*(((value>>13)&32767)+1)
+    cache=integer(symbols['_cpuid_cache_info_boot_cpu'],8)
+    expected={'cache_valid_offset':1,'cache_line_offset':1<<((cache_inputs[2]&7)+4),
+              'cache_isize_offset':geometry(cache_inputs[1]),'cache_dsize_offset':geometry(cache_inputs[0]),
+              'cache_l2size_offset':geometry(cache_inputs[2])}
+    if not cache or any(integer(cache+layout[key])!=value for key,value in expected.items()):
+        raise ValueError('Actual cache identification differs from explicit CCSIDR geometry')
+    return {'cpu_type':'ARM64','cpu_subtype':'V8','cpu_running_flag':True,
+            'clock_deadline':'EndOfAllTime','dram_base':hex(dram[0]),'dram_size':dram[1],
+            'icache_bytes':expected['cache_isize_offset'],'dcache_bytes':expected['cache_dsize_offset'],
+            'l2_bytes':expected['cache_l2size_offset'],'cache_line_bytes':expected['cache_line_offset'],
+            'hardware_cpu_or_cache_verified':False,'vm_initialization_executed':False}

@@ -2,7 +2,7 @@
 import struct
 import unittest
 from early_c_state import inspect_static_if
-from early_c_state import inspect_startup,inspect_startup_entries
+from early_c_state import inspect_startup,inspect_startup_entries,inspect_vm_boundary
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -114,6 +114,44 @@ class StartupEntriesTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'sequence'):self.inspect()
         self.setUp();self.calls[0]['x0']='0x0'
         with self.assertRaisesRegex(ValueError,'sequence'):self.inspect()
+
+
+class VmBoundaryTests(unittest.TestCase):
+    def setUp(self):
+        import json
+        from pathlib import Path
+        self.layout=json.loads(Path(__file__).with_name('early_c_abi.json').read_text())['layout']
+        self.memory=bytearray(0x6000)
+        self.uc=SimpleNamespace(mem_read=lambda address,size:self.memory[address:address+size])
+        self.symbols={'_percpu_slot_cpu_data':0x1000,'_gDramBase':0x5000,'_gDramSize':0x5008,
+                      '_pmap_first_pnum':0x5010,'_cpuid_cache_info_boot_cpu':0x5020}
+        self.boot_args=bytearray(1152);struct.pack_into('<QQ',self.boot_args,16,0x80000000,0x40000000)
+        self.memory[0x5000:0x5010]=struct.pack('<QQ',0x80000000,0x40000000)
+        self.memory[0x5010:0x5014]=struct.pack('<I',0x20000)
+        self.memory[0x5020:0x5028]=struct.pack('<Q',0x5100)
+        for name,value,size in (('cpu_type_offset',0x100000c,4),('cpu_subtype_offset',1,4),
+                                ('cpu_running_offset',1,1),('cpu_rtclock_deadline_offset',(1<<64)-1,8)):
+            at=0x1000+self.layout[name];self.memory[at:at+size]=value.to_bytes(size,'little')
+        for name,value in (('cache_valid_offset',1),('cache_line_offset',64),('cache_isize_offset',32768),
+                            ('cache_dsize_offset',32768),('cache_l2size_offset',1048576)):
+            at=0x5100+self.layout[name];self.memory[at:at+4]=struct.pack('<I',value)
+        self.caches={0:0x700fe01a,1:0x200fe01a,2:0x707fe07a}
+        self.state={'daif':0x3c0,'clidr_el1':0x82000023}
+    def inspect(self):return inspect_vm_boundary(self.uc,self.symbols,self.boot_args,self.caches,self.state)
+    def test_compiled_layout_fixture(self):
+        self.assertEqual(self.inspect()['l2_bytes'],1048576)
+        self.assertFalse(self.inspect()['vm_initialization_executed'])
+    def test_corrupt_cpu_dram_page_or_cache_state(self):
+        for address in (0x1000+self.layout['cpu_type_offset'],0x1000+self.layout['cpu_running_offset'],
+                        0x1000+self.layout['cpu_rtclock_deadline_offset'],0x5000,0x5008,0x5010,
+                        0x5100+self.layout['cache_line_offset'],0x5100+self.layout['cache_l2size_offset']):
+            self.setUp();self.memory[address]^=1
+            with self.subTest(address=address),self.assertRaises(ValueError):self.inspect()
+    def test_unmasked_interrupts_or_unreviewed_geometry(self):
+        self.state['daif']=0
+        with self.assertRaisesRegex(ValueError,'masked'):self.inspect()
+        self.setUp();self.state['clidr_el1']=0
+        with self.assertRaisesRegex(ValueError,'Unsupported'):self.inspect()
 
 
 if __name__=='__main__':unittest.main()
