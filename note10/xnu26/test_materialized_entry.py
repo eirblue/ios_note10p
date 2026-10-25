@@ -10,7 +10,7 @@ from test_linked_entry import run_case
 from verify_experimental_artifact import verify
 
 
-def run(directory,adapter,output,profile=None):
+def run(directory,adapter,output,profile=None,continuation=None):
     if not output.resolve().is_relative_to((ROOT/'note10/private').resolve()):raise ValueError('Private model output required')
     if output.exists():raise ValueError('Refusing existing materialization model output')
     checked=verify(directory)
@@ -31,7 +31,7 @@ def run(directory,adapter,output,profile=None):
               'top_of_kernel':image+len(kernel),'command_line':'debug=0x14e'}
         bundle=output/('case-'+str(index))
         manifest=build(directory,adapter,adt,plan,bundle)
-        case=run_case(directory,ram,transfer_elf=adapter,handoff_bundle=bundle,ram_size=size)
+        case=run_case(directory,ram,transfer_elf=adapter,handoff_bundle=bundle,ram_size=size,continuation=continuation)
         if observations:case['observed_capacity_check']=check_tcr(observations,int(case['tcr_el1'],16))
         case['buffer_count']=len(manifest['buffers'])
         case['bundle_manifest_sha256']=hashlib.sha256((bundle/'handoff.json').read_bytes()).hexdigest()
@@ -39,7 +39,8 @@ def run(directory,adapter,output,profile=None):
     result={'passed':True,'cases':cases,'kernel_sha256':checked['sha256'],
             'materialized_buffers_executed_in_pc_model':True,'physical_reservation_verified':False,
             'hardware_verified':False,'deployment_ready':False,'device_operations':[],
-            'scope':'Real XNU instructions and generated buffers; synthetic RAM/register/cache/TLB; stops before MMU enable'}
+            'scope':('Real XNU instructions and generated buffers; software VA aliases; stops before first C call' if continuation else
+                     'Real XNU instructions and generated buffers; synthetic RAM/register/cache/TLB; stops before MMU enable')}
     (output/'result.json').write_text(json.dumps(result,indent=2),encoding='utf-8')
     return result
 

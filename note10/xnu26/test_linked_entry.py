@@ -17,7 +17,7 @@ from boot_contract import Region, PAGE, encode_boot_args, validate_placement
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def run_case(directory, ram_base, outside_bootstrap_block=False, transfer_elf=None, handoff_bundle=None,ram_size=0x40000000):
+def run_case(directory, ram_base, outside_bootstrap_block=False, transfer_elf=None, handoff_bundle=None,ram_size=0x40000000,continuation=None):
     from unicorn import Uc, UC_ARCH_ARM64, UC_MODE_ARM, UC_HOOK_CODE, UC_HOOK_MEM_WRITE
     from unicorn import arm64_const as regs
     from capstone import Cs, CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN
@@ -154,7 +154,8 @@ def run_case(directory, ram_base, outside_bootstrap_block=False, transfer_elf=No
         if not physical_image <= address or address+size > physical_image+rounded:
             raise ValueError('Startup store left modeled kernel RAM: '+hex(address))
         stores.append(address);stored_bytes += size
-    uc.hook_add(UC_HOOK_CODE,instruction);uc.hook_add(UC_HOOK_MEM_WRITE,write)
+    code_hook=uc.hook_add(UC_HOOK_CODE,instruction)
+    write_hook=uc.hook_add(UC_HOOK_MEM_WRITE,write)
     try:uc.emu_start(pc_start,physical_image+rounded,count=100000)
     except Exception as error:raise ValueError(str(error)+'\n'+'\n'.join(recent)) from error
     if not stop:raise ValueError('Entry failed to reach modeled MMU boundary\n'+'\n'.join(recent))
@@ -209,7 +210,7 @@ def run_case(directory, ram_base, outside_bootstrap_block=False, transfer_elf=No
             if walk(va,True) != pa or walk(pa,False) != pa:
                 raise ValueError('Kernel segment endpoint outside actual bootstrap mapping')
             endpoints.append(hex(va))
-    return {'synthetic_ram_base':hex(ram_base),'synthetic_ram_size':hex(ram_size),'synthetic_kernel_physical':hex(physical_image),
+    result={'synthetic_ram_base':hex(ram_base),'synthetic_ram_size':hex(ram_size),'synthetic_kernel_physical':hex(physical_image),
             'synthetic_boot_args_physical':hex(arguments),'instructions':count,'stop':stop,
             'system_operations':dict(operations),'register_writes':writes,
             'store_count':len(stores),'stored_bytes':stored_bytes,
@@ -218,6 +219,12 @@ def run_case(directory, ram_base, outside_bootstrap_block=False, transfer_elf=No
             'segment_virtual_and_identity_endpoints_checked':endpoints,
             'store_range':[hex(min(stores)),hex(max(stores))],
             'translations':{k:hex(v) for k,v in translations.items()},'tcr_el1':hex(tcr),'passed':True}
+    if continuation is not None:
+        result['continuation']=continuation(uc=uc,md=md,state=state,stop=stop,symbols=symbols,
+            physical_image=physical_image,rounded=rounded,arguments=arguments,boot_args=boot_args,
+            virtual_ram=virtual_ram,ram_base=ram_base,walk=walk,
+            code_hook=code_hook,write_hook=write_hook,banked_sp=banked_sp,sp_select=sp_select)
+    return result
 
 
 if __name__ == '__main__':

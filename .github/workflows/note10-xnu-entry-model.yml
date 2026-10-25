@@ -1,0 +1,50 @@
+name: Note10 XNU virtual entry PC model
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  entry:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install PC model tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y clang lld
+          python -m pip install unicorn==2.1.4 capstone==5.0.9
+      - name: Read the reviewed public-source native build
+        uses: actions/download-artifact@v4
+        with:
+          name: note10-experimental-native-build
+          run-id: 39560904016
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: note10/private/entry-model-kernel
+      - name: Build the actual handoff adapter
+        run: |
+          mkdir -p note10/private/xnu-transfer
+          clang --target=aarch64-none-elf -march=armv8.2-a -Wall -Wextra -Werror -c note10/shim/xnu_transfer.S -o note10/private/xnu-transfer/transfer.o
+          ld.lld -T note10/shim/cap_link.ld note10/private/xnu-transfer/transfer.o -o note10/private/xnu-transfer/transfer.elf
+      - name: Verify actual instructions with software VA aliases
+        run: |
+          python note10/xnu26/test_post_mmu_entry.py --kernel-build note10/private/entry-model-kernel --adapter note10/private/xnu-transfer/transfer.elf --output note10/private/post-mmu-model
+          python note10/xnu26/test_materialized_entry.py --kernel-build note10/private/entry-model-kernel --adapter note10/private/xnu-transfer/transfer.elf --output note10/private/pre-mmu-regression
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: note10-xnu-entry-model-research-only
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            note10/private/post-mmu-model/result.json
+            note10/private/pre-mmu-regression/result.json
