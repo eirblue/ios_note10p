@@ -48,7 +48,7 @@ def prepare(source):
     if any(p.exists() for p in targets):raise ValueError('Existing PM diagnostic extension')
     for target,original in targets.items():target.write_bytes(original.read_bytes())
     path.write_bytes(patched)
-    return {'pm_timer_diagnostic':True,'pm_timer_evidence_version':1,
+    return {'pm_timer_diagnostic':True,'pm_timer_evidence_version':1,'boot_binding_evidence_version':1,
         'pm_timer_source_sha256':hashlib.sha256((HERE/'pm_timer_roundtrip.c').read_bytes()).hexdigest(),
         'pm_backend_source_sha256':hashlib.sha256((HERE/'pm_devices_backend.c').read_bytes()).hexdigest(),
         'pm_contract_sha256':hashlib.sha256((HERE/'pm_test_contract.h').read_bytes()).hexdigest(),

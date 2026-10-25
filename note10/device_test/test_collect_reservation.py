@@ -43,7 +43,7 @@ class CollectorTests(unittest.TestCase):
               f'sha256={"a"*64} status=0')
         return f'N10XNU1 {body} checksum={checksum(body.encode()):08x}\n'
 
-    def run_fixture(self,log,*,version2=True,missing_image_id=False,access=False,xnu_stage=False,cpu_cache=False,pm_timer=False):
+    def run_fixture(self,log,*,version2=True,missing_image_id=False,access=False,xnu_stage=False,cpu_cache=False,pm_timer=False,boot_binding=False):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);build=root/'build';build.mkdir();packages=root/'packages';packages.mkdir()
             image=b'Linux version 4.14.113-note10-reserve-pc (fixture)\0'
@@ -55,6 +55,7 @@ class CollectorTests(unittest.TestCase):
             if xnu_stage:report.update(xnu_payload_stage_diagnostic=True,xnu_payload_size=16384,xnu_payload_sha256='a'*64)
             if cpu_cache:report.update(cpu_cache_roundtrip_diagnostic=True,cpu_cache_evidence_version=1)
             if pm_timer:report.update(pm_timer_diagnostic=True,pm_timer_evidence_version=1)
+            if boot_binding:report.update(boot_binding_evidence_version=1)
             (build/'build-result.json').write_text(json.dumps(report))
             (packages/'package-result.json').write_text(json.dumps({'kernel_image_sha256':digest,
                 'window_access_diagnostic':access,'xnu_payload_stage_diagnostic':xnu_stage,
@@ -183,6 +184,18 @@ class CollectorTests(unittest.TestCase):
         self.assertFalse(result['log_selections']['last_kmsg.txt']['start_banner_matches_image'])
         self.assertFalse(self.run_fixture(log.replace(exact,exact.replace('(fixture)','(other)')))['diagnostic_passed'])
         self.assertFalse(self.run_fixture(start+exact)['diagnostic_passed'])
+
+    def test_new_build_bound_banner_is_checked_by_collector(self):
+        banner='Linux version 4.14.113-note10-reserve-pc (fixture)'
+        frames=''
+        for seq in range(2):
+            body=f'id={self.identity} seq={seq} banner={banner}'
+            frames+=f'N10BND1 {body} checksum={checksum(body.encode()):08x}\n'
+        log=self.boot_header('Linux version damaged')+self.frame(0)+self.frame(1)+frames
+        self.assertFalse(self.run_fixture(log)['diagnostic_passed'])
+        result=self.run_fixture(log,boot_binding=True)
+        self.assertTrue(result['diagnostic_passed'])
+        self.assertTrue(result['log_selections']['last_kmsg.txt']['exact_checksummed_banner_binding'])
 
     def test_old_panic_banner_cannot_corroborate_new_boot(self):
         old=self.boot_header()+self.frame(0)+self.frame(1)

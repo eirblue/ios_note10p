@@ -39,6 +39,45 @@ class PmTimerTests(unittest.TestCase):
         chain=prefix(SHA,SIZE)+summary(0)+summary(1)+snapshots()
         return decode(chain+text,IDENTITY,SHA,SIZE)
 
+    def binding(self,seq,banner='Linux version fixture',identity=IDENTITY):
+        from decode_reservation import checksum
+        body=f'id={identity} seq={seq} banner={banner}'
+        return f'N10BND1 {body} checksum={checksum(body.encode()):08x}\n'
+
+    def test_exact_bound_banner_corroborates_only_latest_interval(self):
+        from collect_reservation import select_latest_boot
+        start='<5>[    0.000000] Linux version damaged\n'
+        log=start+self.binding(0)+self.binding(1)
+        selected,report=select_latest_boot(log.encode(),'Linux version fixture',boot_binding_id=IDENTITY)
+        self.assertEqual(selected,log.encode())
+        self.assertTrue(report['exact_checksummed_banner_binding'])
+        self.assertFalse(report['corrupted_bytes_repaired'])
+        with self.assertRaises(ValueError):
+            select_latest_boot(log.encode(),'Linux version fixture')
+        with self.assertRaises(ValueError):
+            select_latest_boot((log+start).encode(),'Linux version fixture',boot_binding_id=IDENTITY)
+
+    def test_boot_binding_missing_wrong_duplicate_or_conflicting_refused(self):
+        from collect_reservation import select_latest_boot
+        start='<5>[    0.000000] Linux version damaged\n'
+        for frames in (self.binding(0),self.binding(0)+self.binding(0),
+                self.binding(0)+self.binding(1,banner='Linux version other'),
+                self.binding(0)+self.binding(1,identity='f'*32),
+                self.binding(0)+self.binding(1).replace('checksum=','checksum=f')):
+            with self.subTest(frames=frames),self.assertRaises(ValueError):
+                select_latest_boot((start+frames).encode(),'Linux version fixture',boot_binding_id=IDENTITY)
+
+    def test_cpu_copies_are_interleaved_and_pm_delayed_without_wakeup_bypass(self):
+        here=Path(__file__).resolve().parent
+        cpu=(here/'cpu_cache_roundtrip.c').read_text()
+        self.assertIn('for (sequence = 0; sequence < 32; ++sequence) {\n        for (cpu = 0; cpu < 8; ++cpu)',cpu)
+        worker=(here/'pm_timer_roundtrip.c').read_text()
+        self.assertLess(worker.index('on_each_cpu(n10_timer_cpu'),worker.index('error = n10_pm_devices_test'))
+        self.assertIn('msecs_to_jiffies(30000)',worker)
+        self.assertIn('msecs_to_jiffies(10000)',worker)
+        self.assertIn('n10_pm_attempts < 3',worker)
+        self.assertNotIn('pm_wakeup_clear',worker)
+
     def test_all_phases_and_eight_restored_timers(self):
         result=self.parse(pm(0)+pm(1)+timers())
         self.assertTrue(result['previous_boot_pm_timer_observed'])

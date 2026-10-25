@@ -109,6 +109,8 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
                 report['scope']='Experimental XNU memory-image data staging and SHA256 readback in this boot reservation; no XNU branch'
             if cpu_cache:
                 report['scope']='Cached XNU data staging plus Linux CPU offline/online, cache maintenance and per-CPU readback; no DMA/MMU handoff'
+        if pm_timer:
+            report['scope']='Timer restoration before devices-only PM test, settled boot and bounded EBUSY retries; low-level entry blocked; no XNU branch'
         report['public_defconfig_sha256']=hashlib.sha256(defconfig.read_bytes()).hexdigest()
         make=['make','-C',str(source),'O='+str(objects),'ARCH=arm64',
               'CC=clang-14','CROSS_COMPILE=aarch64-linux-gnu-',
@@ -166,7 +168,7 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             if b'N10XNU1' not in target.read_bytes():raise ValueError('XNU stage evidence marker missing from Linux Image')
         if cpu_cache and any(marker not in target.read_bytes() for marker in (b'N10QUI1',b'N10CPU2')):
             raise ValueError('CPU/cache evidence markers missing from Linux Image')
-        if pm_timer and any(marker not in target.read_bytes() for marker in (b'N10PMT1',b'N10TMR1')):
+        if pm_timer and any(marker not in target.read_bytes() for marker in (b'N10PMT1',b'N10TMR1',b'N10BND1',b'N10TRY1')):
             raise ValueError('PM/timer evidence markers missing from Linux Image')
         report.update(build_passed=True,image_size=target.stat().st_size,
                       image_sha256=hashlib.file_digest(target.open('rb'),'sha256').hexdigest(),

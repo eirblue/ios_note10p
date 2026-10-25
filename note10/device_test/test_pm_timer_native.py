@@ -16,8 +16,12 @@ PM_STUB=r'''
 #undef read_sysreg
 static bool pm_va_valid(const void *p) {(void)p;return true;}
 #define virt_addr_valid(p) pm_va_valid(p)
+static const char linux_banner[]="Linux version fixture\n";
+static void pm_cpus_lock(void) {if(mode==31)online=15;}
+#define cpus_read_lock pm_cpus_lock
 static u64 timer_values[8];
 static unsigned int timer_writes[8],scheduled,pm_calls;
+static unsigned int delays[64];
 static u64 pm_reg(const char *reg) {
     if(!strcmp(reg,"cntfrq_el0"))return mode==10&&current_cpu==4?19200000:26000000;
     return timer_values[current_cpu];
@@ -36,7 +40,7 @@ struct delayed_work {int unused;};
 #define DECLARE_DELAYED_WORK(name,fn) struct delayed_work name={0}
 #define msecs_to_jiffies(n) (n)
 static int schedule_delayed_work(struct delayed_work *work,unsigned long delay) {
-    (void)work;(void)delay;++scheduled;return 1;
+    (void)work;if(scheduled>=64)exit(78);delays[scheduled++]=(unsigned int)delay;return 1;
 }
 #define SYSTEM_RUNNING 3
 static int system_state=SYSTEM_RUNNING;
@@ -59,6 +63,15 @@ static int pm_suspend(int state) {
     mutex_lock(&pm_mutex);old=pm_test_level;n10_pm_active->old_level=(unsigned int)old;
     if(old) {n10_pm_active->new_level=(unsigned int)old;mutex_unlock(&pm_mutex);return -EBUSY;}
     pm_test_level=4;
+    if((mode==24&&pm_calls<3)||(mode>=25&&mode<=30)) {
+        if(mode==26)buffer[0]^=1;
+        if(mode==27)online=7;
+        if(mode==28)++suspend_stats.failed_resume;
+        if(mode==29)n10_pm_active->blocked=1;
+        if(mode==30)n10_pm_active->devices=1;
+        pm_test_level=old;n10_pm_active->new_level=(unsigned int)old;
+        mutex_unlock(&pm_mutex);return -EBUSY;
+    }
     n10_pm_active->devices=mode==5?0:1;
     n10_pm_active->resumed=mode==23?0:1;
     n10_pm_active->blocked=mode==14?1:0;
@@ -67,7 +80,7 @@ static int pm_suspend(int state) {
     if(mode==7)buffer[0]^=1;
     pm_test_level=mode==22?4:old;
     n10_pm_active->new_level=(unsigned int)pm_test_level;
-    mutex_unlock(&pm_mutex);return mode==4?-16:0;
+    mutex_unlock(&pm_mutex);return mode==4?-5:0;
 }
 '''
 MAIN=r'''
@@ -86,7 +99,7 @@ int main(int argc,char **argv) {
     if(mode==20)pm_test_level=4;
     if(mode==21)n10_pm_owner=(void *)(uintptr_t)2;
     n10_start_pm_timer();
-    for(int i=0;i<(mode==1?50:1);++i)n10_pm_worker(NULL);
+    for(unsigned int i=0;i<scheduled&&i<64;++i)n10_pm_worker(NULL);
     unsigned int writes=0;
     for(int i=0;i<8;++i) {
         writes+=timer_writes[i];
@@ -94,6 +107,10 @@ int main(int argc,char **argv) {
     }
     if(mutex_depth||n10_pm_active||(mode!=21&&n10_pm_owner))return 74;
     if(down_calls||up_calls||flush_calls)return 76;
+    if(delays[0]!=30000)return 79;
+    if(mode==24||mode==25) {
+        if(scheduled!=3||pm_calls!=3||delays[1]!=10000||delays[2]!=10000||writes!=16)return 80;
+    }
     printf("PMMODEL calls=%u writes=%u level=%d scheduled=%u\n",pm_calls,writes,pm_test_level,scheduled);
     free(buffer);return 0;
 }
@@ -125,31 +142,41 @@ def test(payload,cpu_model,output):
     (output/'compile.log').write_bytes(result.stdout+result.stderr)
     if result.returncode:raise RuntimeError('PM actual-C model compilation failed; see compile.log')
     chain=prefix(digest,len(raw))+(cpu_model/'mode-0.txt').read_text()
-    statuses=[0,1,2,3,4,5,6,7,8,8,8,8,5,8,5,9,3,7,9,2,4,4,5,5]
-    early={1,2,3,16,19,21};cases=[]
+    statuses=[0,1,2,3,4,5,6,7,8,8,8,8,5,8,5,9,3,9,7,2,4,4,5,5,0,4,7,6,4,4,4,6]
+    early={1,2,3,8,9,10,11,13,15,16,17,19,21,31};cases=[]
     for mode,status in enumerate(statuses):
         result=subprocess.run([str(exe.resolve()),str(mode),str(payload.resolve())],capture_output=True,timeout=60)
         (output/f'mode-{mode}.txt').write_bytes(result.stdout+result.stderr)
         if result.returncode:raise ValueError(f'PM model disposition failed in mode {mode}: {result.returncode}')
-        text=result.stdout.decode();records=re.findall(r'N10PMT1 ([^\r\n]*) checksum=([0-9a-f]{8})',text)
+        text=result.stdout.decode()
+        from collect_reservation import select_latest_boot
+        _,binding=select_latest_boot(('<5>[    0.000000] Linux version damaged\n'+text).encode(),
+            'Linux version fixture',boot_binding_id=IDENTITY)
+        if not binding['exact_checksummed_banner_binding']:raise ValueError('Actual boot binding differs')
+        records=re.findall(r'N10PMT1 ([^\r\n]*) checksum=([0-9a-f]{8})',text)
         from decode_reservation import checksum
         if len(records)!=32 or any(checksum(body.encode())!=int(total,16) or
             not body.endswith('status='+str(status)) for body,total in records):raise ValueError('PM model summary differs')
+        from decode_cpu_cache import frames
+        attempts=frames(text,'N10TRY1',('id','seq','attempt','error','devices','resume','blocked','oldlevel','newlevel','resume_errors'),IDENTITY,24)
+        wanted=0 if mode in early-{21} else (3 if mode in {24,25} else 1)
+        if len(attempts)!=wanted*8 or any(row['attempt']!=row['seq']//8+1 for row in attempts.values()):
+            raise ValueError('Attempt frame count or sequence differs')
         counts=re.search(r'PMMODEL calls=(\d+) writes=(\d+) level=(\d+) scheduled=(\d+)',text)
         if not counts:raise ValueError('Missing modeled PM counts')
         calls,writes,level,scheduled=map(int,counts.groups())
-        if calls!=(0 if mode in early else 1):raise ValueError('Failed prerequisite invoked PM')
+        if calls!=(0 if mode in early else (3 if mode in {24,25} else 1)):raise ValueError('PM attempt count differs')
         if mode not in {20,22} and level:raise ValueError('PM test level leaked')
-        if status in {1,2,3,4,5,6,7} and writes:raise ValueError('Failed prerequisite modified timer registers')
+        if mode in {1,2,3,16,19,31} and writes:raise ValueError('Failed prerequisite modified timer registers')
         try:decode(chain+text,IDENTITY,digest,len(raw));accepted=True
         except ValueError:accepted=False
-        if accepted!=(mode==0):raise ValueError('PM decoder differs from actual C disposition')
+        if accepted!=(mode in {0,24}):raise ValueError('PM decoder differs from actual C disposition')
         if mode==0 and (writes!=16 or scheduled!=1):raise ValueError('Missing timer clear/restore operations')
         cases.append(dict(mode=mode,status=status,pm_calls=calls,timer_writes=writes,level_after=level,accepted=accepted))
     report={'passed':True,'source_sha256':hashlib.sha256(sources['pm_timer_roundtrip.c']).hexdigest(),
         'backend_source_sha256':hashlib.sha256(sources['pm_devices_backend.c']).hexdigest(),
         'contract_sha256':hashlib.sha256(sources['pm_test_contract.h']).hexdigest(),
-        'cpu_source_sha256':previous['source_sha256'],'payload_sha256':digest,'payload_size':len(raw),'cases':cases,
+        'cpu_source_sha256':previous['source_sha256'],'payload_sha256':digest,'payload_size':len(raw),'cases':cases,'bounded_retry_cases':8,'timer_precedes_pm':True,'first_delay_ms':30000,'max_pm_attempts':3,
         'hardware_verified':False,'device_operations':[],
         'scope':'Actual worker/backend C; modeled PM framework, scheduling, registers and faults; real SHA256'}
     (output/'result.json').write_text(json.dumps(report,indent=2))

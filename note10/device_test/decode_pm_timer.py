@@ -15,7 +15,7 @@ def decode(text,identity,digest,size):
         if tuple(row[k] for k in ('before','after','devices','resume','blocked','oldlevel','newlevel',
             'resume_errors','timers','error','sha256','status'))!=(255,255,1,1,0,0,0,0,8,0,int(digest,16),0):
             raise ValueError('PM devices or timer roundtrip failed')
-    records=frames(text,'N10TMR1',('id','seq','cpu','before','cleared','restored','freq','status'),identity,8)
+    records=frames(text,'N10TMR1',('id','seq','cpu','before','cleared','restored','freq','status'),identity,32)
     cpus={}
     for row in records.values():
         if (row['cpu']>=8 or row['cleared']!=row['before']&~0xf0 or row['restored']!=row['before'] or

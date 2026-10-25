@@ -42,7 +42,8 @@ def check(packages,kernel_build,backup,core_model,gate_model,init_model,adb):
                       ('backend_source_sha256','pm_backend_source_sha256','pm_devices_backend.c'),
                       ('contract_sha256','pm_contract_sha256','pm_test_contract.h'))
             if (not cpu_cache or build.get('pm_timer_evidence_version')!=1 or pm_model.get('passed') is not True or
-                len(pm_model.get('cases',[]))!=24 or patch_model.get('passed') is not True or
+                len(pm_model.get('cases',[]))!=32 or pm_model.get('first_delay_ms')!=30000 or
+                build.get('boot_binding_evidence_version')!=1 or pm_model.get('max_pm_attempts')!=3 or pm_model.get('timer_precedes_pm') is not True or patch_model.get('passed') is not True or patch_model.get('cases')!=8 or
                 patch_model.get('patched_sha256')!=build.get('patched_suspend_sha256') or
                 pm_model.get('payload_sha256')!=build.get('xnu_payload_sha256') or
                 pm_model.get('payload_size')!=build.get('xnu_payload_size') or
@@ -79,7 +80,7 @@ def check(packages,kernel_build,backup,core_model,gate_model,init_model,adb):
         if xnu_stage and b'N10XNU1' not in image:raise ValueError('XNU stage evidence marker missing from Image')
         if cpu_cache and any(marker not in image for marker in (b'N10QUI1',b'N10CPU2')):
             raise ValueError('CPU/cache diagnostic markers missing from Image')
-        if pm_timer and any(marker not in image for marker in (b'N10PMT1',b'N10TMR1')):raise ValueError('PM/timer markers missing')
+        if pm_timer and any(marker not in image for marker in (b'N10PMT1',b'N10TMR1',b'N10BND1',b'N10TRY1')):raise ValueError('PM/timer markers missing')
         embedded=verify_embedded_init(image,(kernel_build/'initramfs.cpio').read_bytes())
         core=json.loads(core_model.read_text());gate=json.loads(gate_model.read_text());init=json.loads(init_model.read_text())
         sources=build['window_access_sources_sha256']

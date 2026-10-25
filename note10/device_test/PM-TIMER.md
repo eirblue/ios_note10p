@@ -41,3 +41,33 @@ ZIP hash, native updater syntax and five current partition baseline checks.
 The current BOOT baseline is the completed v5 diagnostic. Physical v6 device
 PM behavior, timer restoration and recovery reentry still await manual testing.
 No installation or reboot was performed by the preparation tools.
+
+## v6 device results and v7 changes (2026-10-26)
+
+Both manual v6 attempts returned EBUSY before the device suspend phase. The
+same-boot checksummed PM summary reported zero devices/resume/timer counts;
+wakeup sources caused the Samsung interruptible filesystem-sync path to abort.
+The second capture established RAM reservation, write/read/scrub and XNU data
+staging, but lacked enough intact CPU 4 records, so the overall test failed.
+All five partition hashes matched the expected baseline. No evidence is repaired
+or borrowed from the other attempt.
+
+The v7 worker waits 30 seconds after the successful initcall prerequisites,
+checks timer clear/restore first, then calls the guarded devices-only PM test.
+Only a clean pre-device EBUSY can be retried, at 10-second intervals with at
+most three total attempts. Each retry rechecks the CPU online mask and payload
+SHA256. Active wakeup sources are respected; no wake lock is released or ignored.
+Timer registers are restored before the first PM attempt and are not rewritten
+by retries. Timer records can be preserved even when PM fails, while full PM
+success still requires complete devices/resume evidence and unchanged SHA256.
+
+CPU and timer snapshots now have 32 interleaved rounds across all eight CPUs.
+The minimum remains two intact records for every CPU. N10TRY1 records identify
+each attempt; N10BND1 repeats the actual Linux banner with build ID, sequence
+and checksum. If the latest start banner is damaged, at least two exact matching
+banner bindings within that interval are required for this new build contract.
+Conflicting, duplicate, wrong-ID or earlier-interval copies cannot corroborate it.
+
+Local validation executes 32 actual PM/timer C cases, 21 CPU/cache C cases,
+8 source/decoder contracts and 18 collector cases. The PM framework and hardware
+register APIs remain modeled; v7 hardware behavior awaits manual testing.

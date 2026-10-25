@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import re
 import uuid
-from decode_reservation import decode,decode_frames
+from decode_reservation import decode,decode_frames,checksum
 from decode_window_access import decode as decode_access
 from decode_xnu_stage import decode as decode_xnu_stage
 from decode_cpu_cache import decode as decode_cpu_cache
@@ -15,7 +15,7 @@ from run_probe import ROOT,Adb,preflight
 from stage_phase2 import verify_packages
 
 
-def select_latest_boot(data,expected_banner,allow_panic_corroboration=False):
+def select_latest_boot(data,expected_banner,allow_panic_corroboration=False,boot_binding_id=None):
     """Select one contiguous boot using an intact zero-time Linux banner.
 
     Never combine frames across boots or search backwards for a passing boot.
@@ -23,20 +23,33 @@ def select_latest_boot(data,expected_banner,allow_panic_corroboration=False):
     """
     headers=list(re.finditer(
         rb'(?m)^[ \t]*(?:<[0-9]+>)?\[\s*0\.000000\][^\r\n]*?(Linux version [^\r\n]*)',data))
-    offset=0;corroborated=False
+    offset=0;corroborated=False;bound_banner=False
     if headers:
         latest=headers[-1]
         if latest.group(1)!=expected_banner.encode('ascii'):
             panic_banners=re.findall(rb'(?m)^<[0-9]+>\[\s*[0-9]+\.[0-9]+\][^\r\n]* linux_banner: (Linux version [^\r\n]*)',data[latest.start():])
-            if (not allow_panic_corroboration or not panic_banners or
-                any(value!=expected_banner.encode('ascii') for value in panic_banners)):
+            if allow_panic_corroboration and panic_banners and all(value==expected_banner.encode('ascii') for value in panic_banners):
+                corroborated=True
+            elif boot_binding_id is not None:
+                valid={}
+                pattern=rb'N10BND1 (id=([0-9a-f]{32}) seq=([0-9]+) banner=(Linux version [^\r\n]+)) checksum=([0-9a-f]{8})(?=\r?\n|$)'
+                for match in re.finditer(pattern,data[latest.start():]):
+                    body,identity,sequence,banner,total=match.groups()
+                    if identity.decode()!=boot_binding_id or checksum(body)!=int(total,16):continue
+                    sequence=int(sequence)
+                    if sequence>=16 or sequence in valid:raise ValueError('Invalid or duplicate boot binding sequence')
+                    if banner!=expected_banner.encode('ascii'):raise ValueError('Checksummed boot banner differs from Image')
+                    valid[sequence]=banner
+                if len(valid)<2:raise ValueError('Two intact exact boot banner bindings required')
+                bound_banner=True
+            else:
                 raise ValueError('Latest intact boot-start banner differs from verified Image')
-            corroborated=True
         offset=latest.start()
     selected=data[offset:]
     return selected,{'method':'latest-intact-zero-time-banner' if headers else 'whole-log-no-intact-boundary',
                      'intact_boot_start_count':len(headers),'byte_start':offset,'byte_end':len(data),
-                     'start_banner_matches_image':not corroborated if headers else None,
+                     'start_banner_matches_image':latest.group(1)==expected_banner.encode('ascii') if headers else None,
+                     'exact_checksummed_banner_binding':bound_banner,
                      'exact_panic_banner_corroboration':corroborated,
                      'selected_sha256':hashlib.sha256(selected).hexdigest(),
                      'older_pass_fallback':False,'corrupted_bytes_repaired':False}
@@ -111,7 +124,8 @@ def collect(packages,kernel_build,adb):
             'log_selections':{},'decode_failures':{}}
     for name,data in logs.items():
         try:
-            selected,selection=select_latest_boot(data,banner,allow_panic_corroboration=evidence_id is not None)
+            selected,selection=select_latest_boot(data,banner,allow_panic_corroboration=evidence_id is not None,
+                boot_binding_id=evidence_id if result.get('boot_binding_evidence_version')==1 else None)
             report['log_selections'][name]=selection
             if selection['byte_start']:
                 selected_name=name+'.selected-boot.txt'

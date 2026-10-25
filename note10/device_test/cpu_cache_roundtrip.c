@@ -170,9 +170,9 @@ report:
     }
     if (status)
         return status;
-    for (cpu = 0; cpu < 8; ++cpu) {
-        struct n10_cpu_sample *sample = &n10_cpu_samples[cpu];
-        for (sequence = 0; sequence < 8; ++sequence) {
+    for (sequence = 0; sequence < 32; ++sequence) {
+        for (cpu = 0; cpu < 8; ++cpu) {
+            struct n10_cpu_sample *sample = &n10_cpu_samples[cpu];
             int count = scnprintf(frame, sizeof(frame),
                 "id=%s seq=%u cpu=%u el=%llx mpidr=%llx sctlr=%llx tcr=%llx ttbr1=%llx mair=%llx cntkctl=%llx cntfrq=%llx words=%llu fnv=%llx",
                 N10_RESERVE_BUILD_ID, sequence, cpu,

@@ -42,7 +42,7 @@ def decode(text,identity,payload_sha256,payload_size):
                 0xff,1,0xff,8,payload_size//8,1,0) or row['sha256']!=int(payload_sha256,16):
             raise ValueError('CPU offline/online or cache/readback batch did not pass')
     cpus=frames(text,'N10CPU2',
-        ('id','seq','cpu','el','mpidr','sctlr','tcr','ttbr1','mair','cntkctl','cntfrq','words','fnv'),identity,8)
+        ('id','seq','cpu','el','mpidr','sctlr','tcr','ttbr1','mair','cntkctl','cntfrq','words','fnv'),identity,32)
     observed={}
     for row in cpus.values():
         cpu=row['cpu']
