@@ -64,3 +64,13 @@ python note10/xnu26/test_linked_entry.py NATIVE_BUILD --adapter note10/private/x
 바이트가 같았다. 파티션 전체에는 뒤쪽 추가 공간이 있으므로 원본 IMG 전체 해시와는 구분한다.
 이 백업은 전체 Android·사용자 데이터·EFS 백업이 아니며, 복원 성공을 시험한 결과도 아니다.
 원본 이미지·DT·기기 로그·전체 헤더와 hash manifest는 private에만 보관한다.
+
+## Timer entry guard (2026-10-25)
+
+Current source additionally requires CNTFRQ_EL0=26,000,000 and clear CNTKCTL_EL1
+EVENTI selector bits [7:4]. A mismatch returns status 5 before branching to XNU.
+The guard does not reset those registers or quiesce Linux/devices. The actual
+assembly instruction suite now covers 81 cases across three placements.
+uild_transfer.ps1 -OutputDirectory PRIVATE_NEW_DIRECTORY and
+	est_transfer.py --elf PRIVATE_NEW_DIRECTORY/transfer.elf preserve older ELFs
+and their bundle hashes. Existing diagnostic ZIPs are unchanged.

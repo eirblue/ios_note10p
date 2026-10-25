@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "layout": {
+    "static_entry_size": 16,
+    "static_key_size": 24,
+    "static_count_offset": 4,
+    "static_head_offset": 8,
+    "timebase_offset": 72,
+    "topology_prefix_size": 56,
+    "cpu_mmio_offset": 40,
+    "cluster_mmio_offset": 32,
+    "thread_size": 1680,
+    "thread_ctid_offset": 1520,
+    "thread_ctid_size": 4,
+    "thread_priority_offset": 668,
+    "thread_priority_size": 2,
+    "thread_cpu_data_offset": 568,
+    "thread_preemption_offset": 576,
+    "cpu_active_thread_offset": 48,
+    "rtc_timebase_offset": 8,
+    "startup_entry_size": 24,
+    "startup_func_offset": 8,
+    "startup_arg_offset": 16,
+    "startup_locks_phase": 3,
+    "ctid_mask": 1048575,
+    "maxpri_kernel": 95,
+    "thread_active_offset": 1291,
+    "thread_active_mask": 1
+  },
+  "kernel_sha256": "8584aec16c94eeb16b078cb18807f5b93b923c989c19afd78a778745d851454b",
+  "oracle_object_sha256": "6df4c01ab114e4f57060142ae92ac6ef8177497e29439353301be0008da3812a",
+  "scope": "Actual configured ARM64 C types compiled with saved local flags; not IPSW ABI or hardware boot"
+}

@@ -25,7 +25,7 @@ def continue_entry(*,uc,md,state,stop,symbols,physical_image,rounded,arguments,
                    expected_timebase=None):
     from unicorn import UC_HOOK_CODE,UC_HOOK_MEM_WRITE,UC_HOOK_MEM_READ
     from unicorn import arm64_const as regs
-    if c_phase not in ('first-call','platform','platform-return','topology','topology-return'):
+    if c_phase not in ('first-call','platform','platform-return','topology','topology-return','thread','thread-return','startup','startup-return'):
         raise ValueError('Unknown C continuation boundary')
     descriptor_faults=('mapping','af','pxn','readonly','table-pxn','table-readonly','el0-writable')
     if fault not in (None,'argument','wxn','epd',*descriptor_faults):raise ValueError('Unknown PC fault injection')
@@ -77,13 +77,14 @@ def continue_entry(*,uc,md,state,stop,symbols,physical_image,rounded,arguments,
     # modeled explicitly; only the subsequent linked instructions execute.
     state=dict(state);state['sctlr_el1']=int(stop['sctlr_value'],16)
     register_inputs=dict(register_inputs or {})
-    if set(register_inputs)-{'cntkctl_el1'} or any(type(v) is not int or not 0<=v<1<<64 for v in register_inputs.values()):
+    if set(register_inputs)-{'cntkctl_el1','cntvct_el0'} or any(type(v) is not int or not 0<=v<1<<64 for v in register_inputs.values()):
         raise ValueError('Unsupported explicit register fixture')
     state.update(register_inputs)
     if fault=='wxn':state['sctlr_el1']|=1<<19
     if fault=='epd':state['tcr_el1']|=1<<23
     start=int(stop['address'],16)+4
     operations=Counter();recent=deque(maxlen=20);count=0;entry=None;boundary=None;platform_return=None;topology_return=None
+    thread_return=None;startup_return=None
     stores=[];reads=0;fetches=0;pending=[];calls=[]
     def flush_stores(engine):
         for address,size in pending:
@@ -109,17 +110,26 @@ def continue_entry(*,uc,md,state,stop,symbols,physical_image,rounded,arguments,
         register=gpr(name)
         return uc.reg_read(register) if register is not None else 0
     def instruction(engine,address,size,_):
-        nonlocal count,entry,boundary,fetches,platform_return,topology_return
+        nonlocal count,entry,boundary,fetches,platform_return,topology_return,thread_return,startup_return
         flush_stores(engine)
         count+=1
         translate(address,4,'fetch');fetches+=1
         ins=next(md.disasm(bytes(engine.mem_read(address,4)),address))
         recent.append(hex(address)+' '+ins.mnemonic+' '+ins.op_str)
+        if startup_return is not None and address==startup_return:
+            boundary={'reason':'after_kernel_startup_bootstrap','address':hex(address)}
+            engine.emu_stop();return
         if platform_return is not None and address==platform_return:
             boundary={'reason':'after_platform_init_return','address':hex(address)}
             engine.emu_stop();return
         if topology_return is not None and address==topology_return:
             boundary={'reason':'after_cpu_topology_return','address':hex(address)}
+            engine.emu_stop();return
+        if thread_return is not None and address==thread_return:
+            if engine.reg_read(regs.UC_ARM64_REG_X0)!=symbols['_init_thread']:
+                raise ValueError('Bootstrap thread return differs from actual static object')
+            boundary={'reason':'after_thread_bootstrap_return','address':hex(address),
+                      'thread_pointer':hex(engine.reg_read(regs.UC_ARM64_REG_X0))}
             engine.emu_stop();return
         if address==target:
             if engine.reg_read(regs.UC_ARM64_REG_X0)!=expected_args:
@@ -135,9 +145,14 @@ def continue_entry(*,uc,md,state,stop,symbols,physical_image,rounded,arguments,
             if not names:raise ValueError('First C call target has no linked symbol')
             record={'address':hex(address),'target_address':hex(destination),'target_symbols':sorted(names),
                     'indirect':ins.mnemonic=='blr','x0':hex(engine.reg_read(regs.UC_ARM64_REG_X0)),
-                    'x1':hex(engine.reg_read(regs.UC_ARM64_REG_X1))}
+                    'x1':hex(engine.reg_read(regs.UC_ARM64_REG_X1)),
+                    'x2':hex(engine.reg_read(regs.UC_ARM64_REG_X2))}
             calls.append(record)
-            if len(calls)>4096:raise ValueError('C continuation call budget exceeded')
+            if len(calls)>(32768 if c_phase=='startup-return' else 4096):raise ValueError('C continuation call budget exceeded')
+            if c_phase=='startup' and '_kernel_startup_bootstrap' in names:
+                boundary={'reason':'before_kernel_startup_bootstrap',**record}
+                engine.emu_stop();return
+            if c_phase=='startup-return' and '_kernel_startup_bootstrap' in names:startup_return=address+4
             if c_phase=='platform-return' and '_PE_init_platform' in names:
                 platform_return=address+4
             if c_phase=='topology' and '_ml_parse_cpu_topology' in names:
@@ -146,6 +161,11 @@ def continue_entry(*,uc,md,state,stop,symbols,physical_image,rounded,arguments,
                 engine.emu_stop();return
             if c_phase=='topology-return' and '_ml_parse_cpu_topology' in names:
                 topology_return=address+4
+            if c_phase=='thread' and '_thread_bootstrap' in names:
+                boundary={'reason':'before_thread_bootstrap','address':hex(address),
+                          'target_address':hex(destination),'target_symbols':sorted(names)}
+                engine.emu_stop();return
+            if c_phase=='thread-return' and '_thread_bootstrap' in names:thread_return=address+4
             if c_phase=='first-call' or (c_phase=='platform' and '_PE_init_platform' in names):
                 boundary={'reason':'before_first_arm_init_call' if c_phase=='first-call' else 'before_platform_init',**record}
                 engine.emu_stop();return
@@ -168,7 +188,7 @@ def continue_entry(*,uc,md,state,stop,symbols,physical_image,rounded,arguments,
             engine.reg_write(gpr(dst),state[reg]);operations['modeled_mrs']+=1
         elif ins.mnemonic=='msr':
             reg,src=operands
-            if reg not in ('cpacr_el1','tpidr_el1','tpidr_el0','tpidrro_el0') and not (reg=='cntkctl_el1' and reg in register_inputs):
+            if reg not in ('cpacr_el1','tpidr_el1','tpidr_el0','tpidrro_el0','contextidr_el1') and not (reg=='cntkctl_el1' and reg in register_inputs):
                 raise ValueError('Unexpected post-MMU register write: '+reg)
             state[reg]=read(src);operations['modeled_msr']+=1
         elif ins.mnemonic in ('dc','ic','tlbi','dsb','dmb','isb'):
@@ -191,7 +211,8 @@ def continue_entry(*,uc,md,state,stop,symbols,physical_image,rounded,arguments,
     hook=uc.hook_add(UC_HOOK_CODE,instruction);memory_hook=uc.hook_add(UC_HOOK_MEM_WRITE,write)
     read_hook=uc.hook_add(UC_HOOK_MEM_READ,load)
     try:
-        uc.emu_start(start,physical_image+rounded,count=10000 if c_phase=='first-call' else 500000)
+        budget=10000 if c_phase=='first-call' else (2000000 if c_phase=='startup-return' else 500000)
+        uc.emu_start(start,physical_image+rounded,count=budget)
         flush_stores(uc)
     except ModelPanic:raise
     except Exception as error:raise ValueError(str(error)+'\n'+'\n'.join(recent)) from error
@@ -208,11 +229,21 @@ def continue_entry(*,uc,md,state,stop,symbols,physical_image,rounded,arguments,
         from early_c_state import inspect
         early_state=inspect(uc,kernel_raw,symbols,kernel_segments,boot_args,calls,stores,
                             expected_timebase,state.get('cntkctl_el1'))
-        if c_phase=='topology-return':
+        if c_phase in ('topology-return','thread','thread-return','startup','startup-return'):
             from early_c_state import inspect_single_cpu
             early_state['single_cpu_fixture']=inspect_single_cpu(uc,symbols)
             if state.get('tpidr_el0')!=0 or state.get('tpidrro_el0')!=0:
                 raise ValueError('CPU ID register model differs from logical CPU 0')
+        if c_phase=='thread-return':
+            from early_c_state import inspect_thread
+            early_state['bootstrap_thread']=inspect_thread(uc,symbols,kernel_raw,calls)
+        if c_phase in ('startup','startup-return'):
+            if expected_timebase is None:raise ValueError('Startup state requires explicit timebase')
+            from early_c_state import inspect_startup
+            early_state['startup']=inspect_startup(uc,symbols,state,expected_timebase)
+        if c_phase=='startup-return':
+            from early_c_state import inspect_startup_entries
+            early_state['startup_entries']=inspect_startup_entries(uc,kernel_raw,symbols,calls)
     return {'passed':True,'instructions':count,'arm_init_entry':entry,'stop':boundary,
             'early_c_state':early_state,
             'c_phase':c_phase,'calls_observed':calls,

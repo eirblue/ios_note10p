@@ -1,9 +1,12 @@
 """Inspect real early-C state against immutable linked Mach-O metadata."""
 from collections import defaultdict
+import hashlib
+import json
+from pathlib import Path
 import struct
 
 
-def sections(raw):
+def sections(raw,names=('__static_if','__static_ifinit')):
     result={};offset=32
     for _ in range(struct.unpack_from('<I',raw,16)[0]):
         command,size=struct.unpack_from('<II',raw,offset)
@@ -11,13 +14,13 @@ def sections(raw):
             for index in range(struct.unpack_from('<I',raw,offset+64)[0]):
                 at=offset+72+index*80
                 name=raw[at:at+16].split(b'\0')[0].decode()
-                if name not in ('__static_if','__static_ifinit'):continue
+                if name not in names:continue
                 if name in result:raise ValueError('Duplicate static-if section')
                 va,length,fileoff=struct.unpack_from('<QQI',raw,at+32)
                 if fileoff+length>len(raw):raise ValueError('Static-if section exceeds file')
                 result[name]=(va,raw[fileoff:fileoff+length])
         offset+=size
-    if set(result)!={'__static_if','__static_ifinit'}:raise ValueError('Static-if metadata required')
+    if set(result)!=set(names):raise ValueError('Required early-C metadata missing')
     return result
 
 
@@ -48,7 +51,8 @@ def inspect_static_if(read,original_at,entries_address,entries,initializers,call
             seen.add(address);address=struct.unpack_from('<Q',read(address,16),8)[0]&~3
         if seen!=expected:raise ValueError('Static-if chain incomplete')
     expected_initializers=list(struct.unpack('<'+'Q'*(len(initializers)//8),initializers))
-    observed=[int(c['target_address'],16) for c in calls if c.get('indirect')]
+    platform_index=next((i for i,c in enumerate(calls) if '_PE_init_platform' in c['target_symbols']),len(calls))
+    observed=[int(c['target_address'],16) for c in calls[:platform_index] if c.get('indirect')]
     if observed!=expected_initializers:raise ValueError('Static-if initializer call sequence mismatch')
     patches=[]
     for call in calls:
@@ -128,3 +132,72 @@ def inspect_single_cpu(uc,symbols):
     return {'version':2,'cpus':1,'clusters':1,'logical_cpu_id':0,'synthetic_phys_id':0,
             'boot_cpu_and_cluster_checked':True,'cpu_mmio_declared':False,
             'scope':'Explicit single-CPU PC fixture; not the physical SM-N976N topology'}
+
+
+def inspect_thread(uc,symbols,raw,calls):
+    reference=json.loads(Path(__file__).with_name('early_c_abi.json').read_text())
+    if reference.get('schema')!=1 or hashlib.sha256(raw).hexdigest()!=reference['kernel_sha256']:
+        raise ValueError('Thread inspection ABI requires reviewed kernel')
+    layout=reference['layout'];size=layout['thread_size'];pointer=symbols['_init_thread']
+    template=symbols['_thread_template']
+    actual=bytes(uc.mem_read(pointer,size));expected=bytearray(uc.mem_read(template,size))
+    for name,value in (('ctid',layout['ctid_mask']),('priority',layout['maxpri_kernel'])):
+        offset=layout['thread_'+name+'_offset'];length=layout['thread_'+name+'_size']
+        expected[offset:offset+length]=value.to_bytes(length,'little')
+    if actual!=expected:raise ValueError('Actual bootstrap thread differs from C template plus declared changes')
+    copies=[call for call in calls if '_memcpy' in call['target_symbols'] and int(call['x0'],16)==pointer]
+    if len(copies)!=1 or int(copies[0]['x1'],16)!=template or int(copies[0]['x2'],16)!=size:
+        raise ValueError('Actual thread copy does not match compiled ABI extent')
+    if actual[layout['thread_active_offset']]&layout['thread_active_mask']:
+        raise ValueError('Bootstrap thread became active before scheduler setup')
+    if int.from_bytes(actual[layout['thread_cpu_data_offset']:layout['thread_cpu_data_offset']+8],'little'):
+        raise ValueError('Bootstrap thread CPU data assigned before caller')
+    return {'template_copy_bytes_checked':size,'ctid':layout['ctid_mask'],
+            'priority':layout['maxpri_kernel'],'active':False,'cpu_data_assigned':False,
+            'scope':'Actual static bootstrap thread before arm_init assigns CPU data; not scheduler execution'}
+
+
+def inspect_startup(uc,symbols,state,frequency):
+    layout=json.loads(Path(__file__).with_name('early_c_abi.json').read_text())['layout']
+    def integer(address,size):return int.from_bytes(uc.mem_read(address,size),'little')
+    thread=symbols['_init_thread'];cpu=symbols['_percpu_slot_cpu_data']
+    if state.get('tpidr_el1')!=thread or integer(thread+layout['thread_cpu_data_offset'],8)!=cpu:
+        raise ValueError('Current thread / CPU data pointers disagree')
+    if integer(cpu+layout['cpu_active_thread_offset'],8)!=thread:
+        raise ValueError('CPU active thread does not point back to bootstrap thread')
+    if integer(thread+layout['thread_preemption_offset'],4)!=0:
+        raise ValueError('Bootstrap preemption count is not zero')
+    from math import gcd
+    divisor=gcd(1000000000,frequency)
+    observed=struct.unpack('<4I',bytes(uc.mem_read(symbols['_RTClockData'],16)))
+    if layout['rtc_timebase_offset']!=8 or observed!=(frequency,frequency//1000000,1000000000//divisor,frequency//divisor):
+        raise ValueError('Real timebase callback result differs from rational conversion')
+    return {'current_thread_and_cpu_backpointer_checked':True,'preemption_count':0,
+            'frequency_hz':observed[0],'nanoseconds_numer':observed[2],'nanoseconds_denom':observed[3],
+            'counter_fixture':state.get('cntvct_el0'),'running_clock_verified':False}
+
+
+def inspect_startup_entries(uc,raw,symbols,calls):
+    layout=json.loads(Path(__file__).with_name('early_c_abi.json').read_text())['layout']
+    address,initial=sections(raw,('__init_entry_set',))['__init_entry_set']
+    if layout['startup_entry_size']!=24 or not initial or len(initial)%24:
+        raise ValueError('Unsupported startup section geometry')
+    def records(data):return [struct.unpack_from('<IIQQ',data,i) for i in range(0,len(data),24)]
+    before=records(initial);after=records(bytes(uc.mem_read(address,len(initial))))
+    from collections import Counter
+    if Counter(before)!=Counter(after):raise ValueError('Startup sort changed entry contents')
+    if [(r[0],r[1]) for r in after]!=sorted((r[0],r[1]) for r in before):
+        raise ValueError('Startup entries not ordered by subsystem/rank')
+    phase=layout['startup_locks_phase'];executed=[r for r in after if r[0]<=phase]
+    if int.from_bytes(uc.mem_read(symbols['_startup_phase'],4),'little')!=phase:
+        raise ValueError('Startup locks phase not completed')
+    if int.from_bytes(uc.mem_read(symbols['_startup_entry_cur'],8),'little')!=address+len(executed)*24:
+        raise ValueError('Startup cursor differs from completed entries')
+    targets={r[2] for r in executed}
+    candidates=[c for c in calls if c.get('indirect') and int(c['target_address'],16) in targets]
+    sites={c['address'] for c in candidates}
+    if len(sites)!=1:raise ValueError('Startup callback callsite is ambiguous or absent')
+    observed=[(int(c['target_address'],16),int(c['x0'],16)) for c in calls if c.get('indirect') and c['address'] in sites]
+    if observed!=[(r[2],r[3]) for r in executed]:raise ValueError('Startup callback sequence/arguments differ')
+    return {'entries_sorted':len(after),'callbacks_executed':len(executed),'completed_phase':phase,
+            'immutable_entry_multiset_checked':True,'callback_order_and_arguments_checked':True}

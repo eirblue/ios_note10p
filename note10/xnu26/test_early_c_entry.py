@@ -1,4 +1,4 @@
-"""Run real XNU early C to CPU-topology boundary with synthetic clock inputs."""
+"""Run real XNU early C to startup boundary with explicit synthetic inputs."""
 import argparse
 from functools import partial
 import json
@@ -15,17 +15,29 @@ from verify_experimental_artifact import verify
 
 def test(directory,adapter,output,profile=None):
     if verify(directory)['sha256']!=KERNEL_SHA256:raise ValueError('Reviewed native kernel required')
-    continuation=partial(continue_entry,c_phase='topology-return',register_inputs={'cntkctl_el1':0},
+    continuation=partial(continue_entry,c_phase='startup',register_inputs={'cntkctl_el1':0,'cntvct_el0':26000000},
                          expected_timebase=26000000)
     result=run(directory,adapter,output,profile,continuation=continuation,model_tree=clock_tree(cpu_id=0))
     result.update(negative_checks_completed=False,c_initialization_completed=False,
-                  scope='Actual XNU early-C/state/topology parser; explicit single-CPU/clock/register fixtures; after topology parser return')
+                  scope='Actual XNU early C through timebase callback; explicit single-CPU and frozen counter fixtures; before kernel_startup_bootstrap')
     (output/'result.json').write_text(json.dumps(result,indent=2))
     for case in result['cases']:
         observed=case['continuation']
-        if observed['stop']['reason']!='after_cpu_topology_return':raise ValueError('Unexpected early-C boundary')
-        if observed['final_explicit_registers']!={'cntkctl_el1':0x4f}:
+        if observed['stop']['reason']!='before_kernel_startup_bootstrap':raise ValueError('Unexpected early-C boundary')
+        if observed['final_explicit_registers']!={'cntkctl_el1':0x4f,'cntvct_el0':26000000}:
             raise ValueError('Unexpected explicit timer fixture result')
+    thread=run_case(directory,0x80000000,transfer_elf=adapter,handoff_bundle=output/'case-0',
+                    continuation=partial(continue_entry,c_phase='thread-return',
+                        register_inputs={'cntkctl_el1':0},expected_timebase=26000000))
+    (output/'thread-return.json').write_text(json.dumps(thread,indent=2))
+    result['thread_before_cpu_assignment']=thread['continuation']['early_c_state']['bootstrap_thread']
+    startup=run_case(directory,0x80000000,transfer_elf=adapter,handoff_bundle=output/'case-0',cpu_model='max',
+                     continuation=partial(continue_entry,c_phase='startup-return',
+                         register_inputs={'cntkctl_el1':0,'cntvct_el0':26000000},expected_timebase=26000000))
+    result['startup_lse_model']={'instructions':startup['continuation']['instructions'],
+                                'synthetic_cpu_model':startup['synthetic_cpu_model'],
+                                'state':startup['continuation']['early_c_state']['startup_entries'],
+                                'physical_cpu_model_verified':False}
     plan=json.loads((output/'case-0/handoff.json').read_text())['plan']
     missing=output/'missing-clock.adt'
     missing.write_bytes(encode(Node('device-tree',children=[Node('chosen',{'boot-args':b'debug=0x14e\0'})])))

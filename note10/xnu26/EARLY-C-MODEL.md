@@ -54,3 +54,37 @@ python note10/xnu26/test_early_c_entry.py --kernel-build NATIVE_BUILD --adapter 
 덮어쓰지 않았다. 플랫폼 하드웨어 준비 완료나 XNU/iOS 기기 부팅 성공을 의미하지 않는다.
 이 모델의 CPU ID 레지스터·CNTKCTL·cache/TLB는 합성 상태다. 실제 예외 처리·GIC MMIO와
 전체 arm_init 이후 VM/스케줄러/드라이버 초기화는 아직 검증하지 않았다.
+
+## 초기 스레드와 시간 변환 추가 검증 (2026-10-25)
+
+	hread_bootstrap 반환까지 실제 239,922개 명령을 실행했다. 실제 configured ARM64
+헤더를 컴파일한 arly_c_abi.json을 기준으로 thread 전체 1,680바이트가 template 복사에
+ctid=1,048,575와 priority=95 변경만 더한 결과인지 검사한다. 이 시점의 active=false와
+미할당 CPU 포인터도 검사한다. memcpy의 실제 X0/X1/X2 인자가 목적지/template/1,680과
+일치해야 한다. ABI 재검증 도구는 erify_early_c_abi.py이며 Windows configured 소스가 필요하다.
+
+machine_set_current_thread, cpu_bootstrap, 
+tclock_early_init 및 실제 timebase_callback
+이후, kernel_startup_bootstrap 호출 직전까지 240,463개 명령을 실행했다. thread의
+CpuDatap과 CPU의 active-thread backpointer, TPIDR_EL1 및 preemption_count=0을 검사한다.
+26MHz 입력에서 실제 RTClockData 결과는 초 divisor=26,000,000, 마이크로초 divisor=26,
+나노초 환산 numer/denom=500/13이다.
+
+이 경로의 CONTEXTIDR_EL1 쓰기는 실제 thread-register 설정 코드의 효과만 모델링한다.
+CNTVCT_EL0=26,000,000은 명시적인 **정지된 합성 카운터**다. 실제 타이머의 증가, 인터럽트,
+시계 정확도나 스케줄러 동작을 검증한 것이 아니다. 간접 timebase callback을 static-if
+초기화 함수로 오인하지 않도록 initializer 순서 검사는 첫 PE 호출 이전으로 제한한다.
+
+## Startup 정렬 및 잠금 단계 (PC 전용)
+
+Unicorn의 명시적 max CPU 모델로 LSE LDADD를 실제 실행하여
+kernel_startup_bootstrap 반환까지 1,021,267개 명령을 확인했다. 기본 CPU 모델에서는
+LDADD가 지원되지 않아 예외가 발생하므로 기존 3개 배치 시험은 기본 모델을 유지하고
+별도의 LSE 사례를 둔다. 기기 로그에 atomics가 관측되었지만 max 모델은 실제 Exynos의
+미세구조나 전체 ISA와 같지 않으며, 실제 코어에서 LSE를 실행한 결과가 아니다.
+
+실제 Mach-O __init_entry_set의 4,670개 항목을 원본 multiset과 비교하고, 실행 후
+subsystem/rank 오름차순인지 확인한다. STARTUP_SUB_LOCKS=3까지 대상 1,006개의 실제
+간접 콜백 순서·인자, startup_phase 및 다음 entry cursor를 대조한다. qsort 비교 함수와
+초기화 콜백 모두 실제 커널 명령이며 함수 반환을 대체하지 않는다. 이 추가 단계만
+명령 2,000,000개·호출 32,768회의 유한 실행 예산을 사용한다.

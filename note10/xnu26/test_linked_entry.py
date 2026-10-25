@@ -17,7 +17,7 @@ from boot_contract import Region, PAGE, encode_boot_args, validate_placement
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def run_case(directory, ram_base, outside_bootstrap_block=False, transfer_elf=None, handoff_bundle=None,ram_size=0x40000000,continuation=None):
+def run_case(directory, ram_base, outside_bootstrap_block=False, transfer_elf=None, handoff_bundle=None,ram_size=0x40000000,continuation=None,cpu_model=None):
     from unicorn import Uc, UC_ARCH_ARM64, UC_MODE_ARM, UC_HOOK_CODE, UC_HOOK_MEM_WRITE
     from unicorn import arm64_const as regs
     from capstone import Cs, CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN
@@ -42,6 +42,9 @@ def run_case(directory, ram_base, outside_bootstrap_block=False, transfer_elf=No
         if transfer_elf is None or bundle['adapter_elf_sha256']!=hashlib.sha256(transfer_elf.read_bytes()).hexdigest():
             raise ValueError('Bundle adapter source differs')
     uc = Uc(UC_ARCH_ARM64,UC_MODE_ARM)
+    if cpu_model is not None:
+        if cpu_model!='max':raise ValueError('Unsupported explicit synthetic CPU model')
+        uc.ctl_set_cpu_model(regs.UC_CPU_ARM64_MAX)
     uc.mem_map(physical_image,rounded)
     if bundle is not None:
         # Make copying the full buffer (including zero BSS) observable.
@@ -211,7 +214,7 @@ def run_case(directory, ram_base, outside_bootstrap_block=False, transfer_elf=No
             if walk(va,True) != pa or walk(pa,False) != pa:
                 raise ValueError('Kernel segment endpoint outside actual bootstrap mapping')
             endpoints.append(hex(va))
-    result={'synthetic_ram_base':hex(ram_base),'synthetic_ram_size':hex(ram_size),'synthetic_kernel_physical':hex(physical_image),
+    result={'synthetic_cpu_model':cpu_model or 'unicorn-default','synthetic_ram_base':hex(ram_base),'synthetic_ram_size':hex(ram_size),'synthetic_kernel_physical':hex(physical_image),
             'synthetic_boot_args_physical':hex(arguments),'instructions':count,'stop':stop,
             'system_operations':dict(operations),'register_writes':writes,
             'store_count':len(stores),'stored_bytes':stored_bytes,

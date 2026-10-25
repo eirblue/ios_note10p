@@ -2,6 +2,9 @@
 import struct
 import unittest
 from early_c_state import inspect_static_if
+from early_c_state import inspect_startup,inspect_startup_entries
+from types import SimpleNamespace
+from unittest.mock import patch
 
 
 class EarlyStateTests(unittest.TestCase):
@@ -49,6 +52,68 @@ class EarlyStateTests(unittest.TestCase):
     def test_patch_must_agree_with_real_key_enablement(self):
         self.put(0x2000,struct.pack('<h',-1))
         with self.assertRaisesRegex(ValueError,'key state'):self.inspect()
+    def test_later_indirect_callbacks_are_not_static_initializers(self):
+        self.calls.extend([{'target_symbols':['_PE_init_platform']},
+                           {'indirect':True,'target_symbols':['_timebase_callback'],'target_address':'0x6000'}])
+        self.assertEqual(self.inspect()['initializers_executed'],1)
+
+
+class StartupStateTests(unittest.TestCase):
+    def setUp(self):
+        import json
+        from pathlib import Path
+        self.layout=json.loads(Path(__file__).with_name('early_c_abi.json').read_text())['layout']
+        self.memory=bytearray(0x5000)
+        self.uc=SimpleNamespace(mem_read=lambda address,size:self.memory[address:address+size])
+        self.symbols={'_init_thread':0x100,'_percpu_slot_cpu_data':0x1000,'_RTClockData':0x3000}
+        self.state={'tpidr_el1':0x100,'cntvct_el0':26000000}
+        self.put(0x100+self.layout['thread_cpu_data_offset'],0x1000,8)
+        self.put(0x1000+self.layout['cpu_active_thread_offset'],0x100,8)
+        self.memory[0x3000:0x3010]=struct.pack('<4I',26000000,26,500,13)
+    def put(self,address,value,size):self.memory[address:address+size]=value.to_bytes(size,'little')
+    def inspect(self):return inspect_startup(self.uc,self.symbols,self.state,26000000)
+    def test_actual_layout_fixture(self):
+        self.assertEqual(self.inspect()['nanoseconds_denom'],13)
+        self.assertFalse(self.inspect()['running_clock_verified'])
+    def test_corrupt_backpointers_preemption_and_timebase(self):
+        for address in (0x100+self.layout['thread_cpu_data_offset'],
+                        0x1000+self.layout['cpu_active_thread_offset'],
+                        0x100+self.layout['thread_preemption_offset'],0x3000,0x3008,0x300c):
+            self.setUp();self.memory[address]^=1
+            with self.subTest(address=address),self.assertRaises(ValueError):self.inspect()
+    def test_wrong_current_thread(self):
+        self.state['tpidr_el1']=0
+        with self.assertRaisesRegex(ValueError,'pointers'):self.inspect()
+
+
+class StartupEntriesTests(unittest.TestCase):
+    def setUp(self):
+        self.memory=bytearray(0x1000)
+        self.uc=SimpleNamespace(mem_read=lambda address,size:self.memory[address:address+size])
+        self.symbols={'_startup_phase':0x100,'_startup_entry_cur':0x108}
+        self.entries=[(4,0,0x8000,0),(1,10,0x8100,0x9000),(3,0,0x8200,0x9100)]
+        self.initial=b''.join(struct.pack('<IIQQ',*r) for r in self.entries)
+        self.memory[0x200:0x248]=b''.join(struct.pack('<IIQQ',*r) for r in sorted(self.entries))
+        self.memory[0x100:0x104]=struct.pack('<I',3)
+        self.memory[0x108:0x110]=struct.pack('<Q',0x230)
+        self.calls=[{'indirect':True,'address':'0x7000','target_address':hex(r[2]),'x0':hex(r[3])}
+                    for r in sorted(self.entries)[:2]]
+    def inspect(self):
+        with patch('early_c_state.sections',return_value={'__init_entry_set':(0x200,self.initial)}):
+            return inspect_startup_entries(self.uc,b'',self.symbols,self.calls)
+    def test_sorted_multiset_and_callbacks(self):
+        self.assertEqual(self.inspect()['callbacks_executed'],2)
+    def test_corruption_sort_and_cursor(self):
+        for address in (0x200,0x208,0x100,0x108):
+            self.setUp();self.memory[address]^=1
+            with self.subTest(address=address),self.assertRaises(ValueError):self.inspect()
+        self.setUp();self.memory[0x200:0x248]=self.initial
+        with self.assertRaisesRegex(ValueError,'ordered'):self.inspect()
+    def test_wrong_callback_order_or_arguments(self):
+        self.calls.reverse()
+        with self.assertRaisesRegex(ValueError,'sequence'):self.inspect()
+        self.setUp();self.calls[0]['x0']='0x0'
+        with self.assertRaisesRegex(ValueError,'sequence'):self.inspect()
 
 
 if __name__=='__main__':unittest.main()
