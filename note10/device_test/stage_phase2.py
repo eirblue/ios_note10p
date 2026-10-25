@@ -11,9 +11,10 @@ from run_probe import Adb,ROOT,preflight
 
 def verify_packages(directory):
     result=json.loads((directory/'package-result.json').read_text())
-    expected={'note10-phase2-diagnostic.zip','note10-phase2-rollback.zip'}
+    expected=({'note10-phase2-diagnostic.zip','note10-phase2-rollback.zip'},
+              {'note10-reservation-diagnostic.zip','note10-reservation-rollback.zip'})
     records=result.get('packages',[])
-    if len(records)!=2 or {r['file'] for r in records}!=expected:raise ValueError('Expected paired phase-2 packages')
+    if len(records)!=2 or {r['file'] for r in records} not in expected:raise ValueError('Expected a matched diagnostic/rollback pair')
     for record in records:
         path=directory/record['file']
         if path.is_symlink() or not 0<path.stat().st_size<=128*1024*1024:raise ValueError('Unsafe package file')
@@ -42,7 +43,8 @@ def stage(directory,adb):
         raise ValueError('Memory-backed tmp required')
     tools=adb.text('shell','command','-v','sh','unzip','dd','sha256sum','blockdev','readlink','sync','awk')
     if len(tools.splitlines())!=8:raise ValueError('Required native TWRP utilities not all found')
-    remote='/tmp/note10-phase2-'+uuid.uuid4().hex[:8]
+    prefix='note10-reserve-' if records[0]['file'].startswith('note10-reservation-') else 'note10-phase2-'
+    remote='/tmp/'+prefix+uuid.uuid4().hex[:8]
     adb.call('shell','mkdir',remote)
     adb.call('shell','chmod','700',remote)
     for record in records:

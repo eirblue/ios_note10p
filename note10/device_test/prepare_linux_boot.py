@@ -20,10 +20,10 @@ TWRP_SHA256='e8de29b03fc3eab95f51663b08b2f848e168854a15f8a598a1f80d216f4794df'
 KERNEL_COMMIT='55f042627bb7030c93550faafa117674d32b21d1'
 
 
-def payload_size(kernel_size,ramdisk_size,page,partition_size):
+def payload_size(kernel_size,ramdisk_size,page,partition_size,*,allow_empty_ramdisk=False):
     if any(type(n) is not int or n<0 for n in (kernel_size,ramdisk_size,page,partition_size)):
         raise ValueError('Invalid image size input')
-    if not kernel_size or not ramdisk_size or page not in (2048,4096,8192,16384):
+    if not kernel_size or (not ramdisk_size and not allow_empty_ramdisk) or page not in (2048,4096,8192,16384):
         raise ValueError('Unsupported prototype sizes or page')
     align=lambda n:(n+page-1)//page*page
     size=page+align(kernel_size)+align(ramdisk_size)
@@ -79,6 +79,13 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output):
     required={'CONFIG_BLK_DEV_INITRD=y','CONFIG_RD_LZMA=y','CONFIG_KEXEC=y','CONFIG_KEXEC_CORE=y','CONFIG_ARM64_4K_PAGES=y'}
     if not required.issubset(config.decode().splitlines()):
         raise ValueError('Kernel lacks required ramdisk/kexec/page configuration')
+    builtin=build.get('builtin_idle_init') is True
+    if builtin:
+        if build.get('early_xnu_reservation') is not True or 'CONFIG_INITRAMFS_FORCE=y' not in config.decode().splitlines():
+            raise ValueError('Built-in reservation init must be forced')
+        for name,key in (('minimal-init.elf','minimal_init_elf_sha256'),('initramfs.cpio','initramfs_cpio_sha256')):
+            if hashlib.sha256((kernel_build/name).read_bytes()).hexdigest()!=build[key]:
+                raise ValueError('Built-in init artifact differs from report')
     boot=boot_header(parts['boot']);recovery=boot_header(official)
     if boot['header_version']!=1 or recovery['header_version']!=1 or boot['page_size']!=recovery['page_size']:
         raise ValueError('Expected observed matching v1 boot headers')
@@ -91,23 +98,26 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output):
     vbmeta=parts['vbmeta']
     if vbmeta[:4]!=b'AVB0' or not struct.unpack_from('>I',vbmeta,120)[0]&2:
         raise ValueError('Observed verification-disabled vbmeta header required; no vbmeta changes performed')
-    start=recovery['ramdisk_file_offset'];ramdisk=official[start:start+recovery['ramdisk_size']]
-    size=payload_size(len(data),len(ramdisk),boot['page_size'],len(parts['boot']))
+    start=recovery['ramdisk_file_offset']
+    ramdisk=b'' if builtin else official[start:start+recovery['ramdisk_size']]
+    size=payload_size(len(data),len(ramdisk),boot['page_size'],len(parts['boot']),allow_empty_ramdisk=builtin)
     output.parent.mkdir(exist_ok=True,parents=True)
     rd=output.with_suffix('.ramdisk.lzma')
-    if rd.exists():raise ValueError('Refusing to overwrite ramdisk staging input')
-    rd.write_bytes(ramdisk)
+    if ramdisk:
+        if rd.exists():raise ValueError('Refusing to overwrite ramdisk staging input')
+        rd.write_bytes(ramdisk)
     partial=output.with_suffix('.partial')
     # Boot uses the backed-up separate DTB/DTBO partitions. No embedded
     # recovery_dtbo is copied; this is an unbooted boot-only prototype.
     command=[sys.executable,'-X','utf8',str(mkbootimg),'--header_version','1',
-             '--kernel',str(kernel),'--ramdisk',str(rd),'--base','0',
+             '--kernel',str(kernel),'--base','0',
              '--kernel_offset',hex(boot['kernel_addr']),
-             '--ramdisk_offset',hex(recovery['ramdisk_addr']),
+             '--ramdisk_offset',hex(boot['ramdisk_addr'] if builtin else recovery['ramdisk_addr']),
              '--tags_offset',hex(boot['tags_addr']),'--pagesize',str(boot['page_size']),
              '--board',boot['name'],'--cmdline',recovery['cmdline'],
              '--os_version',boot['os_version'],'--os_patch_level',boot['security_patch_month'],
              '--output',str(partial)]
+    if ramdisk:command.extend(['--ramdisk',str(rd)])
     subprocess.run(command,check=True,capture_output=True,timeout=60)
     packed=partial.read_bytes();header=boot_header(packed)
     if len(packed)!=size or header['kernel_sha256']!=build['image_sha256']:
@@ -133,7 +143,10 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output):
             'backup_manifest_sha256':hashlib.sha256((backup/'backup-manifest.json').read_bytes()).hexdigest(),
             'original_boot_sha256':hashlib.sha256(parts['boot']).hexdigest(),
             'existing_recovery_partition_sha256':hashlib.sha256(parts['recovery']).hexdigest(),
-            'aosp_mkbootimg_sha256':MKBOOTIMG_SHA256,'reference_ramdisk_sha256':hashlib.sha256(ramdisk).hexdigest(),
+            'aosp_mkbootimg_sha256':MKBOOTIMG_SHA256,
+            'reference_ramdisk_sha256':None if builtin else hashlib.sha256(ramdisk).hexdigest(),
+            'builtin_idle_init':builtin,'early_xnu_reservation':build.get('early_xnu_reservation') is True,
+            'external_ramdisk_included':bool(ramdisk),
             'embedded_recovery_dtbo':False,'requires_existing_dtb_dtbo_partitions':True,
             'preserved_boot_os_version':boot['os_version'],
             'preserved_boot_security_patch_month':boot['security_patch_month'],

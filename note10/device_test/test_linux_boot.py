@@ -9,6 +9,8 @@ class LinuxBootTests(unittest.TestCase):
     def test_alignment_and_exact_limit(self):
         self.assertEqual(payload_size(2049,1,2048,8192),8192)
         with self.assertRaises(ValueError):payload_size(2049,1,2048,8191)
+        self.assertEqual(payload_size(2049,0,2048,8192,allow_empty_ramdisk=True),6144)
+        with self.assertRaises(ValueError):payload_size(2049,0,2048,8192)
 
     def test_invalid_sizes(self):
         for values in ((0,1,2048,8192),(1,0,2048,8192),(1,1,3,8192),(-1,1,2048,8192),(True,1,2048,8192)):

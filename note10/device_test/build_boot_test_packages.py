@@ -12,7 +12,7 @@ import zipfile
 from prepare_linux_boot import ROOT, read_verified_backup
 
 
-def updater(*, mode, bootloader, partitions, payload_sha, current_boot_sha):
+def updater(*, mode, bootloader, partitions, payload_sha, current_boot_sha,reservation=False):
     if mode not in ('diagnostic','rollback') or not re.fullmatch(r'N976N[A-Z0-9]+',bootloader):
         raise ValueError('Unexpected package mode or bootloader')
     if not re.fullmatch(r'[0-9a-f]{64}',payload_sha) or not re.fullmatch(r'[0-9a-f]{64}',current_boot_sha):
@@ -46,6 +46,8 @@ case "$(getprop ro.product.device)" in d2x|d2xks) ;; *) abort "Expected d2x" ;; 
     script+='[ "$(getprop ro.bootloader)" = "'+bootloader+'" ] || abort "Bootloader differs from paired backup"\n'
     script+='ui "'+('Temporary Linux CPU diagnostic; not iOS/XNU.' if mode=='diagnostic' else 'Restore the paired Android BOOT backup.')+'"\n'
     script+='ui "Writes BOOT only. No automatic reboot."\n'
+    if mode=='diagnostic' and reservation:
+        script+='ui "RAM reservation test with built-in idle init: no TWRP UI or ADB after System boot."\n'
     for item in partitions:
         name=item['partition'];node=item['block_node']
         script+='[ "$(readlink -f /dev/block/by-name/'+name+')" = "'+node+'" ] || abort "Unexpected '+name+' block node"\n'
@@ -89,6 +91,8 @@ def build(backup,prototype,output):
     if metadata.get('original_boot_sha256')!=original or metadata.get('existing_recovery_partition_sha256')!=hashlib.sha256(parts['recovery']).hexdigest():
         raise ValueError('Prototype baseline differs')
     if not 0<len(raw)<=len(parts['boot']):raise ValueError('Prototype exceeds BOOT partition')
+    reservation=metadata.get('early_xnu_reservation') is True
+    if reservation and metadata.get('builtin_idle_init') is not True:raise ValueError('Reservation test needs built-in idle init')
     padded=raw+bytes(len(parts['boot'])-len(raw))
     output.mkdir(parents=True,exist_ok=False)
     result={'scope':'Manual BOOT-only Linux test and paired Android BOOT rollback; not full device backup',
@@ -99,12 +103,13 @@ def build(backup,prototype,output):
     for mode,payload in (('diagnostic',padded),('rollback',parts['boot'])):
         digest=hashlib.sha256(payload).hexdigest()
         script=updater(mode=mode,bootloader=manifest['bootloader'],partitions=manifest['partitions'],
-                       payload_sha=digest,current_boot_sha=original)
+                       payload_sha=digest,current_boot_sha=original,reservation=reservation)
         metadata={'mode':mode,'writes':['boot'],'payload_sha256':digest,'payload_size':len(payload),
                   'updater_sha256':hashlib.sha256(script).hexdigest(),
                   'preserves_on_disk':['recovery','dtb','dtbo','vbmeta'],'automatic_reboot':False,
                   'recovery_reentry_guaranteed':False,'scope':'Human-triggered TWRP install only; not executed by builder'}
-        target=output/('note10-phase2-'+mode+'.zip')
+        metadata['test_purpose']='ram-reservation' if reservation else 'cpu-caps'
+        target=output/(('note10-reservation-' if reservation else 'note10-phase2-')+mode+'.zip')
         files={'META-INF/com/google/android/update-binary':script,
                'META-INF/com/google/android/updater-script':b'# BOOT-only manual test/rollback\n',
                'boot.img':payload,'manifest.json':json.dumps(metadata,indent=2).encode()}

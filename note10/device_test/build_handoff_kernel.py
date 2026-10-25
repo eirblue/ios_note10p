@@ -114,14 +114,16 @@ def main(caps=False,reserve=False):
             '02-enable-kexec.log')
         if reserve:
             run([str(source/'scripts/config'),'--file',str(config),'--set-str','INITRAMFS_SOURCE',
-                 str(OUT/'initramfs.cpio'),'--enable','INITRAMFS_FORCE'],'02-initramfs.log')
+                 str(OUT/'initramfs.cpio'),'--set-str','CMDLINE','rdinit=/init',
+                 '--disable','CMDLINE_FROM_BOOTLOADER','--disable','CMDLINE_FORCE',
+                 '--enable','CMDLINE_EXTEND','--enable','INITRAMFS_FORCE'],'02-initramfs.log')
         run([*make,'olddefconfig'],'03-olddefconfig.log')
         configured=config.read_text()
         required=('CONFIG_KEXEC=y','CONFIG_KEXEC_CORE=y','CONFIG_PM_SLEEP_SMP=y','CONFIG_ARM64_4K_PAGES=y')
-        if reserve:required+=('CONFIG_INITRAMFS_FORCE=y',)
-        if not all(line in configured.splitlines() for line in required):
-            raise ValueError('Requested kexec dependencies did not survive Kconfig')
         (OUT/'handoff.config').write_bytes(config.read_bytes())
+        if reserve:required+=('CONFIG_INITRAMFS_FORCE=y','CONFIG_CMDLINE_EXTEND=y','CONFIG_CMDLINE="rdinit=/init"')
+        missing=[line for line in required if line not in configured.splitlines()]
+        if missing:raise ValueError('Required Kconfig options missing: '+', '.join(missing))
         report['effective_config_sha256']=hashlib.sha256(config.read_bytes()).hexdigest()
         if caps:run([*make,'drivers/misc/note10_handoff_caps.o'],'04-caps-object.log')
         if reserve:run([*make,'arch/arm64/mm/init.o'],'04-reservation-object.log')
