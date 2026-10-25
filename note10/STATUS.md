@@ -373,3 +373,16 @@ Exynos SoC MASTER 및 플랫폼 archive 입력 분리:
 - 실제 TWRP의 새 RAM 폴더로 최종 ZIP 2개를 전송하고 네이티브 unzip·셸 구문·원격 해시를 확인했다. 기기 5개 부팅 파티션은 원래 백업과 모두 일치한다. 설치/재부팅은 사용자 직접 조작 단계로 남겼다.
 - 이 BOOT의 최소 PID1에는 TWRP UI/ADB가 없다. 사용자가 System 부팅을 관찰한 뒤 기존 recovery로 돌아오면 로그를 회수한다. decoder는 이전 Linux boot 문맥에만 유효한 예약으로 표시하며, 재부팅 후 그 주소 재사용을 허용하지 않는다.
 - 상세 device_test/RESERVATION.md. 실제 CPU/DMA/cache/MMU 종료·GIC 인계·live load backend·XNU 실행은 여전히 미완료다. Android 정상 복구도 중단된 상태다. 에이전트는 기기 파티션 쓰기·재부팅을 수행하지 않았다.
+
+## 2026-10-25: 첫 RAM 예약 시험 회수와 v2 로그 검증
+
+- 사용자 수동 시험 후 기존 TWRP로 재진입했다. BOOT 전체 해시는 예약 진단 payload와 일치하며 recovery/DTB/DTBO/vbmeta는 원래 백업과 일치했다.
+- 이전 부팅 로그에 pages=65536/reserved=65536/invalid=0/shift=12가 남았다. 그러나 RESERVED 주소와 build banner가 손상돼 엄격한 예약 검증은 통과시키지 않았다. 두 번 읽은 원본 SHA-256이 같아 전송 재시도로 회복되지 않았다. 원본 로그는 private에 보관한다.
+- 약 125초 시점에 버튼 hard-reset hook과 panic 기록이 있었다. 이 관측을 XNU 실행이나 커널의 자발적 예약 실패로 바꾸어 설명하지 않는다.
+- v2는 빌드 고유 ID·순번·전체 예약 정보·FNV-1a 오류 검출값을 포함한 N10RAM2 프레임 32개를 출력한다. 검증한 Image의 내부 ID와 연결된 서로 다른 순번 2개 이상이 완전히 일치해야 통과한다. 손상된 주소를 복원하지 않고 충돌·중복 순번·불완전 페이지 상태를 거부한다.
+- 실제 C 검사값 함수를 Windows에서 컴파일해 Python 검증기와 1,026건 대조했다. 전체 예약 C 소스의 API를 명시적으로 모형화한 별도 PC 실행에서 정상 프레임 32개 및 find/reserve/invalid-PFN/unreserved-page 실패 경로 5개를 확인했다. 실기기 예약 검증의 대체 증거는 아니다.
+- 최신 PC CI에서 어댑터·단위 검사 108개와 실제 최소 PID1 명령 모델이 통과했다: https://github.com/eirblue/ios_note10p/actions/runs/40163157625 (`5a543bf`). 누락 pstore 파일 오류를 로그로 저장하지 않도록 수정하고 v1/v2 수집 경로를 검사했다.
+- 다음 설치 ZIP은 검증한 이전 진단 BOOT 해시를 설치 전 기준으로 연결할 수 있다. 원본 BOOT 복구 ZIP은 유지하며 비BOOT 4개 파티션의 원본 대조는 계속 필수다. 에이전트의 기기 설치·재부팅·파티션 쓰기는 없다.
+- v2 전체 커널 빌드 성공: https://github.com/eirblue/ios_note10p/actions/runs/40162958220 (`88a97da`). Image 46,350,348 bytes, SHA-256 `8b16ccf9287b8f3bb97708875724d56eede31a3e91d0d5307f1bec307e568a01`. 빌드 고유 ID가 실제 Image에 한 번 포함됨을 확인했다.
+- 실제 Image 내부 CPIO와 원본 archive를 대조했고 실제 init ELF 명령 모델도 통과했다. BOOT prototype 46,354,448 bytes 및 진단/원본 BOOT 복구 ZIP을 PC private에 완성했다. 패키지 SHA/CRC와 PC 셸 구문 검사를 통과했다.
+- 빌드 완료 시 ADB transport가 없어 새 ZIP의 TWRP RAM 전송 및 현재 기기 재검사는 미완료다. 전송·검사·로그 회수용 PC 실행 파일과 수동 안내서를 준비했다. PC 패키지 준비와 실제 기기 설치 직전 상태를 별도 필드로 구분한다. v2 기기 시험 및 XNU 실행은 아직 없다.

@@ -21,6 +21,13 @@ ASCII 본문의 FNV-1a 32비트 오류 검출값을 포함한다. 이는 인증�
 다음 설치 ZIP은 `--current-packages`로 검증한 이전 시험 BOOT를 설치 전 기준으로 삼을 수 있다.
 원래 백업과의 결합 및 비BOOT 4개 파티션 대조는 계속 필수다. 자동 설치/재부팅은 없다.
 
+v2 전체 Image 빌드와 고유 ID 내장 검사를 통과했다:
+https://github.com/eirblue/ios_note10p/actions/runs/40162958220 .
+수집기를 포함한 PC 검사 108개 및 실제 PID1 명령 모델도 통과했다:
+https://github.com/eirblue/ios_note10p/actions/runs/40163157625 .
+로컬 수동 ZIP 쌍은 완성했으나, 완료 시 ADB 연결이 없어 RAM 전송·현재 파티션 재검사는 대기 상태다.
+이는 v2 실기기 시험이나 XNU 부팅 성공을 의미하지 않는다.
+
 XNU 로드 버퍼 생성 뒤 실제로 필요한 **Linux allocator에서 제외된 RAM**을 준비하는 단계다.
 아직 XNU를 실행하지 않으며, 실제 예약 성공은 사용자의 다음 수동 기기 시험 로그로 판정한다.
 Android 부팅 복구와 별개로 진행한다. 원래 BOOT 복구 후에도 Android 부팅 반복이 남았다는 상태를 유지한다.
