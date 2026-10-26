@@ -32,6 +32,11 @@ on:
         type: boolean
         default: false
 
+      auto_return:
+        description: Opt-in one-shot recovery request; cycle token required at BOOT packaging
+        type: boolean
+        default: false
+
 permissions:
   contents: read
   actions: read
@@ -62,7 +67,15 @@ jobs:
           NOTE10_XNU_STAGE: ${{ inputs.xnu_stage }}
           NOTE10_CPU_CACHE: ${{ inputs.cpu_cache }}
           NOTE10_PM_TIMER: ${{ inputs.pm_timer }}
+          NOTE10_AUTO_RETURN: ${{ inputs.auto_return }}
         run: |
+          if [ "$NOTE10_AUTO_RETURN" = true ] && [ "$NOTE10_PM_TIMER" != true ]; then
+            echo "auto_return requires pm_timer=true" >&2
+            exit 2
+          fi
+          if [ "$NOTE10_AUTO_RETURN" = true ]; then
+            python note10/device_test/test_auto_cycle_contract.py
+          fi
           if [ "$NOTE10_PM_TIMER" = true ] && [ "$NOTE10_CPU_CACHE" != true ]; then
             echo "pm_timer requires cpu_cache=true" >&2
             exit 2
@@ -114,6 +127,7 @@ jobs:
         env:
           NOTE10_CPU_CACHE: ${{ inputs.cpu_cache }}
           NOTE10_PM_TIMER: ${{ inputs.pm_timer }}
+          NOTE10_AUTO_RETURN: ${{ inputs.auto_return }}
         run: |
           count="$(find note10/private/xnu-input -name note10-experimental.macho -type f | wc -l)"
           [ "$count" -eq 1 ]
@@ -127,6 +141,10 @@ jobs:
           if [ "$NOTE10_PM_TIMER" = true ]; then
             python note10/device_test/test_pm_timer_native.py --payload note10/private/xnu-stage-payload/kernel.mem --cpu-model note10/private/handoff-kernel/cpu-cache-model --output note10/private/handoff-kernel/pm-timer-model
             EXTRA+=(--pm-timer)
+          fi
+          if [ "$NOTE10_AUTO_RETURN" = true ]; then
+            python note10/device_test/test_auto_return_native.py --output note10/private/handoff-kernel/auto-return-model
+            EXTRA+=(--auto-return)
           fi
           python note10/device_test/build_handoff_kernel.py --caps --reserve --window-access \
             --xnu-payload note10/private/xnu-stage-payload/kernel.mem \
@@ -150,5 +168,7 @@ jobs:
             note10/private/handoff-kernel/pm-timer-model/result.json
             note10/private/handoff-kernel/pm-timer-model/compile.log
             note10/private/handoff-kernel/pm-source-model.json
+            note10/private/handoff-kernel/auto-return-model/result.json
+            note10/private/handoff-kernel/auto-return-model/compile.log
             note10/private/window-access-core-ci/result.json
             note10/private/window-access-gate-ci/result.json

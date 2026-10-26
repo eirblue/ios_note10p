@@ -52,10 +52,11 @@ def cpio(init, xnu_payload=None):
     return bytes(output)
 
 
-def prepare(source,output,run,window_access=False,xnu_payload=None,xnu_manifest=None,cpu_cache=False,pm_timer=False):
+def prepare(source,output,run,window_access=False,xnu_payload=None,xnu_manifest=None,cpu_cache=False,pm_timer=False,auto_return=False):
     here=Path(__file__).resolve().parent
     if cpu_cache and xnu_payload is None:
         raise ValueError('CPU/cache roundtrip requires verified XNU payload staging')
+    if auto_return and not pm_timer:raise ValueError('Auto return requires PM/timer diagnostic')
     if pm_timer and not cpu_cache:raise ValueError('PM/timer diagnostic requires CPU/cache batch')
     if (xnu_payload is None)!=(xnu_manifest is None):
         raise ValueError('XNU stage payload and manifest must be supplied together')
@@ -151,6 +152,10 @@ def prepare(source,output,run,window_access=False,xnu_payload=None,xnu_manifest=
         call_cpu=b'    n10_test_cpu_cache();\n'
         if extension.count(call_cpu)!=1:raise ValueError('Unexpected CPU/cache prerequisite insertion')
         extension=extension.replace(call_cpu,b'    if (n10_test_cpu_cache())\n        return 0;\n    n10_start_pm_timer();\n')
+    if auto_return:
+        from prepare_auto_return import prepare as prepare_return
+        extension,return_report=prepare_return(source,path,extension)
+        access_report.update(return_report)
     evidence_id=uuid.uuid4().hex
     target.write_bytes(('#define N10_RESERVE_BUILD_ID "'+evidence_id+'"\n').encode()+extension)
     text=text.replace(declaration,'#include "note10_xnu_reserve.c"\n\n'+declaration)

@@ -32,6 +32,19 @@ def check(packages,kernel_build,backup,core_model,gate_model,init_model,adb):
         xnu_stage=paired.get('xnu_payload_stage_diagnostic') is True
         cpu_cache=paired.get('cpu_cache_roundtrip_diagnostic') is True
         pm_timer=paired.get('pm_timer_diagnostic') is True
+        auto_return=paired.get('auto_return_diagnostic') is True
+        if auto_return!=(build.get('auto_return_diagnostic') is True) or auto_return!=(diagnostic.get('auto_return_diagnostic') is True):raise ValueError('Auto-return scope mismatch')
+        if auto_return:
+            from inspect_firmware import boot_header
+            cycle=paired.get('auto_cycle_token')
+            if not pm_timer or not re.fullmatch(r'[0-9a-f]{32}',cycle or '') or diagnostic.get('auto_cycle_token')!=cycle:raise ValueError('Invalid auto-return token')
+            with zipfile.ZipFile(packages/diagnostic['file']) as z:header=boot_header(z.read('boot.img'))
+            if header['kernel_sha256']!=build['image_sha256']:raise ValueError('Actual BOOT kernel differs from build')
+            cmdline=header['cmdline']
+            if cmdline.split().count('n10.cycle='+cycle)!=1 or sum(x.startswith('n10.cycle=') for x in cmdline.split())!=1:raise ValueError('Cycle command-line binding differs')
+            model=json.loads((kernel_build/'auto-return-model/result.json').read_text())
+            actual=hashlib.sha256(Path(__file__).with_name('auto_return.c').read_bytes()).hexdigest()
+            if model.get('passed') is not True or model.get('cases')!=10 or model.get('source_sha256')!=actual or build.get('auto_return_source_sha256')!=actual:raise ValueError('Auto-return C model/build mismatch')
         if pm_timer!=(build.get('pm_timer_diagnostic') is True) or pm_timer!=(diagnostic.get('pm_timer_diagnostic') is True):
             raise ValueError('PM/timer package and kernel scope differ')
         if pm_timer:
@@ -131,7 +144,7 @@ def check(packages,kernel_build,backup,core_model,gate_model,init_model,adb):
                       core_model_cases=len(core['cases']),gate_model_cases=len(gate['cases']),
                       xnu_payload_stage_diagnostic=xnu_stage,
                       cpu_cache_roundtrip_diagnostic=cpu_cache,
-                      pm_timer_diagnostic=pm_timer,
+                      pm_timer_diagnostic=pm_timer,auto_return_diagnostic=auto_return,
                       xnu_payload_sha256=build.get('xnu_payload_sha256') if xnu_stage else None,
                       xnu_payload_size=build.get('xnu_payload_size') if xnu_stage else None,
                       scope=('Read-only readiness for manual same-boot XNU-data staging/readback test'

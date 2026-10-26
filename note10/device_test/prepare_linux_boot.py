@@ -4,6 +4,7 @@ Never flashes or accesses ADB. Keeps the recovery partition separate. A built
 file is not evidence that Samsung will boot it or that recovery reentry works.
 """
 import argparse
+import re
 import hashlib
 import json
 from pathlib import Path
@@ -52,7 +53,7 @@ def read_verified_backup(directory):
     return result
 
 
-def prepare(backup,kernel_build,twrp,mkbootimg,output):
+def prepare(backup,kernel_build,twrp,mkbootimg,output,auto_cycle_token=None):
     if not output.resolve().is_relative_to((ROOT/'note10/private').resolve()):
         raise ValueError('Prototype output must remain in private workspace')
     if output.exists() or output.with_suffix('.partial').exists():raise ValueError('Output already exists')
@@ -69,7 +70,11 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output):
         raise ValueError('Diagnostic must preserve external initramfs in normal boot')
     if build.get('source_commit')!=KERNEL_COMMIT or build.get('public_defconfig')!='exynos9820-d2x_defconfig':
         raise ValueError('Unexpected kernel source or target')
+    auto_return=build.get('auto_return_diagnostic') is True
+    if auto_return!=(auto_cycle_token is not None):raise ValueError('Auto-return build and per-cycle token must be paired')
+    if auto_cycle_token is not None and not re.fullmatch(r'[0-9a-f]{32}',auto_cycle_token):raise ValueError('Invalid cycle token')
     kernel=kernel_build/'Image';data=kernel.read_bytes()
+    if auto_return and b'N10RET1' not in data:raise ValueError('Auto-return marker missing from actual kernel')
     if hashlib.sha256(data).hexdigest()!=build['image_sha256'] or len(data)!=build['image_size']:
         raise ValueError('Kernel image differs from build report')
     if len(data)<64 or data[56:60]!=b'ARM\x64':raise ValueError('Not an ARM64 Linux Image')
@@ -119,12 +124,16 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output):
     partial=output.with_suffix('.partial')
     # Boot uses the backed-up separate DTB/DTBO partitions. No embedded
     # recovery_dtbo is copied; this is an unbooted boot-only prototype.
+    cmdline=recovery['cmdline']
+    if 'n10.cycle=' in cmdline:raise ValueError('Existing cycle argument refused')
+    if auto_return:cmdline+=' n10.cycle='+auto_cycle_token
+    if len(cmdline.encode())>1535:raise ValueError('BOOT command line too long')
     command=[sys.executable,'-X','utf8',str(mkbootimg),'--header_version','1',
              '--kernel',str(kernel),'--base','0',
              '--kernel_offset',hex(boot['kernel_addr']),
              '--ramdisk_offset',hex(boot['ramdisk_addr'] if builtin else recovery['ramdisk_addr']),
              '--tags_offset',hex(boot['tags_addr']),'--pagesize',str(boot['page_size']),
-             '--board',boot['name'],'--cmdline',recovery['cmdline'],
+             '--board',boot['name'],'--cmdline',cmdline,
              '--os_version',boot['os_version'],'--os_patch_level',boot['security_patch_month'],
              '--output',str(partial)]
     if ramdisk:command.extend(['--ramdisk',str(rd)])
@@ -134,6 +143,7 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output):
         raise ValueError('Packed image does not match size/kernel contract')
     if any(header[field]!=boot[field] for field in ('name','os_version','security_patch_month','kernel_addr','tags_addr','page_size')):
         raise ValueError('Packed BOOT metadata differs from paired original')
+    if header['cmdline']!=cmdline:raise ValueError('Packed cycle command line differs')
     if packed[header['ramdisk_file_offset']:header['ramdisk_file_offset']+header['ramdisk_size']]!=ramdisk:
         raise ValueError('Packed ramdisk differs from reference')
     if header['recovery_dtbo_size']!=0:raise ValueError('Unexpected embedded recovery DTBO')
@@ -160,6 +170,7 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output):
             'xnu_payload_stage_diagnostic':xnu_stage,
             'cpu_cache_roundtrip_diagnostic':build.get('cpu_cache_roundtrip_diagnostic') is True,
             'pm_timer_diagnostic':build.get('pm_timer_diagnostic') is True,
+            'auto_return_diagnostic':auto_return,'auto_cycle_token':auto_cycle_token,
             'xnu_payload_sha256':build.get('xnu_payload_sha256') if xnu_stage else None,
             'xnu_payload_size':build.get('xnu_payload_size') if xnu_stage else None,
             'external_ramdisk_included':bool(ramdisk),
@@ -179,6 +190,7 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output):
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     for name in ('backup','kernel-build','twrp','mkbootimg','output'):parser.add_argument('--'+name,type=Path,required=True)
+    parser.add_argument('--auto-cycle-token')
     args=parser.parse_args()
-    result=prepare(args.backup,args.kernel_build,args.twrp,args.mkbootimg,args.output)
+    result=prepare(args.backup,args.kernel_build,args.twrp,args.mkbootimg,args.output,args.auto_cycle_token)
     print(json.dumps({k:result[k] for k in ('prototype_created','size','boot_partition_size','deployment_ready')}))

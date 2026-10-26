@@ -41,7 +41,7 @@ def parse_newc(data):
 
 
 class XnuStageTests(unittest.TestCase):
-    def test_stage_preparation_preserves_memblock_insertion(self,cpu_cache=False,pm_timer=False):
+    def test_stage_preparation_preserves_memblock_insertion(self,cpu_cache=False,pm_timer=False,auto_return=False):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);source=root/'source';output=root/'output'
             output.mkdir();init_c=source/'arch/arm64/mm/init.c'
@@ -52,6 +52,10 @@ class XnuStageTests(unittest.TestCase):
                 from test_pm_timer_contract import pinned_source
                 pm_source=source/'kernel/power/suspend.c';pm_source.parent.mkdir(parents=True)
                 pm_source.write_bytes(pinned_source());(source/'include/linux').mkdir(parents=True)
+            if auto_return:
+                from test_auto_cycle_contract import pinned_restart_sources
+                for name,raw_source in pinned_restart_sources().items():
+                    target=source/name;target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(raw_source)
             payload=b'K'*0x4000;payload_path=root/'kernel.mem';payload_path.write_bytes(payload)
             manifest=root/'payload-manifest.json'
             digest=hashlib.sha256(payload).hexdigest()
@@ -65,7 +69,7 @@ class XnuStageTests(unittest.TestCase):
                 Path(command[command.index('-o')+1]).write_bytes(elf)
             with patch('prepare_reservation_kernel.INIT_SHA',hashlib.sha256(raw).hexdigest()):
                 result=prepare(source,output,run,window_access=True,
-                               xnu_payload=payload_path,xnu_manifest=manifest,cpu_cache=cpu_cache,pm_timer=pm_timer)
+                               xnu_payload=payload_path,xnu_manifest=manifest,cpu_cache=cpu_cache,pm_timer=pm_timer,auto_return=auto_return)
             self.assertIn('\tnote10_reserve_xnu_window();\n\n\tmemblock_allow_resize();',init_c.read_text())
             extension=init_c.with_name('note10_xnu_reserve.c').read_text()
             self.assertIn('n10_stage_xnu_payload(reserved, count, invalid)',extension)
@@ -79,6 +83,10 @@ class XnuStageTests(unittest.TestCase):
                 self.assertTrue(result['pm_timer_diagnostic'])
                 self.assertIn('if (n10_test_cpu_cache())',extension)
                 self.assertIn('n10_start_pm_timer();',extension)
+            if auto_return:
+                self.assertTrue(result['auto_return_diagnostic'])
+                self.assertIn('n10_arm_auto_return()',extension)
+                self.assertLess(extension.index('note10_auto_return.c'),extension.index('note10_pm_timer_roundtrip.c'))
             self.assertEqual(parse_newc((output/'initramfs.cpio').read_bytes())['xnu/kernel.mem'],payload)
 
     def test_cpu_cache_preparation_preserves_prerequisites(self):
@@ -86,6 +94,9 @@ class XnuStageTests(unittest.TestCase):
 
     def test_pm_preparation_preserves_root_and_guards_lowlevel_entry(self):
         self.test_stage_preparation_preserves_memblock_insertion(cpu_cache=True,pm_timer=True)
+
+    def test_auto_return_preparation_preserves_prerequisites(self):
+        self.test_stage_preparation_preserves_memblock_insertion(cpu_cache=True,pm_timer=True,auto_return=True)
 
     def test_two_bound_readback_frames(self):
         result=decode(reservation()+stage(0)+stage(1),ID,SHA,0x4000)

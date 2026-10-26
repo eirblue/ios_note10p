@@ -34,6 +34,8 @@ def verify_packages(directory):
             if meta.get('cpu_cache_roundtrip_diagnostic') is True and (
                 meta.get('xnu_payload_stage_diagnostic') is not True or meta.get('mode')!='diagnostic'):
                 raise ValueError('CPU/cache diagnostic must explicitly require XNU staging')
+            if bool(meta.get('auto_return_diagnostic'))!=bool(record.get('auto_return_diagnostic')) or meta.get('auto_cycle_token')!=record.get('auto_cycle_token'):raise ValueError('Auto-return package record differs from archive')
+            if meta.get('auto_return_diagnostic') and (meta.get('mode')!='diagnostic' or not meta.get('pm_timer_diagnostic') or not re.fullmatch('[0-9a-f]{32}',meta.get('auto_cycle_token',''))):raise ValueError('Invalid auto-return manifest')
             if meta.get('pm_timer_diagnostic') is True and meta.get('cpu_cache_roundtrip_diagnostic') is not True:
                 raise ValueError('PM/timer must explicitly require CPU/cache batch')
             if hashlib.sha256(archive.read('META-INF/com/google/android/update-binary')).hexdigest()!=meta['updater_sha256']:

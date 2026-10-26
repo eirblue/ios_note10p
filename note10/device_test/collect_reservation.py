@@ -71,6 +71,7 @@ def collect(packages,kernel_build,adb):
     xnu_stage=result.get('xnu_payload_stage_diagnostic') is True
     cpu_cache=result.get('cpu_cache_roundtrip_diagnostic') is True
     pm_timer=result.get('pm_timer_diagnostic') is True
+    auto_return=result.get('auto_return_diagnostic') is True
     if pm_timer and (not cpu_cache or result.get('pm_timer_evidence_version')!=1):raise ValueError('Invalid PM/timer batch contract')
     if cpu_cache and not xnu_stage:raise ValueError('CPU/cache batch requires XNU staging')
     if cpu_cache and result.get('cpu_cache_evidence_version')!=1:raise ValueError('Unsupported CPU/cache evidence version')
@@ -83,6 +84,9 @@ def collect(packages,kernel_build,adb):
         raise ValueError('Diagnostic package scope differs from this kernel build')
     if (paired.get('cpu_cache_roundtrip_diagnostic') is True)!=cpu_cache:
         raise ValueError('CPU/cache package and kernel scope differ')
+    if (paired.get('auto_return_diagnostic') is True)!=auto_return:raise ValueError('Auto-return package and build scope differ')
+    cycle=paired.get('auto_cycle_token')
+    if auto_return and (result.get('auto_return_evidence_version')!=1 or not re.fullmatch(r'[0-9a-f]{32}',cycle or '')):raise ValueError('Invalid auto-return cycle contract')
     if (paired.get('pm_timer_diagnostic') is True)!=pm_timer:raise ValueError('PM/timer package and kernel scope differ')
     if xnu_stage and (paired.get('xnu_payload_sha256')!=result.get('xnu_payload_sha256') or
                       paired.get('xnu_payload_size')!=result.get('xnu_payload_size')):
@@ -126,6 +130,13 @@ def collect(packages,kernel_build,adb):
         try:
             selected,selection=select_latest_boot(data,banner,allow_panic_corroboration=evidence_id is not None,
                 boot_binding_id=evidence_id if result.get('boot_binding_evidence_version')==1 else None)
+            if auto_return:
+                from decode_auto_return import select_cycle_log
+                selected,cycle_offset=select_cycle_log(selected,evidence_id,cycle)
+                selection['cycle_arm_offset']=cycle_offset
+                selection['byte_start']+=cycle_offset
+                selection['selected_sha256']=hashlib.sha256(selected).hexdigest()
+                selection['cycle_token']=cycle
             report['log_selections'][name]=selection
             if selection['byte_start']:
                 selected_name=name+'.selected-boot.txt'

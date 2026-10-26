@@ -12,10 +12,11 @@ import zipfile
 from prepare_linux_boot import ROOT, read_verified_backup
 
 
-def updater(*, mode, bootloader, partitions, payload_sha, current_boot_sha,reservation=False,window_access=False,xnu_stage=False,cpu_cache=False,pm_timer=False):
+def updater(*, mode, bootloader, partitions, payload_sha, current_boot_sha,reservation=False,window_access=False,xnu_stage=False,cpu_cache=False,pm_timer=False,auto_return=False):
     if window_access and not reservation:raise ValueError('RAM access requires the reservation diagnostic')
     if xnu_stage and not window_access:raise ValueError('XNU staging requires the RAM access diagnostic')
     if cpu_cache and not xnu_stage:raise ValueError('CPU/cache roundtrip requires XNU staging')
+    if auto_return and not pm_timer:raise ValueError('Auto return requires PM/timer')
     if pm_timer and not cpu_cache:raise ValueError('PM/timer requires CPU/cache batch')
     if mode not in ('diagnostic','rollback') or not re.fullmatch(r'N976N[A-Z0-9]+',bootloader):
         raise ValueError('Unexpected package mode or bootloader')
@@ -60,6 +61,8 @@ case "$(getprop ro.product.device)" in d2x|d2xks) ;; *) abort "Expected d2x" ;; 
         script+='ui "Temporarily offlines secondary CPUs, maintains payload caches, restores CPUs and checks per-CPU reads. No DMA/MMU shutdown or XNU branch."\n'
     if mode=='diagnostic' and pm_timer:
         script+='ui "Tests device-driver suspend/resume and timer selector clear/restore. Low-level sleep is blocked. Drivers can hang during this test."\n'
+    if mode=='diagnostic' and auto_return:
+        script+='ui "Opt-in kernel requests recovery after 90 seconds. First automatic roundtrip is unverified."\n'
     for item in partitions:
         name=item['partition'];node=item['block_node']
         script+='[ "$(readlink -f /dev/block/by-name/'+name+')" = "'+node+'" ] || abort "Unexpected '+name+' block node"\n'
@@ -119,6 +122,9 @@ def build(backup,prototype,output,current_packages=None):
     xnu_stage=metadata.get('xnu_payload_stage_diagnostic') is True
     cpu_cache=metadata.get('cpu_cache_roundtrip_diagnostic') is True
     pm_timer=metadata.get('pm_timer_diagnostic') is True
+    auto_return=metadata.get('auto_return_diagnostic') is True
+    cycle=metadata.get('auto_cycle_token')
+    if auto_return and (not pm_timer or not re.fullmatch(r'[0-9a-f]{32}',cycle or '')):raise ValueError('Incomplete auto-return cycle')
     if pm_timer and not cpu_cache:raise ValueError('PM/timer requires CPU/cache batch')
     if cpu_cache and not xnu_stage:raise ValueError('CPU/cache roundtrip needs XNU staging')
     xnu_sha=metadata.get('xnu_payload_sha256') if xnu_stage else None
@@ -138,7 +144,7 @@ def build(backup,prototype,output,current_packages=None):
             'window_access_diagnostic':window_access,
             'xnu_payload_stage_diagnostic':xnu_stage,
             'cpu_cache_roundtrip_diagnostic':cpu_cache,
-            'pm_timer_diagnostic':pm_timer,
+            'pm_timer_diagnostic':pm_timer,'auto_return_diagnostic':auto_return,'auto_cycle_token':cycle,
             'xnu_payload_sha256':metadata.get('xnu_payload_sha256') if xnu_stage else None,
             'xnu_payload_size':metadata.get('xnu_payload_size') if xnu_stage else None,
             'builder_device_operations':[],'device_boot_tested':False,'deployment_ready':False,'packages':[]}
@@ -147,7 +153,7 @@ def build(backup,prototype,output,current_packages=None):
         script=updater(mode=mode,bootloader=manifest['bootloader'],partitions=manifest['partitions'],
                        payload_sha=digest,current_boot_sha=current_boot,reservation=reservation,
                        window_access=window_access,xnu_stage=xnu_stage and mode=='diagnostic',
-                       cpu_cache=cpu_cache and mode=='diagnostic',pm_timer=pm_timer and mode=='diagnostic')
+                       cpu_cache=cpu_cache and mode=='diagnostic',pm_timer=pm_timer and mode=='diagnostic',auto_return=auto_return and mode=='diagnostic')
         metadata={'mode':mode,'writes':['boot'],'payload_sha256':digest,'payload_size':len(payload),
                   'updater_sha256':hashlib.sha256(script).hexdigest(),
                   'preserves_on_disk':['recovery','dtb','dtbo','vbmeta'],'automatic_reboot':False,
@@ -158,6 +164,8 @@ def build(backup,prototype,output,current_packages=None):
         metadata['xnu_payload_stage_diagnostic']=xnu_stage and mode=='diagnostic'
         metadata['cpu_cache_roundtrip_diagnostic']=cpu_cache and mode=='diagnostic'
         metadata['pm_timer_diagnostic']=pm_timer and mode=='diagnostic'
+        metadata['auto_return_diagnostic']=auto_return and mode=='diagnostic'
+        metadata['auto_cycle_token']=cycle if auto_return and mode=='diagnostic' else None
         metadata['xnu_payload_sha256']=xnu_sha if xnu_stage and mode=='diagnostic' else None
         metadata['xnu_payload_size']=xnu_size if xnu_stage and mode=='diagnostic' else None
         target=output/(('note10-reservation-' if reservation else 'note10-phase2-')+mode+'.zip')

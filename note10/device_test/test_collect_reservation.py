@@ -43,7 +43,7 @@ class CollectorTests(unittest.TestCase):
               f'sha256={"a"*64} status=0')
         return f'N10XNU1 {body} checksum={checksum(body.encode()):08x}\n'
 
-    def run_fixture(self,log,*,version2=True,missing_image_id=False,access=False,xnu_stage=False,cpu_cache=False,pm_timer=False,boot_binding=False):
+    def run_fixture(self,log,*,version2=True,missing_image_id=False,access=False,xnu_stage=False,cpu_cache=False,pm_timer=False,boot_binding=False,auto_return=False):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);build=root/'build';build.mkdir();packages=root/'packages';packages.mkdir()
             image=b'Linux version 4.14.113-note10-reserve-pc (fixture)\0'
@@ -56,10 +56,12 @@ class CollectorTests(unittest.TestCase):
             if cpu_cache:report.update(cpu_cache_roundtrip_diagnostic=True,cpu_cache_evidence_version=1)
             if pm_timer:report.update(pm_timer_diagnostic=True,pm_timer_evidence_version=1)
             if boot_binding:report.update(boot_binding_evidence_version=1)
+            if auto_return:report.update(auto_return_diagnostic=True,auto_return_evidence_version=1)
             (build/'build-result.json').write_text(json.dumps(report))
             (packages/'package-result.json').write_text(json.dumps({'kernel_image_sha256':digest,
                 'window_access_diagnostic':access,'xnu_payload_stage_diagnostic':xnu_stage,
                 'cpu_cache_roundtrip_diagnostic':cpu_cache,'pm_timer_diagnostic':pm_timer,
+                'auto_return_diagnostic':auto_return,'auto_cycle_token':self.identity if auto_return else None,
                 'xnu_payload_size':16384 if xnu_stage else None,'xnu_payload_sha256':'a'*64 if xnu_stage else None}))
             records=[{'file':'note10-reservation-'+kind+'.zip'} for kind in ('diagnostic','rollback')]
             adb=FakeAdb(log.encode())
@@ -196,6 +198,19 @@ class CollectorTests(unittest.TestCase):
         result=self.run_fixture(log,boot_binding=True)
         self.assertTrue(result['diagnostic_passed'])
         self.assertTrue(result['log_selections']['last_kmsg.txt']['exact_checksummed_banner_binding'])
+
+    def auto_arm(self,seq):
+        body=f'id={self.identity} cycle={self.identity} phase=0 seq={seq} delay_ms=90000 status=0'
+        return f'N10RET1 {body} checksum={checksum(body.encode()):08x}\n'
+
+    def test_previous_cycle_diagnostics_cannot_pass_new_arm(self):
+        from test_cpu_cache_decode import summary,snapshots
+        from test_pm_timer_contract import pm,timers
+        old=self.frame(0)+self.frame(1)+self.access_frame(0)+self.access_frame(1)+self.xnu_frame(0)+self.xnu_frame(1)+summary(0)+summary(1)+snapshots()+pm(0)+pm(1)+timers()
+        result=self.run_fixture(old+self.auto_arm(0)+self.auto_arm(1),access=True,xnu_stage=True,cpu_cache=True,pm_timer=True,auto_return=True)
+        self.assertFalse(result['diagnostic_passed'])
+        result=self.run_fixture(self.auto_arm(0)+self.auto_arm(1)+old,access=True,xnu_stage=True,cpu_cache=True,pm_timer=True,auto_return=True)
+        self.assertTrue(result['diagnostic_passed'])
 
     def test_old_panic_banner_cannot_corroborate_new_boot(self):
         old=self.boot_header()+self.frame(0)+self.frame(1)
