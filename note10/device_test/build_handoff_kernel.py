@@ -170,10 +170,11 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
         if pm_timer:
             targets=['kernel/power/suspend.o','drivers/usb/notify/usb_notify.o',
                      'drivers/usb/notify/usb_notifier.o','drivers/usb/dwc3/otg.o',
-                     'drivers/usb/dwc3/dwc3-exynos.o','drivers/video/fbdev/exynos/dpu20/decon_core.o']
-            if screen_log:targets+=['drivers/video/fbdev/exynos/dpu20/cal_9820/decon_reg.o',
-                                   'drivers/video/fbdev/exynos/dpu20/cal_9820/dsim_reg.o']
+                     'drivers/usb/dwc3/dwc3-exynos.o']
             run([*make,'-j2',*targets],'04-quiesce-objects.log')
+            # The parent Makefile owns ./cal_9820/*.o; that subdirectory has
+            # no Makefile and cannot be invoked as a standalone Kbuild target.
+            run([*make,'-j2','drivers/video/fbdev/exynos/dpu20/'],'04-display-objects.log')
         run([*make,'-j'+str(min(os.cpu_count() or 2,8)),'Image'],'04-build.log',timeout=1500)
         image=objects/'arch/arm64/boot/Image'
         with image.open('rb') as stream:header=stream.read(64)

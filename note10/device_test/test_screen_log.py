@@ -81,6 +81,49 @@ int main(void) {
 }
 '''
 
+def pause_native(output, cc, screen):
+    found=re.search(r'int n10_screen_pause\(bool paused\)\n\{.*?^\}',screen,re.S|re.M)
+    if not found:raise ValueError('Screen pause function missing')
+    code=r"""
+#include <stdbool.h>
+#include <stdio.h>
+#define WRITE_ONCE(x,v) ((x)=(v))
+#define READ_ONCE(x) (x)
+static bool n10_screen_paused,n10_screen_stopped;
+static void *n10_screen_queue;
+static int n10_screen_work,n10_screen_paint_lock;
+static int cancelled,queued,restored,restore_error;
+static void cancel_delayed_work_sync(int *work){(void)work;++cancelled;}
+static void mutex_lock(int *lock){++*lock;}
+static void mutex_unlock(int *lock){--*lock;}
+static int n10_screen_restore_if_active(void){++restored;return n10_screen_paint_lock?-9:restore_error;}
+static int msecs_to_jiffies(int ms){return ms;}
+static void queue_delayed_work(void *queue,int *work,int delay){(void)queue;(void)work;(void)delay;++queued;}
+"""+found.group()+r"""
+#define CHECK(c) do{if(!(c)){fprintf(stderr,"line %d\n",__LINE__);return 1;}}while(0)
+int main(void){
+ CHECK(!n10_screen_pause(true) && n10_screen_paused && !cancelled && !restored);
+ n10_screen_queue=&n10_screen_work;
+ CHECK(!n10_screen_pause(true) && cancelled==1 && restored==1 && !n10_screen_paint_lock);
+ restore_error=-5;
+ CHECK(n10_screen_pause(true)==-5 && cancelled==2 && restored==2 && n10_screen_paused);
+ CHECK(!n10_screen_pause(false) && !n10_screen_paused && queued==1);
+ n10_screen_stopped=true;
+ CHECK(!n10_screen_pause(false) && queued==1);
+ puts("pause_cases=5 passed=1");return 0;
+}
+"""
+    source=output/'pause.c';source.write_text(code,encoding='utf-8')
+    exe=output/('pause.exe' if sys.platform=='win32' else 'pause')
+    built=subprocess.run([cc,'-std=c11','-Wall','-Wextra','-Werror',str(source),'-o',str(exe)],capture_output=True,timeout=60)
+    (output/'pause-compile.log').write_bytes(built.stdout+built.stderr)
+    if built.returncode:raise ValueError('Actual screen pause native compilation failed')
+    ran=subprocess.run([str(exe)],capture_output=True,timeout=30)
+    (output/'pause.log').write_bytes(ran.stdout+ran.stderr)
+    if ran.returncode:raise ValueError('Actual screen pause return/error cases failed')
+    return 5
+
+
 def test(output):
     output=Path(output).resolve()
     if not output.is_relative_to((ROOT/'note10/private').resolve()) or output.exists():raise ValueError('Fresh private output required')
@@ -104,6 +147,7 @@ def test(output):
     prepared=prepare(fixture)
     core=(fixture/'drivers/video/fbdev/exynos/dpu20/decon_core.c').read_text()
     screen=(HERE/'screen_log.c').read_text()
+    pause_cases=pause_native(output,cc,screen)
     reserve=(HERE/'xnu_reserve.c').read_text()
     update=(fixture/'drivers/video/fbdev/exynos/dpu20/win_update.c').read_text()
     dcal=(fixture/'drivers/video/fbdev/exynos/dpu20/cal_9820/decon_reg.c').read_text()
@@ -141,7 +185,7 @@ def test(output):
     try:prepare(fixture)
     except ValueError:pass
     else:raise AssertionError('Modified source accepted')
-    report=dict(passed=True,renderer_cases=9,bridge_cases=6,hardware_cases=hardware_model(),source_contracts=29,source_sha256=prepared['screen_log_sources_sha256'],
+    report=dict(passed=True,pause_cases=pause_cases,actual_screen_pause_executed=True,renderer_cases=9,bridge_cases=6,hardware_cases=hardware_model(),source_contracts=29,source_sha256=prepared['screen_log_sources_sha256'],
         physical_display_verified=False,partial_panel_update_verified=False)
     (output/'result.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
     return report

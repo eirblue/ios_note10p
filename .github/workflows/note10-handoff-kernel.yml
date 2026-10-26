@@ -178,6 +178,7 @@ jobs:
           if [ "$NOTE10_SCREEN_LOG" = true ]; then
             if [ "$NOTE10_AUTO_RETURN" != true ]; then exit 2; fi
             python note10/device_test/test_screen_log.py --output note10/private/handoff-kernel/screen-log-model
+            python note10/device_test/test_screen_log_binding.py
             EXTRA+=(--screen-log)
           fi
           python note10/device_test/build_handoff_kernel.py --caps --reserve --window-access \

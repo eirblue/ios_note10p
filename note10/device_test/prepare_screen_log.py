@@ -399,6 +399,7 @@ def validate_model(root,build):
         for name in ('screen_log.c','screen_log_core.h','prepare_screen_log.py','xnu_reserve.c')}
     if (model.get('passed') is not True or model.get('renderer_cases')!=9 or model.get('bridge_cases')!=6 or
         model.get('hardware_cases')!=8 or model.get('source_contracts')!=29 or
+        model.get('pause_cases')!=5 or model.get('actual_screen_pause_executed') is not True or
         model.get('source_sha256')!=current or build.get('screen_log_sources_sha256')!=current or
         build.get('screen_log_version')!=1 or build.get('screen_log_layout')!='top-left-quarter' or
         b'N10DSP1' not in (Path(root)/'Image').read_bytes() or

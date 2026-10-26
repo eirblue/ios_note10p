@@ -124,6 +124,7 @@ int n10_screen_pause(bool paused)
     } else if (!paused && n10_screen_queue && !READ_ONCE(n10_screen_stopped)) {
         queue_delayed_work(n10_screen_queue, &n10_screen_work, msecs_to_jiffies(500));
     }
+    return ret;
 }
 
 static int n10_screen_allocate(struct decon_device *decon)
