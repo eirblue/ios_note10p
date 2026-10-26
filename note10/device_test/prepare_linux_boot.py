@@ -74,7 +74,10 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output,auto_cycle_token=None):
     if auto_return!=(auto_cycle_token is not None):raise ValueError('Auto-return build and per-cycle token must be paired')
     if auto_cycle_token is not None and not re.fullmatch(r'[0-9a-f]{32}',auto_cycle_token):raise ValueError('Invalid cycle token')
     kernel=kernel_build/'Image';data=kernel.read_bytes()
-    if auto_return and b'N10RET1' not in data:raise ValueError('Auto-return marker missing from actual kernel')
+    if auto_return:
+        from materialize_auto_cycle import validate
+        validate(kernel_build,auto_cycle_token)
+        if b'N10RET1' not in data:raise ValueError('Auto-return marker missing from actual kernel')
     if hashlib.sha256(data).hexdigest()!=build['image_sha256'] or len(data)!=build['image_size']:
         raise ValueError('Kernel image differs from build report')
     if len(data)<64 or data[56:60]!=b'ARM\x64':raise ValueError('Not an ARM64 Linux Image')
@@ -126,7 +129,6 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output,auto_cycle_token=None):
     # recovery_dtbo is copied; this is an unbooted boot-only prototype.
     cmdline=recovery['cmdline']
     if 'n10.cycle=' in cmdline:raise ValueError('Existing cycle argument refused')
-    if auto_return:cmdline+=' n10.cycle='+auto_cycle_token
     if len(cmdline.encode())>1535:raise ValueError('BOOT command line too long')
     command=[sys.executable,'-X','utf8',str(mkbootimg),'--header_version','1',
              '--kernel',str(kernel),'--base','0',

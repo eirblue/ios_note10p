@@ -47,7 +47,7 @@ MAIN=r'''
 int main(int argc,char **argv){
  if(argc!=2)return 70;
  mode=atoi(argv[1]);
- if(mode!=1){int ok=n10_cycle_setup(mode==2?"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA":"1234567890abcdef1234567890abcdef");if(ok!=(mode!=2))return 71;}
+ if(mode!=1){const char *token=mode==2?"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA":"1234567890abcdef1234567890abcdef";for(int i=0;i<32;++i)n10_cycle[i]=token[i];}
  int armed=n10_arm_auto_return();
  if(mode>=1&&mode<=4){if(!armed||reboots)return 72;printf("MODEL reboots=%d queued=%d allocated=%d\n",reboots,queued,allocated);return 0;}
  if(armed||first_delay!=90000)return 73;

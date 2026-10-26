@@ -14,6 +14,7 @@ from stage_phase2 import stage,verify_packages
 from precheck_window_access import check
 from collect_reservation import collect
 from decode_auto_return import decode as decode_return
+from materialize_auto_cycle import materialize,validate as validate_variant
 
 
 def read(path):return json.loads(Path(path).read_text(encoding='utf-8-sig'))
@@ -38,10 +39,11 @@ def prepare_plan(*,kernel_build,backup,twrp,mkbootimg,current_packages,output,cy
     stages=[];previous=current_packages
     for index in range(cycles):
         cycle=uuid.uuid4().hex;folder=output/f'cycle-{index+1:02d}';folder.mkdir()
+        variant=folder/'kernel-build';variant_report=materialize(kernel_build,variant,cycle)
         image=folder/'boot.img'
-        prepare(backup,kernel_build,Path(twrp),Path(mkbootimg),image,auto_cycle_token=cycle)
+        prepare(backup,variant,Path(twrp),Path(mkbootimg),image,auto_cycle_token=cycle)
         packages=folder/'packages';pair=build(backup,image,packages,previous)
-        stages.append(dict(index=index+1,cycle=cycle,packages=str(packages),package_result_sha256=sha(packages/'package-result.json')))
+        stages.append(dict(index=index+1,cycle=cycle,kernel_build=str(variant),image_sha256=variant_report['image_sha256'],build_result_sha256=sha(variant/'build-result.json'),packages=str(packages),package_result_sha256=sha(packages/'package-result.json')))
         previous=packages
     plan=dict(schema=1,kind='note10-bounded-auto-cycle',kernel_build=str(kernel_build),backup=str(backup),
         backup_manifest_sha256=sha(backup/'backup-manifest.json'),build_result_sha256=sha(kernel_build/'build-result.json'),
@@ -68,12 +70,14 @@ def validate_plan(path,expected):
     for number,item in enumerate(stages,1):
         folder=private(item['packages'])
         if item['index']!=number or not re.fullmatch('[0-9a-f]{32}',item['cycle']) or sha(folder/'package-result.json')!=item['package_result_sha256']:raise ValueError('Stage manifest changed')
+        variant=private(item['kernel_build']);variant_report=validate_variant(variant,item['cycle'],build)
+        if sha(variant/'build-result.json')!=item['build_result_sha256'] or variant_report['image_sha256']!=item['image_sha256']:raise ValueError('Stage variant changed')
         records=verify_packages(folder);pair=read(folder/'package-result.json')
         diag=next(r for r in records if r['mode']=='diagnostic')
-        if pair.get('auto_return_diagnostic') is not True or pair.get('auto_cycle_token')!=item['cycle'] or diag.get('auto_cycle_token')!=item['cycle'] or diag.get('auto_return_diagnostic') is not True or pair['kernel_image_sha256']!=plan['image_sha256']:raise ValueError('Stage cycle scope differs')
+        if pair.get('auto_return_diagnostic') is not True or pair.get('auto_cycle_token')!=item['cycle'] or diag.get('auto_cycle_token')!=item['cycle'] or diag.get('auto_return_diagnostic') is not True or pair['kernel_image_sha256']!=item['image_sha256']:raise ValueError('Stage cycle scope differs')
         from prepare_linux_boot import boot_header
         with zipfile.ZipFile(folder/diag['file']) as archive:header=boot_header(archive.read('boot.img'))
-        if header['kernel_sha256']!=plan['image_sha256'] or header['cmdline'].split().count('n10.cycle='+item['cycle'])!=1 or sum(x.startswith('n10.cycle=') for x in header['cmdline'].split())!=1:raise ValueError('Actual BOOT kernel/cycle binding differs')
+        if header['kernel_sha256']!=item['image_sha256'] or 'n10.cycle=' in header['cmdline']:raise ValueError('Actual BOOT kernel/cycle binding differs')
         if last and pair['expected_current_boot_sha256']!=last:raise ValueError('Stage BOOT chain differs')
         last=diag['payload_sha256']
     for key in ('core_model','gate_model','init_model'):private(plan[key])
@@ -143,7 +147,7 @@ def run_plan(path,expected,output,*,execute=False,limit=1,adb=None,verified_roun
             if item['index']>1 and not journal['completed'][-1]['passed']:raise ValueError('Previous cycle did not pass')
             packages=Path(item['packages']);records=verify_packages(packages);diag=next(r for r in records if r['mode']=='diagnostic')
             staged=stage(packages,adb)
-            ready=check(packages,Path(plan['kernel_build']),Path(plan['backup']),Path(plan['core_model']),Path(plan['gate_model']),Path(plan['init_model']),adb)
+            ready=check(packages,Path(item['kernel_build']),Path(plan['backup']),Path(plan['core_model']),Path(plan['gate_model']),Path(plan['init_model']),adb)
             if ready.get('ready_for_manual_access_test') is not True:raise ValueError('Readiness did not pass')
             before=boot_id(adb)
             if adb.text('shell','command','-v','twrp')!='/sbin/twrp':raise ValueError('Expected TWRP CLI unavailable')
@@ -156,7 +160,7 @@ def run_plan(path,expected,output,*,execute=False,limit=1,adb=None,verified_roun
             after=wait_recovery(adb,before,plan['return_timeout_seconds'])
             if preflight(adb)['twrp_version']!=initial['twrp_version']:raise ValueError('Recovery version changed')
             # Preserve diagnostic logs immediately after return, even when tests failed.
-            captured=collect(packages,Path(plan['kernel_build']),adb)
+            captured=collect(packages,Path(item['kernel_build']),adb)
             verify_partitions(adb,plan['backup'],diag['payload_sha256'])
             return_observation=None
             for name,selection in captured.get('log_selections',{}).items():

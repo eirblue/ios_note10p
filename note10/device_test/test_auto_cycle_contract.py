@@ -54,6 +54,54 @@ class EvidenceTests(unittest.TestCase):
             decode(frame(1, 0)+frame(1, 1)+frame(0, 0)+frame(0, 1), IDENTITY, TOKEN)
 
 
+class SlotTests(unittest.TestCase):
+    def fixture(self,root,data=None):
+        from materialize_auto_cycle import SLOT
+        data=data if data is not None else b'prefixN10RET1'+SLOT+b'\0suffix'
+        source=root/'template';source.mkdir()
+        report=dict(build_passed=True,auto_return_diagnostic=True,auto_cycle_slot=SLOT.decode(),
+                    image_sha256=hashlib.sha256(data).hexdigest(),image_size=len(data))
+        (source/'Image').write_bytes(data)
+        (source/'build-result.json').write_text(json.dumps(report))
+        return source
+
+    def test_exact_data_slot_only_and_template_unchanged(self):
+        from materialize_auto_cycle import materialize,validate,SLOT
+        with tempfile.TemporaryDirectory() as name:
+            root=Path(name);source=self.fixture(root);original=(source/'Image').read_bytes()
+            materialize(source,root/'variant',TOKEN)
+            validate(root/'variant',TOKEN,source)
+            self.assertEqual((source/'Image').read_bytes(),original)
+            self.assertEqual((root/'variant/Image').read_bytes(),original.replace(SLOT,TOKEN.encode()))
+
+    def test_missing_or_duplicate_slot_refused(self):
+        from materialize_auto_cycle import materialize,SLOT
+        for data in (b'N10RET1',b'N10RET1'+(SLOT+b'\0')*2):
+            with tempfile.TemporaryDirectory() as name:
+                root=Path(name);source=self.fixture(root,data)
+                with self.assertRaises(ValueError):materialize(source,root/'variant',TOKEN)
+
+    def test_bad_template_hash_refused(self):
+        from materialize_auto_cycle import materialize
+        with tempfile.TemporaryDirectory() as name:
+            root=Path(name);source=self.fixture(root)
+            (source/'Image').write_bytes(b'changed')
+            with self.assertRaises(ValueError):materialize(source,root/'variant',TOKEN)
+
+    def test_other_byte_or_metadata_mutation_refused(self):
+        from materialize_auto_cycle import materialize,validate
+        for metadata in (False,True):
+            with tempfile.TemporaryDirectory() as name:
+                root=Path(name);source=self.fixture(root);variant=root/'variant'
+                materialize(source,variant,TOKEN)
+                if metadata:
+                    report=host.read(variant/'build-result.json');report['build_passed']=False
+                    host.save(variant/'build-result.json',report)
+                else:
+                    data=(variant/'Image').read_bytes();(variant/'Image').write_bytes(b'X'+data[1:])
+                with self.assertRaises(ValueError):validate(variant,TOKEN)
+
+
 @lru_cache(maxsize=1)
 def pinned_restart_sources():
     from prepare_auto_return import PINS
@@ -143,7 +191,7 @@ class HostTests(unittest.TestCase):
         capture = self.root/'capture'
         capture.mkdir()
         (capture/'selected.txt').write_bytes(good())
-        plan = dict(stages=[dict(index=1, cycle=TOKEN, packages=str(packages))], kernel_build=str(self.root/'kernel'), backup=str(self.root/'backup'), core_model='core', gate_model='gate', init_model='init', identity=IDENTITY, return_timeout_seconds=240, image_sha256='a'*64, backup_manifest_sha256='b'*64)
+        plan = dict(stages=[dict(index=1, cycle=TOKEN, kernel_build=str(self.root/'variant'), packages=str(packages))], kernel_build=str(self.root/'kernel'), backup=str(self.root/'backup'), core_model='core', gate_model='gate', init_model='init', identity=IDENTITY, return_timeout_seconds=240, image_sha256='a'*64, backup_manifest_sha256='b'*64)
         captured = dict(diagnostic_passed=True, directory=str(capture), log_selections={'log': dict(selected_file='selected.txt')})
         return plan, captured
 

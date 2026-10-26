@@ -40,8 +40,9 @@ def check(packages,kernel_build,backup,core_model,gate_model,init_model,adb):
             if not pm_timer or not re.fullmatch(r'[0-9a-f]{32}',cycle or '') or diagnostic.get('auto_cycle_token')!=cycle:raise ValueError('Invalid auto-return token')
             with zipfile.ZipFile(packages/diagnostic['file']) as z:header=boot_header(z.read('boot.img'))
             if header['kernel_sha256']!=build['image_sha256']:raise ValueError('Actual BOOT kernel differs from build')
-            cmdline=header['cmdline']
-            if cmdline.split().count('n10.cycle='+cycle)!=1 or sum(x.startswith('n10.cycle=') for x in cmdline.split())!=1:raise ValueError('Cycle command-line binding differs')
+            from materialize_auto_cycle import validate
+            validate(kernel_build,cycle)
+            if 'n10.cycle=' in header['cmdline']:raise ValueError('Unexpected legacy cycle argument')
             model=json.loads((kernel_build/'auto-return-model/result.json').read_text())
             actual=hashlib.sha256(Path(__file__).with_name('auto_return.c').read_bytes()).hexdigest()
             if model.get('passed') is not True or model.get('cases')!=10 or model.get('source_sha256')!=actual or build.get('auto_return_source_sha256')!=actual:raise ValueError('Auto-return C model/build mismatch')

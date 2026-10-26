@@ -21,8 +21,11 @@ A kernel hard lockup, stuck shutdown driver or firmware issue can prevent
 recovery; the PC stops after 240 seconds and does not resend install/reboot.
 A manual recovery step may still be needed.
 
-Every cycle has a fresh 128-bit `n10.cycle` token in its BOOT command line and
-N10RET1 records. Missing or malformed tokens prevent arming. The collector
+Every cycle has a fresh 128-bit token in a fixed 32-byte volatile kernel data
+slot and N10RET1 records. Packaging copies the compiled template, changes only
+those 32 bytes, and verifies exact equality against the template plus token.
+The original compiled template stays unarmed. BOOT command-line propagation
+is not required. Missing or malformed tokens prevent arming. The collector
 requires at least two intact arm records and discards everything before the
 current cycle arm. This prevents an earlier successful boot of the same Image
 from filling missing diagnostic records. No raw bytes are repaired.
@@ -66,8 +69,9 @@ journal. There is no automatic rollback or repeated reboot on failure.
 
 Multiple cycles require a prior successful single-cycle journal, supplied with
 `--verified-roundtrip` and its reviewed `--roundtrip-sha256`. That proof must
-match the exact kernel Image, original backup and connected device. A new Image
-requires another single-cycle commissioning run. Even then the explicit limit
+match the exact compiled template Image, original backup and connected device.
+Only verified 32-byte token variants of that template share commissioning proof.
+A new compiled template requires another single-cycle commissioning run. Even then the explicit limit
 cannot exceed the finite prepared plan, and every cycle must pass before the
 next starts. A stopped plan is not automatically resumed; prepare a new plan
 against the installed BOOT after reviewing the captured result.
@@ -77,7 +81,7 @@ against the installed BOOT after reviewing the captured result.
 - Actual auto-return C: ten modeled cases, including no token, malformed token,
   queue allocation/scheduling errors, init not finishing, delayed running state,
   duplicate arm, unexpectedly returning restart and one-shot enforcement.
-- Host/source/evidence contracts: nineteen cases using in-memory ADB substitutes.
+- Host/source/evidence/data-slot contracts: twenty-three cases using in-memory ADB substitutes.
 - Collector regression: nineteen cases including old-success-before-new-arm
   rejection. Reservation integration includes the opt-in auto-return path.
 - Kernel/PM/register/restart APIs are modeled. These results do not establish

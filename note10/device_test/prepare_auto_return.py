@@ -22,5 +22,5 @@ def prepare(source,path,extension):
     extension=extension.replace(local,local+b'\n    if (n10_arm_auto_return())\n        return 0;\n')
     target.write_bytes(actual)
     return extension,dict(auto_return_diagnostic=True,auto_return_evidence_version=1,
-        auto_return_delay_ms=90000,auto_return_source_sha256=hashlib.sha256(actual).hexdigest(),
+        auto_cycle_slot="N10_CYCLE_SLOT_UNSET_0123456789A",auto_return_delay_ms=90000,auto_return_source_sha256=hashlib.sha256(actual).hexdigest(),
         auto_return_restart_source_pins=PINS,auto_return_hardware_verified=False)

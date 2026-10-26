@@ -172,7 +172,9 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             raise ValueError('CPU/cache evidence markers missing from Linux Image')
         if pm_timer and any(marker not in target.read_bytes() for marker in (b'N10PMT1',b'N10TMR1',b'N10BND1',b'N10TRY1')):
             raise ValueError('PM/timer evidence markers missing from Linux Image')
-        if auto_return and b'N10RET1' not in target.read_bytes():raise ValueError('Auto-return marker missing')
+        if auto_return:
+            from materialize_auto_cycle import SLOT
+            if b'N10RET1' not in target.read_bytes() or target.read_bytes().count(SLOT+b'\0')!=1:raise ValueError('Auto-return marker/unique data slot missing')
         report.update(build_passed=True,image_size=target.stat().st_size,
                       image_sha256=hashlib.file_digest(target.open('rb'),'sha256').hexdigest(),
                       arm64_text_offset=hex(text_offset),arm64_header_image_size=image_size,arm64_flags=hex(flags))
