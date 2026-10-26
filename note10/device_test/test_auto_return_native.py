@@ -45,7 +45,8 @@ static void kernel_restart(char *cmd){if(strcmp(cmd,"recovery"))exit(62);++reboo
 '''
 MAIN=r'''
 int main(int argc,char **argv){
- if(argc!=2)return 70;mode=atoi(argv[1]);
+ if(argc!=2)return 70;
+ mode=atoi(argv[1]);
  if(mode!=1){int ok=n10_cycle_setup(mode==2?"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA":"1234567890abcdef1234567890abcdef");if(ok!=(mode!=2))return 71;}
  int armed=n10_arm_auto_return();
  if(mode>=1&&mode<=4){if(!armed||reboots)return 72;printf("MODEL reboots=%d queued=%d allocated=%d\n",reboots,queued,allocated);return 0;}
