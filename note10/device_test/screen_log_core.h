@@ -59,15 +59,15 @@ static inline int n10_screen_render(unsigned int *pixels, unsigned long capacity
 {
     unsigned int x, y, row, col, bit, gy, scale = 2;
     unsigned int rows, cols, start, total = 0, entry, length, offset, logical = 0;
-    if (!pixels || !font || !text || width < 16 || height < 32 ||
+    if (!pixels || !font || !text || width < 80 || height < 96 ||
         width > 4096 || height > 4096 || stride < width || stride > 8192 ||
         (unsigned long)stride * height > capacity || text->count > N10_SCREEN_LINES)
         return -1;
     for (y = 0; y < height; ++y)
         for (x = 0; x < width; ++x)
             pixels[(unsigned long)y * stride + x] = 0xff080808U;
-    rows = height / (16 * scale);
-    cols = width / (8 * scale);
+    rows = (height - 64) / (16 * scale);
+    cols = (width - 64) / (8 * scale);
     if (cols > N10_SCREEN_COLUMNS) cols = N10_SCREEN_COLUMNS;
     for (entry = 0; entry < text->count; ++entry) {
         length = 0;
@@ -89,8 +89,8 @@ static inline int n10_screen_render(unsigned int *pixels, unsigned long capacity
                         if (font[(ch - 32) * 16 + gy] & (0x80U >> bit))
                             for (y = 0; y < scale; ++y)
                                 for (x = 0; x < scale; ++x)
-                                    pixels[(unsigned long)(row * 32 + gy * 2 + y) * stride +
-                                           col * 16 + bit * 2 + x] = 0xffd8f0d8U;
+                                    pixels[(unsigned long)(32 + row * 32 + gy * 2 + y) * stride +
+                                           32 + col * 16 + bit * 2 + x] = 0xffd8f0d8U;
             }
         }
     }
