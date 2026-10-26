@@ -49,7 +49,7 @@ permissions:
 jobs:
   kernel:
     runs-on: ubuntu-22.04
-    timeout-minutes: 35
+    timeout-minutes: 40
     env:
       PLATFORM_VERSION: '11'
       ANDROID_MAJOR_VERSION: r
@@ -61,9 +61,23 @@ jobs:
         with:
           python-version: '3.13'
       - name: Install Linux cross compiler and kernel host dependencies
+        timeout-minutes: 12
         run: |
-          timeout 360s sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update -qq
-          timeout 480s sudo apt-get -o DPkg::Lock::Timeout=90 -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y clang-14 gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi make bc bison flex libssl-dev libelf-dev
+          packages=(clang-14 gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi make bc bison flex libssl-dev libelf-dev)
+          missing=()
+          for package in "${packages[@]}"; do
+            if [ "$(dpkg-query -W -f='${Status}' "$package" 2>/dev/null || true)" != "install ok installed" ]; then
+              missing+=("$package")
+            fi
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            sudo -n env DEBIAN_FRONTEND=noninteractive timeout --kill-after=30s 180s apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
+            sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a timeout --kill-after=30s 480s apt-get -o Dpkg::Use-Pty=0 -o DPkg::Lock::Timeout=60 -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install --no-install-recommends -y "${missing[@]}"
+          fi
+          clang-14 --version
+          aarch64-linux-gnu-gcc --version
+          arm-linux-gnueabi-gcc --version
+          command -v aarch64-linux-gnu-elfedit arm-linux-gnueabi-ld
       - name: Build the pinned public d2x source with legacy kexec
         env:
           NOTE10_CAPS: ${{ inputs.caps }}
