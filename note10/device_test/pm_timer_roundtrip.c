@@ -108,6 +108,14 @@ static void n10_pm_worker(struct work_struct *unused)
             pm.resume_errors_after - pm.resume_errors_before);
         pr_info("N10TRY1 %s checksum=%08x\n", frame, n10_frame_checksum(frame, count));
     }
+    for (sequence = 0; sequence < 8; ++sequence) {
+        int count = scnprintf(frame, sizeof(frame),
+            "id=%s seq=%u attempt=%u stage=%u error=%u",
+            N10_RESERVE_BUILD_ID, (n10_pm_attempts - 1) * 8 + sequence,
+            n10_pm_attempts, pm.stage,
+            (unsigned int)(error < 0 ? -(long long)error : error));
+        pr_info("N10PMS1 %s checksum=%08x\n", frame, n10_frame_checksum(frame, count));
+    }
     status = 4;
     if (error || pm.error) {
         /* Respect wakeup-source aborts. Retry only a clean pre-device EBUSY,

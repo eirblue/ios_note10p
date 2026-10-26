@@ -123,6 +123,8 @@ def build(backup,prototype,output,current_packages=None):
     cpu_cache=metadata.get('cpu_cache_roundtrip_diagnostic') is True
     pm_timer=metadata.get('pm_timer_diagnostic') is True
     auto_return=metadata.get('auto_return_diagnostic') is True
+    screen_log=metadata.get('screen_log_diagnostic') is True
+    if screen_log and not auto_return:raise ValueError('Screen log requires auto return')
     cycle=metadata.get('auto_cycle_token')
     if auto_return and (not pm_timer or not re.fullmatch(r'[0-9a-f]{32}',cycle or '')):raise ValueError('Incomplete auto-return cycle')
     if pm_timer and not cpu_cache:raise ValueError('PM/timer requires CPU/cache batch')
@@ -144,6 +146,7 @@ def build(backup,prototype,output,current_packages=None):
             'window_access_diagnostic':window_access,
             'xnu_payload_stage_diagnostic':xnu_stage,
             'cpu_cache_roundtrip_diagnostic':cpu_cache,
+            'screen_log_diagnostic':screen_log,
             'pm_timer_diagnostic':pm_timer,'auto_return_diagnostic':auto_return,'auto_cycle_token':cycle,
             'xnu_payload_sha256':metadata.get('xnu_payload_sha256') if xnu_stage else None,
             'xnu_payload_size':metadata.get('xnu_payload_size') if xnu_stage else None,
@@ -164,6 +167,7 @@ def build(backup,prototype,output,current_packages=None):
         metadata['xnu_payload_stage_diagnostic']=xnu_stage and mode=='diagnostic'
         metadata['cpu_cache_roundtrip_diagnostic']=cpu_cache and mode=='diagnostic'
         metadata['pm_timer_diagnostic']=pm_timer and mode=='diagnostic'
+        metadata['screen_log_diagnostic']=screen_log and mode=='diagnostic'
         metadata['auto_return_diagnostic']=auto_return and mode=='diagnostic'
         metadata['auto_cycle_token']=cycle if auto_return and mode=='diagnostic' else None
         metadata['xnu_payload_sha256']=xnu_sha if xnu_stage and mode=='diagnostic' else None

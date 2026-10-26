@@ -34,6 +34,11 @@ def check(packages,kernel_build,backup,core_model,gate_model,init_model,adb):
         pm_timer=paired.get('pm_timer_diagnostic') is True
         auto_return=paired.get('auto_return_diagnostic') is True
         if auto_return!=(build.get('auto_return_diagnostic') is True) or auto_return!=(diagnostic.get('auto_return_diagnostic') is True):raise ValueError('Auto-return scope mismatch')
+        screen_log=build.get('screen_log_diagnostic') is True
+        if screen_log!=bool(paired.get('screen_log_diagnostic')) or screen_log!=bool(diagnostic.get('screen_log_diagnostic')):raise ValueError('Screen log package scope differs')
+        if screen_log:
+            from prepare_screen_log import validate_model
+            validate_model(kernel_build,build)
         if auto_return:
             from inspect_firmware import boot_header
             cycle=paired.get('auto_cycle_token')
@@ -94,6 +99,7 @@ def check(packages,kernel_build,backup,core_model,gate_model,init_model,adb):
         if xnu_stage and b'N10XNU1' not in image:raise ValueError('XNU stage evidence marker missing from Image')
         if cpu_cache and any(marker not in image for marker in (b'N10QUI1',b'N10CPU2')):
             raise ValueError('CPU/cache diagnostic markers missing from Image')
+        if build.get('pm_failure_stage_evidence_version')==1 and b'N10PMS1' not in image:raise ValueError('PM stage marker missing')
         if pm_timer and any(marker not in image for marker in (b'N10PMT1',b'N10TMR1',b'N10BND1',b'N10TRY1')):raise ValueError('PM/timer markers missing')
         embedded=verify_embedded_init(image,(kernel_build/'initramfs.cpio').read_bytes())
         core=json.loads(core_model.read_text());gate=json.loads(gate_model.read_text());init=json.loads(init_model.read_text())

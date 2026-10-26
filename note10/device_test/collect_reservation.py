@@ -143,6 +143,9 @@ def collect(packages,kernel_build,adb):
                 (out/selected_name).write_bytes(selected)
                 selection['selected_file']=selected_name
             text=selected.decode(errors='replace')
+            if result.get('pm_failure_stage_evidence_version')==1:
+                from decode_pm_timer import decode_stages
+                report['pm_failure_stage_observation']=decode_stages(text,evidence_id)
             if evidence_id is None and banner not in text:
                 raise ValueError('Exact source build banner not observed')
             observation=decode_frames(text,evidence_id) if evidence_id else decode(text)

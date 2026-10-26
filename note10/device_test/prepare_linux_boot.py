@@ -172,6 +172,7 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output,auto_cycle_token=None):
             'xnu_payload_stage_diagnostic':xnu_stage,
             'cpu_cache_roundtrip_diagnostic':build.get('cpu_cache_roundtrip_diagnostic') is True,
             'pm_timer_diagnostic':build.get('pm_timer_diagnostic') is True,
+            'screen_log_diagnostic':build.get('screen_log_diagnostic') is True,
             'auto_return_diagnostic':auto_return,'auto_cycle_token':auto_cycle_token,
             'xnu_payload_sha256':build.get('xnu_payload_sha256') if xnu_stage else None,
             'xnu_payload_size':build.get('xnu_payload_size') if xnu_stage else None,

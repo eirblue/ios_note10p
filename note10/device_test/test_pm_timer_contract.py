@@ -108,6 +108,8 @@ class PmTimerTests(unittest.TestCase):
         self.assertIn('if (suspend_test(TEST_DEVICES)) {\n\t\tif (n10_pm_active) ++n10_pm_active->devices;',patched)
         self.assertIn('if (n10_test)\n\t\tpm_test_level = n10_old_level;',patched)
         self.assertIn('n10_pm_owner != current',patched)
+        self.assertIn('n10_pm_active->stage = 11;',patched)
+        self.assertIn('n10_pm_active->stage = 21;',patched)
         self.assertEqual(patched.count('#include "note10_pm_devices_backend.c"'),1)
         with self.assertRaises(ValueError):patch_suspend(raw+b'changed')
 

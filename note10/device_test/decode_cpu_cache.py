@@ -7,7 +7,7 @@ from decode_xnu_stage import decode as decode_stage
 def frames(text,tag,names,identity,maximum):
     pattern=tag+' ('+' '.join(name+'=([0-9a-f]+)' for name in names)+r') checksum=([0-9a-f]{8})(?=\r?\n|$)'
     records={}
-    decimal={'seq','cpu','cpus','words','clean','status','devices','resume','blocked','oldlevel','newlevel',
+    decimal={'stage','attempt','seq','cpu','cpus','words','clean','status','devices','resume','blocked','oldlevel','newlevel',
              'resume_errors','timers','error'}
     for match in re.finditer(pattern,text):
         body,*values,digest=match.groups()

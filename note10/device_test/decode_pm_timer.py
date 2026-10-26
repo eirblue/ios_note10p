@@ -1,6 +1,25 @@
 """Require a complete same-boot CPU/cache, PM devices and timer roundtrip."""
 from decode_cpu_cache import frames,decode as decode_cpu
 
+def decode_stages(text,identity):
+    rows=frames(text,'N10PMS1',('id','seq','attempt','stage','error'),identity,24)
+    names={0:'PM ownership unavailable',1:'PM wrapper entered',10:'prepare notifier entered',11:'interruptible sync entered',
+           12:'interruptible sync completed',13:'freezer entered',14:'freezer returned',
+           20:'device suspend entered',21:'device suspend returned'}
+    attempts={}
+    for row in rows.values():
+        attempt=row['attempt']
+        if attempt not in (1,2,3) or row['seq']//8+1!=attempt or row['stage'] not in names:
+            raise ValueError('Invalid PM failure-stage record')
+        current={'stage':row['stage'],'stage_name':names[row['stage']],'error':row['error']}
+        previous=attempts.setdefault(attempt,{'result':current,'frames':0})
+        if previous['result']!=current:raise ValueError('Conflicting PM failure stages')
+        previous['frames']+=1
+    if not attempts or any(value['frames']<2 for value in attempts.values()):
+        raise ValueError('Two intact PM stage records per attempt required')
+    if set(attempts)!=set(range(1,max(attempts)+1)):raise ValueError('Missing PM attempt stage')
+    return attempts
+
 
 def decode(text,identity,digest,size):
     previous=decode_cpu(text,identity,digest,size)

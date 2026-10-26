@@ -20,7 +20,7 @@ REPOSITORY = 'corsicanu/android_kernel_samsung_universal9820'
 OUT = ROOT / 'note10/private/handoff-kernel'
 
 
-def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manifest=None,cpu_cache=False,pm_timer=False,auto_return=False):
+def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manifest=None,cpu_cache=False,pm_timer=False,auto_return=False,screen_log=False):
     if not sys.platform.startswith('linux'): raise RuntimeError('Linux CI host required')
     if os.environ.get('PLATFORM_VERSION')!='11' or os.environ.get('ANDROID_MAJOR_VERSION')!='r':
         raise ValueError('Pinned Samsung build requires PLATFORM_VERSION=11 and ANDROID_MAJOR_VERSION=r')
@@ -29,6 +29,7 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
     if (xnu_payload is None)!=(xnu_manifest is None):raise ValueError('XNU payload and manifest must be paired')
     if xnu_payload is not None and not window_access:raise ValueError('XNU staging requires the opt-in window diagnostic')
     if cpu_cache and xnu_payload is None:raise ValueError('CPU/cache roundtrip requires XNU data staging')
+    if screen_log and not auto_return:raise ValueError('Screen log requires automatic recovery')
     if auto_return and not pm_timer:raise ValueError('Auto return requires PM/timer diagnostic')
     if pm_timer and not cpu_cache:raise ValueError('PM/timer requires CPU/cache batch')
     OUT.mkdir(parents=True,exist_ok=True)
@@ -112,6 +113,9 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
                 report['scope']='Cached XNU data staging plus Linux CPU offline/online, cache maintenance and per-CPU readback; no DMA/MMU handoff'
         if pm_timer:
             report['scope']='Timer restoration before devices-only PM test, settled boot and bounded EBUSY retries; low-level entry blocked; no XNU branch'
+        if screen_log:
+            from prepare_screen_log import prepare as prepare_screen
+            report.update(prepare_screen(source))
         report['public_defconfig_sha256']=hashlib.sha256(defconfig.read_bytes()).hexdigest()
         make=['make','-C',str(source),'O='+str(objects),'ARCH=arm64',
               'CC=clang-14','CROSS_COMPILE=aarch64-linux-gnu-',
@@ -135,6 +139,7 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
                  str(OUT/'initramfs.cpio'),'--set-str','CMDLINE','rdinit=/init',
                  '--disable','CMDLINE_FROM_BOOTLOADER','--disable','CMDLINE_FORCE',
                  '--enable','CMDLINE_EXTEND','--enable','INITRAMFS_FORCE'],'02-initramfs.log')
+        if screen_log:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_SCREEN_LOG'],'02-screen-log.log')
         run([*make,'olddefconfig'],'03-olddefconfig.log')
         configured=config.read_text()
         required=('CONFIG_KEXEC=y','CONFIG_KEXEC_CORE=y','CONFIG_PM_SLEEP_SMP=y','CONFIG_ARM64_4K_PAGES=y')
@@ -142,6 +147,7 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
         if reserve:required+=('CONFIG_INITRAMFS_FORCE=y','CONFIG_CMDLINE_EXTEND=y','CONFIG_CMDLINE="rdinit=/init"')
         if xnu_payload is not None:required+=('CONFIG_CRYPTO=y','CONFIG_CRYPTO_HASH=y','CONFIG_CRYPTO_SHA256=y')
         if cpu_cache:required+=('CONFIG_HOTPLUG_CPU=y','CONFIG_SMP=y','CONFIG_PM_SLEEP_SMP=y')
+        if screen_log:required+=('CONFIG_NOTE10_SCREEN_LOG=y','CONFIG_EXYNOS_WINDOW_UPDATE=y','CONFIG_EXYNOS_DPU20=y')
         if auto_return:required+=('CONFIG_EXYNOS_REBOOT=y','CONFIG_SEC_REBOOT=y')
         if pm_timer:required+=('CONFIG_SUSPEND=y','CONFIG_PM_SLEEP_DEBUG=y','CONFIG_PM_DEBUG=y')
         missing=[line for line in required if line not in configured.splitlines()]
@@ -172,6 +178,8 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             raise ValueError('CPU/cache evidence markers missing from Linux Image')
         if pm_timer and any(marker not in target.read_bytes() for marker in (b'N10PMT1',b'N10TMR1',b'N10BND1',b'N10TRY1')):
             raise ValueError('PM/timer evidence markers missing from Linux Image')
+        if pm_timer and b'N10PMS1' not in target.read_bytes():raise ValueError('PM failure stage marker missing')
+        if screen_log and b'N10DSP1' not in target.read_bytes():raise ValueError('Screen log marker missing')
         if auto_return:
             from materialize_auto_cycle import SLOT
             if b'N10RET1' not in target.read_bytes() or target.read_bytes().count(SLOT+b'\0')!=1:raise ValueError('Auto-return marker/unique data slot missing')
@@ -198,5 +206,6 @@ if __name__=='__main__':
     parser.add_argument('--cpu-cache',action='store_true',help='Opt-in CPU offline/online, cache maintenance and per-CPU payload reads')
     parser.add_argument('--pm-timer',action='store_true',help='Devices-only PM test and restored per-CPU event-stream normalization')
     parser.add_argument('--auto-return',action='store_true',help='Opt-in one-shot recovery request after 90 seconds; requires cycle token')
+    parser.add_argument('--screen-log',action='store_true',help='Experimental top-left quarter panel console; requires auto return')
     args=parser.parse_args();main(caps=args.caps,reserve=args.reserve,window_access=args.window_access,
-                                  xnu_payload=args.xnu_payload,xnu_manifest=args.xnu_payload_manifest,cpu_cache=args.cpu_cache,pm_timer=args.pm_timer,auto_return=args.auto_return)
+                                  xnu_payload=args.xnu_payload,xnu_manifest=args.xnu_payload_manifest,cpu_cache=args.cpu_cache,pm_timer=args.pm_timer,auto_return=args.auto_return,screen_log=args.screen_log)

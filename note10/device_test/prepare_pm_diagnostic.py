@@ -34,6 +34,14 @@ def patch_suspend(raw):
          ' Unlock:\n\tif (n10_test)\n\t\tpm_test_level = n10_old_level;\n'
          '\tif (n10_pm_active && n10_pm_owner == current)\n'
          '\t\tn10_pm_active->new_level = pm_test_level;\n\tmutex_unlock(&pm_mutex);')]
+    mark = lambda stage: '\n\tif (n10_pm_active && n10_pm_owner == current) n10_pm_active->stage = '+str(stage)+';'
+    changes += [
+        ('\terror = __pm_notifier_call_chain(PM_SUSPEND_PREPARE, -1, &nr_calls);', mark(10)+'\n\terror = __pm_notifier_call_chain(PM_SUSPEND_PREPARE, -1, &nr_calls);'),
+        ('\tif (intr_sync(NULL)) {', mark(11)+'\n\tif (intr_sync(NULL)) {'),
+        ('\tpr_cont("done.\\n");', mark(12)+'\n\tpr_cont("done.\\n");'),
+        ('\terror = suspend_freeze_processes();', mark(13)+'\n\terror = suspend_freeze_processes();'+mark(14)),
+        ('\terror = dpm_suspend_start(PMSG_SUSPEND);', mark(20)+'\n\terror = dpm_suspend_start(PMSG_SUSPEND);'+mark(21)),
+    ]
     for old,new in changes:
         if text.count(old)!=1:raise ValueError('Unexpected PM instrumentation insertion point')
         text=text.replace(old,new)
@@ -48,7 +56,7 @@ def prepare(source):
     if any(p.exists() for p in targets):raise ValueError('Existing PM diagnostic extension')
     for target,original in targets.items():target.write_bytes(original.read_bytes())
     path.write_bytes(patched)
-    return {'pm_timer_diagnostic':True,'pm_timer_evidence_version':1,'boot_binding_evidence_version':1,
+    return {'pm_failure_stage_evidence_version':1,'pm_timer_diagnostic':True,'pm_timer_evidence_version':1,'boot_binding_evidence_version':1,
         'pm_timer_source_sha256':hashlib.sha256((HERE/'pm_timer_roundtrip.c').read_bytes()).hexdigest(),
         'pm_backend_source_sha256':hashlib.sha256((HERE/'pm_devices_backend.c').read_bytes()).hexdigest(),
         'pm_contract_sha256':hashlib.sha256((HERE/'pm_test_contract.h').read_bytes()).hexdigest(),

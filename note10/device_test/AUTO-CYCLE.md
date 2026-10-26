@@ -1,9 +1,13 @@
 # Note10 diagnostic cycle preparation
 
-Status: implemented locally and checked with PC models. No device has been
-contacted or installed by this preparation task. The auto-return kernel has
-not yet completed a full Linux CI build or a physical automatic roundtrip.
-The existing v7 kernel cannot be used for this mode.
+Status (2026-10-26): full Linux CI run 40325362180 succeeded. The first
+physical automatic install → diagnostic boot → recovery → log capture completed.
+The kernel's request was observed at uptime 93.16 seconds and TWRP returned
+with a new boot ID. Normal-restart last_kmsg persistence and all five post-return
+partition hashes were checked. RAM/XNU-data/CPU/cache and eight timer register
+roundtrips passed; the PM device phase aborted with EBUSY in all three attempts.
+The whole diagnostic did not pass, so repetition commissioning remains disabled.
+The original v7 kernel cannot be used for automatic recovery.
 
 ## Flow
 

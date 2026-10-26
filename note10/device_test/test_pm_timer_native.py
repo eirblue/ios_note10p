@@ -9,7 +9,7 @@ import subprocess
 import sys
 from run_probe import ROOT
 from test_cpu_cache_native import STUB,prefix,IDENTITY
-from decode_pm_timer import decode
+from decode_pm_timer import decode,decode_stages
 
 HERE=Path(__file__).resolve().parent
 PM_STUB=r'''
@@ -50,7 +50,15 @@ static int system_state=SYSTEM_RUNNING;
 struct task_struct {int unused;};
 static struct task_struct task;
 #define current (&task)
+#define CONFIG_NOTE10_SCREEN_LOG 1
 static int pm_mutex,mutex_depth,pm_test_level;
+static bool screen_paused;
+static unsigned int screen_pauses,screen_resumes;
+void n10_screen_pause(bool paused) {
+    if(mutex_depth||paused==screen_paused)exit(81);
+    screen_paused=paused;
+    if(paused)++screen_pauses;else ++screen_resumes;
+}
 static struct {unsigned int failed_resume;} suspend_stats;
 static struct task_struct *n10_pm_owner;
 static struct n10_pm_result *n10_pm_active;
@@ -59,7 +67,7 @@ static void mutex_unlock(int *p) {(void)p;if(--mutex_depth)exit(72);}
 static int pm_suspend(int state) {
     int old;
     ++pm_calls;
-    if(state!=PM_SUSPEND_MEM||n10_pm_owner!=current||!n10_pm_active||mutex_depth)exit(73);
+    if(!screen_paused||state!=PM_SUSPEND_MEM||n10_pm_owner!=current||!n10_pm_active||mutex_depth)exit(73);
     mutex_lock(&pm_mutex);old=pm_test_level;n10_pm_active->old_level=(unsigned int)old;
     if(old) {n10_pm_active->new_level=(unsigned int)old;mutex_unlock(&pm_mutex);return -EBUSY;}
     pm_test_level=4;
@@ -69,9 +77,11 @@ static int pm_suspend(int state) {
         if(mode==28)++suspend_stats.failed_resume;
         if(mode==29)n10_pm_active->blocked=1;
         if(mode==30)n10_pm_active->devices=1;
+        n10_pm_active->stage=11;
         pm_test_level=old;n10_pm_active->new_level=(unsigned int)old;
         mutex_unlock(&pm_mutex);return -EBUSY;
     }
+    n10_pm_active->stage=21;
     n10_pm_active->devices=mode==5?0:1;
     n10_pm_active->resumed=mode==23?0:1;
     n10_pm_active->blocked=mode==14?1:0;
@@ -105,6 +115,7 @@ int main(int argc,char **argv) {
         writes+=timer_writes[i];
         if(mode==8&&(timer_writes[i]!=2||timer_values[i]!=0xf5ULL+((u64)i<<8)))return 75;
     }
+    if(screen_paused||screen_pauses!=pm_calls||screen_resumes!=pm_calls)return 82;
     if(mutex_depth||n10_pm_active||(mode!=21&&n10_pm_owner))return 74;
     if(down_calls||up_calls||flush_calls)return 76;
     if(delays[0]!=30000)return 79;
@@ -162,6 +173,9 @@ def test(payload,cpu_model,output):
         wanted=0 if mode in early-{21} else (3 if mode in {24,25} else 1)
         if len(attempts)!=wanted*8 or any(row['attempt']!=row['seq']//8+1 for row in attempts.values()):
             raise ValueError('Attempt frame count or sequence differs')
+        stages=frames(text,'N10PMS1',('id','seq','attempt','stage','error'),IDENTITY,24)
+        if len(stages)!=wanted*8:raise ValueError('PM stage frame count differs')
+        if wanted and len(decode_stages(text,IDENTITY))!=wanted:raise ValueError('PM stage decode differs')
         counts=re.search(r'PMMODEL calls=(\d+) writes=(\d+) level=(\d+) scheduled=(\d+)',text)
         if not counts:raise ValueError('Missing modeled PM counts')
         calls,writes,level,scheduled=map(int,counts.groups())
@@ -177,7 +191,7 @@ def test(payload,cpu_model,output):
         'backend_source_sha256':hashlib.sha256(sources['pm_devices_backend.c']).hexdigest(),
         'contract_sha256':hashlib.sha256(sources['pm_test_contract.h']).hexdigest(),
         'cpu_source_sha256':previous['source_sha256'],'payload_sha256':digest,'payload_size':len(raw),'cases':cases,'bounded_retry_cases':8,'timer_precedes_pm':True,'first_delay_ms':30000,'max_pm_attempts':3,
-        'hardware_verified':False,'device_operations':[],
+        'screen_pause_verified':True,'hardware_verified':False,'device_operations':[],
         'scope':'Actual worker/backend C; modeled PM framework, scheduling, registers and faults; real SHA256'}
     (output/'result.json').write_text(json.dumps(report,indent=2))
     return report
