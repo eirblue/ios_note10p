@@ -29,14 +29,14 @@ STUB = r'''
 struct task_struct { int id; };
 static struct task_struct task_a={1}, task_b={2};
 static struct task_struct *current=&task_a;
-static int pm_mutex, mutex_depth, mode;
-static int wake_print_calls;
-static int pause_state, usb_active, wake_ok=1, pm_result, pm_calls, validate_before_error, validate_after_error;
-static int pause_on_calls, pause_off_calls, usb_begin_calls, usb_end_calls;
-static int decon_power_off_calls, decon_power_on_calls;
-static int fail_screen_on, fail_screen_off, fail_usb_begin, fail_usb_end;
-static int fail_display_off, fail_display_on, partial_display_off;
-static int idle_result, missing_device, power_no_change, resume_bad, partial_same_state;
+static int __attribute__((unused)) pm_mutex, mutex_depth, mode;
+static int __attribute__((unused)) wake_print_calls;
+static int __attribute__((unused)) pause_state, usb_active, wake_ok=1, pm_result, pm_calls, validate_before_error, validate_after_error;
+static int __attribute__((unused)) pause_on_calls, pause_off_calls, usb_begin_calls, usb_end_calls;
+static int __attribute__((unused)) decon_power_off_calls, decon_power_on_calls;
+static int __attribute__((unused)) fail_screen_on, fail_screen_off, fail_usb_begin, fail_usb_end;
+static int __attribute__((unused)) fail_display_off, fail_display_on, partial_display_off;
+static int __attribute__((unused)) idle_result, missing_device, power_no_change, resume_bad, partial_same_state;
 static struct n10_pm_result *n10_pm_active;
 static struct task_struct *n10_pm_owner;
 static struct { unsigned int failed_resume; } suspend_stats;
@@ -57,7 +57,7 @@ struct decon_device {
     int cur_using_dpp, eint_status;
     struct { struct atomic_stub remaining_frame; } up;
 };
-static int out_token, dsim_token, lcd_token;
+static int __attribute__((unused)) out_token, dsim_token, lcd_token;
 static struct decon_device device={.id=0,.lcd_info=&lcd_token,.dt={DECON_OUT_DSI},
     .out_sd={&out_token},.dsim_sd={&dsim_token},.state=DECON_STATE_ON,.eint_status=1};
 static struct decon_device *get_decon_drvdata(int id) { return id==0 && !missing_device?&device:NULL; }
@@ -380,7 +380,7 @@ def run(output, decon_core=None):
         src = output / (label+'.c')
         src.write_text(text, encoding='utf-8')
         exe = output / (label+('.exe' if sys.platform == 'win32' else ''))
-        built = subprocess.run([str(compiler), '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror', '-Wno-unused-function', '-Wno-unused-variable', '-Wno-unused-but-set-variable', '-Wno-unused-but-set-global', '-Wno-unused-label', str(src), '-o', str(exe)], capture_output=True, timeout=60)
+        built = subprocess.run([str(compiler), '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror', '-Wno-unused-function', '-Wno-unused-variable', '-Wno-unused-but-set-variable', '-Wno-unused-label', str(src), '-o', str(exe)], capture_output=True, timeout=60)
         (output / (label+'-compile.log')).write_bytes(built.stdout+built.stderr)
         if built.returncode:
             failures.append(label+': compilation failed')
