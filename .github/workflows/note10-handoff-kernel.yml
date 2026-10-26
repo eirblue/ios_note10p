@@ -63,7 +63,7 @@ jobs:
       - name: Install Linux cross compiler and kernel host dependencies
         timeout-minutes: 12
         run: |
-          packages=(clang-14 gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi make bc bison flex libssl-dev libelf-dev)
+          packages=(clang-14 gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libc6-dev-arm64-cross libc6-dev-armel-cross make bc bison flex libssl-dev libelf-dev)
           missing=()
           for package in "${packages[@]}"; do
             if [ "$(dpkg-query -W -f='${Status}' "$package" 2>/dev/null || true)" != "install ok installed" ]; then
@@ -82,6 +82,8 @@ jobs:
           aarch64-linux-gnu-gcc --version
           arm-linux-gnueabi-gcc --version
           command -v aarch64-linux-gnu-elfedit arm-linux-gnueabi-ld
+          test -r /usr/aarch64-linux-gnu/include/asm/unistd.h
+          test -r /usr/arm-linux-gnueabi/include/asm/unistd.h
       - name: Build the pinned public d2x source with legacy kexec
         env:
           NOTE10_CAPS: ${{ inputs.caps }}
