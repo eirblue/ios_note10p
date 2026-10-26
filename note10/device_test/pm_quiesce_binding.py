@@ -68,14 +68,16 @@ def validate_model(root,build):
         raise ValueError('Actual backend/DECON quiesce model binding differs')
     usb=json.loads((root/'pm-usb-model/result.json').read_text())
     usb_ids=[row.get('case') for row in usb.get('cases',[])]
-    usb_required=set(range(16))|{'generated-runtime-get-0','generated-runtime-get-1'}
-    if (usb.get('passed') is not True or usb.get('case_count',0)<18 or
+    usb_required=set(range(23))|{'generated-runtime-get-0','generated-runtime-get-1'}|{'generated-after-pm-'+str(i) for i in range(16)}
+    if (usb.get('passed') is not True or usb.get('case_count',0)<len(usb_required) or
             usb.get('case_count')!=len(usb.get('cases',[])) or
             len(set(usb_ids))!=len(usb_ids) or not usb_required.issubset(usb_ids) or
             usb.get('source_sha256')!={name:actual[name] for name in ('usb_notify_quiesce.c','pm_test_contract.h')} or
             usb.get('harness_sha256')!=hashlib.sha256((HERE/'test_pm_usb_native.py').read_bytes()).hexdigest() or
             usb.get('actual_usb_helper_executed') is not True or
             usb.get('generated_runtime_block_executed') is not True or
+            usb.get('generated_after_pm_block_executed') is not True or
+            usb.get('generated_exynos_sha256')!=build.get('pm_quiesce_patched_sha256',{}).get('drivers/usb/dwc3/dwc3-exynos.c') or
             usb.get('generated_otg_sha256')!=build.get('pm_quiesce_patched_sha256',{}).get('drivers/usb/dwc3/otg.c') or
             any(row.get('passed') is not True for row in usb.get('cases',[])) or
             usb.get('hardware_verified') is not False):

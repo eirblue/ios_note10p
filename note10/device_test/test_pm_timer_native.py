@@ -149,6 +149,7 @@ int n10_usb_quiesce_end(struct n10_pm_result *out) {
     return mode==103||mode==106?-5:0;
 }
 int n10_usb_quiesce_validate(void) {assert_pm_unlocked();return usb_quiet?0:-EBUSY;}
+int n10_usb_quiesce_after_pm(void) {return n10_usb_quiesce_validate();}
 static bool pm_get_wakeup_count(unsigned int *count,bool block) {
     assert_pm_unlocked();if(block||!usb_quiet||!display_quiet)exit(84);*count=17;return mode!=102;
 }

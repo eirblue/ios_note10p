@@ -101,6 +101,7 @@ static int n10_usb_quiesce_validate(void) {
     if (!usb_active) abort();
     return pm_calls?validate_after_error:validate_before_error;
 }
+static int n10_usb_quiesce_after_pm(void) { return n10_usb_quiesce_validate(); }
 static void pm_print_active_wakeup_sources(void) { no_pm_lock(); ++wake_print_calls; }
 static int pm_get_wakeup_count(unsigned int *count, bool block) {
     no_pm_lock(); event('W'); if (block) abort(); *count=42; return wake_ok;

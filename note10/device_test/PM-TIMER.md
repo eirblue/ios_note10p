@@ -1,5 +1,27 @@
 # Devices-only PM and timer roundtrip (v6)
 
+## Re-establish USB runtime idle after devices-only PM (2026-10-27)
+
+The pinned DWC3 system-suspend path takes a runtime reference, and its resume
+path marks the core active before dropping that reference. A successful
+devices-only suspend/resume can therefore leave the blocked peripheral's core
+runtime-active. Read-only post-PM validation must continue to reject that state.
+
+The owned transaction now requests ordinary `pm_runtime_suspend()` after PM,
+before validating quiescence again. It requires the notifier CLIENT block,
+unchanged cable epoch, idle peripheral FSM, absent VBUS session, released USB
+wake lock and zero PHY ownership. Runtime references, callback errors and
+failure to reach the suspended state remain failures. The request does not
+change policy, rewrite runtime status, drop references or relax wakeup checks.
+The original pre-PM validator remains read-only. Restoration still runs in
+reverse order and preserves the first failure.
+
+The core PM source is pinned alongside the glue and OTG drivers. Native models
+execute the generated runtime helper and check success, already-idle state,
+runtime errors, active references, failed readback, active PHY/wake/session,
+busy work/locks, cable changes and ownership mismatches. These PC results do
+not establish physical PM, DMA shutdown, GIC/MMU handoff or XNU execution.
+
 ## Owned driver quiesce before PM (2026-10-27)
 
 Kernel and XNU porting take priority; the screen console provides supporting

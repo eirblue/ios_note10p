@@ -9,6 +9,7 @@ extern int n10_decon_quiesce_end(struct n10_pm_result *out);
 extern int n10_usb_quiesce_begin(struct n10_pm_result *out);
 extern int n10_usb_quiesce_end(struct n10_pm_result *out);
 extern int n10_usb_quiesce_validate(void);
+extern int n10_usb_quiesce_after_pm(void);
 #endif
 int n10_pm_devices_test(struct n10_pm_result *out)
 {
@@ -73,7 +74,7 @@ int n10_pm_devices_test(struct n10_pm_result *out)
     out->error = pm_suspend(PM_SUSPEND_MEM);
     ret = out->error;
 #ifdef CONFIG_NOTE10_PM_QUIESCE
-    restore_ret = n10_usb_quiesce_validate();
+    restore_ret = n10_usb_quiesce_after_pm();
     if (restore_ret) { out->usb_error = restore_ret; if (!ret) ret = restore_ret; }
 #endif
 restore:

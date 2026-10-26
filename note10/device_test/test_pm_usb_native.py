@@ -63,6 +63,8 @@ static int check_event_type(unsigned long e){return NOTIFY_EVENT_STATE;}
 static struct usb_notify u;
 static struct otg_notify n;
 static int mode,ticks,rsw_off,phy_busy,action_count,action_index;
+static int after_pm_calls;
+static void n10_usb_quiesce_physical(unsigned long event);
 static struct {int action;struct work_struct*work;} actions[12];
 static struct otg_notify*get_otg_notify(void){return &n;}
 static bool is_host_cable_enable(struct otg_notify*n){return false;}
@@ -79,6 +81,13 @@ int n10_exynos_usb_quiesce_check(bool off){
  if(phy_busy)return -EBUSY;
  if(mode==2 && action_count)return -EAGAIN;
  return rsw_off==off?0:-EBUSY;
+}
+int n10_exynos_usb_quiesce_after_pm(void){
+ ++after_pm_calls;
+ if(mode==17)return -EIO;
+ if(mode==18)n10_usb_quiesce_physical(NOTIFY_EVENT_VBUS);
+ if(mode==19)u.ws.active=true;
+ return 0;
 }
 """
 TAIL=r"""
@@ -121,6 +130,19 @@ int main(int argc,char**argv){
  begin=n10_usb_quiesce_begin(&out);
  if(mode==14){CHECK(!n10_usb_quiesce_validate());n10_usb_quiesce_physical(NOTIFY_EVENT_VBUS);CHECK(n10_usb_quiesce_validate()==-ESTALE);}
  if(mode==7){struct n10_pm_result unrelated={0};CHECK(n10_usb_quiesce_begin(&unrelated)==-EBUSY);CHECK(!n10_usb_quiesce_end(&unrelated));CHECK(n10_usb_q_owner==current);current=&other;CHECK(set_notify_disable(&u.udev,0)==-EBUSY);current=&t;}
+ if(mode>=16){
+  int post,want=0;CHECK(!begin);
+  if(mode==20)current=&other;
+  if(mode==21)n10_usb_quiesce_physical(NOTIFY_EVENT_VBUS);
+  if(mode==22)u.c_status=NOTIFY_EVENT_ENABLED;
+  post=n10_usb_quiesce_after_pm();
+  if(mode==17)want=-EIO;
+  if(mode==18 || mode==21)want=-ESTALE;
+  if(mode==19 || mode==22)want=-EBUSY;
+  if(mode==20)want=-EPERM;
+  CHECK(post==want);CHECK(after_pm_calls==(mode<20));
+  current=&t;u.c_status=NOTIFY_EVENT_BLOCKED;
+ }
  end=n10_usb_quiesce_end(&out);
  if(mode==0 || mode==7)CHECK(!begin && !end && !n10_usb_q_owner && !rsw_off);
  if(mode==1 || mode==2)CHECK(begin<0 && end<0 && n10_usb_q_owner);
@@ -134,6 +156,7 @@ int main(int argc,char**argv){
  if(mode==12)CHECK(begin==-EIO && !end && !n10_usb_q_owner);
  if(mode==14)CHECK(!begin && end==-ESTALE && !n10_usb_q_owner);
  if(mode==15)CHECK(begin==-ETIMEDOUT && !end && !n10_usb_q_owner);
+ if(mode>=16)CHECK(end==((mode==18 || mode==21)?-ESTALE:0) && !n10_usb_q_owner);
  printf("mode=%d begin=%d end=%d ticks=%d generation=%u\n",mode,begin,end,ticks,out.qgeneration);
  return 0;
 }
@@ -183,6 +206,87 @@ out:
   cases.append({'case':'generated-runtime-get-'+str(failure),'passed':ran.returncode==0,'observation':(ran.stdout+ran.stderr).decode(errors='replace')})
  return cases,hashlib.sha256(block.encode()).hexdigest()
 
+def _after_pm_cases(output, compiler, exynos_path):
+ source=Path(exynos_path).read_text()
+ start=source.index('static int n10_exynos_usb_quiesce_state(')
+ block=source[start:source.index('\n#endif',start)]
+ stub=r'''
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <errno.h>
+#define container_of(p,t,m) ((t*)((char*)(p)-offsetof(t,m)))
+#define OTG_STATE_B_IDLE 1
+#define OTG_STATE_B_PERIPHERAL 2
+struct mutex {int held;};
+struct device {int suspended;};
+struct device_node {int unused;};
+struct platform_device {struct device dev;};
+struct otg_fsm {int id,reset,b_sess_vld;struct mutex lock;};
+struct dwc3 {int vbus_state;struct device *dev;};
+struct dwc3_otg {struct otg_fsm fsm;int ready;struct {int state;} otg;struct dwc3 *dwc;int wakelock,combo_phy_control;struct mutex lock;};
+struct dwc3_exynos {struct {struct otg_fsm *fsm;int work;} rsw;};
+static struct device_node node;
+static struct platform_device pdev;
+static struct device child;
+static struct dwc3 core={.dev=&child};
+static struct dwc3_otg dotg={.dwc=&core};
+static struct dwc3_exynos exynos;
+static int mode,calls,refs;
+static struct device_node *of_find_compatible_node(void*a,void*b,const char*c){return &node;}
+static struct platform_device *of_find_device_by_node(struct device_node*n){if(mode==12)return NULL;++refs;return &pdev;}
+static void of_node_put(struct device_node*n){}
+static void *dev_get_drvdata(struct device*d){return &exynos;}
+static void put_device(struct device*d){--refs;}
+static int work_busy(int*w){return mode==8;}
+static int mutex_trylock(struct mutex*m){if(m->held)return 0;m->held=1;return 1;}
+static void mutex_unlock(struct mutex*m){m->held=0;}
+static int wake_lock_active(int*w){return *w;}
+static int pm_runtime_suspended(struct device*d){return d->suspended;}
+static int pm_runtime_active(struct device*d){return !d->suspended;}
+static int pm_runtime_suspend(struct device*d){
+ ++calls;if(mode==2)return -EIO;if(mode==3)return -EAGAIN;
+ if(mode!=4)d->suspended=1;return 0;
+}
+'''
+ main=r'''
+int main(int argc,char**argv){
+ int ret,want=0,want_calls=0;
+ mode=atoi(argv[1]);dotg.ready=1;dotg.fsm.id=1;dotg.otg.state=OTG_STATE_B_IDLE;
+ exynos.rsw.fsm=&dotg.fsm;
+ if(mode==1)child.suspended=1;
+ if(mode==5)dotg.combo_phy_control=1;
+ if(mode==6)dotg.wakelock=1;
+ if(mode==7)dotg.fsm.b_sess_vld=1;
+ if(mode==9)dotg.lock.held=1;
+ if(mode==11){dotg.otg.state=OTG_STATE_B_PERIPHERAL;dotg.fsm.b_sess_vld=1;dotg.combo_phy_control=1;dotg.wakelock=1;core.vbus_state=1;}
+ if(mode==13)exynos.rsw.fsm=NULL;
+ if(mode==14)dotg.ready=0;
+ if(mode==15)dotg.fsm.reset=1;
+ ret=mode==10?n10_exynos_usb_quiesce_check(true):mode==11?n10_exynos_usb_quiesce_check(false):n10_exynos_usb_quiesce_after_pm();
+ if(mode==2)want=-EIO;
+ if(mode==3 || mode==8 || mode==9)want=-EAGAIN;
+ if(mode==4 || mode==5 || mode==6 || mode==7 || mode==10 || mode==14 || mode==15)want=-EBUSY;
+ if(mode==12 || mode==13)want=-ENODEV;
+ if(mode==0 || mode==2 || mode==3 || mode==4)want_calls=1;
+ if(ret!=want || calls!=want_calls || refs || dotg.fsm.lock.held || (mode!=9 && dotg.lock.held)){
+  fprintf(stderr,"mode=%d ret=%d want=%d calls=%d refs=%d\n",mode,ret,want,calls,refs);return 1;
+ }
+ printf("after_pm=%d ret=%d calls=%d suspended=%d\n",mode,ret,calls,child.suspended);return 0;
+}
+'''
+ src=output/'after-pm.c';src.write_bytes((stub+block+main).encode())
+ exe=output/('after-pm.exe' if sys.platform=='win32' else 'after-pm')
+ built=subprocess.run([str(compiler),'-std=c11',str(src),'-o',str(exe)],capture_output=True,timeout=60)
+ (output/'after-pm-compile.log').write_bytes(built.stdout+built.stderr)
+ if built.returncode:raise RuntimeError('Generated post-PM runtime native compile failed')
+ cases=[]
+ for mode in range(16):
+  ran=subprocess.run([str(exe),str(mode)],capture_output=True,timeout=15)
+  cases.append({'case':'generated-after-pm-'+str(mode),'passed':ran.returncode==0,'observation':(ran.stdout+ran.stderr).decode(errors='replace')})
+ return cases,hashlib.sha256(block.encode()).hexdigest()
+
 def run(output, usb_helper=None):
  output=Path(output).resolve()
  if not output.is_relative_to((ROOT/'note10/private').resolve()) or output.exists():
@@ -217,18 +321,23 @@ def run(output, usb_helper=None):
  (output/'compile.log').write_bytes(built.stdout+built.stderr)
  if built.returncode:raise RuntimeError('USB actual helper native compile failed')
  cases=[]
- for mode in range(16):
+ for mode in range(23):
   ran=subprocess.run([str(exe),str(mode)],capture_output=True,timeout=60)
   cases.append({'case':mode,'passed':ran.returncode==0,'observation':(ran.stdout+ran.stderr).decode(errors='replace')})
- runtime_hash=None
+ runtime_hash=None;after_pm_hash=None
  if usb_helper:
   runtime, runtime_hash=_runtime_cases(output,compiler,kernel/'drivers/usb/dwc3/otg.c')
   cases.extend(runtime)
+  after_pm,after_pm_hash=_after_pm_cases(output,compiler,kernel/'drivers/usb/dwc3/dwc3-exynos.c')
+  cases.extend(after_pm)
  report={'passed':all(c['passed'] for c in cases),'cases':cases,'case_count':len(cases),
   'source_sha256':{n:hashlib.sha256(v).hexdigest() for n,v in sources.items()},
   'generated_runtime_block_sha256':runtime_hash,
   'generated_otg_sha256':hashlib.sha256((kernel/'drivers/usb/dwc3/otg.c').read_bytes()).hexdigest() if usb_helper else None,
   'generated_runtime_block_executed':bool(usb_helper),
+  'generated_after_pm_block_executed':bool(usb_helper),
+  'generated_after_pm_block_sha256':after_pm_hash,
+  'generated_exynos_sha256':hashlib.sha256((kernel/'drivers/usb/dwc3/dwc3-exynos.c').read_bytes()).hexdigest() if usb_helper else None,
   'vendor_sources_sha256':vendor_sources,
   'harness_sha256':hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
   'actual_usb_helper_executed':True,'hardware_verified':False,'scope':'Actual usb_notify_quiesce.c, deterministic notifier FIFO/RSW/physical-event stubs; no hardware claim.'}

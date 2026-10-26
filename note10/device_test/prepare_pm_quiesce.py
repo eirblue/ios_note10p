@@ -9,6 +9,7 @@ PINS = {
     "drivers/usb/notify/usb_notifier.c": "c39ec018885b611ea9fc8caff23df6d1e8c19f20d46b410109f6840fd20c07f6",
     "drivers/usb/notify/Kconfig": "c46d7458ce23c535d0601ed027c224b3e8815d532f18952b3bde48a798e673cc",
     "drivers/usb/dwc3/dwc3-exynos.c": "a3a5ca9c2d2614ce5516cd35cb57b9c2837fe4ea79c5189ecad12909b0d85fad",
+    "drivers/usb/dwc3/core.c": "7d12e2d8303388da50de6c6631943921562423b4ae35b88d2a1431b668a3a4e1",
     "drivers/usb/dwc3/otg.c": "f8ca1ef72d8eaef9e9377b6ebb6b26bc12c8290d0b502a18bc8fc191017d12de",
     "drivers/usb/dwc3/otg.h": "861157acc947aefeca38f654c3fdcbb382d797b6edef2790ecb99587ee51fdc1",
     "drivers/usb/dwc3/dwc3-exynos.h": "bc9321bdbfb5c44863329dcc66492ebebd952614c1f41b7e4a1e35f9e7672d9e",
@@ -64,7 +65,7 @@ def _prepare_usb(source):
     exynos += r"""
 #ifdef CONFIG_NOTE10_PM_QUIESCE
 /* Only this controller's worker is observed; no unbounded global flush. */
-int n10_exynos_usb_quiesce_check(bool off)
+static int n10_exynos_usb_quiesce_state(bool off, bool resuspend)
 {
     struct device_node *np;
     struct platform_device *pdev;
@@ -85,6 +86,18 @@ int n10_exynos_usb_quiesce_check(bool off)
     if (work_busy(&exynos->rsw.work) || !mutex_trylock(&fsm->lock)) goto out;
     if (!mutex_trylock(&dotg->lock)) { mutex_unlock(&fsm->lock); goto out; }
     ret = -EBUSY;
+    /* System PM resumes the core into runtime-active state. Re-establish
+     * runtime idle only after the owned peripheral/PHY OFF predicates hold.
+     * The ordinary request respects runtime references and callback errors.
+     */
+    if (resuspend && off && dotg->ready && fsm->id && !fsm->reset &&
+        dotg->otg.state == OTG_STATE_B_IDLE && !fsm->b_sess_vld &&
+        !dotg->dwc->vbus_state && !wake_lock_active(&dotg->wakelock) &&
+        dotg->combo_phy_control == 0 && !pm_runtime_suspended(dotg->dwc->dev)) {
+        ret = pm_runtime_suspend(dotg->dwc->dev);
+        if (ret < 0) goto unlock;
+        ret = -EBUSY;
+    }
     if (dotg->ready && fsm->id && !fsm->reset &&
         ((off && dotg->otg.state == OTG_STATE_B_IDLE && !fsm->b_sess_vld &&
           !dotg->dwc->vbus_state && pm_runtime_suspended(dotg->dwc->dev) && !wake_lock_active(&dotg->wakelock) &&
@@ -92,11 +105,20 @@ int n10_exynos_usb_quiesce_check(bool off)
          (!off && dotg->otg.state == OTG_STATE_B_PERIPHERAL && fsm->b_sess_vld &&
           dotg->dwc->vbus_state && pm_runtime_active(dotg->dwc->dev) && wake_lock_active(&dotg->wakelock) &&
           dotg->combo_phy_control == 1))) ret = 0;
+unlock:
     mutex_unlock(&dotg->lock);
     mutex_unlock(&fsm->lock);
 out:
     put_device(&pdev->dev);
     return ret;
+}
+int n10_exynos_usb_quiesce_check(bool off)
+{
+    return n10_exynos_usb_quiesce_state(off, false);
+}
+int n10_exynos_usb_quiesce_after_pm(void)
+{
+    return n10_exynos_usb_quiesce_state(true, true);
 }
 #endif
 """

@@ -20,7 +20,7 @@ class BindingTests(unittest.TestCase):
             pm_quiesce_sources_sha256=actual,pm_quiesce_source_pins=PINS,
             pm_quiesce_upstream_sha256=PINS,interruptible_sync_guard_preserved=True,
             low_level_suspend_unchanged=True,
-            pm_quiesce_patched_sha256={DCORE:'a'*64,'drivers/usb/dwc3/otg.c':'b'*64})
+            pm_quiesce_patched_sha256={DCORE:'a'*64,'drivers/usb/dwc3/otg.c':'b'*64,'drivers/usb/dwc3/dwc3-exynos.c':'c'*64})
         self.models={}
         cases=[dict(configuration=f'quiesce-{q}-screen-{s}',case=c,passed=True)
                for q in (0,1) for s in (0,1) for c in (range(38) if q else (0,8,24,25))
@@ -31,11 +31,12 @@ class BindingTests(unittest.TestCase):
             harness_sha256=hashlib.sha256((HERE/'test_pm_quiesce_native.py').read_bytes()).hexdigest(),
             actual_backend_executed=True,actual_decon_helper_executed=True,
             generated_decon_executed=True,generated_decon_sha256='a'*64,hardware_verified=False)
-        cases=[dict(case=c,passed=True) for c in list(range(16))+['generated-runtime-get-0','generated-runtime-get-1']]
+        cases=[dict(case=c,passed=True) for c in list(range(23))+['generated-runtime-get-0','generated-runtime-get-1']+['generated-after-pm-'+str(i) for i in range(16)]]
         self.models['pm-usb-model']=dict(passed=True,case_count=len(cases),cases=cases,
             source_sha256={n:actual[n] for n in ('usb_notify_quiesce.c','pm_test_contract.h')},
             harness_sha256=hashlib.sha256((HERE/'test_pm_usb_native.py').read_bytes()).hexdigest(),
             actual_usb_helper_executed=True,generated_runtime_block_executed=True,
+            generated_after_pm_block_executed=True,generated_exynos_sha256='c'*64,
             generated_otg_sha256='b'*64,hardware_verified=False)
         cases=[dict(mode=c,passed=True,real_frame_checksums_verified=True,strict_decoder_require_quiesce=True) for c in range(100,108)]
         self.models['pm-timer-model']=dict(passed=True,quiesce_evidence_verified=True,
@@ -77,6 +78,7 @@ class BindingTests(unittest.TestCase):
 
     def test_source_or_generated_digest_differs(self):
         for name,key in (('pm-quiesce-model','generated_decon_sha256'),('pm-usb-model','generated_otg_sha256'),
+                         ('pm-usb-model','generated_exynos_sha256'),
                          ('pm-usb-model','harness_sha256'),('pm-timer-model','quiesce_core_sha256')):
             with self.subTest(name=name,key=key):
                 old=self.models[name][key];self.models[name][key]='f'*64
@@ -90,6 +92,10 @@ class BindingTests(unittest.TestCase):
                 self.models[name][key]=False
                 with self.assertRaises(ValueError):self.validate()
                 self.models[name][key]=True
+
+    def test_post_pm_runtime_model_must_execute(self):
+        self.models['pm-usb-model']['generated_after_pm_block_executed']=False
+        with self.assertRaises(ValueError):self.validate()
 
     def test_marker_and_configuration_required(self):
         for name in ('Image','handoff.config'):

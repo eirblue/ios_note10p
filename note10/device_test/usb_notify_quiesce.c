@@ -11,6 +11,7 @@ static int n10_usb_q_original_disable;
 static bool n10_usb_q_off;
 static int n10_usb_q_transition_error, n10_usb_q_restore_error;
 extern int n10_exynos_usb_quiesce_check(bool off);
+extern int n10_exynos_usb_quiesce_after_pm(void);
 
 static void n10_usb_q_begin_barrier(struct work_struct *work)
 {
@@ -151,6 +152,22 @@ int n10_usb_quiesce_validate(void)
     if (!ret && (unsigned int)atomic_read(&n10_usb_q_epoch) != n10_usb_q_expected_epoch)
         ret = -ESTALE;
     return ret;
+}
+
+int n10_usb_quiesce_after_pm(void)
+{
+    struct usb_notify *u = READ_ONCE(n10_usb_q_notify);
+    int ret;
+    if (!u || READ_ONCE(n10_usb_q_owner) != current || !READ_ONCE(n10_usb_q_off))
+        return -EPERM;
+    if ((unsigned int)atomic_read(&n10_usb_q_epoch) != n10_usb_q_expected_epoch)
+        return -ESTALE;
+    if (u->c_type != NOTIFY_EVENT_VBUS || u->c_status != NOTIFY_EVENT_BLOCKED ||
+        u->ndev.mode != NOTIFY_NONE_MODE || !is_client_cable_block(u->o_notify) ||
+        n10_usb_q_wake_active(&u->ws)) return -EBUSY;
+    ret = n10_exynos_usb_quiesce_after_pm();
+    if (ret) return ret;
+    return n10_usb_quiesce_validate();
 }
 
 int n10_usb_quiesce_end(struct n10_pm_result *out)
