@@ -1,5 +1,41 @@
 # Devices-only PM and timer roundtrip (v6)
 
+## Owned driver quiesce before PM (2026-10-27)
+
+Kernel and XNU porting take priority; the screen console provides supporting
+diagnostics. The v8 physical test returned EBUSY at all three attempts before
+filesystem sync began. The pinned Samsung `intr_sync` checks the active wakeup
+count before starting I/O. Delaying retries and pausing the screen worker did
+not release the USB and DECON driver wake locks.
+
+`CONFIG_NOTE10_PM_QUIESCE` is separate from the screen console and defaults off.
+The opt-in PM build enables it to stop DECON through its normal power API and
+temporarily block the USB peripheral through the existing CLIENT policy. It
+preserves physical cable state, waits for the notifier queue and targeted OTG
+worker, and checks FSM, PHY ownership, runtime PM and wake-lock state. Vendor
+disconnect, PHY, runtime-PM and bus-idle errors must remain errors; software
+role flags alone cannot establish a successful stop. Existing sync, wakeup,
+notifier, freezer and TEST_DEVICES checks remain in use.
+
+Every exit requests reverse restoration of USB, display and screen logging.
+INIT is a boot handoff marker: after normal power down it is restored through
+the normal API to operational ON. Driver reinitialization can replace the
+bootloader logo. A failed or incomplete restoration prevents a passing result
+and prevents another EBUSY retry. Generation, physical cable epoch and bounded
+completion checks reject late work and concurrent role changes.
+
+Checksummed `N10QSC1` records preserve each attempt's ownership generation,
+phase, PM call, restoration and individual error results. A build declaring
+quiesce version 1 requires intact same-boot quiesce records as well as the
+existing PM, CPU and timer evidence. Source hashes, generated driver hashes,
+four configuration models and actual helper fault models are checked before
+installation. These PC models stub kernel APIs and do not prove hardware.
+
+A successful TEST_DEVICES roundtrip covers the normal preparation and driver
+suspend/resume callbacks. It does not enter late/noirq/syscore suspend or prove
+all DMA engines stopped, GIC ownership transfer, MMU/cache shutdown, or actual
+XNU/iOS execution. Physical validation of this new quiesce path is pending.
+
 This opt-in batch requires the v5 RAM, XNU data staging and CPU/cache tests to
 succeed first. A delayed system work item waits for SYSTEM_RUNNING before using
 the Linux suspend framework, avoiding the initcall/freezer dependency.

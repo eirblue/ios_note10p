@@ -88,6 +88,8 @@ jobs:
           fi
           if [ "$NOTE10_PM_TIMER" = true ]; then
             python note10/device_test/test_pm_timer_contract.py --report note10/private/handoff-kernel/pm-source-model.json
+            python note10/device_test/test_pm_quiesce_decode.py
+            python note10/device_test/test_pm_quiesce_binding.py
           fi
           if [ "$NOTE10_CPU_CACHE" = true ] && [ "$NOTE10_XNU_STAGE" != true ]; then
             echo "cpu_cache requires xnu_stage=true" >&2
@@ -180,6 +182,10 @@ jobs:
             note10/private/handoff-kernel/pm-timer-model/result.json
             note10/private/handoff-kernel/pm-timer-model/compile.log
             note10/private/handoff-kernel/pm-source-model.json
+            note10/private/handoff-kernel/pm-quiesce-model/result.json
+            note10/private/handoff-kernel/pm-quiesce-model/*.log
+            note10/private/handoff-kernel/pm-usb-model/result.json
+            note10/private/handoff-kernel/pm-usb-model/compile.log
             note10/private/handoff-kernel/screen-log-model/result.json
             note10/private/handoff-kernel/screen-log-model/compile.log
             note10/private/handoff-kernel/auto-return-model/result.json

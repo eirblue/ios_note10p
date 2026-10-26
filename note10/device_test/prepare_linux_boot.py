@@ -82,6 +82,8 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output,auto_cycle_token=None):
         raise ValueError('Kernel image differs from build report')
     if len(data)<64 or data[56:60]!=b'ARM\x64':raise ValueError('Not an ARM64 Linux Image')
     config=(kernel_build/'handoff.config').read_bytes()
+    from pm_quiesce_binding import assert_scope as assert_quiesce_scope
+    assert_quiesce_scope(kernel_build,build)
     if hashlib.sha256(config).hexdigest()!=build['effective_config_sha256']:
         raise ValueError('Config differs from kernel build report')
     required={'CONFIG_BLK_DEV_INITRD=y','CONFIG_RD_LZMA=y','CONFIG_KEXEC=y','CONFIG_KEXEC_CORE=y','CONFIG_ARM64_4K_PAGES=y'}
@@ -172,6 +174,8 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output,auto_cycle_token=None):
             'xnu_payload_stage_diagnostic':xnu_stage,
             'cpu_cache_roundtrip_diagnostic':build.get('cpu_cache_roundtrip_diagnostic') is True,
             'pm_timer_diagnostic':build.get('pm_timer_diagnostic') is True,
+            'pm_quiesce_diagnostic':build.get('pm_quiesce_diagnostic') is True,
+            'pm_quiesce_evidence_version':build.get('pm_quiesce_evidence_version'),
             'screen_log_diagnostic':build.get('screen_log_diagnostic') is True,
             'auto_return_diagnostic':auto_return,'auto_cycle_token':auto_cycle_token,
             'xnu_payload_sha256':build.get('xnu_payload_sha256') if xnu_stage else None,

@@ -26,12 +26,22 @@ def check(packages,kernel_build,backup,core_model,gate_model,init_model,adb):
             raise ValueError('RAM-access diagnostic pair required')
         paired=json.loads((packages/'package-result.json').read_text())
         build=json.loads((kernel_build/'build-result.json').read_text())
+        from pm_quiesce_binding import assert_scope as assert_quiesce_scope
+        assert_quiesce_scope(kernel_build,build)
         if not (build.get('build_passed') is True and build.get('window_access_diagnostic') is True and
                 build.get('window_access_evidence_version')==1 and build.get('reservation_evidence_version')==2):
             raise ValueError('Successful opt-in access kernel build required')
         xnu_stage=paired.get('xnu_payload_stage_diagnostic') is True
         cpu_cache=paired.get('cpu_cache_roundtrip_diagnostic') is True
         pm_timer=paired.get('pm_timer_diagnostic') is True
+        pm_quiesce=build.get('pm_quiesce_diagnostic') is True
+        if pm_quiesce!=bool(paired.get('pm_quiesce_diagnostic')) or pm_quiesce!=bool(diagnostic.get('pm_quiesce_diagnostic')):
+            raise ValueError('PM quiesce package scope differs')
+        if pm_quiesce:
+            if not pm_timer or paired.get('pm_quiesce_evidence_version')!=1 or diagnostic.get('pm_quiesce_evidence_version')!=1:
+                raise ValueError('Invalid PM quiesce package contract')
+            from pm_quiesce_binding import validate_model as validate_quiesce
+            validate_quiesce(kernel_build,build)
         auto_return=paired.get('auto_return_diagnostic') is True
         if auto_return!=(build.get('auto_return_diagnostic') is True) or auto_return!=(diagnostic.get('auto_return_diagnostic') is True):raise ValueError('Auto-return scope mismatch')
         screen_log=build.get('screen_log_diagnostic') is True

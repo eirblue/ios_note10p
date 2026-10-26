@@ -9,6 +9,71 @@ struct n10_screen_text {
     unsigned int count;
     char line[N10_SCREEN_LINES][N10_SCREEN_COLUMNS];
 };
+static inline void n10_screen_line(char *out, const char *in);
+static inline int n10_screen_has(const char *text, const char *needle)
+{
+    const char *a, *b;
+    for (; *text; ++text) {
+        a = text; b = needle;
+        while (*a && *b && *a == *b) { ++a; ++b; }
+        if (!*b) return 1;
+    }
+    return 0;
+}
+static inline int n10_screen_seed_title(struct n10_screen_text *ring, const char *title)
+{
+    unsigned int i, n = 0;
+    if (!ring || !title || ring->count >= N10_SCREEN_LINES) return 0;
+    for (i = ring->count; i > 0; --i)
+        memcpy(ring->line[i], ring->line[i - 1], N10_SCREEN_COLUMNS);
+    while (title[n] && n < N10_SCREEN_COLUMNS - 1) {
+        ring->line[0][n] = title[n];
+        ++n;
+    }
+    ring->line[0][n] = 0;
+    ++ring->count;
+    return 1;
+}
+/* Add one bounded checksummed frame without depending on printk/console state. */
+static inline int n10_screen_record(struct n10_screen_text *ring,
+                                    const char *text, unsigned int length)
+{
+    char input[256], tagged[288];
+    const char *seq;
+    const char *tag = "N10LOG1";
+    unsigned int i, n = 0;
+    if (!ring || !text || !length || length >= sizeof(input) ||
+        ring->count > N10_SCREEN_LINES) return 0;
+    for (i = 0; i < length; ++i) {
+        unsigned char ch = (unsigned char)text[i];
+        if (ch < 32 || ch > 126) return 0;
+        input[i] = (char)ch;
+    }
+    input[length] = 0;
+    seq = input;
+    while (*seq && !(seq[0] == ' ' && seq[1] == 's' && seq[2] == 'e' &&
+                     seq[3] == 'q' && seq[4] == '=')) ++seq;
+    if (*seq && seq[5] && (seq[5] != '0' || (seq[6] >= '0' && seq[6] <= '9'))) return 0;
+    if (n10_screen_has(input, "cycle=")) tag = "N10RET1";
+    else if (n10_screen_has(input, "stage=")) tag = "N10PMS1";
+    else if (n10_screen_has(input, "attempt=")) tag = "N10TRY1";
+    else if (n10_screen_has(input, "timers=")) tag = "N10PMT1";
+    else if (n10_screen_has(input, "cleared=")) tag = "N10TMR1";
+    else if (n10_screen_has(input, "clean=")) tag = "N10CPU2";
+    else if (n10_screen_has(input, "pages=")) tag = "N10RAM2";
+    else if (n10_screen_has(input, "sha256=")) tag = "N10XNU1";
+    while (tag[n] && n < sizeof(tagged) - 1) { tagged[n] = tag[n]; ++n; }
+    tagged[n++] = ' ';
+    for (i = 0; i < length && n < sizeof(tagged) - 1; ++i) tagged[n++] = input[i];
+    tagged[n] = 0;
+    if (ring->count == N10_SCREEN_LINES) {
+        for (i = 1; i < N10_SCREEN_LINES; ++i)
+            memcpy(ring->line[i - 1], ring->line[i], N10_SCREEN_COLUMNS);
+        --ring->count;
+    }
+    n10_screen_line(ring->line[ring->count++], tagged);
+    return 1;
+}
 /* Compact repeated machine records into a readable terminal line. */
 static inline void n10_screen_line(char *out, const char *in)
 {

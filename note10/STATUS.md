@@ -1,5 +1,12 @@
 # 작업 상태 (2026-10-20, Asia/Seoul)
 
+## 2026-10-27: 커널·XNU 우선, EBUSY 정상 정지 경로 준비
+
+- 사용자 우선순위는 커널 및 iOS 포팅이다. 화면 터미널은 보조 진단으로 진행한다.
+- v8의 세 PM 시도는 모두 동기화 시작 전 활성 wake lock으로 EBUSY를 반환했다. USB·DECON의 정상 정지와 역순 복원을 추가하고 기존 sync/freezer/wakeup 검사를 유지한다.
+- 별도 NOTE10_PM_QUIESCE 설정, 비동기 USB 완료·케이블 변화·드라이버 오류·복원 실패 검사와 체크섬 N10QSC1 기록을 구현하고 PC 검사를 통과했다. 새 실기기 결과는 아직 없다.
+- PM devices-only 왕복이 통과해도 모든 DMA/GIC/MMU/cache 인계 또는 기기 XNU 실행·iOS 부팅을 의미하지 않는다. 다음 빌드의 PC 검사와 실기기 검증을 이어간다.
+
 - 기준 저장소 복제 및 커밋 고정 기록 완료.
 - Note10+ 포팅 계획과 읽기 전용 ADB 수집 도구 작성.
 - 공식 Google Platform-Tools ZIP 다운로드/압축 해제 완료 (`host-tools/`, Git 제외).
@@ -470,3 +477,13 @@ Exynos SoC MASTER 및 플랫폼 archive 입력 분리:
 - 전체 Linux CI 성공: https://github.com/eirblue/ios_note10p/actions/runs/40206140366 (`524286b`). Image 52,576,268 bytes, SHA256 `a86dac6ccd27ac00a095def4a84825dfcf8265644d5a82bada4a114bd1771dbf`. 내장 CPIO·진단 marker 및 CPU/cache 모델의 소스·payload 해시 binding을 확인했다.
 - 실제 BOOT 크기 검증 후 현재 v4 BOOT를 설치 전 기준으로 묶은 진단·원본 복원 ZIP을 비공개 로컬에 생성하고 TWRP RAM에 전송했다. ZIP 2개 해시·네이티브 updater 문법·현재 5개 파티션 검사를 통과했다. 설치·재부팅은 수동 단계다.
 - 이번 진단은 실제 CPU 상태를 바꾸므로 정지·복귀 도중 멈출 수 있으며 새 동작과 TWRP 재진입은 아직 실기기 시험 전이다. Linux MMU/cache는 유지하고 DMA/GIC 인계 및 XNU branch는 포함하지 않는다. 상세 [CPU-CACHE.md](device_test/CPU-CACHE.md).
+
+
+## 2026-10-26: 첫 자동 설치·진단 부팅·TWRP 복귀·로그 수집
+
+- 승인된 소스 c3770b0의 CI 40325362180이 17분 41초에 성공했다. 자동 복귀 C 모델 10개 및 PC 계약/회귀 검사 71개를 통과했다.
+- per-cycle 토큰은 커널의 고정 volatile 데이터 슬롯 32바이트에 넣고, 컴파일 원본과 그 슬롯 외 모든 바이트가 같은지 검증했다. BOOT 명령줄 전달에 의존하지 않는다.
+- TWRP CLI로 1회 설치하고 실제 5개 파티션 해시를 확인한 뒤 System으로 1회 부팅했다. uptime 약 2.319초의 arm과 93.162초의 recovery 요청 각각 16개 체크섬 프레임이 보존됐고, 새로운 TWRP 부팅 ID로 자동 복귀해 원시 로그를 수집했다.
+- RAM 접근·XNU 데이터 적재·CPU/cache는 통과했다. 8개 CPU의 타이머 clear/restore 기록 256개도 정상이다. PM은 3회 모두 EBUSY(16)로 device 단계 전에 중단됐다. 각 시도에 USB·DECON 활성 wakeup source가 관측됐으나 개별 소스 인과관계는 미확정이다.
+- 전체 진단 실패로 반복을 중단했다. 자동 왕복 자체는 성공했지만 반복 허용용 single_cycle_verified는 발급하지 않았다. 복귀 후 BOOT는 이번 진단 이미지이고 recovery/DTB/DTBO/vbmeta는 원본과 일치한다. 기기는 TWRP에 있으며 XNU는 실행하지 않았다.
+- 다음 빌드 요청 확정: 화면 왼쪽 위 가로 1/2 × 세로 1/2(면적 1/4) 터미널 로그 창. 현재 generic console 경로로는 표시 불가하며 DPU 전용 경로가 필요하다. 요구사항/소스 조사는 완료, 구현·실화면 검증은 남았다. 비공개 quarter-screen-preparation-20261026/PLAN.ko.md 참조.

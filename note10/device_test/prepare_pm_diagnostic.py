@@ -10,7 +10,7 @@ def patch_suspend(raw):
     if hashlib.sha256(raw).hexdigest()!=SUSPEND_SHA:raise ValueError('Pinned suspend source differs')
     text=raw.decode()
     changes=[
-        ('#include "power.h"', '#include "power.h"\n#include <linux/note10_pm_contract.h>\n'
+        ('#include "power.h"', '#include "power.h"\n#include <linux/note10_pm_contract.h>\n#include <linux/note10_pm_quiesce.h>\n'
          'static struct task_struct *n10_pm_owner;\nstatic struct n10_pm_result *n10_pm_active;'),
         ('static int enter_state(suspend_state_t state)\n{\n\tint error;',
          'static int enter_state(suspend_state_t state)\n{\n\tint error;\n\tbool n10_test = false;\n\tint n10_old_level = TEST_NONE;'),
@@ -52,6 +52,7 @@ def prepare(source):
     path=source/'kernel/power/suspend.c'
     patched=patch_suspend(path.read_bytes())
     targets={source/'include/linux/note10_pm_contract.h':HERE/'pm_test_contract.h',
+             source/'include/linux/note10_pm_quiesce.h':HERE/'pm_quiesce_core.h',
              path.with_name('note10_pm_devices_backend.c'):HERE/'pm_devices_backend.c'}
     if any(p.exists() for p in targets):raise ValueError('Existing PM diagnostic extension')
     for target,original in targets.items():target.write_bytes(original.read_bytes())
@@ -60,4 +61,5 @@ def prepare(source):
         'pm_timer_source_sha256':hashlib.sha256((HERE/'pm_timer_roundtrip.c').read_bytes()).hexdigest(),
         'pm_backend_source_sha256':hashlib.sha256((HERE/'pm_devices_backend.c').read_bytes()).hexdigest(),
         'pm_contract_sha256':hashlib.sha256((HERE/'pm_test_contract.h').read_bytes()).hexdigest(),
+        'pm_quiesce_contract_sha256':hashlib.sha256((HERE/'pm_quiesce_core.h').read_bytes()).hexdigest(),
         'patched_suspend_sha256':hashlib.sha256(patched).hexdigest()}

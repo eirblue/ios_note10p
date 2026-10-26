@@ -61,6 +61,8 @@ def collect(packages,kernel_build,adb):
         raise ValueError('Reservation package pair required')
     result=json.loads((kernel_build/'build-result.json').read_text())
     image=(kernel_build/'Image').read_bytes()
+    from pm_quiesce_binding import assert_scope as assert_quiesce_scope
+    assert_quiesce_scope(kernel_build,result)
     if result.get('build_passed') is not True or result.get('early_xnu_reservation') is not True:
         raise ValueError('Successful reservation kernel build required')
     digest=hashlib.sha256(image).hexdigest()
@@ -71,6 +73,9 @@ def collect(packages,kernel_build,adb):
     xnu_stage=result.get('xnu_payload_stage_diagnostic') is True
     cpu_cache=result.get('cpu_cache_roundtrip_diagnostic') is True
     pm_timer=result.get('pm_timer_diagnostic') is True
+    pm_quiesce=result.get('pm_quiesce_diagnostic') is True
+    if pm_quiesce and (not pm_timer or result.get('pm_quiesce_evidence_version')!=1):
+        raise ValueError('Invalid PM quiesce build contract')
     auto_return=result.get('auto_return_diagnostic') is True
     if pm_timer and (not cpu_cache or result.get('pm_timer_evidence_version')!=1):raise ValueError('Invalid PM/timer batch contract')
     if cpu_cache and not xnu_stage:raise ValueError('CPU/cache batch requires XNU staging')
@@ -88,6 +93,8 @@ def collect(packages,kernel_build,adb):
     cycle=paired.get('auto_cycle_token')
     if auto_return and (result.get('auto_return_evidence_version')!=1 or not re.fullmatch(r'[0-9a-f]{32}',cycle or '')):raise ValueError('Invalid auto-return cycle contract')
     if (paired.get('pm_timer_diagnostic') is True)!=pm_timer:raise ValueError('PM/timer package and kernel scope differ')
+    if bool(paired.get('pm_quiesce_diagnostic'))!=pm_quiesce or (pm_quiesce and paired.get('pm_quiesce_evidence_version')!=1):
+        raise ValueError('PM quiesce package and kernel contract differs')
     if xnu_stage and (paired.get('xnu_payload_sha256')!=result.get('xnu_payload_sha256') or
                       paired.get('xnu_payload_size')!=result.get('xnu_payload_size')):
         raise ValueError('XNU payload package and kernel build differ')
@@ -146,6 +153,9 @@ def collect(packages,kernel_build,adb):
             if result.get('pm_failure_stage_evidence_version')==1:
                 from decode_pm_timer import decode_stages
                 report['pm_failure_stage_observation']=decode_stages(text,evidence_id)
+            if pm_quiesce:
+                from decode_pm_timer import decode_quiescence
+                report['pm_quiesce_observation']=decode_quiescence(text,evidence_id,require_success=False)
             if evidence_id is None and banner not in text:
                 raise ValueError('Exact source build banner not observed')
             observation=decode_frames(text,evidence_id) if evidence_id else decode(text)
@@ -167,7 +177,7 @@ def collect(packages,kernel_build,adb):
                 report['previous_boot_cpu_cache_roundtrip_observed']=True
                 observation['cpu_cache_roundtrip']=cpu_observation
             if pm_timer:
-                observation['pm_timer']=decode_pm_timer(text,evidence_id,result['xnu_payload_sha256'],result['xnu_payload_size'])
+                observation['pm_timer']=decode_pm_timer(text,evidence_id,result['xnu_payload_sha256'],result['xnu_payload_size'],require_quiesce=pm_quiesce)
                 report['previous_boot_pm_timer_observed']=True
         except ValueError as error:
             report['decode_failures'][name]=str(error);continue

@@ -21,6 +21,57 @@ static unsigned int n10_screen_waits;
 static void n10_screen_worker(struct work_struct *work);
 static DECLARE_DELAYED_WORK(n10_screen_work, n10_screen_worker);
 
+static int n10_screen_restore_if_active(void)
+{
+    struct decon_device *decon = get_decon_drvdata(0);
+    int ret;
+    if (!decon) return -ENODEV;
+    ret = dpu_note10_screen_restore(decon);
+    if (ret) pr_err("N10DSP2 restore_error=%d\n", ret);
+    return ret;
+}
+
+/* Direct producer bridge: this runs from early init/PM paths, never printk. */
+void n10_screen_frame(const char *text, unsigned int length)
+{
+    unsigned long flags;
+    if (READ_ONCE(n10_screen_stopped) ||
+        !spin_trylock_irqsave(&n10_screen_ring_lock, flags))
+        return;
+    if (n10_screen_record(&n10_screen_ring, text, length))
+        ++n10_screen_generation;
+    spin_unlock_irqrestore(&n10_screen_ring_lock, flags);
+}
+
+/* Bounded internal lifecycle/frame evidence, independent of console loglevel. */
+void n10_screen_event(const char *text, unsigned int length)
+{
+    unsigned long flags;
+    unsigned int i;
+    char line[256];
+    if (!text || !length || length >= sizeof(line) ||
+        READ_ONCE(n10_screen_stopped) ||
+        !spin_trylock_irqsave(&n10_screen_ring_lock, flags))
+        return;
+    for (i = 0; i < length; ++i) {
+        unsigned char ch = (unsigned char)text[i];
+        if (ch < 32 || ch > 126) {
+            spin_unlock_irqrestore(&n10_screen_ring_lock, flags);
+            return;
+        }
+        line[i] = (char)ch;
+    }
+    line[length] = 0;
+    if (n10_screen_ring.count == N10_SCREEN_LINES) {
+        memmove(n10_screen_ring.line[0], n10_screen_ring.line[1],
+                (N10_SCREEN_LINES - 1) * N10_SCREEN_COLUMNS);
+        --n10_screen_ring.count;
+    }
+    n10_screen_line(n10_screen_ring.line[n10_screen_ring.count++], line);
+    ++n10_screen_generation;
+    spin_unlock_irqrestore(&n10_screen_ring_lock, flags);
+}
+
 /* Console context: bounded copies only; no display calls or allocations. */
 static void n10_screen_console_write(struct console *con, const char *s, unsigned int n)
 {
@@ -61,13 +112,15 @@ static struct console n10_screen_console = {
 };
 
 /* Called before PM owns pm_mutex or enters any freezer/device phase. */
-void n10_screen_pause(bool paused)
+int n10_screen_pause(bool paused)
 {
+    int ret = 0;
     WRITE_ONCE(n10_screen_paused, paused);
     if (paused && n10_screen_queue) {
         cancel_delayed_work_sync(&n10_screen_work);
         mutex_lock(&n10_screen_paint_lock);
         mutex_unlock(&n10_screen_paint_lock);
+        ret = n10_screen_restore_if_active();
     } else if (!paused && n10_screen_queue && !READ_ONCE(n10_screen_stopped)) {
         queue_delayed_work(n10_screen_queue, &n10_screen_work, msecs_to_jiffies(500));
     }
@@ -142,7 +195,7 @@ static int n10_screen_submit(struct decon_device *decon, unsigned int index)
     data.config[DECON_WIN_UPDATE_IDX].state = DECON_WIN_STATE_UPDATE;
     data.config[DECON_WIN_UPDATE_IDX].color = N10_SCREEN_MAGIC;
     data.config[DECON_WIN_UPDATE_IDX].dst = config->dst;
-    WRITE_ONCE(n10_screen_last_error, 0);
+    WRITE_ONCE(n10_screen_last_error, -EINPROGRESS);
     ret = decon_set_win_config(decon, &data);
     if (!ret && data.retire_fence >= 0) fence = sync_file_get_fence(data.retire_fence);
     if (data.retire_fence >= 0) sys_close(data.retire_fence);
@@ -202,6 +255,7 @@ again:
         queue_delayed_work(n10_screen_queue, &n10_screen_work, msecs_to_jiffies(500));
     return;
 stopped:
+    n10_screen_restore_if_active();
     WRITE_ONCE(n10_screen_stopped, true);
     pr_info("N10DSP1 stopped error=%d visual_verified=0\n", ret);
 }
@@ -215,11 +269,14 @@ static int n10_screen_reboot(struct notifier_block *nb, unsigned long action, vo
 static struct notifier_block n10_screen_reboot_notifier = { .notifier_call = n10_screen_reboot };
 static int __init n10_screen_init(void)
 {
+    unsigned long flags;
     n10_screen_queue = alloc_workqueue("n10_screen", WQ_UNBOUND | WQ_FREEZABLE, 1);
     if (!n10_screen_queue) return -ENOMEM;
-    strlcpy(n10_screen_ring.line[0], "NOTE10 diagnostic log / top-left 1/4", N10_SCREEN_COLUMNS);
-    n10_screen_ring.count = 1;
-    n10_screen_generation = 1;
+    /* A direct checksummed frame may arrive before this late initcall. */
+    spin_lock_irqsave(&n10_screen_ring_lock, flags);
+    if (n10_screen_seed_title(&n10_screen_ring,
+            "NOTE10 diagnostic log / top-left 1/4")) ++n10_screen_generation;
+    spin_unlock_irqrestore(&n10_screen_ring_lock, flags);
     register_reboot_notifier(&n10_screen_reboot_notifier);
     register_console(&n10_screen_console);
     queue_delayed_work(n10_screen_queue, &n10_screen_work, msecs_to_jiffies(1000));

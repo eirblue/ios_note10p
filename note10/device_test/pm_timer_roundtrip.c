@@ -99,6 +99,23 @@ static void n10_pm_worker(struct work_struct *unused)
     error = n10_pm_devices_test(&pm);
     after = n10_online_bits();
     n10_cpu_checkpoint(7, after);
+#ifdef CONFIG_NOTE10_PM_QUIESCE
+    /* Preserve failed quiesce/restore evidence as well as a successful PM run. */
+    for (sequence = 0; sequence < 8; ++sequence) {
+#define N10_QERR(value) ((unsigned int)((value) < 0 ? -(long long)(value) : (value)))
+        int count = scnprintf(frame, sizeof(frame),
+            "id=%s seq=%u attempt=%u version=1 generation=%u epoch=%u phase=%u called=%u restored=%u screen=%u display=%u usb=%u wake=%u r_usb=%u r_display=%u r_screen=%u",
+            N10_RESERVE_BUILD_ID, (n10_pm_attempts - 1) * 8 + sequence,
+            n10_pm_attempts, pm.qgeneration, pm.cable_epoch, pm.qphase,
+            pm.pm_called, pm.quiesce_restored,
+            N10_QERR(pm.screen_error), N10_QERR(pm.display_error),
+            N10_QERR(pm.usb_error), N10_QERR(pm.wake_error),
+            N10_QERR(pm.usb_restore_error), N10_QERR(pm.display_restore_error),
+            N10_QERR(pm.screen_restore_error));
+        pr_info("N10QSC1 %s checksum=%08x\n", frame, n10_frame_checksum(frame, count));
+#undef N10_QERR
+    }
+#endif
     for (sequence = 0; sequence < 8; ++sequence) {
         int count = scnprintf(frame, sizeof(frame),
             "id=%s seq=%u attempt=%u error=%u devices=%u resume=%u blocked=%u oldlevel=%u newlevel=%u resume_errors=%u",
@@ -123,6 +140,10 @@ static void n10_pm_worker(struct work_struct *unused)
          */
         if (error == -EBUSY && pm.error == -EBUSY && !pm.devices && !pm.resumed &&
             !pm.blocked && !pm.old_level && !pm.new_level &&
+#ifdef CONFIG_NOTE10_PM_QUIESCE
+            pm.quiesce_restored && !pm.usb_restore_error &&
+            !pm.display_restore_error && !pm.screen_restore_error &&
+#endif
             pm.resume_errors_before == pm.resume_errors_after) {
             status = 6;
             if (after != before)

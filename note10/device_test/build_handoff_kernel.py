@@ -116,6 +116,16 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
         if screen_log:
             from prepare_screen_log import prepare as prepare_screen
             report.update(prepare_screen(source))
+        if pm_timer:
+            from prepare_pm_quiesce import prepare as prepare_quiesce
+            report.update(prepare_quiesce(source,report if screen_log else None))
+            run([sys.executable,str(ROOT/'note10/device_test/test_pm_quiesce_native.py'),
+                 '--decon-core',str(source/'drivers/video/fbdev/exynos/dpu20/decon_core.c'),
+                 '--output',str(OUT/'pm-quiesce-model')],'03-quiesce-model.log')
+            run([sys.executable,str(ROOT/'note10/device_test/test_pm_usb_native.py'),
+                 '--usb-helper',str(source/'drivers/usb/notify/note10_pm_usb_quiesce.c'),
+                 '--output',str(OUT/'pm-usb-model')],'03-usb-quiesce-model.log')
+            report['scope']='Owned normal display/USB quiesce and restore around the unchanged devices-only PM test; no DMA/GIC/MMU handoff or XNU branch'
         report['public_defconfig_sha256']=hashlib.sha256(defconfig.read_bytes()).hexdigest()
         make=['make','-C',str(source),'O='+str(objects),'ARCH=arm64',
               'CC=clang-14','CROSS_COMPILE=aarch64-linux-gnu-',
@@ -140,6 +150,7 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
                  '--disable','CMDLINE_FROM_BOOTLOADER','--disable','CMDLINE_FORCE',
                  '--enable','CMDLINE_EXTEND','--enable','INITRAMFS_FORCE'],'02-initramfs.log')
         if screen_log:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_SCREEN_LOG'],'02-screen-log.log')
+        if pm_timer:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_PM_QUIESCE'],'02-pm-quiesce.log')
         run([*make,'olddefconfig'],'03-olddefconfig.log')
         configured=config.read_text()
         required=('CONFIG_KEXEC=y','CONFIG_KEXEC_CORE=y','CONFIG_PM_SLEEP_SMP=y','CONFIG_ARM64_4K_PAGES=y')
@@ -150,11 +161,19 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
         if screen_log:required+=('CONFIG_NOTE10_SCREEN_LOG=y','CONFIG_EXYNOS_WINDOW_UPDATE=y','CONFIG_EXYNOS_DPU20=y')
         if auto_return:required+=('CONFIG_EXYNOS_REBOOT=y','CONFIG_SEC_REBOOT=y')
         if pm_timer:required+=('CONFIG_SUSPEND=y','CONFIG_PM_SLEEP_DEBUG=y','CONFIG_PM_DEBUG=y')
+        if pm_timer:required+=('CONFIG_NOTE10_PM_QUIESCE=y','CONFIG_USB_NOTIFY_LAYER=y','CONFIG_USB_NOTIFIER=y','CONFIG_USB_DWC3=y','CONFIG_USB_DWC3_EXYNOS=y')
         missing=[line for line in required if line not in configured.splitlines()]
         if missing:raise ValueError('Required Kconfig options missing: '+', '.join(missing))
         report['effective_config_sha256']=hashlib.sha256(config.read_bytes()).hexdigest()
         if caps:run([*make,'drivers/misc/note10_handoff_caps.o'],'04-caps-object.log')
         if reserve:run([*make,'arch/arm64/mm/init.o'],'04-reservation-object.log')
+        if pm_timer:
+            targets=['kernel/power/suspend.o','drivers/usb/notify/usb_notify.o',
+                     'drivers/usb/notify/usb_notifier.o','drivers/usb/dwc3/otg.o',
+                     'drivers/usb/dwc3/dwc3-exynos.o','drivers/video/fbdev/exynos/dpu20/decon_core.o']
+            if screen_log:targets+=['drivers/video/fbdev/exynos/dpu20/cal_9820/decon_reg.o',
+                                   'drivers/video/fbdev/exynos/dpu20/cal_9820/dsim_reg.o']
+            run([*make,'-j2',*targets],'04-quiesce-objects.log')
         run([*make,'-j'+str(min(os.cpu_count() or 2,8)),'Image'],'04-build.log',timeout=1500)
         image=objects/'arch/arm64/boot/Image'
         with image.open('rb') as stream:header=stream.read(64)
@@ -179,6 +198,10 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
         if pm_timer and any(marker not in target.read_bytes() for marker in (b'N10PMT1',b'N10TMR1',b'N10BND1',b'N10TRY1')):
             raise ValueError('PM/timer evidence markers missing from Linux Image')
         if pm_timer and b'N10PMS1' not in target.read_bytes():raise ValueError('PM failure stage marker missing')
+        if pm_timer and b'N10QSC1' not in target.read_bytes():raise ValueError('PM quiesce marker missing')
+        if pm_timer:
+            from pm_quiesce_binding import validate_model as validate_quiesce
+            validate_quiesce(OUT,report)
         if screen_log and b'N10DSP1' not in target.read_bytes():raise ValueError('Screen log marker missing')
         if auto_return:
             from materialize_auto_cycle import SLOT

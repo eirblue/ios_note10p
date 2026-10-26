@@ -8,7 +8,8 @@ def frames(text,tag,names,identity,maximum):
     pattern=tag+' ('+' '.join(name+'=([0-9a-f]+)' for name in names)+r') checksum=([0-9a-f]{8})(?=\r?\n|$)'
     records={}
     decimal={'stage','attempt','seq','cpu','cpus','words','clean','status','devices','resume','blocked','oldlevel','newlevel',
-             'resume_errors','timers','error'}
+             'resume_errors','timers','error','version','generation','epoch','phase','called',
+             'screen','display','usb','wake','r_usb','r_display','r_screen'}
     for match in re.finditer(pattern,text):
         body,*values,digest=match.groups()
         row=dict(zip(names,values))

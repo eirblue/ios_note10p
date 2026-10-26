@@ -40,6 +40,10 @@ def verify_packages(directory):
             if meta.get('auto_return_diagnostic') and (meta.get('mode')!='diagnostic' or not meta.get('pm_timer_diagnostic') or not re.fullmatch('[0-9a-f]{32}',meta.get('auto_cycle_token',''))):raise ValueError('Invalid auto-return manifest')
             if meta.get('pm_timer_diagnostic') is True and meta.get('cpu_cache_roundtrip_diagnostic') is not True:
                 raise ValueError('PM/timer must explicitly require CPU/cache batch')
+            if bool(meta.get('pm_quiesce_diagnostic'))!=bool(record.get('pm_quiesce_diagnostic')) or meta.get('pm_quiesce_evidence_version')!=record.get('pm_quiesce_evidence_version'):
+                raise ValueError('PM quiesce package record differs')
+            if meta.get('pm_quiesce_diagnostic') and (meta.get('mode')!='diagnostic' or not meta.get('pm_timer_diagnostic') or meta.get('pm_quiesce_evidence_version')!=1):
+                raise ValueError('Invalid PM quiesce manifest')
             if hashlib.sha256(archive.read('META-INF/com/google/android/update-binary')).hexdigest()!=meta['updater_sha256']:
                 raise ValueError('Updater integrity mismatch')
             if hashlib.sha256(archive.read('boot.img')).hexdigest()!=meta['payload_sha256']:

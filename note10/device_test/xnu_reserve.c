@@ -19,8 +19,14 @@ static u32 n10_frame_checksum(const char *text, unsigned int length)
 {
     u32 value = 2166136261U;
     unsigned int i;
+#ifdef CONFIG_NOTE10_SCREEN_LOG
+    extern void n10_screen_frame(const char *text, unsigned int length);
+#endif
     for (i = 0; i < length; ++i)
         value = (value ^ (unsigned char)text[i]) * 16777619U;
+#ifdef CONFIG_NOTE10_SCREEN_LOG
+    n10_screen_frame(text, length);
+#endif
     return value;
 }
 
