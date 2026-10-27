@@ -7,7 +7,9 @@ def decode(text,identity,generation):
     phases={}
     for row in rows.values():
         phase=row['phase']
-        if (phase>=3 or row['seq']%3!=phase or row['generation']!=generation or not generation or row['seen']!=1 or
+        completed=(row['generation']+1)&0xffffffff
+        if not completed:completed=1
+        if (phase>=3 or row['seq']%3!=phase or completed!=generation or not row['generation'] or row['seen']!=1 or
             row['error'] or row['status'] or not 0<row['dma']<=row['total']<=4096 or
             row['suspended']+row['direct']+row['syscore']+row['uncovered']!=row['dma'] or
             row['active']+row['idle']+row['other']!=row['dma'] or row['prepared']>row['dma'] or

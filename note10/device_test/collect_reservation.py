@@ -14,6 +14,12 @@ from decode_linux_caps import decode as decode_caps
 from run_probe import ROOT,Adb,preflight
 from stage_phase2 import verify_packages
 
+def decode_dma_pm_observation(text,identity,pm_observation):
+    from decode_dma_pm import decode as decode_dma
+    generations=pm_observation['quiescence']['attempts']
+    generation=generations[max(generations,key=int)]['result']['generation']
+    return decode_dma(text,identity,generation)
+
 
 def select_latest_boot(data,expected_banner,allow_panic_corroboration=False,boot_binding_id=None):
     """Select one contiguous boot using an intact zero-time Linux banner.
@@ -192,10 +198,7 @@ def collect(packages,kernel_build,adb):
                 observation['gic_cpu_roundtrip']=decode_gic(text,evidence_id)
                 report['previous_boot_gic_roundtrip_observed']=True
             if dma_pm_audit:
-                from decode_dma_pm import decode as decode_dma
-                generations=observation['pm_timer']['quiescence']['attempts']
-                generation=generations[str(max(map(int,generations)))]['result']['generation']
-                observation['dma_pm_audit']=decode_dma(text,evidence_id,generation)
+                observation['dma_pm_audit']=decode_dma_pm_observation(text,evidence_id,observation['pm_timer'])
                 report['previous_boot_dma_pm_audit_observed']=True
         except ValueError as error:
             report['decode_failures'][name]=str(error);continue

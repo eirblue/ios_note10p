@@ -66,8 +66,8 @@ static void setup(unsigned int phase){
 '''
 MAIN=r'''
 int main(int argc,char**argv){
- unsigned int phase,generation;struct device copy[4097];
- mode=atoi(argv[1]);generation=mode==2?0:2;
+ unsigned int phase,generation,completed;struct device copy[4097];
+ mode=atoi(argv[1]);generation=mode==2?0:(mode==14?0xffffffffU:1);
  if(n10_dma_pm_read(NULL,2)!=-EINVAL)return 80;
  for(phase=0;phase<3;++phase){
   setup(phase);memcpy(copy,devices,sizeof(devices));
@@ -77,7 +77,8 @@ int main(int argc,char**argv){
   if(locked || memcmp(copy,devices,sizeof(devices)))return 81;
  }
  if(mode==11)n10_dma_pm_samples[1].runtime_active++;
- n10_report_dma_pm(generation);return 0;
+ completed=generation+1;if(!completed)completed=1;
+ n10_report_dma_pm(mode==13?generation:completed);return 0;
 }
 '''
 
@@ -96,13 +97,13 @@ def run(output):
     (output/'compile.log').write_bytes(built.stdout+built.stderr)
     if built.returncode:raise RuntimeError('DMA actual-C model compilation failed')
     rows=[]
-    for mode in range(13):
+    for mode in range(15):
         ran=subprocess.run([str(exe),str(mode)],capture_output=True,timeout=15)
         (output/f'mode-{mode}.log').write_bytes(ran.stdout+ran.stderr)
         if ran.returncode:raise ValueError('DMA read-only backend model failed mode '+str(mode))
-        try:decode(ran.stdout.decode(),ID,2);accepted=True
+        try:decode(ran.stdout.decode(),ID,1 if mode==14 else 2);accepted=True
         except ValueError:accepted=False
-        if accepted!=(mode in (0,9,10)):raise ValueError('DMA strict decoder differs mode '+str(mode))
+        if accepted!=(mode in (0,9,10,14)):raise ValueError('DMA strict decoder differs mode '+str(mode))
         rows.append(dict(mode=mode,accepted=accepted,passed=True))
     result=dict(passed=True,cases=len(rows),outcomes=rows,source_sha256={n:hashlib.sha256(raw).hexdigest() for n,raw in sources.items()},
         harness_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),actual_backend_executed=True,actual_probe_executed=True,strict_decoder_verified=True,hardware_verified=False)

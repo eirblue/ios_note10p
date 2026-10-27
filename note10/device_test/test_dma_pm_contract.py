@@ -15,7 +15,7 @@ def evidence(change=None):
     decimal={'seq','phase','generation','error','status'}
     for seq in range(2):
         for phase in range(3):
-            row=dict(seq=seq*3+phase,phase=phase,generation=2,seen=1,error=0,total=24,dma=16,
+            row=dict(seq=seq*3+phase,phase=phase,generation=1,seen=1,error=0,total=24,dma=16,
                 suspended=16 if phase==1 else 0,direct=0,syscore=0,uncovered=0 if phase==1 else 16,
                 prepared=16 if phase==1 else 0,active=8,idle=4,other=4,names_xor=0x1234,names_sum=0x87654321,status=0)
             if change:change(phase,seq,row)
@@ -57,7 +57,7 @@ class BindingTests(unittest.TestCase):
         actual={n:hashlib.sha256((HERE/n).read_bytes()).hexdigest() for n in SOURCES}
         self.build=dict(dma_pm_audit_diagnostic=True,dma_pm_audit_evidence_version=1,gic_roundtrip_diagnostic=True,
             pm_quiesce_diagnostic=True,auto_return_diagnostic=True,dma_pm_audit_sources_sha256=actual,dma_pm_audit_source_pin=PIN)
-        self.model=dict(passed=True,cases=13,outcomes=[dict(mode=i,passed=True,accepted=i in (0,9,10)) for i in range(13)],source_sha256=actual,
+        self.model=dict(passed=True,cases=15,outcomes=[dict(mode=i,passed=True,accepted=i in (0,9,10,14)) for i in range(15)],source_sha256=actual,
             actual_backend_executed=True,actual_probe_executed=True,strict_decoder_verified=True,hardware_verified=False,
             harness_sha256=hashlib.sha256((HERE/'test_dma_pm_native.py').read_bytes()).hexdigest())
         (self.root/'Image').write_bytes(b'PC FIXTURE N10DMA1');(self.root/'handoff.config').write_bytes(b'CONFIG_NOTE10_DMA_PM_AUDIT=y\n')

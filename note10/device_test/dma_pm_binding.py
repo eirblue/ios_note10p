@@ -21,9 +21,9 @@ def validate_model(root,build):
         raise ValueError('DMA PM audit source binding differs')
     model=json.loads((Path(root)/'dma-pm-model/result.json').read_text())
     rows=model.get('outcomes',[])
-    if (model.get('passed') is not True or model.get('cases')!=13 or len(rows)!=13 or
-        {r.get('mode') for r in rows}!=set(range(13)) or
-        any(r.get('passed') is not True or r.get('accepted')!=(r.get('mode') in (0,9,10)) for r in rows) or
+    if (model.get('passed') is not True or model.get('cases')!=15 or len(rows)!=15 or
+        {r.get('mode') for r in rows}!=set(range(15)) or
+        any(r.get('passed') is not True or r.get('accepted')!=(r.get('mode') in (0,9,10,14)) for r in rows) or
         model.get('source_sha256')!=actual or model.get('actual_backend_executed') is not True or
         model.get('actual_probe_executed') is not True or model.get('strict_decoder_verified') is not True or
         model.get('harness_sha256')!=hashlib.sha256((HERE/'test_dma_pm_native.py').read_bytes()).hexdigest() or

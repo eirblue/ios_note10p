@@ -65,11 +65,15 @@ out:
 
 int n10_dma_pm_read(struct n10_dma_pm_sample *out, unsigned int generation)
 {
-    unsigned int phase;
+    unsigned int phase, begin, completed;
     if (!out || !generation) return -EINVAL;
     memcpy(out, n10_dma_pm_samples, sizeof(n10_dma_pm_samples));
+    begin = out[0].generation;
+    completed = begin + 1;
+    if (!completed) completed = 1; /* USB ownership generations skip zero. */
+    if (!begin || generation != completed) return -EIO;
     for (phase = 0; phase < 3; ++phase)
         if (out[phase].seen != 1 || out[phase].error ||
-            out[phase].phase != phase || out[phase].generation != generation) return -EIO;
+            out[phase].phase != phase || out[phase].generation != begin) return -EIO;
     return 0;
 }

@@ -25,6 +25,15 @@ class FakeAdb:
 
 class CollectorTests(unittest.TestCase):
     identity='0123456789abcdef0123456789abcdef'
+    def test_dma_generation_from_actual_pm_decoder_and_saved_json(self):
+        from decode_pm_timer import decode_quiescence
+        from test_pm_quiesce_decode import record
+        from test_dma_pm_contract import evidence,ID
+        pm={'quiescence':decode_quiescence(record(0,id=ID,generation=2)+record(1,id=ID,generation=2),ID)}
+        for value in (pm,json.loads(json.dumps(pm))):
+            self.assertTrue(collector.decode_dma_pm_observation(evidence(),ID,value)['dma_pm_framework_observed'])
+        pm['quiescence']['attempts'][1]['result']['generation']=3
+        with self.assertRaises(ValueError):collector.decode_dma_pm_observation(evidence(),ID,pm)
     def frame(self,seq):
         body=(f'id={self.identity} seq={seq} base=a00000000 size=10000000 align=2000000 '
               'pages=65536 reserved=65536 invalid=0 shift=12')
