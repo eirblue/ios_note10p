@@ -59,3 +59,29 @@ observer; independent hardware DMA-idle and XNU execution remain unverified.
 
 The host-only battery policy update passed 169 regression tests. It changes
 neither this compiled kernel nor its model/source bindings.
+
+## Held-clock HCI extension (version 2, physical test pending)
+
+`N10UFS2` retains the three driver snapshots and adds a single hardware read
+sample from the pinned `ufshcd_suspend` callback, after host IRQ disable and
+before reset-low or clock-disable calls. The original callback already holds
+clocks and suspends gating. No new clock hold, PM request, IRQ operation or
+controller write is introduced. The observer requires powered/mapped HCI,
+CLKS_ON, gating suspended, PM in progress, IRQ disabled, power-down/link-off and
+empty software masks before issuing three bounded reads under the host lock.
+It reads controller enable and transfer/task doorbells; the strict decoder
+requires controller disabled and both doorbells empty. Any unsupported state,
+missing or duplicate callback, wrong owner/generation or nonzero value fails.
+No read occurs from the later clock-off driver snapshot.
+
+Arming is bound to the controller and capture generation. Phase 1 consumes and
+disarms it, including lookup/lock failures; phase 2 cancels any leftover observer
+after failed suspend. The native model checks read eligibility, both lock and
+IRQ restoration, unchanged device state, and complete disarming in 42 cases.
+The exact pinned callback preparation hash and its hold/IRQ/reset/clock order
+are checked separately. All 170 host regression tests passed locally.
+
+These observations describe one callback boundary; they do not establish
+persistent DMA shutdown, other DMA engines or safe XNU/GIC/MMU ownership.
+The version 1 physical result above remains historical evidence only. The
+version 2 kernel must complete its own build and fresh single physical test.

@@ -48,7 +48,7 @@ on:
         default: false
 
       ufs_pm_audit:
-        description: Read-only UFS driver queue/link/clock/IRQ observations; requires dma_pm_audit
+        description: Read-only UFS PM snapshots and held-clock HCI reads; requires dma_pm_audit
         type: boolean
         default: false
 

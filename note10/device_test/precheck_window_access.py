@@ -71,7 +71,7 @@ def check(packages,kernel_build,backup,core_model,gate_model,init_model,adb):
         if ufs_pm_audit!=bool(paired.get('ufs_pm_audit_diagnostic')) or ufs_pm_audit!=bool(diagnostic.get('ufs_pm_audit_diagnostic')):
             raise ValueError('UFS PM package scope differs from actual Image/config')
         if ufs_pm_audit:
-            if paired.get('ufs_pm_audit_evidence_version')!=1 or diagnostic.get('ufs_pm_audit_evidence_version')!=1:
+            if paired.get('ufs_pm_audit_evidence_version')!=2 or diagnostic.get('ufs_pm_audit_evidence_version')!=2:
                 raise ValueError('UFS PM package evidence version differs')
             validate_ufs(kernel_build,build)
         if not (build.get('build_passed') is True and build.get('window_access_diagnostic') is True and

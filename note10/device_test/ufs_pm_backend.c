@@ -9,22 +9,23 @@ void n10_ufs_pm_capture(unsigned int phase, unsigned int generation)
     struct n10_ufs_pm_sample *s;
     struct device_node *node;
     struct platform_device *pdev;
-    struct ufs_hba *hba;
+    struct ufs_hba *hba = NULL;
     unsigned long flags;
     if (phase >= 3) return;
+    if (phase == 2) n10_ufs_hci_arm(NULL, 0);
     if (!phase && (!n10_ufs_samples[0].seen || n10_ufs_samples[0].generation != generation))
         memset(n10_ufs_samples, 0, sizeof(n10_ufs_samples));
     s = &n10_ufs_samples[phase];
-    if (s->seen++) { s->error = 1; return; }
+    if (s->seen++) { s->error = 1; goto finish; }
     s->phase = phase;
     s->generation = generation;
     if (!generation || (phase && (n10_ufs_samples[phase - 1].seen != 1 ||
-        n10_ufs_samples[phase - 1].generation != generation))) { s->error = 2; return; }
+        n10_ufs_samples[phase - 1].generation != generation))) { s->error = 2; goto finish; }
     node = of_find_compatible_node(NULL, NULL, "samsung,exynos-ufs");
-    if (!node) { s->error = 3; return; }
+    if (!node) { s->error = 3; goto finish; }
     pdev = of_find_device_by_node(node);
     of_node_put(node);
-    if (!pdev) { s->error = 4; return; }
+    if (!pdev) { s->error = 4; goto finish; }
     s->error = 5;
     if (!device_trylock(&pdev->dev)) goto put;
     s->error = 6;
@@ -45,11 +46,14 @@ void n10_ufs_pm_capture(unsigned int phase, unsigned int generation)
     s->gating = hba->clk_gating.is_suspended;
     s->runtime = READ_ONCE(pdev->dev.power.runtime_status);
     spin_unlock_irqrestore(hba->host->host_lock, flags);
+    if (!phase) n10_ufs_hci_arm(hba, generation);
     s->error = 0;
 unlock:
     device_unlock(&pdev->dev);
 put:
     put_device(&pdev->dev);
+finish:
+    if (phase == 1) n10_ufs_hci_finish(hba, generation, s);
 }
 
 int n10_ufs_pm_read(struct n10_ufs_pm_sample *out, unsigned int completed)

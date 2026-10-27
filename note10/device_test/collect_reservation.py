@@ -115,7 +115,7 @@ def collect(packages,kernel_build,adb):
         raise ValueError('PM quiesce package and kernel contract differs')
     if bool(paired.get('dma_pm_audit_diagnostic'))!=dma_pm_audit or (dma_pm_audit and paired.get('dma_pm_audit_evidence_version')!=1):
         raise ValueError('DMA PM package and kernel contract differs')
-    if bool(paired.get('ufs_pm_audit_diagnostic'))!=ufs_pm_audit or (ufs_pm_audit and paired.get('ufs_pm_audit_evidence_version')!=1):
+    if bool(paired.get('ufs_pm_audit_diagnostic'))!=ufs_pm_audit or (ufs_pm_audit and paired.get('ufs_pm_audit_evidence_version')!=2):
         raise ValueError('UFS PM package and kernel contract differs')
     if xnu_stage and (paired.get('xnu_payload_sha256')!=result.get('xnu_payload_sha256') or
                       paired.get('xnu_payload_size')!=result.get('xnu_payload_size')):
