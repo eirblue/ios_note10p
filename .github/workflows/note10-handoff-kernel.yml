@@ -48,7 +48,7 @@ on:
         default: false
 
       ufs_pm_audit:
-        description: Bundle UFS/HCI, IOMMU, ABOX firmware guard and bounded PMU observations; requires dma_pm_audit
+        description: Bundle UFS/HCI, IOMMU, ABOX firmware guard and bounded PMU and 16-domain status observations; requires dma_pm_audit
         type: boolean
         default: false
 

@@ -14,6 +14,25 @@ static const unsigned int n10_abox_pmu_allowed[2][6] = {
     {0x2e00, 1, 0x2e20, 1, 0x2e24, 1},
 };
 
+static const unsigned int n10_pmu_domain_offsets[16][2] = {
+    {0x1900, 0x1904}, /* AUD */
+    {0x1d00, 0x1d04}, /* NPU0 */
+    {0x1d80, 0x1d84}, /* NPU1 */
+    {0x1e00, 0x1e04}, /* DPU */
+    {0x1e80, 0x1e84}, /* DSPM */
+    {0x1f00, 0x1f04}, /* DSPS */
+    {0x2300, 0x2304}, /* G2D */
+    {0x2100, 0x2104}, /* EMBEDDED_G3D */
+    {0x2500, 0x2504}, /* ISPPRE */
+    {0x2400, 0x2404}, /* ISPHQ */
+    {0x2480, 0x2484}, /* ISPLP */
+    {0x2580, 0x2584}, /* IVA */
+    {0x2600, 0x2604}, /* MFC */
+    {0x2a80, 0x2a84}, /* VTS */
+    {0x2200, 0x2204}, /* FSYS0A */
+    {0x2b00, 0x2b04}, /* VRA2 */
+};
+
 void n10_abox_pmu_capture(unsigned int phase, unsigned int generation)
 {
     struct n10_abox_pmu_sample *s;
@@ -79,6 +98,19 @@ void n10_abox_pmu_capture(unsigned int phase, unsigned int generation)
         ret = exynos_pmu_read(n10_abox_pmu_allowed[i][4], &value);
         if (ret) goto out;
         s->standby[i] = value & n10_abox_pmu_allowed[i][5];
+    }
+    /* Fixed CAL fields in PMU_ALIVE, never peripheral registers. Sequential reads.
+     * Re-read configuration to expose changes across each status sample. */
+    for (i = 0; i < 16; ++i) {
+        ret = exynos_pmu_read(n10_pmu_domain_offsets[i][0], &value);
+        if (ret) goto out;
+        s->domain_before |= (value & 1U) << i;
+        ret = exynos_pmu_read(n10_pmu_domain_offsets[i][1], &value);
+        if (ret) goto out;
+        s->domain_state |= (value & 1U) << i;
+        ret = exynos_pmu_read(n10_pmu_domain_offsets[i][0], &value);
+        if (ret) goto out;
+        s->domain_after |= (value & 1U) << i;
     }
     s->error = 0;
     goto out;

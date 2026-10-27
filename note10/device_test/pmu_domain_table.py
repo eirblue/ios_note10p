@@ -1,0 +1,2 @@
+"""Pinned CAL power-domain configuration and status fields, bit zero only."""
+DOMAINS=(('AUD', 6400, 6404), ('NPU0', 7424, 7428), ('NPU1', 7552, 7556), ('DPU', 7680, 7684), ('DSPM', 7808, 7812), ('DSPS', 7936, 7940), ('G2D', 8960, 8964), ('EMBEDDED_G3D', 8448, 8452), ('ISPPRE', 9472, 9476), ('ISPHQ', 9216, 9220), ('ISPLP', 9344, 9348), ('IVA', 9600, 9604), ('MFC', 9728, 9732), ('VTS', 10880, 10884), ('FSYS0A', 8704, 8708), ('VRA2', 11008, 11012))

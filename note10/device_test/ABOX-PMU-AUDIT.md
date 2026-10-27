@@ -69,3 +69,35 @@ balanced. This single cycle does not establish repeated stability, full DMA
 quiescence, hardware ownership handoff or XNU execution. The next source review
 examines DMA status and the existing clock-held disable path; it must not add
 peripheral reads while the device is runtime-suspended.
+
+
+## v27 bundled domain-status extension (physical result pending)
+
+Evidence version 2 preserves the core frames and failed-firmware guard and adds
+`N10PDS1` as a separately required fifteenth evaluation in the same boot.
+The exact Exynos9820 CAL local table and its including `cal_data.c` are pinned.
+Sixteen public-DT domains are covered: AUD, NPU0/1, DPU, DSPM/S, G2D,
+EMBEDDED_G3D, ISPPRE/HQ/LP, IVA, MFC, VTS, FSYS0A and VRA2. Each has an
+explicit configuration and status offset and bit-zero mask from the vendor
+CAL write/read definitions. The DT binds PMU_ALIVE at 0x15860000 (64 KiB),
+which contains every allowlisted field. No peripheral MMIO or inferred
+adjacent status register is used.
+
+After the existing complete ABOX device/tuple validation, the observer uses
+`exynos_pmu_read` to sample configuration, status and configuration again for
+each domain. It records three 16-bit bitmaps, not an atomic shutdown claim.
+Changed configurations and status/control mismatches remain visible. A read
+failure invalidates the complete observation, including zero-valued fields.
+Four checksummed copies per phase are emitted; two matching copies for every
+phase and the existing generation binding are mandatory. Real PMU and
+SOC_EXYNOS9820 configuration plus both Image markers must match metadata and
+package evidence version 2 before installation. The domain table is checked
+against the pinned CAL source and actual C allowlist before building.
+
+The combined actual-C model passes 88 scenarios, including every one of 54
+read failures (six existing core reads plus 48 domain reads), mixed status and
+configuration bitmaps, failed reads, lifetime/lock errors and stale, missing,
+corrupt or malformed evidence. Full PC regression passes 239 tests; retained
+ABOX 105, UFS/HCI 42 and IOMMU 25 source/model digests remain unchanged. Power
+requests, PMU writes and clock changes are absent. A sampled-off domain still
+does not prove global DMA quiescence, repeated stability or XNU execution.

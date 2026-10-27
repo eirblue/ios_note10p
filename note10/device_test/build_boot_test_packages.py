@@ -135,7 +135,7 @@ def build(backup,prototype,output,current_packages=None):
     if abox_pm_audit and (metadata.get('abox_failed_fw_resume_guard') is not True or not iommu_pm_audit or metadata.get('abox_pm_audit_evidence_version')!=8):
         raise ValueError('Incomplete ABOX PM audit package contract')
     abox_pmu_audit=metadata.get('abox_pmu_audit_diagnostic') is True
-    if abox_pmu_audit and (not abox_pm_audit or metadata.get('abox_pmu_audit_evidence_version')!=1):raise ValueError('Incomplete PMU observation package contract')
+    if abox_pmu_audit and (not abox_pm_audit or metadata.get('abox_pmu_audit_evidence_version')!=2):raise ValueError('Incomplete PMU observation package contract')
     if dma_pm_audit and (not gic_roundtrip or metadata.get('dma_pm_audit_evidence_version')!=1):
         raise ValueError('Incomplete DMA PM audit package contract')
     if gic_roundtrip and (not pm_timer or metadata.get('gic_roundtrip_evidence_version')!=1):
@@ -175,7 +175,7 @@ def build(backup,prototype,output,current_packages=None):
             'ufs_pm_audit_diagnostic':ufs_pm_audit,'ufs_pm_audit_evidence_version':2 if ufs_pm_audit else None,
             'iommu_pm_audit_diagnostic':iommu_pm_audit,'iommu_pm_audit_evidence_version':2 if iommu_pm_audit else None,
             'abox_failed_fw_resume_guard':abox_pm_audit,
-            'abox_pmu_audit_diagnostic':abox_pmu_audit,'abox_pmu_audit_evidence_version':1 if abox_pmu_audit else None,
+            'abox_pmu_audit_diagnostic':abox_pmu_audit,'abox_pmu_audit_evidence_version':2 if abox_pmu_audit else None,
             'abox_pm_audit_diagnostic':abox_pm_audit,'abox_pm_audit_evidence_version':8 if abox_pm_audit else None,
             'xnu_payload_sha256':metadata.get('xnu_payload_sha256') if xnu_stage else None,
             'xnu_payload_size':metadata.get('xnu_payload_size') if xnu_stage else None,
@@ -208,7 +208,7 @@ def build(backup,prototype,output,current_packages=None):
         metadata['iommu_pm_audit_evidence_version']=2 if iommu_pm_audit and mode=='diagnostic' else None
         metadata['abox_failed_fw_resume_guard']=abox_pm_audit and mode=='diagnostic'
         metadata['abox_pmu_audit_diagnostic']=abox_pmu_audit and mode=='diagnostic'
-        metadata['abox_pmu_audit_evidence_version']=1 if abox_pmu_audit and mode=='diagnostic' else None
+        metadata['abox_pmu_audit_evidence_version']=2 if abox_pmu_audit and mode=='diagnostic' else None
         metadata['abox_pm_audit_diagnostic']=abox_pm_audit and mode=='diagnostic'
         metadata['abox_pm_audit_evidence_version']=8 if abox_pm_audit and mode=='diagnostic' else None
         metadata['screen_log_diagnostic']=screen_log and mode=='diagnostic'
