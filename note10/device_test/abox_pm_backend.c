@@ -38,6 +38,10 @@ void n10_abox_note(struct device *dev, unsigned int kind, int error)
     else if (kind == 15) { ++h->suspend_calls; h->notify_stage = 4; h->suspend_result = n10_abox_magnitude(error); h->suspend_negative = error < 0; }
     else if (kind == 16) { ++h->notify_bad; h->notify_stage = 5; }
     else if (kind == 17) { ++h->notify_done; h->notify_stage = 6; }
+    else if (kind == 18) { ++h->qos_gets; h->qos_get_result = n10_abox_magnitude(error); h->qos_get_negative = error < 0; }
+    else if (kind == 19) { ++h->qos_puts; h->qos_put_result = n10_abox_magnitude(error); h->qos_put_negative = error < 0; }
+    else if (kind == 20) { ++h->qos_worker_starts; h->qos_worker_inflight = 1; }
+    else if (kind == 21) { ++h->qos_worker_finishes; h->qos_worker_inflight = 0; }
     spin_unlock_irqrestore(&n10_abox_event_lock, flags);
 }
 
@@ -92,6 +96,9 @@ void n10_abox_pm_capture(unsigned int phase, unsigned int generation)
         s->firmware > CALLIOPE_ENABLED || s->runtime > RPM_SUSPENDING ||
         s->interfaces > 8 || s->rdma > 16 || s->wdma > 16 || s->children > 4096) goto unlock;
     s->queued = (s->tail + ABOX_IPC_QUEUE_SIZE - s->head) % ABOX_IPC_QUEUE_SIZE;
+    n10_abox_qos_capture(&pdev->dev, s);
+    s->error = 9;
+    if (s->qos_error) goto unlock;
     spin_lock_irqsave(&n10_abox_event_lock, flags);
     s->error = 8;
     if (n10_abox_history.events && n10_abox_event_device != &pdev->dev) {
@@ -115,6 +122,12 @@ void n10_abox_pm_capture(unsigned int phase, unsigned int generation)
     s->suspend_calls = n10_abox_history.suspend_calls; s->suspend_result = n10_abox_history.suspend_result;
     s->suspend_negative = n10_abox_history.suspend_negative;
     s->notify_bad = n10_abox_history.notify_bad; s->notify_done = n10_abox_history.notify_done;
+    s->qos_gets = n10_abox_history.qos_gets; s->qos_puts = n10_abox_history.qos_puts;
+    s->qos_get_result = n10_abox_history.qos_get_result; s->qos_get_negative = n10_abox_history.qos_get_negative;
+    s->qos_put_result = n10_abox_history.qos_put_result; s->qos_put_negative = n10_abox_history.qos_put_negative;
+    s->qos_worker_starts = n10_abox_history.qos_worker_starts;
+    s->qos_worker_finishes = n10_abox_history.qos_worker_finishes;
+    s->qos_worker_inflight = n10_abox_history.qos_worker_inflight;
     spin_unlock_irqrestore(&n10_abox_event_lock, flags);
     s->error = 0;
 unlock:
@@ -132,7 +145,7 @@ int n10_abox_pm_read(struct n10_abox_pm_sample *out, unsigned int completed)
     if (!next) next = 1;
     if (!begin || next != completed) return -EIO;
     for (phase = 0; phase < 3; ++phase)
-        if (out[phase].seen != 1 || out[phase].error || out[phase].phase != phase ||
+        if (out[phase].seen != 1 || out[phase].error || out[phase].qos_seen != 1 || out[phase].qos_error || out[phase].phase != phase ||
             out[phase].generation != begin) return -EIO;
     return 0;
 }

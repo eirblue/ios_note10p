@@ -129,6 +129,48 @@ full [v3 integrated build](https://github.com/eirblue/ios_note10p/actions/runs/4
 passed at source `b4fd5e0`. The local regression suite passed 207 tests; the
 downloaded CI artifact passed 46 ABOX, 25 IOMMU and 42 UFS/HCI actual-C cases.
 Its actual Image/config, source/model bindings and initial process passed local
-verification, and a fresh single-cycle package was prepared offline. This build
-has no device staging, installation, reboot or controller journal. Fresh v3
-physical observations remain pending.
+verification, and a fresh single-cycle package was prepared offline. Its later
+fresh physical cycle passed all 13 evaluation items at 60% battery, returned
+automatically to a new TWRP boot and passed the five partition checks. Firmware
+download deferred with the original `-EAGAIN` result, while the normal prepare
+notifier completed its clearable path and original runtime-suspend request
+without a negative result. Later snapshots still retained runtime ownership and
+a nonempty queue. This does not establish every owner's identity or DSP/DMA
+shutdown; detailed firmware, callback and device records stay private.
+
+## Next build: AUD QoS and normal runtime reference observations (v4)
+
+The pinned QoS apply path takes a normal runtime reference on the AUD target's
+zero-to-positive transition and releases one on the positive-to-zero transition.
+`N10ABX4` retains prior diagnostics; the required `N10ABQ1` companion adds a
+bounded read-only AUD request view and the original normal get/put outcomes.
+The observer validates the exact QoS device, copies all 64 request IDs/values
+under the existing QoS spinlock and checks contiguity, duplicate IDs and the
+original target helper after restoring IRQ flags. It records registered/active
+counts, target/applied values, default/absolute request values, only the first
+active identity/value, and the work-pending bit. The first identity is not a
+complete active-owner inventory. Names, firmware contents and MMIO are not read.
+Applied value updates are not synchronized by the request lock, so this view
+and its separate event history are not globally atomic.
+
+Normal QoS worker entry/exit and conditional runtime get/put calls are observed
+without changing original conditions, order, return handling or PM/QoS state.
+There are no added PM requests, QoS updates, flushes or counter rewrites.
+Observer history is copied separately from the request and IPC queue locks.
+Counts may wrap and are not proof of runtime reference balance or ownership.
+Active/pending QoS work, nonzero target/applied values or negative observed
+runtime outcomes prevent the optional software-idle flag, without constituting
+hardware shutdown proof.
+
+Both previous companion evidence and four copies per phase of `N10ABQ1` are
+required, with at least two matching copies per phase and exact generation,
+source, helper, model, Image and config bindings. Old v3 evidence cannot satisfy
+v4. PC regression passed 217 tests. The 66-case native model runs the actual
+observer/producer, pinned target helper, original QoS apply and worker bodies
+under controlled stubs, plus exact generated event blocks and default-off
+paths. It checks active/queued releases and acquisitions, full/invalid arrays,
+foreign devices, failures, counter wrap, missing evidence, unchanged targets,
+non-AUD requests and work in flight. Model semantic assertions are separate
+from decoder rejection so an unexpected result cannot pass as a rejection.
+This is not full hardware QoS/PM execution. Compilation and fresh v4 physical
+observations are still pending.

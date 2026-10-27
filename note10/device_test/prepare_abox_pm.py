@@ -4,6 +4,9 @@ from pathlib import Path
 HERE=Path(__file__).resolve().parent
 PINS={'sound/soc/samsung/abox/abox.c': '234bd815a338929053473c1c3e05a52c210cc53af41f23449279b3d870610ef0', 'sound/soc/samsung/abox/abox.h': '6173915f547134a66aff5827afa91930ea6ef6c09a344c7bad9d39a3a3a01d15'}
 SOURCES=('abox_pm_contract.h','abox_pm_backend.c','abox_pm_probe.c','prepare_abox_pm.py','decode_abox_pm.py','abox_pm_binding.py')
+PINS.update({'sound/soc/samsung/abox/abox_qos.c':'e396c8e9c82b8ed72b9ea59f1a8b46926e9e8deb98d134726620e26d9f172f78',
+    'sound/soc/samsung/abox/abox_qos.h':'107235e3adc1467eb0e9265109212d1341e1f83babfa3fca0b779a7416dc7adc'})
+SOURCES=SOURCES+('abox_qos_pm_backend.c',)
 ENABLE_EVENT=b'#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n\tn10_abox_note(dev, 1, ret);\n#endif\n'
 BEGIN_EVENT=b'#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n\tn10_abox_note(dev, 2, 0);\n#endif\n'
 END_EVENT=b'#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n\tn10_abox_note(dev, 4, 0);\n#endif\n'
@@ -24,8 +27,25 @@ NOTIFY_SUSPEND=b'#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n\tn10_abox_note(dev, 15, re
 NOTIFY_BAD=b'#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n\tn10_abox_note(dev, 16, 0);\n#endif\n'
 NOTIFY_DONE=b'#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n\tif (action == PM_SUSPEND_PREPARE) n10_abox_note(dev, 17, 0);\n#endif\n'
 EVENT_BLOCKS=(ENABLE_EVENT,BEGIN_EVENT,IPC_EVENT,END_EVENT,WORK_BEGIN,WORK_GET,WORK_GATE,WORK_END,QUEUE_PUT,QUEUE_GET,FW_EVENT,NOTIFY_BEGIN,NOTIFY_READY,NOTIFY_GATE,NOTIFY_SUSPEND,NOTIFY_BAD,NOTIFY_DONE)
+QOS_GET=b'#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n\t{ int n10_ret = pm_runtime_get(dev_abox); n10_abox_note(dev_abox, 18, n10_ret); }\n#else\n\tpm_runtime_get(dev_abox);\n#endif'
+QOS_PUT=b'#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n\t{ int n10_ret = pm_runtime_put_autosuspend(dev_abox); n10_abox_note(dev_abox, 19, n10_ret); }\n#else\n\tpm_runtime_put_autosuspend(dev_abox);\n#endif'
+QOS_WORK_BEGIN=b'#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n\tn10_abox_note(dev_abox, 20, 0);\n#endif\n'
+QOS_WORK_END=b'#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n\tn10_abox_note(dev_abox, 21, 0);\n#endif\n'
+QOS_PATCHED_SHA='75f3c217b7cc85a2d0a9576e5af0f34c25ffa8a76ef79e1f7dc96f48f3e9448c'
+QOS_TARGET_SHA='666d22452848a90e884a6a5d992363658dcf396d7baca3cb7e850f8f796636e2'
 
-def event_digest():return hashlib.sha256(b''.join(EVENT_BLOCKS)).hexdigest()
+def event_digest():return hashlib.sha256(b''.join(EVENT_BLOCKS)+(QOS_GET+QOS_PUT+QOS_WORK_BEGIN+QOS_WORK_END)).hexdigest()
+
+def instrument_qos(raw):
+    if hashlib.sha256(raw).hexdigest()!=PINS['sound/soc/samsung/abox/abox_qos.c']:raise ValueError('Pinned QoS source differs')
+    if raw.count(b'\t\t\t\tpm_runtime_get(dev_abox);')!=1 or raw.count(b'\t\t\t\tpm_runtime_put_autosuspend(dev_abox);')!=1:raise ValueError('QoS runtime call insertion differs')
+    patched=raw.replace(b'\t\t\t\tpm_runtime_get(dev_abox);',QOS_GET).replace(b'\t\t\t\tpm_runtime_put_autosuspend(dev_abox);',QOS_PUT)
+    start=patched.index(b'static void abox_qos_work_func(');end=patched.index(b'static DECLARE_WORK(',start)
+    worker=patched[start:end];anchor=b'\tfor (p_qos = abox_qos_array; p_qos - abox_qos_array < len; p_qos++)'
+    if worker.count(anchor)!=1 or worker.count(b'\t\tabox_qos_apply(*p_qos);')!=1:raise ValueError('QoS worker event insertion differs')
+    worker=worker.replace(anchor,QOS_WORK_BEGIN+anchor).replace(b'\t\tabox_qos_apply(*p_qos);',b'\t\tabox_qos_apply(*p_qos);\n'+QOS_WORK_END)
+    patched=patched[:start]+worker+patched[end:]
+    return b'#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n#include <linux/note10_abox_pm.h>\n#endif\n'+patched+b'\n#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n#include "note10_abox_qos_pm.c"\n#endif\n'
 
 def instrument(raw):
     if hashlib.sha256(raw).hexdigest()!=PINS['sound/soc/samsung/abox/abox.c']:raise ValueError('Pinned ABOX source differs')
@@ -82,11 +102,14 @@ def prepare(source):
     patched=instrument(driver.read_bytes())
     if hashlib.sha256(patched).hexdigest()!=PATCHED_SHA:raise ValueError('ABOX prepared callback binding differs')
     driver.write_bytes(patched);helper.write_bytes((HERE/'abox_pm_backend.c').read_bytes())
+    qos=driver.with_name('abox_qos.c');qos_patched=instrument_qos(qos.read_bytes())
+    if hashlib.sha256(qos_patched).hexdigest()!=QOS_PATCHED_SHA:raise ValueError('QoS prepared callback binding differs')
+    qos.write_bytes(qos_patched);qos.with_name('note10_abox_qos_pm.c').write_bytes((HERE/'abox_qos_pm_backend.c').read_bytes())
     (source/'include/linux/note10_abox_pm.h').write_bytes((HERE/'abox_pm_contract.h').read_bytes())
     worker=source/'arch/arm64/mm/note10_pm_timer_roundtrip.c';worker.with_name('note10_abox_pm_probe.c').write_bytes((HERE/'abox_pm_probe.c').read_bytes())
     raw=worker.read_bytes();old=b'    status = 0;\nreport:'
     if raw.count(old)!=1:raise ValueError('ABOX report insertion differs')
     worker.write_bytes(b'#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n#include "note10_abox_pm_probe.c"\n#endif\n'+raw.replace(old,b'#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n    n10_report_abox_pm(pm.qgeneration);\n#endif\n'+old))
     config=source/'kernel/power/Kconfig';config.write_bytes(config.read_bytes()+b'\nconfig NOTE10_ABOX_PM_AUDIT\n\tbool "Experimental read-only ABOX driver and callback observations"\n\tdepends on NOTE10_IOMMU_PM_AUDIT && SND_SOC_SAMSUNG_ABOX=y\n\tdefault n\n')
-    return dict(abox_pm_audit_diagnostic=True,abox_pm_audit_evidence_version=3,abox_pm_source_pins=PINS,abox_patched_sha256=PATCHED_SHA,
+    return dict(abox_pm_audit_diagnostic=True,abox_pm_audit_evidence_version=4,abox_pm_source_pins=PINS,abox_patched_sha256=PATCHED_SHA,abox_qos_patched_sha256=QOS_PATCHED_SHA,
         abox_pm_sources_sha256={n:hashlib.sha256((HERE/n).read_bytes()).hexdigest() for n in SOURCES},audio_dsp_shutdown_verified=False)
