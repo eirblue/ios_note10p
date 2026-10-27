@@ -92,6 +92,8 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output,auto_cycle_token=None):
     validate_ufs(kernel_build,build)
     from iommu_pm_binding import validate_model as validate_iommu
     validate_iommu(kernel_build,build)
+    from abox_pm_binding import validate_model as validate_abox
+    validate_abox(kernel_build,build)
     if hashlib.sha256(config).hexdigest()!=build['effective_config_sha256']:
         raise ValueError('Config differs from kernel build report')
     required={'CONFIG_BLK_DEV_INITRD=y','CONFIG_RD_LZMA=y','CONFIG_KEXEC=y','CONFIG_KEXEC_CORE=y','CONFIG_ARM64_4K_PAGES=y'}
@@ -192,6 +194,8 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output,auto_cycle_token=None):
             'ufs_pm_audit_evidence_version':build.get('ufs_pm_audit_evidence_version'),
             'iommu_pm_audit_diagnostic':build.get('iommu_pm_audit_diagnostic') is True,
             'iommu_pm_audit_evidence_version':build.get('iommu_pm_audit_evidence_version'),
+            'abox_pm_audit_diagnostic':build.get('abox_pm_audit_diagnostic') is True,
+            'abox_pm_audit_evidence_version':build.get('abox_pm_audit_evidence_version'),
             'screen_log_diagnostic':build.get('screen_log_diagnostic') is True,
             'auto_return_diagnostic':auto_return,'auto_cycle_token':auto_cycle_token,
             'xnu_payload_sha256':build.get('xnu_payload_sha256') if xnu_stage else None,

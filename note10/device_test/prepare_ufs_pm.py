@@ -16,8 +16,9 @@ def instrument_dma(raw):
     if raw!=(HERE/'dma_pm_backend.c').read_bytes():raise ValueError('Prepared DMA observer base differs')
     prefix=b'#ifdef CONFIG_NOTE10_UFS_PM_AUDIT\n#include <linux/note10_ufs_pm.h>\n#endif\n'
     prefix+=b'#ifdef CONFIG_NOTE10_IOMMU_PM_AUDIT\n#include <linux/note10_iommu_pm.h>\n#endif\n'
+    prefix+=b'#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n#include <linux/note10_abox_pm.h>\n#endif\n'
     return prefix+replace(raw,b'    mutex_unlock(&dpm_list_mtx);',
-        b'    mutex_unlock(&dpm_list_mtx);\n#ifdef CONFIG_NOTE10_UFS_PM_AUDIT\n    n10_ufs_pm_capture(phase, generation);\n#endif\n#ifdef CONFIG_NOTE10_IOMMU_PM_AUDIT\n    n10_iommu_pm_capture(phase, generation);\n#endif')
+        b'    mutex_unlock(&dpm_list_mtx);\n#ifdef CONFIG_NOTE10_UFS_PM_AUDIT\n    n10_ufs_pm_capture(phase, generation);\n#endif\n#ifdef CONFIG_NOTE10_IOMMU_PM_AUDIT\n    n10_iommu_pm_capture(phase, generation);\n#endif\n#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n    n10_abox_pm_capture(phase, generation);\n#endif')
 
 HCI_PATCHED_SHA = 'a273a596ea2a4f899658d4eca86f7901e0555198680c1de851453fd2969874d5'
 

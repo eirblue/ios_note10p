@@ -82,6 +82,14 @@ def check(packages,kernel_build,backup,core_model,gate_model,init_model,adb):
             if paired.get('iommu_pm_audit_evidence_version')!=2 or diagnostic.get('iommu_pm_audit_evidence_version')!=2:
                 raise ValueError('IOMMU PM package evidence version differs')
             validate_iommu(kernel_build,build)
+        from abox_pm_binding import assert_scope as assert_abox_scope,validate_model as validate_abox
+        abox_pm_audit=assert_abox_scope(kernel_build,build)
+        if abox_pm_audit!=bool(paired.get('abox_pm_audit_diagnostic')) or abox_pm_audit!=bool(diagnostic.get('abox_pm_audit_diagnostic')):
+            raise ValueError('ABOX PM package scope differs from actual Image/config')
+        if abox_pm_audit:
+            if paired.get('abox_pm_audit_evidence_version')!=1 or diagnostic.get('abox_pm_audit_evidence_version')!=1:
+                raise ValueError('ABOX PM package evidence version differs')
+            validate_abox(kernel_build,build)
         if not (build.get('build_passed') is True and build.get('window_access_diagnostic') is True and
                 build.get('window_access_evidence_version')==1 and build.get('reservation_evidence_version')==2):
             raise ValueError('Successful opt-in access kernel build required')

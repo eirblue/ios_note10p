@@ -32,6 +32,11 @@ def decode_iommu_pm_observation(text,identity,pm_observation):
     return decode_iommu(text,identity,pm_completed_generation(pm_observation))
 
 
+def decode_abox_pm_observation(text,identity,pm_observation):
+    from decode_abox_pm import decode as decode_abox
+    return decode_abox(text,identity,pm_completed_generation(pm_observation))
+
+
 def select_latest_boot(data,expected_banner,allow_panic_corroboration=False,boot_binding_id=None):
     """Select one contiguous boot using an intact zero-time Linux banner.
 
@@ -88,6 +93,8 @@ def collect(packages,kernel_build,adb):
     ufs_pm_audit=assert_ufs_scope(kernel_build,result)
     from iommu_pm_binding import assert_scope as assert_iommu_scope
     iommu_pm_audit=assert_iommu_scope(kernel_build,result)
+    from abox_pm_binding import assert_scope as assert_abox_scope
+    abox_pm_audit=assert_abox_scope(kernel_build,result)
     if result.get('build_passed') is not True or result.get('early_xnu_reservation') is not True:
         raise ValueError('Successful reservation kernel build required')
     digest=hashlib.sha256(image).hexdigest()
@@ -126,6 +133,8 @@ def collect(packages,kernel_build,adb):
         raise ValueError('UFS PM package and kernel contract differs')
     if bool(paired.get('iommu_pm_audit_diagnostic'))!=iommu_pm_audit or (iommu_pm_audit and paired.get('iommu_pm_audit_evidence_version')!=2):
         raise ValueError('IOMMU PM package and kernel contract differs')
+    if bool(paired.get('abox_pm_audit_diagnostic'))!=abox_pm_audit or (abox_pm_audit and paired.get('abox_pm_audit_evidence_version')!=1):
+        raise ValueError('ABOX package and kernel scope differs')
     if xnu_stage and (paired.get('xnu_payload_sha256')!=result.get('xnu_payload_sha256') or
                       paired.get('xnu_payload_size')!=result.get('xnu_payload_size')):
         raise ValueError('XNU payload package and kernel build differ')
@@ -167,6 +176,7 @@ def collect(packages,kernel_build,adb):
             'dma_pm_audit_required':dma_pm_audit,'previous_boot_dma_pm_audit_observed':False,
             'ufs_pm_audit_required':ufs_pm_audit,'previous_boot_ufs_pm_audit_observed':False,
             'iommu_pm_audit_required':iommu_pm_audit,'previous_boot_iommu_pm_audit_observed':False,
+            'abox_pm_audit_required':abox_pm_audit,'previous_boot_abox_pm_audit_observed':False,
             'log_selections':{},'decode_failures':{}}
     for name,data in logs.items():
         try:
@@ -227,6 +237,9 @@ def collect(packages,kernel_build,adb):
             if iommu_pm_audit:
                 observation['iommu_pm_audit']=decode_iommu_pm_observation(text,evidence_id,observation['pm_timer'])
                 report['previous_boot_iommu_pm_audit_observed']=True
+            if abox_pm_audit:
+                observation['abox_pm_audit']=decode_abox_pm_observation(text,evidence_id,observation['pm_timer'])
+                report['previous_boot_abox_pm_audit_observed']=True
         except ValueError as error:
             report['decode_failures'][name]=str(error);continue
         (out/'reservation-observation.json').write_text(json.dumps(observation,indent=2),encoding='utf-8')
@@ -249,9 +262,10 @@ def collect(packages,kernel_build,adb):
                                  (not gic_roundtrip or report['previous_boot_gic_roundtrip_observed']) and
                                  (not dma_pm_audit or report['previous_boot_dma_pm_audit_observed']) and
                                  (not ufs_pm_audit or report['previous_boot_ufs_pm_audit_observed']) and
-                                 (not iommu_pm_audit or report['previous_boot_iommu_pm_audit_observed']))
+                                 (not iommu_pm_audit or report['previous_boot_iommu_pm_audit_observed']) and
+                                 (not abox_pm_audit or report['previous_boot_abox_pm_audit_observed']))
     report['evaluation_items']={}
-    for item in ('reservation','window_access','xnu_payload_stage','cpu_cache_roundtrip','pm_timer','gic_roundtrip','dma_pm_audit','ufs_pm_audit','iommu_pm_audit'):
+    for item in ('reservation','window_access','xnu_payload_stage','cpu_cache_roundtrip','pm_timer','gic_roundtrip','dma_pm_audit','ufs_pm_audit','iommu_pm_audit','abox_pm_audit'):
         required=item=='reservation' or report[item+'_required']
         observed=report['previous_boot_'+item+'_observed']
         report['evaluation_items'][item]={'required':required,'status':'passed' if observed else ('failed' if required else 'not_requested')}
