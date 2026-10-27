@@ -86,6 +86,12 @@ gear comparison. Completed historical worker/queue counts also do not prevent
 current software idle. Active work, pending work or a negative last runtime-get
 result prevent that optional flag. This correction does not alter the previous
 physical result: its runtime ownership and nonempty queue independently failed
-the idle predicates. Evidence v1 is not accepted as v2; the next build and its
-new physical observations are still pending. The one-cycle low-battery exception
-has been consumed; future physical cycles retain the 10% default minimum.
+the idle predicates. Evidence v1 is not accepted as v2. The full
+[v2 integrated build](https://github.com/eirblue/ios_note10p/actions/runs/40456766748)
+passed at source `af14c01`; its actual Image/config, bound native models and
+initial process passed local verification, and a fresh single-cycle package was
+prepared offline. ABOX 36, IOMMU 25 and UFS/HCI 42 actual-C cases passed in the
+downloaded CI artifact. Its new physical observations remain pending because
+battery is below 10%; this build has no device staging, install, reboot or
+controller journal. The previous one-cycle low-battery exception has been
+consumed; future physical cycles retain the 10% default minimum.
