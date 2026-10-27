@@ -144,9 +144,10 @@ The pinned QoS apply path takes a normal runtime reference on the AUD target's
 zero-to-positive transition and releases one on the positive-to-zero transition.
 `N10ABX4` retains prior diagnostics; the required `N10ABQ1` companion adds a
 bounded read-only AUD request view and the original normal get/put outcomes.
-The observer validates the exact QoS device, copies all 64 request IDs/values
-under the existing QoS spinlock and checks contiguity, duplicate IDs and the
-original target helper after restoring IRQ flags. It records registered/active
+The observer validates the exact QoS device and copies all 64 request IDs/values
+and the original target under the existing QoS spinlock. After restoring IRQ
+flags it validates contiguity, duplicate IDs and the copied maximum against
+that target. It records registered/active
 counts, target/applied values, default/absolute request values, only the first
 active identity/value, and the work-pending bit. The first identity is not a
 complete active-owner inventory. Names, firmware contents and MMIO are not read.
@@ -172,5 +173,11 @@ paths. It checks active/queued releases and acquisitions, full/invalid arrays,
 foreign devices, failures, counter wrap, missing evidence, unchanged targets,
 non-AUD requests and work in flight. Model semantic assertions are separate
 from decoder rejection so an unexpected result cannot pass as a rejection.
-This is not full hardware QoS/PM execution. Compilation and fresh v4 physical
-observations are still pending.
+This is not full hardware QoS/PM execution. The full
+[v4 integrated build](https://github.com/eirblue/ios_note10p/actions/runs/40516819807)
+passed at source `02e4f5f`. The downloaded artifact passed 66 ABOX, 25 IOMMU and
+42 UFS/HCI native cases, including the actual QoS backend, apply and worker
+paths and default-off blocks. Its actual Image/config, source/model bindings
+and initial process passed local verification; a fresh single-cycle package
+was prepared offline. There is no v4 device staging, installation, reboot or
+controller journal. Fresh v4 physical observations remain pending.
