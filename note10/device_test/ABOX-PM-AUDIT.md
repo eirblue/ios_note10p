@@ -324,3 +324,26 @@ missing companions and invalid queue/sign rejection. Default-off paths retain
 the original single callback call. Full PC regression passes 226 tests; all
 seven frame types fit the existing payload buffer at unsigned bounds. Device
 observations for this v24 build remain pending.
+
+
+The [v24 integrated build](https://github.com/eirblue/ios_note10p/actions/runs/40534155951)
+passed at source `1c565d0`; its actual Image/config, source bindings, 100 ABOX,
+25 IOMMU and 42 UFS/HCI C models and initial process passed offline verification.
+A fresh single physical cycle passed all 13 evaluations at 80% battery,
+automatically returned to a new TWRP boot and passed five partition checks.
+
+The firmware completion resume callback ran twice. The last firmware pointer
+was absent, the last resume returned positive/already-active and did not
+increase usage. Only the last presence was recorded, so both callbacks cannot
+be labeled failed-firmware completions from this evidence alone. The normal
+PM prepare entry preceded the later firmware-download/enable and last callback
+completion records. QoS work drained in this boot; the system PM reference
+pair was balanced, with no usage before/after and its normal protective hold
+during prepare. Runtime remained active, with an autosuspend expiry before
+prepare and a pending idle request after completion. This is not leak proof.
+The pinned firmware loader sets its output pointer to NULL on failure and
+still invokes the callback. A source-backed next candidate is a separately
+opt-in failed-firmware callback guard, retaining successful/default-off behavior
+and adding complete present/absent/skip counts in the same bundled evaluation.
+No speculative barrier change, forced put, DSP/global DMA shutdown or XNU
+execution is claimed. Raw evidence remains private.
