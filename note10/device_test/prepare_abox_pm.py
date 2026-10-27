@@ -16,7 +16,14 @@ WORK_GATE=b'#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n\tn10_can = abox_can_calliope_ip
 WORK_END=b'#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n\tn10_abox_note(dev, 8, 0);\n#endif\n'
 QUEUE_PUT=b'#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n\tn10_abox_note(&data->pdev->dev, 9, ret);\n#endif\n'
 QUEUE_GET=b'#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n\tn10_abox_note(&data->pdev->dev, 10, ret);\n#endif\n'
-EVENT_BLOCKS=(ENABLE_EVENT,BEGIN_EVENT,IPC_EVENT,END_EVENT,WORK_BEGIN,WORK_GET,WORK_GATE,WORK_END,QUEUE_PUT,QUEUE_GET)
+FW_EVENT=b'#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n\tn10_abox_note(dev, 11, ret);\n#endif\n'
+NOTIFY_BEGIN=b'#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n\tn10_abox_note(dev, 12, 0);\n#endif\n'
+NOTIFY_READY=b'#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n\tn10_abox_note(dev, 13, 0);\n#endif\n'
+NOTIFY_GATE=b'#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n\tn10_clearable = abox_is_clearable(dev, data);\n\tn10_abox_note(dev, 14, n10_clearable);\n\tif (n10_clearable) {\n#else\n\tif (abox_is_clearable(dev, data)) {\n#endif'
+NOTIFY_SUSPEND=b'#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n\tn10_abox_note(dev, 15, ret);\n#endif\n'
+NOTIFY_BAD=b'#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n\tn10_abox_note(dev, 16, 0);\n#endif\n'
+NOTIFY_DONE=b'#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n\tif (action == PM_SUSPEND_PREPARE) n10_abox_note(dev, 17, 0);\n#endif\n'
+EVENT_BLOCKS=(ENABLE_EVENT,BEGIN_EVENT,IPC_EVENT,END_EVENT,WORK_BEGIN,WORK_GET,WORK_GATE,WORK_END,QUEUE_PUT,QUEUE_GET,FW_EVENT,NOTIFY_BEGIN,NOTIFY_READY,NOTIFY_GATE,NOTIFY_SUSPEND,NOTIFY_BAD,NOTIFY_DONE)
 
 def event_digest():return hashlib.sha256(b''.join(EVENT_BLOCKS)).hexdigest()
 
@@ -28,6 +35,9 @@ def instrument(raw):
     enable=raw[start:middle];disable=raw[middle:end]
     if enable.count(b'error:\n\treturn ret;')!=1 or disable.count(IPC_OLD)!=1 or disable.count(b'\treturn 0;')!=1:raise ValueError('ABOX event insertion differs')
     enable=enable.replace(b'error:\n\treturn ret;',b'error:\n'+ENABLE_EVENT+b'\treturn ret;')
+    anchor=b'\t\tret = abox_download_firmware(dev);'
+    if enable.count(anchor)!=1:raise ValueError('ABOX firmware return insertion differs')
+    enable=enable.replace(anchor,anchor+b'\n'+FW_EVENT)
     disable=disable.replace(b'\tdev_info(dev, "%s\\n", __func__);',BEGIN_EVENT+b'\tdev_info(dev, "%s\\n", __func__);')
     if BEGIN_EVENT not in disable:raise ValueError('ABOX begin event insertion differs')
     disable=disable.replace(IPC_OLD,IPC_EVENT).replace(b'\treturn 0;',END_EVENT+b'\treturn 0;')
@@ -47,9 +57,21 @@ def instrument(raw):
         if section.count(anchor)!=1:raise ValueError('ABOX queue return recipe differs')
         section=section.replace(anchor,b'\tspin_unlock_irqrestore(lock, flags);\n'+block+b'\n\treturn ret;')
         patched=patched[:start]+section+patched[end:]
+    start=patched.index(b'static int abox_pm_notifier(');end=patched.index(b'static int abox_modem_notifier(',start)
+    notifier=patched[start:end]
+    if notifier.count(b'\tint ret;')!=1 or notifier.count(b'\t\tif (abox_is_clearable(dev, data)) {')!=1 or notifier.count(b'\t\t\tret = pm_runtime_suspend(dev);')!=1:raise ValueError('ABOX notifier recipe differs')
+    notifier=notifier.replace(b'\tint ret;',b'\tint ret;\n#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n\tbool n10_clearable;\n#endif')
+    notifier=notifier.replace(b'\tcase PM_SUSPEND_PREPARE:',b'\tcase PM_SUSPEND_PREPARE:\n'+NOTIFY_BEGIN)
+    notifier=notifier.replace(b'\t\tflush_workqueue(data->ipc_workqueue);',b'\t\tflush_workqueue(data->ipc_workqueue);\n'+NOTIFY_READY)
+    notifier=notifier.replace(b'\t\tif (abox_is_clearable(dev, data)) {',NOTIFY_GATE)
+    notifier=notifier.replace(b'\t\t\tret = pm_runtime_suspend(dev);',b'\t\t\tret = pm_runtime_suspend(dev);\n'+NOTIFY_SUSPEND)
+    notifier=notifier.replace(b'\t\t\t\treturn NOTIFY_BAD;',NOTIFY_BAD+b'\t\t\t\treturn NOTIFY_BAD;')
+    notifier=notifier.replace(b'\treturn NOTIFY_DONE;',NOTIFY_DONE+b'\treturn NOTIFY_DONE;')
+    if any(notifier.count(block)!=1 for block in (NOTIFY_BEGIN,NOTIFY_READY,NOTIFY_GATE,NOTIFY_SUSPEND,NOTIFY_BAD,NOTIFY_DONE)):raise ValueError('ABOX notifier event insertion differs')
+    patched=patched[:start]+notifier+patched[end:]
     return b'#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n#include <linux/note10_abox_pm.h>\n#endif\n'+patched+b'\n#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n#include "note10_abox_pm.c"\n#endif\n'
 
-PATCHED_SHA='688aafe4befc61e1475dfc1c01054cd99f579ba2c628dbcee34354fe8fa491d8'
+PATCHED_SHA='903367a1676df2c3c902f6592d70f870b5011336cbe995b926d5531ff992f946'
 
 def prepare(source):
     source=Path(source)
@@ -66,5 +88,5 @@ def prepare(source):
     if raw.count(old)!=1:raise ValueError('ABOX report insertion differs')
     worker.write_bytes(b'#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n#include "note10_abox_pm_probe.c"\n#endif\n'+raw.replace(old,b'#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n    n10_report_abox_pm(pm.qgeneration);\n#endif\n'+old))
     config=source/'kernel/power/Kconfig';config.write_bytes(config.read_bytes()+b'\nconfig NOTE10_ABOX_PM_AUDIT\n\tbool "Experimental read-only ABOX driver and callback observations"\n\tdepends on NOTE10_IOMMU_PM_AUDIT && SND_SOC_SAMSUNG_ABOX=y\n\tdefault n\n')
-    return dict(abox_pm_audit_diagnostic=True,abox_pm_audit_evidence_version=2,abox_pm_source_pins=PINS,abox_patched_sha256=PATCHED_SHA,
+    return dict(abox_pm_audit_diagnostic=True,abox_pm_audit_evidence_version=3,abox_pm_source_pins=PINS,abox_patched_sha256=PATCHED_SHA,
         abox_pm_sources_sha256={n:hashlib.sha256((HERE/n).read_bytes()).hexdigest() for n in SOURCES},audio_dsp_shutdown_verified=False)

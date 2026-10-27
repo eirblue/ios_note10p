@@ -31,6 +31,13 @@ void n10_abox_note(struct device *dev, unsigned int kind, int error)
     else if (kind == 8) { ++h->worker_finishes; h->worker_stage = 4; h->worker_inflight = 0; }
     else if (kind == 9) { if (!error) ++h->puts; else if (error == -EBUSY) ++h->put_busy; }
     else if (kind == 10) { if (!error) ++h->gets; else if (error == -ENODATA) ++h->get_empty; }
+    else if (kind == 11) { ++h->fw_downloads; h->fw_result = n10_abox_magnitude(error); h->fw_negative = error < 0; }
+    else if (kind == 12) { ++h->notify_prepares; h->notify_stage = 1; h->clearable_seen = 0; h->clearable = 0; h->suspend_result = 0; h->suspend_negative = 0; }
+    else if (kind == 13) { h->notify_stage = 2; }
+    else if (kind == 14) { h->notify_stage = 3; h->clearable_seen = 1; h->clearable = !!error; }
+    else if (kind == 15) { ++h->suspend_calls; h->notify_stage = 4; h->suspend_result = n10_abox_magnitude(error); h->suspend_negative = error < 0; }
+    else if (kind == 16) { ++h->notify_bad; h->notify_stage = 5; }
+    else if (kind == 17) { ++h->notify_done; h->notify_stage = 6; }
     spin_unlock_irqrestore(&n10_abox_event_lock, flags);
 }
 
@@ -101,6 +108,13 @@ void n10_abox_pm_capture(unsigned int phase, unsigned int generation)
     s->gate_seen = n10_abox_history.gate_seen; s->can_ipc = n10_abox_history.can_ipc;
     s->puts = n10_abox_history.puts; s->put_busy = n10_abox_history.put_busy;
     s->gets = n10_abox_history.gets; s->get_empty = n10_abox_history.get_empty;
+    s->fw_downloads = n10_abox_history.fw_downloads; s->fw_result = n10_abox_history.fw_result;
+    s->fw_negative = n10_abox_history.fw_negative;
+    s->notify_prepares = n10_abox_history.notify_prepares; s->notify_stage = n10_abox_history.notify_stage;
+    s->clearable_seen = n10_abox_history.clearable_seen; s->clearable = n10_abox_history.clearable;
+    s->suspend_calls = n10_abox_history.suspend_calls; s->suspend_result = n10_abox_history.suspend_result;
+    s->suspend_negative = n10_abox_history.suspend_negative;
+    s->notify_bad = n10_abox_history.notify_bad; s->notify_done = n10_abox_history.notify_done;
     spin_unlock_irqrestore(&n10_abox_event_lock, flags);
     s->error = 0;
 unlock:

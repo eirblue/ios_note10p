@@ -91,7 +91,41 @@ the idle predicates. Evidence v1 is not accepted as v2. The full
 passed at source `af14c01`; its actual Image/config, bound native models and
 initial process passed local verification, and a fresh single-cycle package was
 prepared offline. ABOX 36, IOMMU 25 and UFS/HCI 42 actual-C cases passed in the
-downloaded CI artifact. Its new physical observations remain pending because
-battery is below 10%; this build has no device staging, install, reboot or
-controller journal. The previous one-cycle low-battery exception has been
-consumed; future physical cycles retain the 10% default minimum.
+downloaded CI artifact. Its fresh physical cycle later passed all 13 evaluation
+items at 22% battery, with automatic TWRP return and all five partition checks.
+The IPC worker completed its original runtime get and put, but its firmware
+gate refused queue processing and work remained queued. The worker was not
+still in flight at the snapshots; this does not identify every remaining
+runtime reference owner or prove a DSP/DMA shutdown. Detailed records remain
+private. The earlier one-cycle low-battery exception was not needed for this
+cycle, and the 10% default minimum remains unchanged.
+
+## Next build: firmware return and PM preparation (evidence v3)
+
+`N10ABX3` retains the worker/queue observations, and a separate `N10ABR1`
+companion records the original firmware-download result before the driver's
+existing `-EAGAIN` to zero normalization. It also observes the normal ABOX PM
+prepare notifier's entry, completion of its existing barriers/flush, original
+clearable predicate, optional original runtime-suspend return and original
+`NOTIFY_BAD`/`NOTIFY_DONE` outcome. No notifier, firmware request, PM operation,
+QoS query or flush is added by the observer. Original calls and conditions
+remain in the same order and execute once when originally applicable.
+
+The main and companion frames require matching current generation and phase,
+at least two intact identical copies per phase and exact source/model/Image
+bindings. The companion has four copies per phase; main frames retain eight.
+Separating them keeps each frame within the kernel line limit. Report samples
+use a static cache on the existing single owned reporting lane to limit stack
+use. Per-boot history is not per-generation ownership proof; absent callbacks
+remain a valid observation, and a valid busy/error observation does not prove
+idle. Old v1/v2 frames cannot satisfy v3.
+
+The actual observer/producer and exact generated blocks pass 46 native cases,
+including default-off behavior, unchanged normalized and nonnormalized firmware
+returns, both clearable decisions, conditional suspend calls, preserved bad/done
+returns, missing companion evidence and signed minimum return magnitude. These
+models do not execute the full hardware firmware loader or PM notifier. The
+source and PC preparation are ready; full compilation and fresh v3 physical
+observations remain pending. The user requested the prior physical cycle and
+this next compilation only; this v3 build is not authorized for an additional
+physical cycle by that request.

@@ -12,6 +12,9 @@ struct n10_abox_pm_sample {
     unsigned int worker_starts, worker_finishes, worker_stage, worker_inflight;
     unsigned int pm_get_result, pm_get_negative, gate_seen, can_ipc, work_pending;
     unsigned int puts, put_busy, gets, get_empty;
+    unsigned int fw_downloads, fw_result, fw_negative;
+    unsigned int notify_prepares, notify_stage, clearable_seen, clearable;
+    unsigned int suspend_calls, suspend_result, suspend_negative, notify_bad, notify_done;
 };
 void n10_abox_note(struct device *dev, unsigned int kind, int error);
 void n10_abox_pm_capture(unsigned int phase, unsigned int generation);
