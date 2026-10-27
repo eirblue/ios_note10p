@@ -71,7 +71,7 @@ examines DMA status and the existing clock-held disable path; it must not add
 peripheral reads while the device is runtime-suspended.
 
 
-## v27 bundled domain-status extension (physical result pending)
+## v27 bundled domain-status extension
 
 Evidence version 2 preserves the core frames and failed-firmware guard and adds
 `N10PDS1` as a separately required fifteenth evaluation in the same boot.
@@ -101,3 +101,22 @@ corrupt or malformed evidence. Full PC regression passes 239 tests; retained
 ABOX 105, UFS/HCI 42 and IOMMU 25 source/model digests remain unchanged. Power
 requests, PMU writes and clock changes are absent. A sampled-off domain still
 does not prove global DMA quiescence, repeated stability or XNU execution.
+
+
+The one fresh v27 physical cycle, source `073c069482a25207cd4a348d3db1290804cb64bd`
+and CI `40598642972`, passed all 15 evaluations, automatic TWRP recovery and
+five expected partition hashes at preinstall battery 49%. All four core/domain
+frame copies were intact in all phases. Before and during devices-only suspend,
+the configuration-before/status/configuration-after bitmaps were each 0x4000:
+FSYS0A was sampled on and the other 15 domains were sampled off. After resume,
+the three bitmaps were each 0x4080: EMBEDDED_G3D and FSYS0A were sampled on.
+No configuration change was detected across any per-domain sample. Sequential
+samples remain non-atomic and do not establish global DMA quiescence.
+
+The pinned FSYS0A DT uses `power-down-ok = <3>`. The original power-domain code
+maps that policy to `exynos_pd_power_down_ok_usb`, which returns
+`!otg_is_connect()` with the actual USB configuration enabled. The domain's
+power-off callback can skip its control operation when this predicate rejects.
+This is a source-based candidate explanation, not an observed callback result.
+The next diagnostic should trace the existing predicate result and skip/control
+path without forcing power-off or calling the predicate an extra time.
