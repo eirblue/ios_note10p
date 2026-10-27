@@ -59,6 +59,14 @@ def check(packages,kernel_build,backup,core_model,gate_model,init_model,adb):
             if paired.get('dma_pm_audit_evidence_version')!=1 or diagnostic.get('dma_pm_audit_evidence_version')!=1:
                 raise ValueError('DMA PM package evidence version differs')
             validate_dma(kernel_build,build)
+        from ufs_pm_binding import assert_scope as assert_ufs_scope,validate_model as validate_ufs
+        ufs_pm_audit=assert_ufs_scope(kernel_build,build)
+        if ufs_pm_audit!=bool(paired.get('ufs_pm_audit_diagnostic')) or ufs_pm_audit!=bool(diagnostic.get('ufs_pm_audit_diagnostic')):
+            raise ValueError('UFS PM package scope differs from actual Image/config')
+        if ufs_pm_audit:
+            if paired.get('ufs_pm_audit_evidence_version')!=1 or diagnostic.get('ufs_pm_audit_evidence_version')!=1:
+                raise ValueError('UFS PM package evidence version differs')
+            validate_ufs(kernel_build,build)
         if not (build.get('build_passed') is True and build.get('window_access_diagnostic') is True and
                 build.get('window_access_evidence_version')==1 and build.get('reservation_evidence_version')==2):
             raise ValueError('Successful opt-in access kernel build required')

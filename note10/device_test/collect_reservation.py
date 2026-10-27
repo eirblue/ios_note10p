@@ -14,11 +14,17 @@ from decode_linux_caps import decode as decode_caps
 from run_probe import ROOT,Adb,preflight
 from stage_phase2 import verify_packages
 
+def pm_completed_generation(pm_observation):
+    generations=pm_observation['quiescence']['attempts']
+    return generations[max(generations,key=int)]['result']['generation']
+
 def decode_dma_pm_observation(text,identity,pm_observation):
     from decode_dma_pm import decode as decode_dma
-    generations=pm_observation['quiescence']['attempts']
-    generation=generations[max(generations,key=int)]['result']['generation']
-    return decode_dma(text,identity,generation)
+    return decode_dma(text,identity,pm_completed_generation(pm_observation))
+
+def decode_ufs_pm_observation(text,identity,pm_observation):
+    from decode_ufs_pm import decode as decode_ufs
+    return decode_ufs(text,identity,pm_completed_generation(pm_observation))
 
 
 def select_latest_boot(data,expected_banner,allow_panic_corroboration=False,boot_binding_id=None):
@@ -73,6 +79,8 @@ def collect(packages,kernel_build,adb):
     gic_roundtrip=assert_gic_scope(kernel_build,result)
     from dma_pm_binding import assert_scope as assert_dma_scope
     dma_pm_audit=assert_dma_scope(kernel_build,result)
+    from ufs_pm_binding import assert_scope as assert_ufs_scope
+    ufs_pm_audit=assert_ufs_scope(kernel_build,result)
     if result.get('build_passed') is not True or result.get('early_xnu_reservation') is not True:
         raise ValueError('Successful reservation kernel build required')
     digest=hashlib.sha256(image).hexdigest()
@@ -107,6 +115,8 @@ def collect(packages,kernel_build,adb):
         raise ValueError('PM quiesce package and kernel contract differs')
     if bool(paired.get('dma_pm_audit_diagnostic'))!=dma_pm_audit or (dma_pm_audit and paired.get('dma_pm_audit_evidence_version')!=1):
         raise ValueError('DMA PM package and kernel contract differs')
+    if bool(paired.get('ufs_pm_audit_diagnostic'))!=ufs_pm_audit or (ufs_pm_audit and paired.get('ufs_pm_audit_evidence_version')!=1):
+        raise ValueError('UFS PM package and kernel contract differs')
     if xnu_stage and (paired.get('xnu_payload_sha256')!=result.get('xnu_payload_sha256') or
                       paired.get('xnu_payload_size')!=result.get('xnu_payload_size')):
         raise ValueError('XNU payload package and kernel build differ')
@@ -146,6 +156,7 @@ def collect(packages,kernel_build,adb):
             'logs_sha256':{n:hashlib.sha256(d).hexdigest() for n,d in logs.items()},
             'gic_roundtrip_required':gic_roundtrip,'previous_boot_gic_roundtrip_observed':False,
             'dma_pm_audit_required':dma_pm_audit,'previous_boot_dma_pm_audit_observed':False,
+            'ufs_pm_audit_required':ufs_pm_audit,'previous_boot_ufs_pm_audit_observed':False,
             'log_selections':{},'decode_failures':{}}
     for name,data in logs.items():
         try:
@@ -200,6 +211,9 @@ def collect(packages,kernel_build,adb):
             if dma_pm_audit:
                 observation['dma_pm_audit']=decode_dma_pm_observation(text,evidence_id,observation['pm_timer'])
                 report['previous_boot_dma_pm_audit_observed']=True
+            if ufs_pm_audit:
+                observation['ufs_pm_audit']=decode_ufs_pm_observation(text,evidence_id,observation['pm_timer'])
+                report['previous_boot_ufs_pm_audit_observed']=True
         except ValueError as error:
             report['decode_failures'][name]=str(error);continue
         (out/'reservation-observation.json').write_text(json.dumps(observation,indent=2),encoding='utf-8')
@@ -220,7 +234,8 @@ def collect(packages,kernel_build,adb):
                                  (not cpu_cache or report['previous_boot_cpu_cache_roundtrip_observed']) and
                                  (not pm_timer or report['previous_boot_pm_timer_observed']) and
                                  (not gic_roundtrip or report['previous_boot_gic_roundtrip_observed']) and
-                                 (not dma_pm_audit or report['previous_boot_dma_pm_audit_observed']))
+                                 (not dma_pm_audit or report['previous_boot_dma_pm_audit_observed']) and
+                                 (not ufs_pm_audit or report['previous_boot_ufs_pm_audit_observed']))
     (out/'capture-result.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
     return report
 

@@ -20,7 +20,7 @@ REPOSITORY = 'corsicanu/android_kernel_samsung_universal9820'
 OUT = ROOT / 'note10/private/handoff-kernel'
 
 
-def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manifest=None,cpu_cache=False,pm_timer=False,auto_return=False,screen_log=False,gic_roundtrip=False,dma_pm_audit=False):
+def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manifest=None,cpu_cache=False,pm_timer=False,auto_return=False,screen_log=False,gic_roundtrip=False,dma_pm_audit=False,ufs_pm_audit=False):
     if not sys.platform.startswith('linux'): raise RuntimeError('Linux CI host required')
     if os.environ.get('PLATFORM_VERSION')!='11' or os.environ.get('ANDROID_MAJOR_VERSION')!='r':
         raise ValueError('Pinned Samsung build requires PLATFORM_VERSION=11 and ANDROID_MAJOR_VERSION=r')
@@ -34,6 +34,7 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
     if pm_timer and not cpu_cache:raise ValueError('PM/timer requires CPU/cache batch')
     if gic_roundtrip and not auto_return:raise ValueError('GIC roundtrip requires PM and automatic recovery')
     if dma_pm_audit and not gic_roundtrip:raise ValueError('DMA PM audit requires the restored GIC/PM diagnostic')
+    if ufs_pm_audit and not dma_pm_audit:raise ValueError('UFS PM audit requires the DMA PM framework audit')
     OUT.mkdir(parents=True,exist_ok=True)
     report = {'source_repository':REPOSITORY,'source_commit':COMMIT,
               'platform_version':os.environ['PLATFORM_VERSION'],
@@ -144,6 +145,14 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             run([sys.executable,str(ROOT/'note10/device_test/test_dma_pm_native.py'),
                  '--output',str(OUT/'dma-pm-model')],'03-dma-pm-model.log')
             report['scope']='Read-only DMA-capable device PM framework snapshots plus restored GIC/PM tests; no hardware DMA-idle or XNU branch claim'
+        if ufs_pm_audit:
+            from prepare_ufs_pm import prepare as prepare_ufs
+            report.update(prepare_ufs(source))
+            report['pm_quiesce_patched_sha256']['kernel/power/Kconfig']=hashlib.sha256((source/'kernel/power/Kconfig').read_bytes()).hexdigest()
+            run([sys.executable,str(ROOT/'note10/device_test/test_ufs_pm_native.py'),
+                 '--dma-helper',str(source/'drivers/base/power/note10_dma_pm.c'),
+                 '--output',str(OUT/'ufs-pm-model')],'03-ufs-pm-model.log')
+            report['scope']='Read-only UFS driver queue/link/clock/IRQ observations during restored PM; no global hardware DMA-idle or XNU branch claim'
         make=['make','-C',str(source),'O='+str(objects),'ARCH=arm64',
               'CC=clang-14','CROSS_COMPILE=aarch64-linux-gnu-',
               'CLANG_TRIPLE=aarch64-linux-gnu-','CROSS_COMPILE_ARM32=arm-linux-gnueabi-',
@@ -170,12 +179,14 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
         if pm_timer:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_PM_QUIESCE'],'02-pm-quiesce.log')
         if gic_roundtrip:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_GIC_ROUNDTRIP'],'02-gic-roundtrip.log')
         if dma_pm_audit:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_DMA_PM_AUDIT'],'02-dma-pm-audit.log')
+        if ufs_pm_audit:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_UFS_PM_AUDIT'],'02-ufs-pm-audit.log')
         run([*make,'olddefconfig'],'03-olddefconfig.log')
         configured=config.read_text()
         required=('CONFIG_KEXEC=y','CONFIG_KEXEC_CORE=y','CONFIG_PM_SLEEP_SMP=y','CONFIG_ARM64_4K_PAGES=y')
         (OUT/'handoff.config').write_bytes(config.read_bytes())
         if gic_roundtrip:required+=('CONFIG_NOTE10_GIC_ROUNDTRIP=y','CONFIG_ARM_GIC=y')
         if dma_pm_audit:required+=('CONFIG_NOTE10_DMA_PM_AUDIT=y',)
+        if ufs_pm_audit:required+=('CONFIG_NOTE10_UFS_PM_AUDIT=y','CONFIG_SCSI_UFSHCD=y','CONFIG_SCSI_UFS_EXYNOS=y')
         if reserve:required+=('CONFIG_INITRAMFS_FORCE=y','CONFIG_CMDLINE_EXTEND=y','CONFIG_CMDLINE="rdinit=/init"')
         if xnu_payload is not None:required+=('CONFIG_CRYPTO=y','CONFIG_CRYPTO_HASH=y','CONFIG_CRYPTO_SHA256=y')
         if cpu_cache:required+=('CONFIG_HOTPLUG_CPU=y','CONFIG_SMP=y','CONFIG_PM_SLEEP_SMP=y')
@@ -231,6 +242,9 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
         if dma_pm_audit:
             from dma_pm_binding import validate_model as validate_dma
             validate_dma(OUT,report)
+        if ufs_pm_audit:
+            from ufs_pm_binding import validate_model as validate_ufs
+            validate_ufs(OUT,report)
         if auto_return:
             from materialize_auto_cycle import SLOT
             if b'N10RET1' not in target.read_bytes() or target.read_bytes().count(SLOT+b'\0')!=1:raise ValueError('Auto-return marker/unique data slot missing')
@@ -260,5 +274,6 @@ if __name__=='__main__':
     parser.add_argument('--screen-log',action='store_true',help='Experimental top-left quarter panel console; requires auto return')
     parser.add_argument('--gic-roundtrip',action='store_true',help='Reversible GICv2 CPU priority mask diagnostic after restored PM')
     parser.add_argument('--dma-pm-audit',action='store_true',help='Read-only DMA-capable device PM framework coverage snapshots')
+    parser.add_argument('--ufs-pm-audit',action='store_true',help='Read-only Exynos UFS driver queue/link/clock/IRQ snapshots')
     args=parser.parse_args();main(caps=args.caps,reserve=args.reserve,window_access=args.window_access,
-                                  xnu_payload=args.xnu_payload,xnu_manifest=args.xnu_payload_manifest,cpu_cache=args.cpu_cache,pm_timer=args.pm_timer,auto_return=args.auto_return,screen_log=args.screen_log,gic_roundtrip=args.gic_roundtrip,dma_pm_audit=args.dma_pm_audit)
+                                  xnu_payload=args.xnu_payload,xnu_manifest=args.xnu_payload_manifest,cpu_cache=args.cpu_cache,pm_timer=args.pm_timer,auto_return=args.auto_return,screen_log=args.screen_log,gic_roundtrip=args.gic_roundtrip,dma_pm_audit=args.dma_pm_audit,ufs_pm_audit=args.ufs_pm_audit)

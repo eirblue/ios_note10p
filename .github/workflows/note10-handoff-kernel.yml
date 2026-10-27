@@ -47,6 +47,11 @@ on:
         type: boolean
         default: false
 
+      ufs_pm_audit:
+        description: Read-only UFS driver queue/link/clock/IRQ observations; requires dma_pm_audit
+        type: boolean
+        default: false
+
       auto_return:
         description: Opt-in one-shot recovery request; cycle token required at BOOT packaging
         type: boolean
@@ -106,6 +111,7 @@ jobs:
           NOTE10_SCREEN_LOG: ${{ inputs.screen_log }}
           NOTE10_GIC_ROUNDTRIP: ${{ inputs.gic_roundtrip }}
           NOTE10_DMA_PM_AUDIT: ${{ inputs.dma_pm_audit }}
+          NOTE10_UFS_PM_AUDIT: ${{ inputs.ufs_pm_audit }}
         run: |
           if [ "$NOTE10_AUTO_RETURN" = true ] && [ "$NOTE10_PM_TIMER" != true ]; then
             echo "auto_return requires pm_timer=true" >&2
@@ -118,6 +124,10 @@ jobs:
           if [ "$NOTE10_DMA_PM_AUDIT" = true ]; then
             python note10/device_test/test_dma_pm_contract.py
             python note10/device_test/test_pm_suspend_binding.py
+          fi
+          if [ "$NOTE10_UFS_PM_AUDIT" = true ]; then
+            if [ "$NOTE10_DMA_PM_AUDIT" != true ]; then exit 2; fi
+            python note10/device_test/test_ufs_pm_contract.py
           fi
           if [ "$NOTE10_GIC_ROUNDTRIP" = true ] && { [ "$NOTE10_AUTO_RETURN" != true ] || [ "$NOTE10_XNU_STAGE" != true ]; }; then
             echo "gic_roundtrip requires auto_return and xnu_stage" >&2
@@ -183,6 +193,7 @@ jobs:
           NOTE10_SCREEN_LOG: ${{ inputs.screen_log }}
           NOTE10_GIC_ROUNDTRIP: ${{ inputs.gic_roundtrip }}
           NOTE10_DMA_PM_AUDIT: ${{ inputs.dma_pm_audit }}
+          NOTE10_UFS_PM_AUDIT: ${{ inputs.ufs_pm_audit }}
         run: |
           count="$(find note10/private/xnu-input -name note10-experimental.macho -type f | wc -l)"
           [ "$count" -eq 1 ]
@@ -214,6 +225,9 @@ jobs:
           if [ "$NOTE10_DMA_PM_AUDIT" = true ]; then
             EXTRA+=(--dma-pm-audit)
           fi
+          if [ "$NOTE10_UFS_PM_AUDIT" = true ]; then
+            EXTRA+=(--ufs-pm-audit)
+          fi
           python note10/device_test/build_handoff_kernel.py --caps --reserve --window-access \
             --xnu-payload note10/private/xnu-stage-payload/kernel.mem \
             --xnu-payload-manifest note10/private/xnu-stage-payload/payload-manifest.json "${EXTRA[@]}"
@@ -225,6 +239,8 @@ jobs:
           if-no-files-found: error
           path: |
             note10/private/handoff-kernel/build-result.json
+            note10/private/handoff-kernel/ufs-pm-model/result.json
+            note10/private/handoff-kernel/ufs-pm-model/*.log
             note10/private/handoff-kernel/dma-pm-model/result.json
             note10/private/handoff-kernel/dma-pm-model/*.log
             note10/private/handoff-kernel/*.log
