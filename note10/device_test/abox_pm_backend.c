@@ -12,6 +12,19 @@ static unsigned int n10_abox_magnitude(int value)
 }
 
 
+void n10_abox_async_firmware(struct device *dev, unsigned int present)
+{
+    unsigned long flags;
+    if (dev->driver != &samsung_abox_driver.driver) return;
+    spin_lock_irqsave(&n10_abox_event_lock, flags);
+    if (n10_abox_event_device != dev) {
+        memset(&n10_abox_history, 0, sizeof(n10_abox_history));
+        n10_abox_event_device = dev;
+    }
+    n10_abox_history.async_fw_present = !!present;
+    spin_unlock_irqrestore(&n10_abox_event_lock, flags);
+}
+
 /* Late init can precede deferred probe: keep this state outside device history. */
 static unsigned int n10_abox_late_observed;
 void n10_abox_late_state(unsigned int state)
@@ -57,6 +70,14 @@ void n10_abox_lifecycle(struct device *dev, unsigned int kind, int result, int b
         h->system_error_put_before = n10_abox_magnitude(before); h->system_error_put_before_negative = before < 0;
         h->system_error_put_after = n10_abox_magnitude(after); h->system_error_put_after_negative = after < 0;
     }
+    else if (kind == 5) {
+        ++h->async_resume_count; h->async_resume_result = n10_abox_magnitude(result); h->async_resume_negative = result < 0;
+        h->async_resume_before = n10_abox_magnitude(before); h->async_resume_before_negative = before < 0;
+        h->async_resume_after = n10_abox_magnitude(after); h->async_resume_after_negative = after < 0;
+        h->async_resume_order = h->events;
+    }
+    if (kind == 2) h->system_get_order = h->events;
+    if (kind == 3) h->system_put_order = h->events;
     spin_unlock_irqrestore(&n10_abox_event_lock, flags);
 }
 
@@ -91,6 +112,12 @@ void n10_abox_note(struct device *dev, unsigned int kind, int error)
     else if (kind == 19) { ++h->qos_puts; h->qos_put_result = n10_abox_magnitude(error); h->qos_put_negative = error < 0; }
     else if (kind == 20) { ++h->qos_worker_starts; h->qos_worker_inflight = 1; }
     else if (kind == 21) { ++h->qos_worker_finishes; h->qos_worker_inflight = 0; }
+    if (kind == 1) h->enable_order = h->events;
+    if (kind == 11) h->firmware_order = h->events;
+    if (kind == 12) h->notifier_order = h->events;
+    if (kind == 20) h->qos_begin_order = h->events;
+    if (kind == 21) h->qos_end_order = h->events;
+    if (kind == 8) h->worker_end_order = h->events;
     spin_unlock_irqrestore(&n10_abox_event_lock, flags);
 }
 
@@ -145,6 +172,15 @@ void n10_abox_pm_capture(unsigned int phase, unsigned int generation)
         s->firmware > CALLIOPE_ENABLED || s->runtime > RPM_SUSPENDING ||
         s->interfaces > 8 || s->rdma > 16 || s->wdma > 16 || s->children > 4096) goto unlock;
     s->queued = (s->tail + ABOX_IPC_QUEUE_SIZE - s->head) % ABOX_IPC_QUEUE_SIZE;
+    spin_lock_irqsave(&pdev->dev.power.lock, flags);
+    s->rpm_request = pdev->dev.power.request;
+    s->rpm_request_pending = pdev->dev.power.request_pending;
+    s->rpm_deferred_resume = pdev->dev.power.deferred_resume;
+    s->rpm_idle_notification = pdev->dev.power.idle_notification;
+    s->rpm_use_autosuspend = pdev->dev.power.use_autosuspend;
+    s->rpm_timer_autosuspends = pdev->dev.power.timer_autosuspends;
+    s->rpm_timer_armed = !!pdev->dev.power.timer_expires;
+    spin_unlock_irqrestore(&pdev->dev.power.lock, flags);
     n10_abox_qos_capture(&pdev->dev, s);
     s->error = 9;
     if (s->qos_error) goto unlock;
@@ -175,6 +211,23 @@ void n10_abox_pm_capture(unsigned int phase, unsigned int generation)
     s->system_error_put_after = n10_abox_history.system_error_put_after;
     s->system_error_put_before_negative = n10_abox_history.system_error_put_before_negative;
     s->system_error_put_after_negative = n10_abox_history.system_error_put_after_negative;
+    s->async_resume_count = n10_abox_history.async_resume_count;
+    s->async_resume_result = n10_abox_history.async_resume_result;
+    s->async_resume_negative = n10_abox_history.async_resume_negative;
+    s->async_resume_before = n10_abox_history.async_resume_before;
+    s->async_resume_after = n10_abox_history.async_resume_after;
+    s->async_resume_before_negative = n10_abox_history.async_resume_before_negative;
+    s->async_resume_after_negative = n10_abox_history.async_resume_after_negative;
+    s->async_fw_present = n10_abox_history.async_fw_present;
+    s->enable_order = n10_abox_history.enable_order;
+    s->firmware_order = n10_abox_history.firmware_order;
+    s->notifier_order = n10_abox_history.notifier_order;
+    s->qos_begin_order = n10_abox_history.qos_begin_order;
+    s->qos_end_order = n10_abox_history.qos_end_order;
+    s->worker_end_order = n10_abox_history.worker_end_order;
+    s->system_get_order = n10_abox_history.system_get_order;
+    s->system_put_order = n10_abox_history.system_put_order;
+    s->async_resume_order = n10_abox_history.async_resume_order;
     s->late_state = n10_abox_late_observed;
     s->probe_get_count = n10_abox_history.probe_get_count;
     s->probe_get_result = n10_abox_history.probe_get_result;

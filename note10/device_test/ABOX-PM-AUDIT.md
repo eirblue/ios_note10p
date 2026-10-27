@@ -283,3 +283,44 @@ yet been observed. These timing-dependent samples warrant bundled QoS/runtime
 queue and event-order analysis. No leak is inferred from the asynchronous get
 return; no reference is forcibly released. DSP/global DMA shutdown and XNU
 execution remain unverified. Raw captures and identifiers stay private.
+
+
+## v24 bundled async/runtime trace (evidence v7)
+
+All 13 evaluations remain bundled. This build combines the preceding reference,
+QoS, IPC, UFS/HCI and IOMMU observations with two required companions rather
+than issuing a separate physical build for each new observation. `N10ABT1`
+records runtime request type/pending, deferred resume, idle notification,
+autosuspend use/timer flags and whether the expiry field is nonzero. These
+fields are copied together under the existing runtime-PM spinlock, separately
+from the QoS, IPC and event locks. A nonzero expiry field is not independent
+proof that a timer is pending. The original runtime snapshot was taken
+separately, so the combined snapshot remains sequential, not globally atomic.
+
+The exact pinned firmware completion callback retains its original single
+`pm_runtime_resume()` call, including when its firmware pointer is null. Only
+pointer presence, signed original resume result and signed usage before/after
+are recorded; firmware names, pointers and payloads are not emitted. Resume
+itself does not inherently acquire a usage reference. Negative asynchronous
+returns do not independently establish a reference leak. `N10ABO1` adds
+completion-order stamps for enable, firmware download, PM prepare, QoS worker,
+IPC worker, system reference pair and firmware completion resume. Stamps are
+recorded after the original calls under the history lock, may wrap and cannot
+prove exact start times, atomic ownership or absence of all other callers.
+
+`N10ABX7` requires both new companions plus all previous companions, strict
+phase/generation/checksum/copy validation and exact main/core/QoS source, model,
+Image and config binding. No PM request, firmware request, flush, barrier,
+counter rewrite or MMIO operation is added. The optional software-idle flag
+also conservatively rejects pending runtime requests/deferred resume/idle
+notification/timer-expiry state and negative observed async resume outcomes.
+This does not establish DSP/global DMA shutdown or XNU execution.
+
+The actual-C model passes 100 cases, retaining the preceding 87 and executing
+the pinned full firmware completion callback under controlled stubs, locked
+runtime field copies, present/null firmware, successful/positive/error and
+in-progress returns, signed samples, foreign-device filtering, event-order wrap,
+missing companions and invalid queue/sign rejection. Default-off paths retain
+the original single callback call. Full PC regression passes 226 tests; all
+seven frame types fit the existing payload buffer at unsigned bounds. Device
+observations for this v24 build remain pending.

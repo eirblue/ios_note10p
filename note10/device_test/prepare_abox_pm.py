@@ -3,6 +3,7 @@ import hashlib
 from pathlib import Path
 HERE=Path(__file__).resolve().parent
 PINS={'sound/soc/samsung/abox/abox.c': '234bd815a338929053473c1c3e05a52c210cc53af41f23449279b3d870610ef0', 'sound/soc/samsung/abox/abox.h': '6173915f547134a66aff5827afa91930ea6ef6c09a344c7bad9d39a3a3a01d15'}
+PINS['sound/soc/samsung/abox/abox_core.c']='a70b0a8856c29d3359e6b14ac4c6f64ea6f5bb3c05cef78158d20a68ec7c0508'
 SOURCES=('abox_pm_contract.h','abox_pm_backend.c','abox_pm_probe.c','prepare_abox_pm.py','decode_abox_pm.py','abox_pm_binding.py')
 PINS.update({'sound/soc/samsung/abox/abox_qos.c':'e396c8e9c82b8ed72b9ea59f1a8b46926e9e8deb98d134726620e26d9f172f78',
     'sound/soc/samsung/abox/abox_qos.h':'107235e3adc1467eb0e9265109212d1341e1f83babfa3fca0b779a7416dc7adc'})
@@ -61,7 +62,15 @@ def instrument_system(raw):
         raw=raw.replace(anchor,b'\n'+new+b'\n')
     return b'#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n#include <linux/note10_abox_pm.h>\n#endif\n'+raw
 
-def event_digest():return hashlib.sha256(b''.join(EVENT_BLOCKS+SYSTEM_BLOCKS)+(QOS_GET+QOS_PUT+QOS_WORK_BEGIN+QOS_WORK_END+PROBE_GET+LATE_BODY)).hexdigest()
+ASYNC_OLD=b'\tpm_runtime_resume(dev);'
+ASYNC_RESUME=b'#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n    {\n        int n10_before, n10_ret, n10_after;\n        n10_abox_async_firmware(dev, !!fw);\n        n10_before = atomic_read(&dev->power.usage_count);\n        n10_ret = pm_runtime_resume(dev);\n        n10_after = atomic_read(&dev->power.usage_count);\n        n10_abox_lifecycle(dev, 5, n10_ret, n10_before, n10_after);\n    }\n#else\n\tpm_runtime_resume(dev);\n#endif'
+CORE_PATCHED_SHA='14f632d1be73a725fd7cadb0482b850b85d252b95470bf743d00cdac29c27590'
+def instrument_core(raw):
+    if hashlib.sha256(raw).hexdigest()!=PINS['sound/soc/samsung/abox/abox_core.c']:raise ValueError('Pinned ABOX core differs')
+    if raw.count(ASYNC_OLD)!=1:raise ValueError('Firmware completion resume recipe differs')
+    return b'#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n#include <linux/note10_abox_pm.h>\n#endif\n'+raw.replace(ASYNC_OLD,ASYNC_RESUME)
+
+def event_digest():return hashlib.sha256(b''.join(EVENT_BLOCKS+SYSTEM_BLOCKS)+(ASYNC_RESUME)+(QOS_GET+QOS_PUT+QOS_WORK_BEGIN+QOS_WORK_END+PROBE_GET+LATE_BODY)).hexdigest()
 
 def instrument_qos(raw):
     if hashlib.sha256(raw).hexdigest()!=PINS['sound/soc/samsung/abox/abox_qos.c']:raise ValueError('Pinned QoS source differs')
@@ -126,6 +135,10 @@ def prepare(source):
     source=Path(source)
     for name,digest in PINS.items():
         if hashlib.sha256((source/name).read_bytes()).hexdigest()!=digest:raise ValueError('Pinned ABOX input differs')
+    core=source/'sound/soc/samsung/abox/abox_core.c'
+    core_patched=instrument_core(core.read_bytes())
+    if hashlib.sha256(core_patched).hexdigest()!=CORE_PATCHED_SHA:raise ValueError('Prepared firmware callback binding differs')
+    core.write_bytes(core_patched)
     main=source/'drivers/base/power/main.c'
     system=instrument_system(main.read_bytes())
     if hashlib.sha256(system).hexdigest()!=SYSTEM_PATCHED_SHA:raise ValueError('Prepared PM core binding differs')
@@ -144,5 +157,5 @@ def prepare(source):
     if raw.count(old)!=1:raise ValueError('ABOX report insertion differs')
     worker.write_bytes(b'#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n#include "note10_abox_pm_probe.c"\n#endif\n'+raw.replace(old,b'#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n    n10_report_abox_pm(pm.qgeneration);\n#endif\n'+old))
     config=source/'kernel/power/Kconfig';config.write_bytes(config.read_bytes()+b'\nconfig NOTE10_ABOX_PM_AUDIT\n\tbool "Experimental read-only ABOX driver and callback observations"\n\tdepends on NOTE10_IOMMU_PM_AUDIT && SND_SOC_SAMSUNG_ABOX=y\n\tdefault n\n')
-    return dict(abox_pm_audit_diagnostic=True,abox_pm_audit_evidence_version=6,abox_system_patched_sha256=SYSTEM_PATCHED_SHA,abox_pm_source_pins=PINS,abox_patched_sha256=PATCHED_SHA,abox_qos_patched_sha256=QOS_PATCHED_SHA,
+    return dict(abox_pm_audit_diagnostic=True,abox_pm_audit_evidence_version=7,abox_core_patched_sha256=CORE_PATCHED_SHA,abox_system_patched_sha256=SYSTEM_PATCHED_SHA,abox_pm_source_pins=PINS,abox_patched_sha256=PATCHED_SHA,abox_qos_patched_sha256=QOS_PATCHED_SHA,
         abox_pm_sources_sha256={n:hashlib.sha256((HERE/n).read_bytes()).hexdigest() for n in SOURCES},audio_dsp_shutdown_verified=False)
