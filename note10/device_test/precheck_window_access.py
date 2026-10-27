@@ -91,6 +91,12 @@ def check(packages,kernel_build,backup,core_model,gate_model,init_model,adb):
             if paired.get('abox_pm_audit_evidence_version')!=8 or diagnostic.get('abox_pm_audit_evidence_version')!=8:
                 raise ValueError('ABOX PM package evidence version differs')
             validate_abox(kernel_build,build)
+        from abox_pmu_binding import assert_scope as assert_pmu_scope,validate_model as validate_pmu
+        pmu_scope=assert_pmu_scope(kernel_build,build)
+        if any(pmu_scope!=bool(m.get('abox_pmu_audit_diagnostic')) for m in (paired,diagnostic)):raise ValueError('PMU package scope differs')
+        if pmu_scope:
+            if any(m.get('abox_pmu_audit_evidence_version')!=1 for m in (paired,diagnostic)):raise ValueError('PMU package evidence version differs')
+            validate_pmu(kernel_build,build)
         if not (build.get('build_passed') is True and build.get('window_access_diagnostic') is True and
                 build.get('window_access_evidence_version')==1 and build.get('reservation_evidence_version')==2):
             raise ValueError('Successful opt-in access kernel build required')

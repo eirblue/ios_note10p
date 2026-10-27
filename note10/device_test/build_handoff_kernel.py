@@ -162,7 +162,13 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             report['pm_quiesce_patched_sha256']['kernel/power/Kconfig']=hashlib.sha256((source/'kernel/power/Kconfig').read_bytes()).hexdigest()
             run([sys.executable,str(ROOT/'note10/device_test/test_abox_pm_native.py'),'--driver',str(source/'sound/soc/samsung/abox/abox.c'),
                  '--dma-helper',str(source/'drivers/base/power/note10_dma_pm.c'),'--output',str(OUT/'abox-pm-model')],'03-abox-pm-model.log')
-            report['scope']='Read-only ABOX state/events, registered IOMMU inventory and read-only UFS driver queue/link/clock/IRQ observations during restored PM; no global hardware DMA-idle or XNU branch claim'
+            from prepare_abox_pmu import prepare as prepare_pmu
+            report.update(prepare_pmu(source))
+            report['pm_quiesce_patched_sha256']['kernel/power/Kconfig']=hashlib.sha256((source/'kernel/power/Kconfig').read_bytes()).hexdigest()
+            run([sys.executable,str(ROOT/'note10/device_test/test_abox_pmu_native.py'),'--core-driver',str(source/'sound/soc/samsung/abox/abox_core.c'),
+                 '--pmu-source',str(source/'drivers/soc/samsung/exynos-pmu.c'),'--dma-helper',str(source/'drivers/base/power/note10_dma_pm.c'),
+                 '--output',str(OUT/'abox-pmu-model')],'03-abox-pmu-model.log')
+            report['scope']='Bundled failed-firmware resume guard, bounded PMU control/standby reads, ABOX software observations, IOMMU inventory and UFS/HCI observations; no DSP/global DMA shutdown or XNU execution claim'
         make=['make','-C',str(source),'O='+str(objects),'ARCH=arm64',
               'CC=clang-14','CROSS_COMPILE=aarch64-linux-gnu-',
               'CLANG_TRIPLE=aarch64-linux-gnu-','CROSS_COMPILE_ARM32=arm-linux-gnueabi-',
@@ -189,14 +195,14 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
         if pm_timer:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_PM_QUIESCE'],'02-pm-quiesce.log')
         if gic_roundtrip:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_GIC_ROUNDTRIP'],'02-gic-roundtrip.log')
         if dma_pm_audit:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_DMA_PM_AUDIT'],'02-dma-pm-audit.log')
-        if ufs_pm_audit:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_UFS_PM_AUDIT','--enable','NOTE10_IOMMU_PM_AUDIT','--enable','NOTE10_ABOX_PM_AUDIT','--enable','NOTE10_ABOX_FW_FAILURE_GUARD'],'02-ufs-pm-audit.log')
+        if ufs_pm_audit:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_UFS_PM_AUDIT','--enable','NOTE10_IOMMU_PM_AUDIT','--enable','NOTE10_ABOX_PM_AUDIT','--enable','NOTE10_ABOX_FW_FAILURE_GUARD','--enable','NOTE10_ABOX_PMU_AUDIT'],'02-ufs-pm-audit.log')
         run([*make,'olddefconfig'],'03-olddefconfig.log')
         configured=config.read_text()
         required=('CONFIG_KEXEC=y','CONFIG_KEXEC_CORE=y','CONFIG_PM_SLEEP_SMP=y','CONFIG_ARM64_4K_PAGES=y')
         (OUT/'handoff.config').write_bytes(config.read_bytes())
         if gic_roundtrip:required+=('CONFIG_NOTE10_GIC_ROUNDTRIP=y','CONFIG_ARM_GIC=y')
         if dma_pm_audit:required+=('CONFIG_NOTE10_DMA_PM_AUDIT=y',)
-        if ufs_pm_audit:required+=('CONFIG_NOTE10_UFS_PM_AUDIT=y','CONFIG_SCSI_UFSHCD=y','CONFIG_SCSI_UFS_EXYNOS=y','CONFIG_NOTE10_IOMMU_PM_AUDIT=y','CONFIG_EXYNOS_IOMMU=y','CONFIG_NOTE10_ABOX_PM_AUDIT=y','CONFIG_NOTE10_ABOX_FW_FAILURE_GUARD=y','CONFIG_SND_SOC_SAMSUNG_ABOX=y')
+        if ufs_pm_audit:required+=('CONFIG_NOTE10_UFS_PM_AUDIT=y','CONFIG_SCSI_UFSHCD=y','CONFIG_SCSI_UFS_EXYNOS=y','CONFIG_NOTE10_IOMMU_PM_AUDIT=y','CONFIG_EXYNOS_IOMMU=y','CONFIG_NOTE10_ABOX_PM_AUDIT=y','CONFIG_NOTE10_ABOX_FW_FAILURE_GUARD=y','CONFIG_SND_SOC_SAMSUNG_ABOX=y','CONFIG_NOTE10_ABOX_PMU_AUDIT=y','CONFIG_EXYNOS_PMU=y')
         if reserve:required+=('CONFIG_INITRAMFS_FORCE=y','CONFIG_CMDLINE_EXTEND=y','CONFIG_CMDLINE="rdinit=/init"')
         if xnu_payload is not None:required+=('CONFIG_CRYPTO=y','CONFIG_CRYPTO_HASH=y','CONFIG_CRYPTO_SHA256=y')
         if cpu_cache:required+=('CONFIG_HOTPLUG_CPU=y','CONFIG_SMP=y','CONFIG_PM_SLEEP_SMP=y')
@@ -259,6 +265,8 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             validate_iommu(OUT,report)
             from abox_pm_binding import validate_model as validate_abox
             validate_abox(OUT,report)
+            from abox_pmu_binding import validate_model as validate_pmu
+            validate_pmu(OUT,report)
         if auto_return:
             from materialize_auto_cycle import SLOT
             if b'N10RET1' not in target.read_bytes() or target.read_bytes().count(SLOT+b'\0')!=1:raise ValueError('Auto-return marker/unique data slot missing')

@@ -1,5 +1,10 @@
 # Read-only ABOX driver and normal callback observations
 
+The next bundled build keeps the tested firmware guard and adds a separate
+[bounded PMU control/standby observation](ABOX-PMU-AUDIT.md) to all previous
+evaluations. The software observer here remains distinct from that PMU API
+read lane, and neither establishes DSP/global DMA shutdown or XNU execution.
+
 The pinned public DT identifies the remaining runtime/syscore IOMMU as ABOX
 audio and explicitly marks it `sysmmu,no-suspend`. Its normal system suspend
 callback does nothing; the notifier and runtime paths manage driver power.

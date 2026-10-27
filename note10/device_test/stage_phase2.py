@@ -23,7 +23,7 @@ def verify_packages(directory):
             if len(archive.namelist())!=len(set(archive.namelist())) or archive.testzip() is not None:
                 raise ValueError('Invalid/duplicate archive members')
             meta=json.loads(archive.read('manifest.json'))
-            for feature in ('gic_roundtrip','dma_pm_audit','ufs_pm_audit','iommu_pm_audit','abox_pm_audit'):
+            for feature in ('gic_roundtrip','dma_pm_audit','ufs_pm_audit','iommu_pm_audit','abox_pm_audit','abox_pmu_audit'):
                 flag=feature+'_diagnostic';version=feature+'_evidence_version'
                 if bool(meta.get(flag))!=bool(record.get(flag)) or meta.get(version)!=record.get(version):
                     raise ValueError('Diagnostic package record differs: '+feature)

@@ -48,7 +48,7 @@ on:
         default: false
 
       ufs_pm_audit:
-        description: Bundled UFS/HCI, IOMMU and ABOX state/events; requires dma_pm_audit
+        description: Bundle UFS/HCI, IOMMU, ABOX firmware guard and bounded PMU observations; requires dma_pm_audit
         type: boolean
         default: false
 
@@ -130,6 +130,7 @@ jobs:
             python note10/device_test/test_ufs_pm_contract.py
             python note10/device_test/test_iommu_pm_contract.py
             python note10/device_test/test_abox_pm_contract.py
+            python note10/device_test/test_abox_pmu_contract.py
           fi
           if [ "$NOTE10_GIC_ROUNDTRIP" = true ] && { [ "$NOTE10_AUTO_RETURN" != true ] || [ "$NOTE10_XNU_STAGE" != true ]; }; then
             echo "gic_roundtrip requires auto_return and xnu_stage" >&2
@@ -243,6 +244,8 @@ jobs:
             note10/private/handoff-kernel/build-result.json
             note10/private/handoff-kernel/abox-pm-model/result.json
             note10/private/handoff-kernel/abox-pm-model/*.log
+            note10/private/handoff-kernel/abox-pmu-model/result.json
+            note10/private/handoff-kernel/abox-pmu-model/*.log
             note10/private/handoff-kernel/iommu-pm-model/result.json
             note10/private/handoff-kernel/iommu-pm-model/*.log
             note10/private/handoff-kernel/ufs-pm-model/result.json
