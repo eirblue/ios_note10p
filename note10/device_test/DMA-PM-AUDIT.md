@@ -59,3 +59,18 @@ Host precheck/collection errors were repaired separately; the stopped journals
 remain preserved. That kernel was booted once, and subsequent collection and
 integrity completion were read-only. The corrected generation rule requires
 a new kernel build and a new physical cycle.
+
+The corrected source `8e7ea2f17b314138f30a0b9d1995217b0712fb7e`
+(CI [40431280403](https://github.com/eirblue/ios_note10p/actions/runs/40431280403))
+passed one new physical cycle on 2026-10-27 KST. All three phases had eight
+intact matching records, begin generation 1 and successful completion generation
+2. The inventory stayed at 1388 total / 277 DMA-capable devices with unchanged
+name digests. The suspend boundary showed 276 system-suspended, one syscore,
+zero direct-complete and zero uncovered devices; initial/restored prepared and
+suspended counts were zero. PM/quiesce and all eight GIC CPU PMR checks passed.
+The controller completed its journal normally, observed a fresh automatic TWRP
+boot and verified all five partition hashes; post-collection read-only checks
+also passed. Local regression tests passed 156 cases and the actual DMA C model
+passed 15 cases. Runtime-active count at the suspend boundary was 10, so these
+system-PM framework observations still do not establish hardware DMA idle.
+UFS queue/link/clock observations and the remaining handoff work remain pending.
