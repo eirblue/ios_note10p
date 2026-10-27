@@ -125,7 +125,10 @@ including default-off behavior, unchanged normalized and nonnormalized firmware
 returns, both clearable decisions, conditional suspend calls, preserved bad/done
 returns, missing companion evidence and signed minimum return magnitude. These
 models do not execute the full hardware firmware loader or PM notifier. The
-source and PC preparation are ready; full compilation and fresh v3 physical
-observations remain pending. The user requested the prior physical cycle and
-this next compilation only; this v3 build is not authorized for an additional
-physical cycle by that request.
+full [v3 integrated build](https://github.com/eirblue/ios_note10p/actions/runs/40510283132)
+passed at source `b4fd5e0`. The local regression suite passed 207 tests; the
+downloaded CI artifact passed 46 ABOX, 25 IOMMU and 42 UFS/HCI actual-C cases.
+Its actual Image/config, source/model bindings and initial process passed local
+verification, and a fresh single-cycle package was prepared offline. This build
+has no device staging, installation, reboot or controller journal. Fresh v3
+physical observations remain pending.
