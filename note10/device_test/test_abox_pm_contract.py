@@ -15,11 +15,11 @@ def evidence(change=None):
     for copy_index in range(2):
         for phase in range(3):
             row=dict(seq=copy_index*3+phase,phase=phase,generation=1,seen=1,error=0)
-            row.update({k:0 for k in FIELDS+EXTRA_FIELDS+QOS_FIELDS+LIFECYCLE_FIELDS+SYSTEM_FIELDS+TRACE_FIELDS+ORDER_FIELDS});row.update(qos_seen=1,runtime=2,interfaces=1,rdma=4,wdma=4,events=3,enables=1,disables=1,status=0)
+            row.update({k:0 for k in FIELDS+EXTRA_FIELDS+QOS_FIELDS+LIFECYCLE_FIELDS+SYSTEM_FIELDS+TRACE_FIELDS+ORDER_FIELDS});row.update(async_guard_enabled=1,qos_seen=1,runtime=2,interfaces=1,rdma=4,wdma=4,events=3,enables=1,disables=1,status=0)
             if change:change(phase,copy_index,row)
             core={k:v for k,v in row.items() if k not in EXTRA_FIELDS+QOS_FIELDS+LIFECYCLE_FIELDS+SYSTEM_FIELDS+TRACE_FIELDS+ORDER_FIELDS}
             body=f'id={ID} '+' '.join(f'{k}={v:d}' if k in decimal else f'{k}={v:x}' for k,v in core.items())
-            result+=f'N10ABX7 {body} checksum={checksum(body.encode()):08x}\n'
+            result+=f'N10ABX8 {body} checksum={checksum(body.encode()):08x}\n'
             extra={k:row[k] for k in ('seq','phase','generation')+EXTRA_FIELDS+('status',)}
             body=f'id={ID} '+' '.join(f'{k}={v:d}' if k in decimal else f'{k}={v:x}' for k,v in extra.items())
             result+=f'N10ABR1 {body} checksum={checksum(body.encode()):08x}\n'
@@ -32,15 +32,22 @@ def evidence(change=None):
             system={k:row[k] for k in ('seq','phase','generation')+SYSTEM_FIELDS+('status',)}
             body=f'id={ID} '+' '.join(f'{k}={v:d}' if k in decimal else f'{k}={v:x}' for k,v in system.items())
             result+=f'N10ABD1 {body} checksum={checksum(body.encode()):08x}\n'
-            for marker,fields in (('N10ABT1',TRACE_FIELDS),('N10ABO1',ORDER_FIELDS)):
+            for marker,fields in (('N10ABT2',TRACE_FIELDS),('N10ABO1',ORDER_FIELDS)):
                 view={k:row[k] for k in ('seq','phase','generation')+fields+('status',)}
                 body=f'id={ID} '+' '.join(f'{k}={v:d}' if k in decimal else f'{k}={v:x}' for k,v in view.items())
                 result+=f'{marker} {body} checksum={checksum(body.encode()):08x}\n'
     return result
 
 class DecoderTests(unittest.TestCase):
+    def test_guard_counts_wrap_and_are_not_reference_ownership_proof(self):
+        def change(phase,copy,row):row.update(async_fw_absent_count=0xffffffff,async_fw_skipped_count=0xffffffff,async_skip_order=1)
+        out=decode(evidence(change),ID,2)
+        self.assertFalse(out['runtime_ownership_unbalanced'])
+        def invalid(phase,copy,row):row['async_guard_enabled']=0
+        with self.assertRaises(ValueError):decode(evidence(invalid),ID,2)
+
     def test_runtime_and_async_companions_required(self):
-        for marker in ('N10ABT1','N10ABO1'):
+        for marker in ('N10ABT2','N10ABO1'):
             missing='\n'.join(v for v in evidence().splitlines() if not (v.startswith(marker+' ') and 'phase=1 ' in v))
             with self.assertRaises(ValueError):decode(missing,ID,2)
     def test_runtime_queue_bounds_async_signs_and_conflicts(self):
@@ -77,7 +84,7 @@ class DecoderTests(unittest.TestCase):
         self.assertTrue(out['system_pm_samples_are_not_atomic_ownership_proof'])
 
     def test_lifecycle_companion_required_and_old_frames_rejected(self):
-        with self.assertRaises(ValueError):decode(evidence().replace('N10ABX7','N10ABX4'),ID,2)
+        with self.assertRaises(ValueError):decode(evidence().replace('N10ABX8','N10ABX4'),ID,2)
         missing='\n'.join(v for v in evidence().splitlines() if not (v.startswith('N10ABL1 ') and 'phase=1 ' in v))
         with self.assertRaises(ValueError):decode(missing,ID,2)
     def test_late_missing_then_probe_is_observation_not_ownership_proof(self):
@@ -140,7 +147,7 @@ class DecoderTests(unittest.TestCase):
             if phase==1 and copy==1:row['qos_registered']=1
         with self.assertRaises(ValueError):decode(evidence(conflict),ID,2)
     def test_v3_frames_cannot_satisfy_v5(self):
-        with self.assertRaises(ValueError):decode(evidence().replace('N10ABX7','N10ABX3'),ID,2)
+        with self.assertRaises(ValueError):decode(evidence().replace('N10ABX8','N10ABX3'),ID,2)
     def test_firmware_defer_is_retained_before_enable_normalization(self):
         def change(phase,copy,row):row.update(fw_downloads=1,fw_result=11,fw_negative=1)
         result=decode(evidence(change),ID,2)
@@ -195,7 +202,7 @@ class DecoderTests(unittest.TestCase):
             def change(phase,copy,row):row.update(values)
             with self.subTest(values=values),self.assertRaises(ValueError):decode(evidence(change),ID,2)
     def test_v1_frames_are_not_v2_evidence(self):
-        with self.assertRaises(ValueError):decode(evidence().replace('N10ABX7','N10ABX2'),ID,2)
+        with self.assertRaises(ValueError):decode(evidence().replace('N10ABX8','N10ABX2'),ID,2)
     def test_worker_and_queue_counts_are_not_error_codes(self):
         def change(phase,copy,row):row.update(worker_starts=5000,worker_finishes=5000,worker_stage=4,gate_seen=1,puts=9000,gets=9000)
         self.assertTrue(decode(evidence(change),ID,2)['abox_driver_idle_state_observed'])
@@ -232,14 +239,14 @@ class BindingTests(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup);self.root=Path(self.tmp.name)
         actual={n:hashlib.sha256((HERE/n).read_bytes()).hexdigest() for n in SOURCES}
-        self.build=dict(abox_pm_audit_diagnostic=True,abox_pm_audit_evidence_version=7,iommu_pm_audit_diagnostic=True,
+        self.build=dict(abox_failed_fw_resume_guard=True,abox_pm_audit_diagnostic=True,abox_pm_audit_evidence_version=8,iommu_pm_audit_diagnostic=True,
             abox_core_patched_sha256=CORE_PATCHED_SHA,abox_system_patched_sha256=SYSTEM_PATCHED_SHA,abox_pm_source_pins=PINS,abox_pm_sources_sha256=actual,abox_patched_sha256=PATCHED_SHA,abox_qos_patched_sha256=QOS_PATCHED_SHA)
-        self.model=dict(passed=True,cases=100,outcomes=[dict(mode=i,passed=True,accepted=i in (0,15,17,18,19,20,23,24,25,26,27,28,29,30,31,35,36,37,38,39,40,41,42,45,46,47,48,49,54,55,56,57,60,61,62,64,65,66,67,68,69,70,71,72,73,78,79,80,81,82,83,84,87,88,89,90,91,92,97,98,99)) for i in range(100)],
-            core_patched_sha256=CORE_PATCHED_SHA,actual_firmware_callback_executed=True,actual_runtime_lock_sample_executed=True,system_patched_sha256=SYSTEM_PATCHED_SHA,generated_system_blocks_executed=True,source_sha256=actual,patched_driver_sha256=PATCHED_SHA,patched_qos_driver_sha256=QOS_PATCHED_SHA,qos_target_sha256=QOS_TARGET_SHA,event_blocks_sha256=event_digest(),
+        self.model=dict(passed=True,cases=105,outcomes=[dict(mode=i,passed=True,accepted=i in (0,15,17,18,19,20,23,24,25,26,27,28,29,30,31,35,36,37,38,39,40,41,42,45,46,47,48,49,54,55,56,57,60,61,62,64,65,66,67,68,69,70,71,72,73,78,79,80,81,82,83,84,87,88,89,90,91,92,97,98,99,100,101,102)) for i in range(105)],
+            core_patched_sha256=CORE_PATCHED_SHA,failed_firmware_guard_executed=True,audit_only_original_callback_executed=True,actual_firmware_callback_executed=True,actual_runtime_lock_sample_executed=True,system_patched_sha256=SYSTEM_PATCHED_SHA,generated_system_blocks_executed=True,source_sha256=actual,patched_driver_sha256=PATCHED_SHA,patched_qos_driver_sha256=QOS_PATCHED_SHA,qos_target_sha256=QOS_TARGET_SHA,event_blocks_sha256=event_digest(),
             generated_dma_sha256=hashlib.sha256(instrument_dma((HERE/'dma_pm_backend.c').read_bytes())).hexdigest(),
             harness_sha256=hashlib.sha256((HERE/'test_abox_pm_native.py').read_bytes()).hexdigest(),generated_lifecycle_blocks_executed=True,actual_late_initcall_executed=True,actual_backend_executed=True,
             actual_probe_executed=True,generated_event_blocks_executed=True,generated_worker_blocks_executed=True,generated_queue_blocks_executed=True,generated_prepare_blocks_executed=True,actual_qos_backend_executed=True,actual_qos_apply_executed=True,actual_qos_worker_executed=True,generated_qos_blocks_executed=True,default_off_blocks_executed=True,generated_dma_hook_executed=True,hardware_verified=False)
-        (self.root/'Image').write_bytes(b'PC FIXTURE N10ABX7 N10ABR1 N10ABQ1 N10ABL1 N10ABD1 N10ABT1 N10ABO1');(self.root/'handoff.config').write_bytes(b'CONFIG_NOTE10_ABOX_PM_AUDIT=y\n');(self.root/'abox-pm-model').mkdir()
+        (self.root/'Image').write_bytes(b'PC FIXTURE N10ABX8 N10ABR1 N10ABQ1 N10ABL1 N10ABD1 N10ABT2 N10ABO1');(self.root/'handoff.config').write_bytes(b'CONFIG_NOTE10_ABOX_PM_AUDIT=y\nCONFIG_NOTE10_ABOX_FW_FAILURE_GUARD=y\n');(self.root/'abox-pm-model').mkdir()
     def validate(self):
         (self.root/'abox-pm-model/result.json').write_text(json.dumps(self.model));return validate_model(self.root,self.build)
     def test_complete(self):self.assertTrue(self.validate())
@@ -252,7 +259,7 @@ class BindingTests(unittest.TestCase):
             old=self.build[key];self.build[key]=None
             with self.assertRaises(ValueError):self.validate()
             self.build[key]=old
-        for key in ('core_patched_sha256','actual_firmware_callback_executed','actual_runtime_lock_sample_executed','system_patched_sha256','generated_system_blocks_executed','generated_dma_sha256','patched_qos_driver_sha256','qos_target_sha256','patched_driver_sha256','event_blocks_sha256','generated_event_blocks_executed','generated_worker_blocks_executed','generated_queue_blocks_executed','generated_prepare_blocks_executed','actual_qos_backend_executed','actual_qos_apply_executed','actual_qos_worker_executed','generated_qos_blocks_executed','default_off_blocks_executed','generated_lifecycle_blocks_executed','actual_late_initcall_executed','actual_backend_executed','actual_probe_executed','generated_dma_hook_executed','harness_sha256'):
+        for key in ('failed_firmware_guard_executed','audit_only_original_callback_executed','core_patched_sha256','actual_firmware_callback_executed','actual_runtime_lock_sample_executed','system_patched_sha256','generated_system_blocks_executed','generated_dma_sha256','patched_qos_driver_sha256','qos_target_sha256','patched_driver_sha256','event_blocks_sha256','generated_event_blocks_executed','generated_worker_blocks_executed','generated_queue_blocks_executed','generated_prepare_blocks_executed','actual_qos_backend_executed','actual_qos_apply_executed','actual_qos_worker_executed','generated_qos_blocks_executed','default_off_blocks_executed','generated_lifecycle_blocks_executed','actual_late_initcall_executed','actual_backend_executed','actual_probe_executed','generated_dma_hook_executed','harness_sha256'):
             old=self.model[key];self.model[key]=None
             with self.assertRaises(ValueError):self.validate()
             self.model[key]=old

@@ -29,6 +29,7 @@ def verify_packages(directory):
                     raise ValueError('Diagnostic package record differs: '+feature)
                 if record.get('mode')=='diagnostic' and (bool(meta.get(flag))!=bool(result.get(flag)) or meta.get(version)!=result.get(version)):
                     raise ValueError('Diagnostic package pair differs: '+feature)
+            if bool(meta.get('abox_failed_fw_resume_guard'))!=bool(record.get('abox_failed_fw_resume_guard')) or (record.get('mode')=='diagnostic' and bool(meta.get('abox_failed_fw_resume_guard'))!=bool(result.get('abox_failed_fw_resume_guard'))):raise ValueError('Failed-firmware guard package scope differs')
             if meta['writes']!=['boot'] or meta['automatic_reboot'] is not False:raise ValueError('Unexpected installer scope')
             if meta.get('xnu_payload_stage_diagnostic') is True and (
                 meta.get('window_access_diagnostic') is not True or meta.get('test_purpose')!='xnu-payload-stage' or

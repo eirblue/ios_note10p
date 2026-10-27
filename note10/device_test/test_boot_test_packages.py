@@ -32,15 +32,15 @@ class PackageTests(unittest.TestCase):
                 early_xnu_reservation=True,builtin_idle_init=True,window_access_diagnostic=True,xnu_payload_stage_diagnostic=True,xnu_payload_sha256='b'*64,xnu_payload_size=1,
                 cpu_cache_roundtrip_diagnostic=True,pm_timer_diagnostic=True,auto_return_diagnostic=True,auto_cycle_token='c'*32,
                 gic_roundtrip_diagnostic=True,gic_roundtrip_evidence_version=1,dma_pm_audit_diagnostic=True,dma_pm_audit_evidence_version=1,
-                ufs_pm_audit_diagnostic=True,ufs_pm_audit_evidence_version=2,iommu_pm_audit_diagnostic=True,iommu_pm_audit_evidence_version=2,abox_pm_audit_diagnostic=True,abox_pm_audit_evidence_version=7)
+                ufs_pm_audit_diagnostic=True,ufs_pm_audit_evidence_version=2,iommu_pm_audit_diagnostic=True,iommu_pm_audit_evidence_version=2,abox_failed_fw_resume_guard=True,abox_pm_audit_diagnostic=True,abox_pm_audit_evidence_version=8)
             prototype.with_suffix('.json').write_text(json.dumps(metadata))
             packages=fs/'packages'
             with patch('build_boot_test_packages.read_verified_backup',return_value=parts):result=build(backup,prototype,packages)
             diagnostic=next(r for r in verify_packages(packages) if r['mode']=='diagnostic')
-            self.assertEqual(diagnostic['abox_pm_audit_evidence_version'],7)
+            self.assertEqual(diagnostic['abox_pm_audit_evidence_version'],8)
             with zipfile.ZipFile(packages/diagnostic['file']) as archive:
-                self.assertEqual(json.loads(archive.read('manifest.json'))['abox_pm_audit_evidence_version'],7)
-            for old_version in (5,6,None):
+                self.assertEqual(json.loads(archive.read('manifest.json'))['abox_pm_audit_evidence_version'],8)
+            for old_version in (5,6,7,None):
                 changed=dict(result,abox_pm_audit_evidence_version=old_version)
                 (packages/'package-result.json').write_text(json.dumps(changed))
                 with self.assertRaisesRegex(ValueError,'package pair differs'):verify_packages(packages)

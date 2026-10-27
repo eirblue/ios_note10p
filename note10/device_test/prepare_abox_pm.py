@@ -63,8 +63,8 @@ def instrument_system(raw):
     return b'#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n#include <linux/note10_abox_pm.h>\n#endif\n'+raw
 
 ASYNC_OLD=b'\tpm_runtime_resume(dev);'
-ASYNC_RESUME=b'#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n    {\n        int n10_before, n10_ret, n10_after;\n        n10_abox_async_firmware(dev, !!fw);\n        n10_before = atomic_read(&dev->power.usage_count);\n        n10_ret = pm_runtime_resume(dev);\n        n10_after = atomic_read(&dev->power.usage_count);\n        n10_abox_lifecycle(dev, 5, n10_ret, n10_before, n10_after);\n    }\n#else\n\tpm_runtime_resume(dev);\n#endif'
-CORE_PATCHED_SHA='14f632d1be73a725fd7cadb0482b850b85d252b95470bf743d00cdac29c27590'
+ASYNC_RESUME=b'#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n    n10_abox_async_firmware(dev, !!fw);\n#endif\n#ifdef CONFIG_NOTE10_ABOX_FW_FAILURE_GUARD\n    if (!fw) {\n#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n        n10_abox_async_skipped(dev);\n#endif\n        return;\n    }\n#endif\n#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n    {\n        int n10_before, n10_ret, n10_after;\n        n10_before = atomic_read(&dev->power.usage_count);\n        n10_ret = pm_runtime_resume(dev);\n        n10_after = atomic_read(&dev->power.usage_count);\n        n10_abox_lifecycle(dev, 5, n10_ret, n10_before, n10_after);\n    }\n#else\n\tpm_runtime_resume(dev);\n#endif'
+CORE_PATCHED_SHA='cd17a9bf0dfef9722ba46afba7cc667928e88b494343b1d04f3eb4be2d4a1283'
 def instrument_core(raw):
     if hashlib.sha256(raw).hexdigest()!=PINS['sound/soc/samsung/abox/abox_core.c']:raise ValueError('Pinned ABOX core differs')
     if raw.count(ASYNC_OLD)!=1:raise ValueError('Firmware completion resume recipe differs')
@@ -157,5 +157,6 @@ def prepare(source):
     if raw.count(old)!=1:raise ValueError('ABOX report insertion differs')
     worker.write_bytes(b'#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n#include "note10_abox_pm_probe.c"\n#endif\n'+raw.replace(old,b'#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n    n10_report_abox_pm(pm.qgeneration);\n#endif\n'+old))
     config=source/'kernel/power/Kconfig';config.write_bytes(config.read_bytes()+b'\nconfig NOTE10_ABOX_PM_AUDIT\n\tbool "Experimental read-only ABOX driver and callback observations"\n\tdepends on NOTE10_IOMMU_PM_AUDIT && SND_SOC_SAMSUNG_ABOX=y\n\tdefault n\n')
-    return dict(abox_pm_audit_diagnostic=True,abox_pm_audit_evidence_version=7,abox_core_patched_sha256=CORE_PATCHED_SHA,abox_system_patched_sha256=SYSTEM_PATCHED_SHA,abox_pm_source_pins=PINS,abox_patched_sha256=PATCHED_SHA,abox_qos_patched_sha256=QOS_PATCHED_SHA,
+    config.write_bytes(config.read_bytes()+b'\nconfig NOTE10_ABOX_FW_FAILURE_GUARD\n\tbool "Experimental skip of runtime resume after failed ABOX firmware completion"\n\tdepends on NOTE10_ABOX_PM_AUDIT\n\tdefault n\n')
+    return dict(abox_failed_fw_resume_guard=True,abox_pm_audit_diagnostic=True,abox_pm_audit_evidence_version=8,abox_core_patched_sha256=CORE_PATCHED_SHA,abox_system_patched_sha256=SYSTEM_PATCHED_SHA,abox_pm_source_pins=PINS,abox_patched_sha256=PATCHED_SHA,abox_qos_patched_sha256=QOS_PATCHED_SHA,
         abox_pm_sources_sha256={n:hashlib.sha256((HERE/n).read_bytes()).hexdigest() for n in SOURCES},audio_dsp_shutdown_verified=False)

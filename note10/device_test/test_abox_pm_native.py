@@ -27,6 +27,7 @@ typedef unsigned int u32;
 #define pr_info printf
 #define DEFINE_SPINLOCK(x) int x
 #define CONFIG_NOTE10_ABOX_PM_AUDIT
+#define CONFIG_NOTE10_ABOX_FW_FAILURE_GUARD
 #define CALLIOPE_DISABLED 0
 #define CALLIOPE_ENABLED 3
 #define RPM_SUSPENDING 3
@@ -179,9 +180,15 @@ int main(int argc,char**argv){
   if(mode==91)controller.dev.power.usage_count=-1;
   if(mode==97)n10_abox_history.events=0xffffffffU;
   abox_core_check_firmware(mode==88?NULL:&fw,NULL);
-  if(resume_calls!=1 || controller.dev.power.usage_count!=(mode==91?-1:0))return 107;
+  if(resume_calls!=(mode==88?0:1) || controller.dev.power.usage_count!=(mode==91?-1:0))return 107;
   if(mode==99){struct n10_abox_pm_sample old=n10_abox_history;n10_abox_lifecycle(&other.dev,5,0,0,0);if(memcmp(&old,&n10_abox_history,sizeof(old)))return 108;}
  }
+ if(mode==100){
+  struct firmware fw={0};abox_core_check_firmware(NULL,NULL);abox_core_check_firmware(&fw,NULL);abox_core_check_firmware(NULL,NULL);abox_core_check_firmware(&fw,NULL);abox_core_check_firmware(NULL,NULL);
+  if(resume_calls!=2 || controller.dev.power.usage_count || n10_abox_history.async_fw_present_count!=2 || n10_abox_history.async_fw_absent_count!=3 || n10_abox_history.async_fw_skipped_count!=3)return 110;
+ }
+ if(mode==101){n10_abox_history.async_fw_absent_count=0xffffffffU;n10_abox_history.async_fw_skipped_count=0xffffffffU;abox_core_check_firmware(NULL,NULL);if(resume_calls || n10_abox_history.async_fw_absent_count || n10_abox_history.async_fw_skipped_count)return 111;}
+ if(mode==102){struct n10_abox_pm_sample old=n10_abox_history;n10_abox_async_skipped(&other.dev);if(memcmp(&old,&n10_abox_history,sizeof(old)))return 112;}
  if(n10_abox_pm_read(NULL,2)!=-EINVAL)return 80;
  for(phase=0;phase<3;++phase){
   setup();
@@ -199,6 +206,8 @@ int main(int argc,char**argv){
   if(mode==13 && phase==1)n10_abox_pm_capture(phase,begin);
   if(node_refs || device_refs || device_locked || ipc_locked || event_locked || qos_locked || rpm_locked || irq!=saved_irq || memcmp(&old_box,&box,sizeof(box)) || memcmp(&old_dev,&controller,sizeof(controller)) || memcmp(&old_qos,&abox_qos_aud,sizeof(old_qos)) || old_qos_work!=abox_qos_work)return 81;
  }
+ if(mode==103)n10_abox_samples[1].async_guard_enabled=0;
+ if(mode==104)n10_abox_samples[1].async_fw_present=2;
  if(mode==96)n10_abox_samples[1].async_resume_negative=1;
  if(mode==85)n10_abox_samples[1].system_get_before_negative=1;
  if(mode==58)n10_abox_samples[1].qos_seen=0;
@@ -247,11 +256,11 @@ def run(output,driver,dma_helper):
     hooks+='static void event_qos_worker_begin(void){\n'+QOS_WORK_BEGIN.decode()+'}\n'
     exe=build('abox',STUB+sources['abox_pm_contract.h'].decode()+qos_target.decode()+clean(sources['abox_qos_pm_backend.c'].decode())+clean(sources['abox_pm_backend.c'].decode())+checksum+clean(sources['abox_pm_probe.c'].decode())+qos_apply.decode()+qos_worker.decode()+hooks+MAIN)
     rows=[]
-    for mode in range(100):
+    for mode in range(105):
         ran=subprocess.run([str(exe),str(mode)],capture_output=True,timeout=15);(output/f'mode-{mode}.log').write_bytes(ran.stdout+ran.stderr)
         if ran.returncode:raise ValueError('ABOX reference/lock/IRQ/state or unchanged callback result failed mode '+str(mode))
         text=ran.stdout.decode()
-        if mode in (94,95):text='\n'.join(line for line in text.splitlines() if not (line.startswith(('N10ABT1 ' if mode==94 else 'N10ABO1 ')) and 'phase=1 ' in line))
+        if mode in (94,95):text='\n'.join(line for line in text.splitlines() if not (line.startswith(('N10ABT2 ' if mode==94 else 'N10ABO1 ')) and 'phase=1 ' in line))
         if mode==86:text='\n'.join(line for line in text.splitlines() if not (line.startswith('N10ABD1 ') and 'phase=1 ' in line))
         if mode==44:text='\n'.join(line for line in text.splitlines() if not (line.startswith('N10ABR1 ') and 'phase=1 ' in line))
         if mode==75:text='\n'.join(line for line in text.splitlines() if not (line.startswith('N10ABL1 ') and 'phase=1 ' in line))
@@ -262,8 +271,17 @@ def run(output,driver,dma_helper):
         if accepted:
             if mode in (87,88,89,90,91,97,98,99):
                 a=observation['phases'][1]['snapshot'];expected=5 if mode==89 else 115 if mode==90 else 1 if mode==98 else 0
-                if a['async_resume_count']!=1 or a['async_resume_result']!=expected or a['async_resume_negative']!=(mode in (89,90)) or a['async_fw_present']!=(mode!=88) or a['async_resume_before_negative']!=(mode==91) or a['async_resume_before']!=(1 if mode==91 else 0):raise ValueError('Firmware callback semantics differ')
-                if mode==97 and a['async_resume_order']!=1:raise ValueError('Completion order wrap differs')
+                if a['async_resume_count']!=(0 if mode==88 else 1) or a['async_resume_result']!=expected or a['async_resume_negative']!=(mode in (89,90)) or a['async_fw_present']!=(mode!=88) or a['async_resume_before_negative']!=(mode==91) or a['async_resume_before']!=(1 if mode==91 else 0):raise ValueError('Firmware callback semantics differ')
+                if mode==97 and a['async_resume_order']!=2:raise ValueError('Completion order wrap differs')
+            if mode==88:
+                a=observation['phases'][1]['snapshot']
+                if a['async_fw_absent_count']!=1 or a['async_fw_skipped_count']!=1 or a['async_resume_order'] or not a['async_skip_order']:raise ValueError('Absent firmware was not skipped')
+            if mode==100:
+                a=observation['phases'][1]['snapshot']
+                if a['async_fw_present_count']!=2 or a['async_fw_absent_count']!=3 or a['async_fw_skipped_count']!=3 or a['async_resume_count']!=2 or a['async_fw_present'] or a['async_skip_order']<=a['async_resume_order']:raise ValueError('Mixed guard/success callback history differs')
+            if mode==101:
+                a=observation['phases'][1]['snapshot']
+                if a['async_fw_absent_count'] or a['async_fw_skipped_count'] or not a['async_skip_order']:raise ValueError('Guard count wrap differs')
             if mode==92:
                 a=observation['phases'][1]['snapshot']
                 if a['rpm_request']!=4 or any(a[k]!=1 for k in ('rpm_request_pending','rpm_deferred_resume','rpm_idle_notification','rpm_use_autosuspend','rpm_timer_autosuspends','rpm_timer_armed')):raise ValueError('Locked runtime queue sample differs')
@@ -276,7 +294,7 @@ def run(output,driver,dma_helper):
                 if (last[prefix+'_count']!=1 or last[prefix+'_before']!=1 or last[prefix+'_after']!=(2 if mode==83 else 0) or
                     last[prefix+'_result']!=(5 if mode==81 else 0) or last[prefix+'_negative']!=(mode==81)):
                     raise ValueError('Original system put samples differ')
-            if observation['abox_driver_idle_state_observed']!=(mode in (0,15,23,27,29,30,35,38,39,40,42,49,54,60,62,65,66,67,68,69,70,71,72,73,78,87,88,91,97,98,99)):raise ValueError('ABOX idle interpretation differs mode '+str(mode))
+            if observation['abox_driver_idle_state_observed']!=(mode in (0,15,23,27,29,30,35,38,39,40,42,49,54,60,62,65,66,67,68,69,70,71,72,73,78,87,88,91,97,98,99,100,101,102)):raise ValueError('ABOX idle interpretation differs mode '+str(mode))
             expected={25:dict(worker_starts=1,worker_stage=1,worker_inflight=1),
                 26:dict(worker_starts=1,worker_finishes=1,worker_stage=4,pm_get_result=5,pm_get_negative=1),
                 27:dict(gate_seen=1,can_ipc=0,worker_finishes=1),
@@ -302,11 +320,14 @@ def run(output,driver,dma_helper):
                 78:dict(late_state=3,late_put_result=0x80000000,late_put_negative=1)})
             snapshot=observation['phases'][1]['snapshot']
             if any(snapshot[k]!=v for k,v in expected.get(mode,{}).items()):raise ValueError('ABOX worker/queue interpretation differs')
-        if accepted!=(mode in (0,15,17,18,19,20,23,24,25,26,27,28,29,30,31,35,36,37,38,39,40,41,42,45,46,47,48,49,54,55,56,57,60,61,62,64,65,66,67,68,69,70,71,72,73,78,79,80,81,82,83,84,87,88,89,90,91,92,97,98,99)):raise ValueError('ABOX strict decoder differs mode '+str(mode))
+        if accepted!=(mode in (0,15,17,18,19,20,23,24,25,26,27,28,29,30,31,35,36,37,38,39,40,41,42,45,46,47,48,49,54,55,56,57,60,61,62,64,65,66,67,68,69,70,71,72,73,78,79,80,81,82,83,84,87,88,89,90,91,92,97,98,99,100,101,102)):raise ValueError('ABOX strict decoder differs mode '+str(mode))
         rows.append(dict(mode=mode,passed=True,accepted=accepted))
-    disabled=build('disabled',STUB.replace('#define CONFIG_NOTE10_ABOX_PM_AUDIT','')+sources['abox_pm_contract.h'].decode()+qos_target.decode()+qos_apply.decode()+qos_worker.decode()+hooks+'int main(void){mode=17;setup();if(event_enable(&controller.dev,-EIO)!=-EIO || event_disable(&controller.dev,&box,3)!=0 || ipc_calls!=1)return 85;event_worker(&controller.dev,&box);if(pm_get_calls!=1 || gate_calls!=1 || pm_put_calls!=1 || event_queue_put(&box,-EBUSY)!=-EBUSY || event_queue_get(&box,-ENODATA)!=-ENODATA)return 88;mode=41;if(event_firmware(&controller.dev,-EAGAIN)!=0 || event_notifier(&controller.dev,&box,PM_SUSPEND_PREPARE)!=NOTIFY_BAD || clearable_calls!=1 || suspend_calls!=1)return 91;mode=54;abox_qos_aud.req_array[0]=(struct abox_qos_req){DEFAULT_CPU_GEAR_ID,100};abox_qos_apply(&abox_qos_aud);abox_qos_aud.req_array[0].val=0;abox_qos_apply(&abox_qos_aud);if(qpm_get_calls!=1 || pm_put_calls!=2)return 93;abox_qos_work_func(NULL);if(qpm_get_calls!=1 || pm_put_calls!=2)return 96;mode=70;setup();event_probe_get(&controller.dev);if(controller.dev.power.usage_count!=1 || samsung_abox_late_initcall()!=0 || late_calls!=1 || controller.dev.power.usage_count)return 101;mode=87;setup();abox_core_check_firmware(NULL,NULL);if(resume_calls!=1)return 109;mode=79;setup();event_system_get(&controller.dev);event_system_put(&controller.dev);event_system_get(&controller.dev);event_system_error_put(&controller.dev);if(controller.dev.power.usage_count)return 105;mode=68;p_abox_data=NULL;if(samsung_abox_late_initcall()!=0 || late_calls!=1)return 102;return 0;}')
+    disabled=build('disabled',STUB.replace('#define CONFIG_NOTE10_ABOX_PM_AUDIT','').replace('#define CONFIG_NOTE10_ABOX_FW_FAILURE_GUARD','')+sources['abox_pm_contract.h'].decode()+qos_target.decode()+qos_apply.decode()+qos_worker.decode()+hooks+'int main(void){mode=17;setup();if(event_enable(&controller.dev,-EIO)!=-EIO || event_disable(&controller.dev,&box,3)!=0 || ipc_calls!=1)return 85;event_worker(&controller.dev,&box);if(pm_get_calls!=1 || gate_calls!=1 || pm_put_calls!=1 || event_queue_put(&box,-EBUSY)!=-EBUSY || event_queue_get(&box,-ENODATA)!=-ENODATA)return 88;mode=41;if(event_firmware(&controller.dev,-EAGAIN)!=0 || event_notifier(&controller.dev,&box,PM_SUSPEND_PREPARE)!=NOTIFY_BAD || clearable_calls!=1 || suspend_calls!=1)return 91;mode=54;abox_qos_aud.req_array[0]=(struct abox_qos_req){DEFAULT_CPU_GEAR_ID,100};abox_qos_apply(&abox_qos_aud);abox_qos_aud.req_array[0].val=0;abox_qos_apply(&abox_qos_aud);if(qpm_get_calls!=1 || pm_put_calls!=2)return 93;abox_qos_work_func(NULL);if(qpm_get_calls!=1 || pm_put_calls!=2)return 96;mode=70;setup();event_probe_get(&controller.dev);if(controller.dev.power.usage_count!=1 || samsung_abox_late_initcall()!=0 || late_calls!=1 || controller.dev.power.usage_count)return 101;mode=87;setup();abox_core_check_firmware(NULL,NULL);if(resume_calls!=1)return 109;mode=79;setup();event_system_get(&controller.dev);event_system_put(&controller.dev);event_system_get(&controller.dev);event_system_error_put(&controller.dev);if(controller.dev.power.usage_count)return 105;mode=68;p_abox_data=NULL;if(samsung_abox_late_initcall()!=0 || late_calls!=1)return 102;return 0;}')
     off=subprocess.run([str(disabled)],capture_output=True,timeout=15);(output/'disabled.log').write_bytes(off.stdout+off.stderr)
     if off.returncode:raise ValueError('Default-off ABOX callback result changed')
+    audit_only=build('audit-only',STUB.replace('#define CONFIG_NOTE10_ABOX_FW_FAILURE_GUARD','')+sources['abox_pm_contract.h'].decode()+qos_target.decode()+clean(sources['abox_qos_pm_backend.c'].decode())+clean(sources['abox_pm_backend.c'].decode())+hooks+'int main(void){struct firmware fw={0};mode=87;setup();abox_core_check_firmware(NULL,NULL);abox_core_check_firmware(&fw,NULL);if(resume_calls!=2 || controller.dev.power.usage_count || n10_abox_history.async_fw_absent_count!=1 || n10_abox_history.async_fw_present_count!=1 || n10_abox_history.async_fw_skipped_count)return 113;return 0;}')
+    off_audit=subprocess.run([str(audit_only)],capture_output=True,timeout=15);(output/'audit-only.log').write_bytes(off_audit.stdout+off_audit.stderr)
+    if off_audit.returncode:raise ValueError('Audit-only original callback behavior changed')
     from test_dma_pm_native import STUB as DMA_STUB,MAIN as DMA_MAIN
     raw=Path(dma_helper).read_bytes();hook='\n#define CONFIG_NOTE10_ABOX_PM_AUDIT\nstatic void n10_abox_pm_capture(unsigned int phase,unsigned int generation){if(locked)abort();printf("ABXHOOK phase=%u generation=%u\\n",phase,generation);}\n'
     exe=build('hook',DMA_STUB+hook+(HERE/'dma_pm_contract.h').read_text()+clean(raw.decode())+checksum+clean((HERE/'dma_pm_probe.c').read_text())+DMA_MAIN)
@@ -315,7 +336,7 @@ def run(output,driver,dma_helper):
     from decode_dma_pm import decode as decode_dma
     decode_dma(ran.stdout.decode(),ID,2)
     result=dict(passed=True,cases=len(rows),outcomes=rows,source_sha256={n:hashlib.sha256(raw).hexdigest() for n,raw in sources.items()},
-        core_patched_sha256=CORE_PATCHED_SHA,actual_firmware_callback_executed=True,actual_runtime_lock_sample_executed=True,system_patched_sha256=SYSTEM_PATCHED_SHA,generated_system_blocks_executed=True,patched_driver_sha256=PATCHED_SHA,patched_qos_driver_sha256=QOS_PATCHED_SHA,qos_target_sha256=QOS_TARGET_SHA,event_blocks_sha256=event_digest(),generated_dma_sha256=hashlib.sha256(raw).hexdigest(),
+        core_patched_sha256=CORE_PATCHED_SHA,failed_firmware_guard_executed=True,audit_only_original_callback_executed=True,actual_firmware_callback_executed=True,actual_runtime_lock_sample_executed=True,system_patched_sha256=SYSTEM_PATCHED_SHA,generated_system_blocks_executed=True,patched_driver_sha256=PATCHED_SHA,patched_qos_driver_sha256=QOS_PATCHED_SHA,qos_target_sha256=QOS_TARGET_SHA,event_blocks_sha256=event_digest(),generated_dma_sha256=hashlib.sha256(raw).hexdigest(),
         harness_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),generated_lifecycle_blocks_executed=True,actual_late_initcall_executed=True,actual_backend_executed=True,actual_probe_executed=True,
         generated_event_blocks_executed=True,generated_worker_blocks_executed=True,generated_queue_blocks_executed=True,generated_prepare_blocks_executed=True,actual_qos_backend_executed=True,actual_qos_apply_executed=True,actual_qos_worker_executed=True,generated_qos_blocks_executed=True,default_off_blocks_executed=True,generated_dma_hook_executed=True,hardware_verified=False)
     (output/'result.json').write_bytes((json.dumps(result,indent=2)+'\n').encode());return result

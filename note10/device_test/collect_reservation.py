@@ -133,7 +133,8 @@ def collect(packages,kernel_build,adb):
         raise ValueError('UFS PM package and kernel contract differs')
     if bool(paired.get('iommu_pm_audit_diagnostic'))!=iommu_pm_audit or (iommu_pm_audit and paired.get('iommu_pm_audit_evidence_version')!=2):
         raise ValueError('IOMMU PM package and kernel contract differs')
-    if bool(paired.get('abox_pm_audit_diagnostic'))!=abox_pm_audit or (abox_pm_audit and paired.get('abox_pm_audit_evidence_version')!=7):
+    if abox_pm_audit and paired.get('abox_failed_fw_resume_guard') is not True:raise ValueError('Failed-firmware guard scope differs')
+    if bool(paired.get('abox_pm_audit_diagnostic'))!=abox_pm_audit or (abox_pm_audit and paired.get('abox_pm_audit_evidence_version')!=8):
         raise ValueError('ABOX package and kernel scope differs')
     if xnu_stage and (paired.get('xnu_payload_sha256')!=result.get('xnu_payload_sha256') or
                       paired.get('xnu_payload_size')!=result.get('xnu_payload_size')):

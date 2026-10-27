@@ -194,6 +194,7 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output,auto_cycle_token=None):
             'ufs_pm_audit_evidence_version':build.get('ufs_pm_audit_evidence_version'),
             'iommu_pm_audit_diagnostic':build.get('iommu_pm_audit_diagnostic') is True,
             'iommu_pm_audit_evidence_version':build.get('iommu_pm_audit_evidence_version'),
+            'abox_failed_fw_resume_guard':build.get('abox_failed_fw_resume_guard') is True,
             'abox_pm_audit_diagnostic':build.get('abox_pm_audit_diagnostic') is True,
             'abox_pm_audit_evidence_version':build.get('abox_pm_audit_evidence_version'),
             'screen_log_diagnostic':build.get('screen_log_diagnostic') is True,

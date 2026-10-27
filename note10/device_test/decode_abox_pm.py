@@ -13,8 +13,8 @@ LIFECYCLE_FIELDS=('late_state', 'probe_get_count', 'probe_get_result', 'probe_ge
 
 SYSTEM_FIELDS=('system_get_count', 'system_get_result', 'system_get_negative', 'system_get_before', 'system_get_after', 'system_get_before_negative', 'system_get_after_negative', 'system_put_count', 'system_put_result', 'system_put_negative', 'system_put_before', 'system_put_after', 'system_put_before_negative', 'system_put_after_negative', 'system_error_put_count', 'system_error_put_result', 'system_error_put_negative', 'system_error_put_before', 'system_error_put_after', 'system_error_put_before_negative', 'system_error_put_after_negative')
 
-TRACE_FIELDS=('rpm_request', 'rpm_request_pending', 'rpm_deferred_resume', 'rpm_idle_notification', 'rpm_use_autosuspend', 'rpm_timer_autosuspends', 'rpm_timer_armed', 'async_resume_count', 'async_resume_result', 'async_resume_negative', 'async_resume_before', 'async_resume_after', 'async_resume_before_negative', 'async_resume_after_negative', 'async_fw_present')
-ORDER_FIELDS=('enable_order', 'firmware_order', 'notifier_order', 'qos_begin_order', 'qos_end_order', 'worker_end_order', 'system_get_order', 'system_put_order', 'async_resume_order')
+TRACE_FIELDS=('rpm_request', 'rpm_request_pending', 'rpm_deferred_resume', 'rpm_idle_notification', 'rpm_use_autosuspend', 'rpm_timer_autosuspends', 'rpm_timer_armed', 'async_resume_count', 'async_resume_result', 'async_resume_negative', 'async_resume_before', 'async_resume_after', 'async_resume_before_negative', 'async_resume_after_negative', 'async_fw_present', 'async_fw_present_count', 'async_fw_absent_count', 'async_fw_skipped_count', 'async_guard_enabled')
+ORDER_FIELDS=('enable_order', 'firmware_order', 'notifier_order', 'qos_begin_order', 'qos_end_order', 'worker_end_order', 'system_get_order', 'system_put_order', 'async_resume_order', 'async_skip_order')
 
 def lifecycle_frames(text,identity,completed,marker="N10ABL1",fields=LIFECYCLE_FIELDS,prefixes=("probe_get","late_put")):
 
@@ -33,7 +33,7 @@ def lifecycle_frames(text,identity,completed,marker="N10ABL1",fields=LIFECYCLE_F
             # Counts wrap: zero count cannot establish absence of a call.
         if marker=='N10ABL1' and any(row['late_put_'+f] for f in ('count','result','negative','before','after','before_negative','after_negative')) and row['late_state']!=3:
             raise ValueError('Late put requires the valid-device branch')
-        if marker=='N10ABT1' and (row['rpm_request']>4 or any(row[k] not in (0,1) for k in TRACE_FIELDS[:7] if k!='rpm_request') or row['async_fw_present'] not in (0,1)):
+        if marker=='N10ABT2' and (row['rpm_request']>4 or any(row[k] not in (0,1) for k in TRACE_FIELDS[:7] if k!='rpm_request') or row['async_fw_present'] not in (0,1) or row['async_guard_enabled']!=1):
             raise ValueError('Invalid runtime queue/firmware observation')
         snapshot={k:v for k,v in row.items() if k!='seq'}
         old=phases.setdefault(phase,dict(snapshot=snapshot,sequences=[]))
@@ -97,7 +97,7 @@ def prepare_frames(text,identity,completed):
 def decode(text,identity,completed):
     fields=('id','seq','phase','generation','seen','error')+FIELDS+('status',)
     phases={}
-    for row in frames(text,'N10ABX7',fields,identity,24).values():
+    for row in frames(text,'N10ABX8',fields,identity,24).values():
         phase=row['phase'];next_generation=(row['generation']+1)&0xffffffff
         if not next_generation:next_generation=1
         if (phase>=3 or row['seq']%3!=phase or not 0<row['generation']<=0xffffffff or
@@ -121,7 +121,7 @@ def decode(text,identity,completed):
     qos=qos_frames(text,identity,completed)
     lifecycle=lifecycle_frames(text,identity,completed)
     system=lifecycle_frames(text,identity,completed,"N10ABD1",SYSTEM_FIELDS,("system_get","system_put","system_error_put"))
-    trace=lifecycle_frames(text,identity,completed,'N10ABT1',TRACE_FIELDS,('async_resume',))
+    trace=lifecycle_frames(text,identity,completed,'N10ABT2',TRACE_FIELDS,('async_resume',))
     order=lifecycle_frames(text,identity,completed,'N10ABO1',ORDER_FIELDS,())
     for phase in phases:
         core=phases[phase]['snapshot'];extra=prepares[phase]['snapshot']

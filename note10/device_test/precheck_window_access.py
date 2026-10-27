@@ -87,7 +87,8 @@ def check(packages,kernel_build,backup,core_model,gate_model,init_model,adb):
         if abox_pm_audit!=bool(paired.get('abox_pm_audit_diagnostic')) or abox_pm_audit!=bool(diagnostic.get('abox_pm_audit_diagnostic')):
             raise ValueError('ABOX PM package scope differs from actual Image/config')
         if abox_pm_audit:
-            if paired.get('abox_pm_audit_evidence_version')!=7 or diagnostic.get('abox_pm_audit_evidence_version')!=7:
+            if any(m.get('abox_failed_fw_resume_guard') is not True for m in (build,paired,diagnostic)):raise ValueError('Failed-firmware guard metadata differs')
+            if paired.get('abox_pm_audit_evidence_version')!=8 or diagnostic.get('abox_pm_audit_evidence_version')!=8:
                 raise ValueError('ABOX PM package evidence version differs')
             validate_abox(kernel_build,build)
         if not (build.get('build_passed') is True and build.get('window_access_diagnostic') is True and

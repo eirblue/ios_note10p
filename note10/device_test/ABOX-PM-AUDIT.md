@@ -347,3 +347,36 @@ opt-in failed-firmware callback guard, retaining successful/default-off behavior
 and adding complete present/absent/skip counts in the same bundled evaluation.
 No speculative barrier change, forced put, DSP/global DMA shutdown or XNU
 execution is claimed. Raw evidence remains private.
+
+
+## v25 bundled failed-firmware completion guard (evidence v8)
+
+The separately default-off `NOTE10_ABOX_FW_FAILURE_GUARD` adds an early return
+only when the original completion callback receives no firmware. Successful
+callbacks retain exactly their original single runtime-resume call and ignored
+return; with the guard disabled, null and non-null callbacks retain the original
+behavior. The integrated diagnostic build explicitly enables and requires the
+guard together with the existing full diagnostic chain. Actual config, build,
+BOOT and pair/record/embedded package metadata are checked before installation.
+No firmware request, forced runtime-reference release, PM counter rewrite,
+barrier change, reset or MMIO access is added by this fix. Its physical effect
+remains unverified until the new single-cycle result is collected.
+
+`N10ABX8` keeps all prior bundled evaluations. Required `N10ABT2` extends the
+trace with all-callback present/absent/skipped counts and the active guard bit;
+`N10ABO1` adds the skip completion order. The last presence now refers to the
+last callback, while the last resume fields refer to the last call that actually
+resumed; they can belong to different callbacks when the guard skips one.
+Counts/order stamps wrap and are not atomic reference ownership proof. Older
+v7/trace-v1 evidence cannot satisfy v8. Complete present/absent counts avoid
+mistaking the prior last-null observation for proof that both callbacks failed.
+
+The actual-C model passes 105 cases, including the successful, null-skipped,
+mixed callback sequence, wrapped skip counts, unchanged signed/positive/error
+resume returns, foreign-device handling and every earlier diagnostic case.
+Separate executables also exercise both guard-and-audit disabled behavior and
+audit enabled with the guard disabled. Those paths preserve original null and
+non-null resume calls. Full PC regression passes 227 tests and all seven
+frame types fit the existing buffer. The next physical cycle retains all
+13 evaluation items and adds the guard/count observations in that same boot.
+DSP/global DMA shutdown and XNU execution remain unverified.

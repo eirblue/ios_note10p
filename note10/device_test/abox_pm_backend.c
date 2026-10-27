@@ -21,7 +21,23 @@ void n10_abox_async_firmware(struct device *dev, unsigned int present)
         memset(&n10_abox_history, 0, sizeof(n10_abox_history));
         n10_abox_event_device = dev;
     }
+    if (!++n10_abox_history.events) ++n10_abox_history.events;
     n10_abox_history.async_fw_present = !!present;
+    if (present) ++n10_abox_history.async_fw_present_count;
+    else ++n10_abox_history.async_fw_absent_count;
+    spin_unlock_irqrestore(&n10_abox_event_lock, flags);
+}
+
+void n10_abox_async_skipped(struct device *dev)
+{
+    unsigned long flags;
+    if (dev->driver != &samsung_abox_driver.driver) return;
+    spin_lock_irqsave(&n10_abox_event_lock, flags);
+    if (n10_abox_event_device == dev) {
+        if (!++n10_abox_history.events) ++n10_abox_history.events;
+        ++n10_abox_history.async_fw_skipped_count;
+        n10_abox_history.async_skip_order = n10_abox_history.events;
+    }
     spin_unlock_irqrestore(&n10_abox_event_lock, flags);
 }
 
@@ -228,6 +244,13 @@ void n10_abox_pm_capture(unsigned int phase, unsigned int generation)
     s->system_get_order = n10_abox_history.system_get_order;
     s->system_put_order = n10_abox_history.system_put_order;
     s->async_resume_order = n10_abox_history.async_resume_order;
+    s->async_fw_present_count = n10_abox_history.async_fw_present_count;
+    s->async_fw_absent_count = n10_abox_history.async_fw_absent_count;
+    s->async_fw_skipped_count = n10_abox_history.async_fw_skipped_count;
+    s->async_skip_order = n10_abox_history.async_skip_order;
+#ifdef CONFIG_NOTE10_ABOX_FW_FAILURE_GUARD
+    s->async_guard_enabled = 1;
+#endif
     s->late_state = n10_abox_late_observed;
     s->probe_get_count = n10_abox_history.probe_get_count;
     s->probe_get_result = n10_abox_history.probe_get_result;
