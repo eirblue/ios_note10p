@@ -9,6 +9,18 @@ static void n10_report_abox_pmu(unsigned int generation)
     for (copy = 0; copy < 4; ++copy)
         for (phase = 0; phase < 3; ++phase) {
             struct n10_abox_pmu_sample *s = &samples[phase];
+            struct n10_fsys_pm_sample *f = &s->fsys;
+            int count = scnprintf(frame, sizeof(frame),
+                "id=%s seq=%u phase=%u generation=%u reg=%x bad=%x ent=%x exit=%x gate=%x allow=%x deny=%x skip=%x ctrl=%x errors=%x done=%x result=%x negative=%x was_skip=%x status=%u",
+                N10_RESERVE_BUILD_ID, copy * 3 + phase, phase, s->generation,
+                f->registered, f->invalid, f->entries, f->exits, f->gates, f->allowed, f->denied,
+                f->skipped, f->controls, f->control_errors, f->completed,
+                f->last_result, f->last_negative, f->last_skipped, error ? 1 : 0);
+            pr_info("N10FSP1 %s checksum=%08x\n", frame, n10_frame_checksum(frame, count));
+        }
+    for (copy = 0; copy < 4; ++copy)
+        for (phase = 0; phase < 3; ++phase) {
+            struct n10_abox_pmu_sample *s = &samples[phase];
             int count = scnprintf(frame, sizeof(frame),
                 "id=%s seq=%u phase=%u generation=%u count=%x seen=%x error=%u before=%x state=%x after=%x status=%u",
                 N10_RESERVE_BUILD_ID, copy * 3 + phase, phase, s->generation,

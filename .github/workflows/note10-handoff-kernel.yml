@@ -48,7 +48,7 @@ on:
         default: false
 
       ufs_pm_audit:
-        description: Bundle UFS/HCI, IOMMU, ABOX firmware guard and bounded PMU and 16-domain status observations; requires dma_pm_audit
+        description: Bundle UFS/HCI, IOMMU, ABOX firmware guard and bounded PMU, 16-domain status and passive FSYS policy traces; requires dma_pm_audit
         type: boolean
         default: false
 
@@ -246,6 +246,8 @@ jobs:
             note10/private/handoff-kernel/abox-pm-model/*.log
             note10/private/handoff-kernel/abox-pmu-model/result.json
             note10/private/handoff-kernel/abox-pmu-model/*.log
+            note10/private/handoff-kernel/fsys-pm-model/result.json
+            note10/private/handoff-kernel/fsys-pm-model/*.log
             note10/private/handoff-kernel/iommu-pm-model/result.json
             note10/private/handoff-kernel/iommu-pm-model/*.log
             note10/private/handoff-kernel/ufs-pm-model/result.json

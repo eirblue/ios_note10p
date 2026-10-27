@@ -10,8 +10,9 @@ def assert_scope(root,build):
     enabled=b'CONFIG_NOTE10_ABOX_PMU_AUDIT=y' in config
     if enabled!=(b'N10APM1' in (root/'Image').read_bytes()) or enabled!=(build.get('abox_pmu_audit_diagnostic') is True):raise ValueError('Actual PMU scope differs')
     if enabled!=(b'N10PDS1' in (root/'Image').read_bytes()):raise ValueError('Actual PMU domain scope differs')
-    if enabled and (build.get('abox_pmu_audit_evidence_version')!=2 or build.get('abox_failed_fw_resume_guard') is not True or
-        b'CONFIG_NOTE10_ABOX_FW_FAILURE_GUARD=y' not in config or b'CONFIG_EXYNOS_PMU=y' not in config or b'CONFIG_SOC_EXYNOS9820=y' not in config):raise ValueError('Real PMU/guard prerequisites differ')
+    if enabled!=(b'N10FSP1' in (root/'Image').read_bytes()):raise ValueError('Actual FSYS policy scope differs')
+    if enabled and (build.get('abox_pmu_audit_evidence_version')!=3 or build.get('abox_failed_fw_resume_guard') is not True or
+        b'CONFIG_NOTE10_ABOX_FW_FAILURE_GUARD=y' not in config or b'CONFIG_EXYNOS_PMU=y' not in config or b'CONFIG_SOC_EXYNOS9820=y' not in config or b'CONFIG_EXYNOS_PM_DOMAINS=y' not in config or b'CONFIG_USB_DWC3_EXYNOS=y' not in config):raise ValueError('Real PMU/guard prerequisites differ')
     return enabled
 
 def validate_model(root,build):
@@ -28,4 +29,14 @@ def validate_model(root,build):
         model.get('harness_sha256')!=hashlib.sha256((HERE/'test_abox_pmu_native.py').read_bytes()).hexdigest() or
         any(model.get(k) is not True for k in ('actual_domain_reads_executed','actual_backend_executed','actual_producer_executed','pinned_pmu_api_executed','all_tuples_validated_before_reads','missing_config_refused_without_reads','generated_unlocked_dma_hook_executed')) or
         model.get('hardware_verified') is not False):raise ValueError('PMU actual-C model binding differs')
+    from prepare_fsys_pm import PINS as FPINS,instrument
+    f=model.get('fsys_policy_model')
+    if not isinstance(f,dict):raise ValueError('Missing FSYS callback model')
+    outcomes=f.get('outcomes')
+    if not isinstance(outcomes,list) or any(not isinstance(r,dict) for r in outcomes):raise ValueError('Invalid FSYS callback outcomes')
+    if (build.get('fsys_pd_source_pins')!=FPINS or build.get('fsys_pd_patched_sha256')!=f.get('prepared_driver_sha256') or
+        f.get('passed') is not True or f.get('cases')!=24 or len(outcomes)!=24 or
+        {r.get('mode') for r in outcomes}!=set(range(24)) or any(r.get('passed') is not True or r.get('valid_observation')!=(r.get('mode') not in (6,8,9,10,11,12,13,20,22,23)) for r in outcomes) or
+        any(f.get(k) is not True for k in ('disabled_path_original_callback_preserved','actual_complete_power_off_callback_executed','original_callback_semantics_preserved','actual_usb_predicate_executed','actual_otg_predicate_executed','no_extra_predicate_calls')) or
+        f.get('harness_sha256')!=hashlib.sha256((HERE/'test_fsys_pm_native.py').read_bytes()).hexdigest() or f.get('hardware_verified') is not False):raise ValueError('FSYS original-callback model differs')
     return True

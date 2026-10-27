@@ -167,7 +167,7 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             report['pm_quiesce_patched_sha256']['kernel/power/Kconfig']=hashlib.sha256((source/'kernel/power/Kconfig').read_bytes()).hexdigest()
             run([sys.executable,str(ROOT/'note10/device_test/test_abox_pmu_native.py'),'--core-driver',str(source/'sound/soc/samsung/abox/abox_core.c'),
                  '--pmu-source',str(source/'drivers/soc/samsung/exynos-pmu.c'),'--dma-helper',str(source/'drivers/base/power/note10_dma_pm.c'),
-                 '--domain-source',str(source/'drivers/soc/samsung/cal-if/exynos9820/flexpmu_cal_local_exynos9820.h'),'--output',str(OUT/'abox-pmu-model')],'03-abox-pmu-model.log')
+                 '--domain-source',str(source/'drivers/soc/samsung/cal-if/exynos9820/flexpmu_cal_local_exynos9820.h'),'--pd-driver',str(source/'drivers/soc/samsung/exynos-pd.c'),'--otg-source',str(source/'drivers/usb/dwc3/otg.c'),'--output',str(OUT/'abox-pmu-model')],'03-abox-pmu-model.log')
             report['scope']='Bundled failed-firmware resume guard, bounded PMU control/standby reads, ABOX software observations, IOMMU inventory and UFS/HCI observations; no DSP/global DMA shutdown or XNU execution claim'
         make=['make','-C',str(source),'O='+str(objects),'ARCH=arm64',
               'CC=clang-14','CROSS_COMPILE=aarch64-linux-gnu-',
@@ -202,7 +202,7 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
         (OUT/'handoff.config').write_bytes(config.read_bytes())
         if gic_roundtrip:required+=('CONFIG_NOTE10_GIC_ROUNDTRIP=y','CONFIG_ARM_GIC=y')
         if dma_pm_audit:required+=('CONFIG_NOTE10_DMA_PM_AUDIT=y',)
-        if ufs_pm_audit:required+=('CONFIG_NOTE10_UFS_PM_AUDIT=y','CONFIG_SCSI_UFSHCD=y','CONFIG_SCSI_UFS_EXYNOS=y','CONFIG_NOTE10_IOMMU_PM_AUDIT=y','CONFIG_EXYNOS_IOMMU=y','CONFIG_NOTE10_ABOX_PM_AUDIT=y','CONFIG_NOTE10_ABOX_FW_FAILURE_GUARD=y','CONFIG_SND_SOC_SAMSUNG_ABOX=y','CONFIG_NOTE10_ABOX_PMU_AUDIT=y','CONFIG_EXYNOS_PMU=y','CONFIG_SOC_EXYNOS9820=y')
+        if ufs_pm_audit:required+=('CONFIG_NOTE10_UFS_PM_AUDIT=y','CONFIG_SCSI_UFSHCD=y','CONFIG_SCSI_UFS_EXYNOS=y','CONFIG_NOTE10_IOMMU_PM_AUDIT=y','CONFIG_EXYNOS_IOMMU=y','CONFIG_NOTE10_ABOX_PM_AUDIT=y','CONFIG_NOTE10_ABOX_FW_FAILURE_GUARD=y','CONFIG_SND_SOC_SAMSUNG_ABOX=y','CONFIG_NOTE10_ABOX_PMU_AUDIT=y','CONFIG_EXYNOS_PMU=y','CONFIG_SOC_EXYNOS9820=y','CONFIG_EXYNOS_PM_DOMAINS=y','CONFIG_USB_DWC3_EXYNOS=y')
         if reserve:required+=('CONFIG_INITRAMFS_FORCE=y','CONFIG_CMDLINE_EXTEND=y','CONFIG_CMDLINE="rdinit=/init"')
         if xnu_payload is not None:required+=('CONFIG_CRYPTO=y','CONFIG_CRYPTO_HASH=y','CONFIG_CRYPTO_SHA256=y')
         if cpu_cache:required+=('CONFIG_HOTPLUG_CPU=y','CONFIG_SMP=y','CONFIG_PM_SLEEP_SMP=y')

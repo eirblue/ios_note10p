@@ -120,3 +120,44 @@ power-off callback can skip its control operation when this predicate rejects.
 This is a source-based candidate explanation, not an observed callback result.
 The next diagnostic should trace the existing predicate result and skip/control
 path without forcing power-off or calling the predicate an extra time.
+
+
+## v28 passive FSYS0A policy trace (physical result pending)
+
+Evidence version 3 retains all preceding observations and adds `N10FSP1` as
+an independently required sixteenth evaluation. The pinned complete original
+power-off callback is instrumented at entry/exit, skip, both existing control
+returns and successful completion. Its existing predicate is wrapped to record
+its single original result; no extra predicate call, power request, register
+access, reference adjustment or forced action is added. The original retry
+path is preserved exactly, including all original returns.
+
+A matching FSYS0A owner is initialized after successful genpd initialization
+and before publishing its provider. The immutable target identity includes
+CAL ID 0xb138000e, name pd-fsys0a, the original control pointer and USB predicate
+pointer. Replaced/foreign target identity, multiple owners, missing or repeated
+initialization and counter overflow invalidate the observation. The helper
+records only numeric shadow history under a short IRQ-preserving spinlock.
+It never holds that lock while calling a predicate or power control function.
+Captures copy the shadow history and never dereference or change the domain.
+The original driver's target remains allocated for the pinned built-in lifetime.
+
+Every phase reports initialized/invalid flags, entry/exit and gate/allow/deny,
+skip/control/error/completion counts and the last control result/sign/skip flag.
+A predicate that was never called stays distinguishable from a predicate that
+allowed or denied power-off. Inflight callbacks and sequential samples remain
+visible; the trace is not evidence of global DMA shutdown. Four copies per
+phase are generation-bound; two consistent copies, bounded coherent counters
+and monotonic history across phases are mandatory. Source/config/Image and
+pair/record/embedded package contracts require evidence version 3, real PMU,
+Exynos9820, built-in Exynos power domains and the actual Exynos USB driver.
+
+The real-C model executes 24 scenarios for the entire original, instrumented
+and disabled-instrumentation callbacks, comparing predicate, control, forced
+retry, callback return and skip-flag behavior. It also executes the pinned USB
+and OTG predicate bodies and checks IRQ/lock preservation, missing/foreign or
+duplicate owners, overflow, signed results, mixed histories and copy isolation.
+The PMU 88 scenarios still pass. Full regression passes 244 tests, including
+malformed nested models and missing/corrupt/conflicting policy evidence. The
+maximum policy payload is 313 bytes inside its 384-byte buffer. The retained
+ABOX 105, UFS/HCI 42 and IOMMU 25 implementations and DMA hook are unchanged.

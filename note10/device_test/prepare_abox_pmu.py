@@ -10,7 +10,7 @@ PINS={
     'include/soc/samsung/exynos-pmu.h':'6cdfb37e49031b5e55af18b7e6e02d78eaa85b97dde61a8ff42d51ee85cfa948',
     'arch/arm64/boot/dts/exynos/exynos9820.dts':'441397886a32c82aa42c3731272ed7153b81d07b601521153061545c490d4a8b',
 }
-SOURCES=('pmu_domain_table.py','abox_pmu_contract.h','abox_pmu_backend.c','abox_pmu_probe.c','prepare_abox_pmu.py','decode_abox_pmu.py','abox_pmu_binding.py')
+SOURCES=('fsys_pm_backend.c','prepare_fsys_pm.py','test_fsys_pm_native.py','pmu_domain_table.py','abox_pmu_contract.h','abox_pmu_backend.c','abox_pmu_probe.c','prepare_abox_pmu.py','decode_abox_pmu.py','abox_pmu_binding.py')
 SUFFIX=b'\n#ifdef CONFIG_NOTE10_ABOX_PMU_AUDIT\n#include "note10_abox_pmu.c"\n#endif\n'
 FINAL_CORE_SHA='500bd5baea17a1809172b83abf6116b658a74e30d0c7d9ba41f363a5c3ab5b4e'
 
@@ -23,6 +23,8 @@ def prepare(source):
     for name,digest in PINS.items():
         if hashlib.sha256((source/name).read_bytes()).hexdigest()!=digest:raise ValueError('Pinned PMU API/DT input differs: '+name)
     validate_domains((source/'drivers/soc/samsung/cal-if/exynos9820/flexpmu_cal_local_exynos9820.h').read_text())
+    from prepare_fsys_pm import prepare as prepare_fsys
+    fsys=prepare_fsys(source)
     core=source/'sound/soc/samsung/abox/abox_core.c';raw=instrument_core(core.read_bytes())
     if hashlib.sha256(raw).hexdigest()!=FINAL_CORE_SHA:raise ValueError('Final ABOX core composition differs')
     core.write_bytes(raw);core.with_name('note10_abox_pmu.c').write_bytes((HERE/'abox_pmu_backend.c').read_bytes())
@@ -31,8 +33,8 @@ def prepare(source):
     if raw.count(anchor)!=1:raise ValueError('PMU report insertion differs')
     worker.with_name('note10_abox_pmu_probe.c').write_bytes((HERE/'abox_pmu_probe.c').read_bytes())
     worker.write_bytes(b'#ifdef CONFIG_NOTE10_ABOX_PMU_AUDIT\n#include "note10_abox_pmu_probe.c"\n#endif\n'+raw.replace(anchor,b'#ifdef CONFIG_NOTE10_ABOX_PMU_AUDIT\n    n10_report_abox_pmu(pm.qgeneration);\n#endif\n'+anchor))
-    config=source/'kernel/power/Kconfig';config.write_bytes(config.read_bytes()+b'\nconfig NOTE10_ABOX_PMU_AUDIT\n\tbool "Experimental bounded read-only ABOX PMU control observations"\n\tdepends on NOTE10_ABOX_FW_FAILURE_GUARD && EXYNOS_PMU=y\n\tdefault n\n')
-    return dict(abox_pmu_audit_diagnostic=True,abox_pmu_audit_evidence_version=2,abox_pmu_source_pins=PINS,
+    config=source/'kernel/power/Kconfig';config.write_bytes(config.read_bytes()+b'\nconfig NOTE10_ABOX_PMU_AUDIT\n\tbool "Experimental bounded read-only ABOX PMU control observations"\n\tdepends on NOTE10_ABOX_FW_FAILURE_GUARD && EXYNOS_PMU=y && EXYNOS_PM_DOMAINS=y && USB_DWC3_EXYNOS=y\n\tdefault n\n')
+    return dict(**fsys,abox_pmu_audit_diagnostic=True,abox_pmu_audit_evidence_version=3,abox_pmu_source_pins=PINS,
         abox_pmu_sources_sha256={n:hashlib.sha256((HERE/n).read_bytes()).hexdigest() for n in SOURCES},
         abox_pmu_final_core_sha256=FINAL_CORE_SHA,abox_pmu_base_core_sha256=CORE_PATCHED_SHA)
 

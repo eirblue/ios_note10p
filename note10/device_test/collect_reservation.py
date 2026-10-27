@@ -138,7 +138,7 @@ def collect(packages,kernel_build,adb):
     if abox_pm_audit and paired.get('abox_failed_fw_resume_guard') is not True:raise ValueError('Failed-firmware guard scope differs')
     if bool(paired.get('abox_pm_audit_diagnostic'))!=abox_pm_audit or (abox_pm_audit and paired.get('abox_pm_audit_evidence_version')!=8):
         raise ValueError('ABOX package and kernel scope differs')
-    if bool(paired.get('abox_pmu_audit_diagnostic'))!=abox_pmu_audit or (abox_pmu_audit and paired.get('abox_pmu_audit_evidence_version')!=2):raise ValueError('PMU package/kernel scope differs')
+    if bool(paired.get('abox_pmu_audit_diagnostic'))!=abox_pmu_audit or (abox_pmu_audit and paired.get('abox_pmu_audit_evidence_version')!=3):raise ValueError('PMU package/kernel scope differs')
     if xnu_stage and (paired.get('xnu_payload_sha256')!=result.get('xnu_payload_sha256') or
                       paired.get('xnu_payload_size')!=result.get('xnu_payload_size')):
         raise ValueError('XNU payload package and kernel build differ')
@@ -181,6 +181,7 @@ def collect(packages,kernel_build,adb):
             'ufs_pm_audit_required':ufs_pm_audit,'previous_boot_ufs_pm_audit_observed':False,
             'iommu_pm_audit_required':iommu_pm_audit,'previous_boot_iommu_pm_audit_observed':False,
             'abox_pm_audit_required':abox_pm_audit,'previous_boot_abox_pm_audit_observed':False,
+            'fsys0a_policy_required':abox_pmu_audit,'previous_boot_fsys0a_policy_observed':False,
             'pmu_domain_status_required':abox_pmu_audit,'previous_boot_pmu_domain_status_observed':False,
             'abox_pmu_audit_required':abox_pmu_audit,'previous_boot_abox_pmu_audit_observed':False,
             'log_selections':{},'decode_failures':{}}
@@ -251,6 +252,7 @@ def collect(packages,kernel_build,adb):
                 observation['abox_pmu_audit']=decode_pmu(text,evidence_id,pm_completed_generation(observation['pm_timer']))
                 report['previous_boot_abox_pmu_audit_observed']=True
                 report['previous_boot_pmu_domain_status_observed']=observation['abox_pmu_audit']['pmu_domain_status_observed']
+                report['previous_boot_fsys0a_policy_observed']=observation['abox_pmu_audit']['fsys0a_policy_observed']
         except ValueError as error:
             report['decode_failures'][name]=str(error);continue
         (out/'reservation-observation.json').write_text(json.dumps(observation,indent=2),encoding='utf-8')
@@ -275,9 +277,9 @@ def collect(packages,kernel_build,adb):
                                  (not ufs_pm_audit or report['previous_boot_ufs_pm_audit_observed']) and
                                  (not iommu_pm_audit or report['previous_boot_iommu_pm_audit_observed']) and
                                  (not abox_pm_audit or report['previous_boot_abox_pm_audit_observed']) and
-                                 (not abox_pmu_audit or (report['previous_boot_abox_pmu_audit_observed'] and report['previous_boot_pmu_domain_status_observed'])))
+                                 (not abox_pmu_audit or (report['previous_boot_abox_pmu_audit_observed'] and report['previous_boot_pmu_domain_status_observed'] and report['previous_boot_fsys0a_policy_observed'])))
     report['evaluation_items']={}
-    for item in ('reservation','window_access','xnu_payload_stage','cpu_cache_roundtrip','pm_timer','gic_roundtrip','dma_pm_audit','ufs_pm_audit','iommu_pm_audit','abox_pm_audit','abox_pmu_audit','pmu_domain_status'):
+    for item in ('reservation','window_access','xnu_payload_stage','cpu_cache_roundtrip','pm_timer','gic_roundtrip','dma_pm_audit','ufs_pm_audit','iommu_pm_audit','abox_pm_audit','abox_pmu_audit','pmu_domain_status','fsys0a_policy'):
         required=item=='reservation' or report[item+'_required']
         observed=report['previous_boot_'+item+'_observed']
         report['evaluation_items'][item]={'required':required,'status':'passed' if observed else ('failed' if required else 'not_requested')}

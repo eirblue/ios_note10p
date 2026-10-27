@@ -112,6 +112,7 @@ void n10_abox_pmu_capture(unsigned int phase, unsigned int generation)
         if (ret) goto out;
         s->domain_after |= (value & 1U) << i;
     }
+    n10_fsys_pm_read(&s->fsys);
     s->error = 0;
     goto out;
 child_error:

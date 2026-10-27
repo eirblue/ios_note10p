@@ -95,7 +95,7 @@ def check(packages,kernel_build,backup,core_model,gate_model,init_model,adb):
         pmu_scope=assert_pmu_scope(kernel_build,build)
         if any(pmu_scope!=bool(m.get('abox_pmu_audit_diagnostic')) for m in (paired,diagnostic)):raise ValueError('PMU package scope differs')
         if pmu_scope:
-            if any(m.get('abox_pmu_audit_evidence_version')!=2 for m in (paired,diagnostic)):raise ValueError('PMU package evidence version differs')
+            if any(m.get('abox_pmu_audit_evidence_version')!=3 for m in (paired,diagnostic)):raise ValueError('PMU package evidence version differs')
             validate_pmu(kernel_build,build)
         if not (build.get('build_passed') is True and build.get('window_access_diagnostic') is True and
                 build.get('window_access_evidence_version')==1 and build.get('reservation_evidence_version')==2):

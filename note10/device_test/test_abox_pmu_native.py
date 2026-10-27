@@ -111,7 +111,7 @@ int main(int argc,char**argv){
 }
 '''
 
-def run(output,core_driver,pmu_source,dma_helper,domain_source):
+def run(output,core_driver,pmu_source,dma_helper,domain_source,pd_driver,otg_source):
     output=Path(output).resolve();core=Path(core_driver).read_bytes();pmu=Path(pmu_source).read_bytes();dma=Path(dma_helper).read_bytes()
     if output.exists() or not output.is_relative_to((ROOT/'note10/private').resolve()):raise ValueError('Fresh private PMU model output required')
     if hashlib.sha256(core).hexdigest()!=FINAL_CORE_SHA or not core.endswith(SUFFIX) or hashlib.sha256(core[:-len(SUFFIX)]).hexdigest()!=CORE_PATCHED_SHA:raise ValueError('Final/base core composition differs')
@@ -132,7 +132,7 @@ def run(output,core_driver,pmu_source,dma_helper,domain_source):
         made=subprocess.run([str(compiler),'-std=c11','-O2',str(source),'-o',str(exe)],capture_output=True,timeout=60);(output/(name+'-compile.log')).write_bytes(made.stdout+made.stderr)
         if made.returncode:raise ValueError('PMU actual-C model compilation failed')
         return exe
-    body=sources['abox_pmu_contract.h'].decode()+clean(sources['abox_pmu_backend.c'].decode())+checksum+clean(sources['abox_pmu_probe.c'].decode())
+    body=sources['abox_pmu_contract.h'].decode()+'void n10_fsys_pm_read(struct n10_fsys_pm_sample*out){memset(out,0,sizeof(*out));out->registered=1;}\n'+clean(sources['abox_pmu_backend.c'].decode())+checksum+clean(sources['abox_pmu_probe.c'].decode())
     exe=build('pmu',STUB+read_api+getter+body+MAIN);rows=[]
     for mode in range(88):
         ran=subprocess.run([str(exe),str(mode)],capture_output=True,timeout=15);(output/f'mode-{mode}.log').write_bytes(ran.stdout+ran.stderr)
@@ -164,12 +164,14 @@ def run(output,core_driver,pmu_source,dma_helper,domain_source):
     exe=build('hook',DMA_STUB+hook+(HERE/'dma_pm_contract.h').read_text()+clean(dma.decode())+checksum+clean((HERE/'dma_pm_probe.c').read_text())+DMA_MAIN)
     ran=subprocess.run([str(exe),'0'],capture_output=True,timeout=15);(output/'hook.log').write_bytes(ran.stdout+ran.stderr)
     if ran.returncode or re.findall(rb'PMUHOOK phase=(\d+) generation=(\d+)',ran.stdout)!=[(b'0',b'1'),(b'1',b'1'),(b'2',b'1')]:raise ValueError('PMU hook must execute after releasing the PM-list mutex')
-    result=dict(passed=True,cases=88,outcomes=rows,source_sha256={n:hashlib.sha256(raw).hexdigest() for n,raw in sources.items()},
+    from test_fsys_pm_native import run as run_fsys
+    fsys=run_fsys(output.parent/'fsys-pm-model',pd_driver,otg_source)
+    result=dict(fsys_policy_model=fsys,passed=True,cases=88,outcomes=rows,source_sha256={n:hashlib.sha256(raw).hexdigest() for n,raw in sources.items()},
         final_core_sha256=FINAL_CORE_SHA,base_core_sha256=CORE_PATCHED_SHA,generated_dma_sha256=hashlib.sha256(dma).hexdigest(),
         harness_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),actual_backend_executed=True,actual_producer_executed=True,pinned_pmu_api_executed=True,actual_domain_reads_executed=True,
         all_tuples_validated_before_reads=True,missing_config_refused_without_reads=True,generated_unlocked_dma_hook_executed=True,hardware_verified=False)
     (output/'result.json').write_bytes((json.dumps(result,indent=2)+'\n').encode());return result
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser();p.add_argument('--output',type=Path,required=True);p.add_argument('--core-driver',type=Path,required=True);p.add_argument('--pmu-source',type=Path,required=True);p.add_argument('--dma-helper',type=Path,required=True);p.add_argument('--domain-source',type=Path,required=True)
-    a=p.parse_args();r=run(a.output,a.core_driver,a.pmu_source,a.dma_helper,a.domain_source);print(json.dumps(dict(passed=r['passed'],cases=r['cases'])))
+    p=argparse.ArgumentParser();p.add_argument('--output',type=Path,required=True);p.add_argument('--core-driver',type=Path,required=True);p.add_argument('--pmu-source',type=Path,required=True);p.add_argument('--dma-helper',type=Path,required=True);p.add_argument('--domain-source',type=Path,required=True);p.add_argument('--pd-driver',type=Path,required=True);p.add_argument('--otg-source',type=Path,required=True)
+    a=p.parse_args();r=run(a.output,a.core_driver,a.pmu_source,a.dma_helper,a.domain_source,a.pd_driver,a.otg_source);print(json.dumps(dict(passed=r['passed'],cases=r['cases'])))
