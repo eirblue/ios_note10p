@@ -18,6 +18,33 @@ from build_boot_test_packages import updater,ROOT,build
 
 
 class PackageTests(unittest.TestCase):
+    def test_abox_version_matches_pair_record_and_embedded_manifest_offline(self):
+        from stage_phase2 import verify_packages
+        parent=ROOT/'note10/private/device-test'
+        with tempfile.TemporaryDirectory(dir=parent) as name:
+            fs=Path(name);backup=fs/'backup';backup.mkdir()
+            parts={p:bytes([i])*512 for i,p in enumerate(('boot','recovery','dtb','dtbo','vbmeta'),1)}
+            records=[dict(partition=p,block_node=f'/dev/block/sda{i}',size=512,sha256=hashlib.sha256(raw).hexdigest()) for i,(p,raw) in enumerate(parts.items(),14)]
+            manifest=backup/'backup-manifest.json';manifest.write_text(json.dumps(dict(bootloader='N976NTEST',partitions=records)))
+            prototype=fs/'fixture.img';prototype.write_bytes(b'fixture')
+            metadata=dict(prototype_created=True,kind='temporary Linux diagnostic boot; not XNU/iOS',sha256=hashlib.sha256(b'fixture').hexdigest(),size=7,
+                backup_manifest_sha256=hashlib.sha256(manifest.read_bytes()).hexdigest(),original_boot_sha256=records[0]['sha256'],existing_recovery_partition_sha256=records[1]['sha256'],kernel_build_sha256='a'*64,
+                early_xnu_reservation=True,builtin_idle_init=True,window_access_diagnostic=True,xnu_payload_stage_diagnostic=True,xnu_payload_sha256='b'*64,xnu_payload_size=1,
+                cpu_cache_roundtrip_diagnostic=True,pm_timer_diagnostic=True,auto_return_diagnostic=True,auto_cycle_token='c'*32,
+                gic_roundtrip_diagnostic=True,gic_roundtrip_evidence_version=1,dma_pm_audit_diagnostic=True,dma_pm_audit_evidence_version=1,
+                ufs_pm_audit_diagnostic=True,ufs_pm_audit_evidence_version=2,iommu_pm_audit_diagnostic=True,iommu_pm_audit_evidence_version=2,abox_pm_audit_diagnostic=True,abox_pm_audit_evidence_version=6)
+            prototype.with_suffix('.json').write_text(json.dumps(metadata))
+            packages=fs/'packages'
+            with patch('build_boot_test_packages.read_verified_backup',return_value=parts):result=build(backup,prototype,packages)
+            diagnostic=next(r for r in verify_packages(packages) if r['mode']=='diagnostic')
+            self.assertEqual(diagnostic['abox_pm_audit_evidence_version'],6)
+            with zipfile.ZipFile(packages/diagnostic['file']) as archive:
+                self.assertEqual(json.loads(archive.read('manifest.json'))['abox_pm_audit_evidence_version'],6)
+            for old_version in (5,None):
+                changed=dict(result,abox_pm_audit_evidence_version=old_version)
+                (packages/'package-result.json').write_text(json.dumps(changed))
+                with self.assertRaisesRegex(ValueError,'package pair differs'):verify_packages(packages)
+
     def test_chain_to_verified_prior_diagnostic_and_reject_foreign_backup(self):
         parent=ROOT/'note10/private/device-test';parent.mkdir(exist_ok=True,parents=True)
         with tempfile.TemporaryDirectory(dir=parent) as name:

@@ -23,6 +23,12 @@ def verify_packages(directory):
             if len(archive.namelist())!=len(set(archive.namelist())) or archive.testzip() is not None:
                 raise ValueError('Invalid/duplicate archive members')
             meta=json.loads(archive.read('manifest.json'))
+            for feature in ('gic_roundtrip','dma_pm_audit','ufs_pm_audit','iommu_pm_audit','abox_pm_audit'):
+                flag=feature+'_diagnostic';version=feature+'_evidence_version'
+                if bool(meta.get(flag))!=bool(record.get(flag)) or meta.get(version)!=record.get(version):
+                    raise ValueError('Diagnostic package record differs: '+feature)
+                if record.get('mode')=='diagnostic' and (bool(meta.get(flag))!=bool(result.get(flag)) or meta.get(version)!=result.get(version)):
+                    raise ValueError('Diagnostic package pair differs: '+feature)
             if meta['writes']!=['boot'] or meta['automatic_reboot'] is not False:raise ValueError('Unexpected installer scope')
             if meta.get('xnu_payload_stage_diagnostic') is True and (
                 meta.get('window_access_diagnostic') is not True or meta.get('test_purpose')!='xnu-payload-stage' or

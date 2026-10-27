@@ -203,7 +203,7 @@ def build(backup,prototype,output,current_packages=None):
         metadata['iommu_pm_audit_diagnostic']=iommu_pm_audit and mode=='diagnostic'
         metadata['iommu_pm_audit_evidence_version']=2 if iommu_pm_audit and mode=='diagnostic' else None
         metadata['abox_pm_audit_diagnostic']=abox_pm_audit and mode=='diagnostic'
-        metadata['abox_pm_audit_evidence_version']=5 if abox_pm_audit and mode=='diagnostic' else None
+        metadata['abox_pm_audit_evidence_version']=6 if abox_pm_audit and mode=='diagnostic' else None
         metadata['screen_log_diagnostic']=screen_log and mode=='diagnostic'
         metadata['auto_return_diagnostic']=auto_return and mode=='diagnostic'
         metadata['auto_cycle_token']=cycle if auto_return and mode=='diagnostic' else None
