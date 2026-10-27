@@ -262,3 +262,24 @@ The PC regression suite passes 222 cases. All five frame types fit the existing
 observations remain pending. Counts/samples are not globally atomic ownership
 proof, and neither a balanced core pair nor diagnostic success establishes
 DSP/global DMA shutdown or XNU execution.
+
+
+The [v23 integrated build](https://github.com/eirblue/ios_note10p/actions/runs/40528298054)
+passed at source `f258172`. Its first host preinstall check stopped before any
+partition write or reboot because the embedded diagnostic package still said
+v5 while its pair metadata said v6. Host fix `c1a2d6e` synchronizes the version
+and verifies pair/record/embedded metadata offline before RAM staging. The real
+package regression and full suite pass 223 tests. That stopped journal is
+preserved; a fresh corrected package/token/plan/journal performed exactly one
+physical cycle using the unchanged verified kernel/model sources.
+
+The physical cycle passed all 13 evaluations at 82% battery, automatically
+returned to a new TWRP boot and passed all five partition integrity checks.
+The original PM core prepare get and complete put were both observed, adding
+and releasing one reference normally. A pre-existing reference remained before
+and after that pair. In this boot, unlike v22, AUD target was zero while applied
+value and pending work remained nonzero, and an original QoS release had not
+yet been observed. These timing-dependent samples warrant bundled QoS/runtime
+queue and event-order analysis. No leak is inferred from the asynchronous get
+return; no reference is forcibly released. DSP/global DMA shutdown and XNU
+execution remain unverified. Raw captures and identifiers stay private.
