@@ -210,3 +210,12 @@ late-init function, exact probe block, actual observer/producer, QoS bodies,
 strict companion decoder and default-off paths are exercised by 79 native
 cases. Existing 13 evaluation items remain bundled. v22 physical observations
 and DSP/global DMA shutdown or XNU execution remain unverified.
+
+
+The [v22 integrated kernel build](https://github.com/eirblue/ios_note10p/actions/runs/40522790002)
+passed at source `8fbe4a2`. Local regression passed 220 tests. The downloaded
+artifact passed source/Image/config and native model bindings for 79 ABOX,
+25 IOMMU and 42 UFS/HCI cases. The initial process and a fresh one-cycle private
+plan/package passed offline validation. No v22 staging, installation, reboot
+or controller journal was created. This completes the requested v21 physical
+cycle plus next compilation; v22 physical lifecycle observations remain pending.
