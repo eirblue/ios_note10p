@@ -37,6 +37,11 @@ on:
         type: boolean
         default: false
 
+      gic_roundtrip:
+        description: Reversible GICv2 CPU priority mask test after successful PM; requires auto_return
+        type: boolean
+        default: false
+
       auto_return:
         description: Opt-in one-shot recovery request; cycle token required at BOOT packaging
         type: boolean
@@ -94,9 +99,14 @@ jobs:
           NOTE10_PM_TIMER: ${{ inputs.pm_timer }}
           NOTE10_AUTO_RETURN: ${{ inputs.auto_return }}
           NOTE10_SCREEN_LOG: ${{ inputs.screen_log }}
+          NOTE10_GIC_ROUNDTRIP: ${{ inputs.gic_roundtrip }}
         run: |
           if [ "$NOTE10_AUTO_RETURN" = true ] && [ "$NOTE10_PM_TIMER" != true ]; then
             echo "auto_return requires pm_timer=true" >&2
+            exit 2
+          fi
+          if [ "$NOTE10_GIC_ROUNDTRIP" = true ] && { [ "$NOTE10_AUTO_RETURN" != true ] || [ "$NOTE10_XNU_STAGE" != true ]; }; then
+            echo "gic_roundtrip requires auto_return and xnu_stage" >&2
             exit 2
           fi
           if [ "$NOTE10_AUTO_RETURN" = true ]; then
@@ -157,6 +167,7 @@ jobs:
           NOTE10_PM_TIMER: ${{ inputs.pm_timer }}
           NOTE10_AUTO_RETURN: ${{ inputs.auto_return }}
           NOTE10_SCREEN_LOG: ${{ inputs.screen_log }}
+          NOTE10_GIC_ROUNDTRIP: ${{ inputs.gic_roundtrip }}
         run: |
           count="$(find note10/private/xnu-input -name note10-experimental.macho -type f | wc -l)"
           [ "$count" -eq 1 ]
@@ -180,6 +191,10 @@ jobs:
             python note10/device_test/test_screen_log.py --output note10/private/handoff-kernel/screen-log-model
             python note10/device_test/test_screen_log_binding.py
             EXTRA+=(--screen-log)
+          fi
+          if [ "$NOTE10_GIC_ROUNDTRIP" = true ]; then
+            if [ "$NOTE10_AUTO_RETURN" != true ]; then exit 2; fi
+            EXTRA+=(--gic-roundtrip)
           fi
           python note10/device_test/build_handoff_kernel.py --caps --reserve --window-access \
             --xnu-payload note10/private/xnu-stage-payload/kernel.mem \
@@ -207,6 +222,8 @@ jobs:
             note10/private/handoff-kernel/pm-quiesce-model/*.log
             note10/private/handoff-kernel/pm-usb-model/result.json
             note10/private/handoff-kernel/pm-usb-model/compile.log
+            note10/private/handoff-kernel/gic-roundtrip-model/result.json
+            note10/private/handoff-kernel/gic-roundtrip-model/*.log
             note10/private/handoff-kernel/screen-log-model/result.json
             note10/private/handoff-kernel/screen-log-model/compile.log
             note10/private/handoff-kernel/auto-return-model/result.json

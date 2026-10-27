@@ -84,6 +84,8 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output,auto_cycle_token=None):
     config=(kernel_build/'handoff.config').read_bytes()
     from pm_quiesce_binding import assert_scope as assert_quiesce_scope
     assert_quiesce_scope(kernel_build,build)
+    from gic_roundtrip_binding import validate_model as validate_gic
+    validate_gic(kernel_build,build)
     if hashlib.sha256(config).hexdigest()!=build['effective_config_sha256']:
         raise ValueError('Config differs from kernel build report')
     required={'CONFIG_BLK_DEV_INITRD=y','CONFIG_RD_LZMA=y','CONFIG_KEXEC=y','CONFIG_KEXEC_CORE=y','CONFIG_ARM64_4K_PAGES=y'}
@@ -176,6 +178,8 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output,auto_cycle_token=None):
             'pm_timer_diagnostic':build.get('pm_timer_diagnostic') is True,
             'pm_quiesce_diagnostic':build.get('pm_quiesce_diagnostic') is True,
             'pm_quiesce_evidence_version':build.get('pm_quiesce_evidence_version'),
+            'gic_roundtrip_diagnostic':build.get('gic_roundtrip_diagnostic') is True,
+            'gic_roundtrip_evidence_version':build.get('gic_roundtrip_evidence_version'),
             'screen_log_diagnostic':build.get('screen_log_diagnostic') is True,
             'auto_return_diagnostic':auto_return,'auto_cycle_token':auto_cycle_token,
             'xnu_payload_sha256':build.get('xnu_payload_sha256') if xnu_stage else None,

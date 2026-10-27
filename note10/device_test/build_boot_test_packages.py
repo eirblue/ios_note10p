@@ -123,9 +123,13 @@ def build(backup,prototype,output,current_packages=None):
     cpu_cache=metadata.get('cpu_cache_roundtrip_diagnostic') is True
     pm_timer=metadata.get('pm_timer_diagnostic') is True
     pm_quiesce=metadata.get('pm_quiesce_diagnostic') is True
+    gic_roundtrip=metadata.get('gic_roundtrip_diagnostic') is True
+    if gic_roundtrip and (not pm_timer or metadata.get('gic_roundtrip_evidence_version')!=1):
+        raise ValueError('Incomplete GIC diagnostic package contract')
     if pm_quiesce and (not pm_timer or metadata.get('pm_quiesce_evidence_version')!=1):
         raise ValueError('Incomplete PM quiesce package contract')
     auto_return=metadata.get('auto_return_diagnostic') is True
+    if gic_roundtrip and not auto_return:raise ValueError('GIC roundtrip requires automatic recovery')
     screen_log=metadata.get('screen_log_diagnostic') is True
     if screen_log and not auto_return:raise ValueError('Screen log requires auto return')
     cycle=metadata.get('auto_cycle_token')
@@ -152,6 +156,7 @@ def build(backup,prototype,output,current_packages=None):
             'screen_log_diagnostic':screen_log,
             'pm_timer_diagnostic':pm_timer,'auto_return_diagnostic':auto_return,'auto_cycle_token':cycle,
             'pm_quiesce_diagnostic':pm_quiesce,'pm_quiesce_evidence_version':1 if pm_quiesce else None,
+            'gic_roundtrip_diagnostic':gic_roundtrip,'gic_roundtrip_evidence_version':1 if gic_roundtrip else None,
             'xnu_payload_sha256':metadata.get('xnu_payload_sha256') if xnu_stage else None,
             'xnu_payload_size':metadata.get('xnu_payload_size') if xnu_stage else None,
             'builder_device_operations':[],'device_boot_tested':False,'deployment_ready':False,'packages':[]}
@@ -173,6 +178,8 @@ def build(backup,prototype,output,current_packages=None):
         metadata['pm_timer_diagnostic']=pm_timer and mode=='diagnostic'
         metadata['pm_quiesce_diagnostic']=pm_quiesce and mode=='diagnostic'
         metadata['pm_quiesce_evidence_version']=1 if pm_quiesce and mode=='diagnostic' else None
+        metadata['gic_roundtrip_diagnostic']=gic_roundtrip and mode=='diagnostic'
+        metadata['gic_roundtrip_evidence_version']=1 if gic_roundtrip and mode=='diagnostic' else None
         metadata['screen_log_diagnostic']=screen_log and mode=='diagnostic'
         metadata['auto_return_diagnostic']=auto_return and mode=='diagnostic'
         metadata['auto_cycle_token']=cycle if auto_return and mode=='diagnostic' else None

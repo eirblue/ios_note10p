@@ -63,6 +63,8 @@ def collect(packages,kernel_build,adb):
     image=(kernel_build/'Image').read_bytes()
     from pm_quiesce_binding import assert_scope as assert_quiesce_scope
     assert_quiesce_scope(kernel_build,result)
+    from gic_roundtrip_binding import assert_scope as assert_gic_scope
+    gic_roundtrip=assert_gic_scope(kernel_build,result)
     if result.get('build_passed') is not True or result.get('early_xnu_reservation') is not True:
         raise ValueError('Successful reservation kernel build required')
     digest=hashlib.sha256(image).hexdigest()
@@ -132,6 +134,7 @@ def collect(packages,kernel_build,adb):
             'cpu_cache_roundtrip_required':cpu_cache,'previous_boot_cpu_cache_roundtrip_observed':False,
             'pm_timer_required':pm_timer,'previous_boot_pm_timer_observed':False,
             'logs_sha256':{n:hashlib.sha256(d).hexdigest() for n,d in logs.items()},
+            'gic_roundtrip_required':gic_roundtrip,'previous_boot_gic_roundtrip_observed':False,
             'log_selections':{},'decode_failures':{}}
     for name,data in logs.items():
         try:
@@ -179,6 +182,10 @@ def collect(packages,kernel_build,adb):
             if pm_timer:
                 observation['pm_timer']=decode_pm_timer(text,evidence_id,result['xnu_payload_sha256'],result['xnu_payload_size'],require_quiesce=pm_quiesce)
                 report['previous_boot_pm_timer_observed']=True
+            if gic_roundtrip:
+                from decode_gic_roundtrip import decode as decode_gic
+                observation['gic_cpu_roundtrip']=decode_gic(text,evidence_id)
+                report['previous_boot_gic_roundtrip_observed']=True
         except ValueError as error:
             report['decode_failures'][name]=str(error);continue
         (out/'reservation-observation.json').write_text(json.dumps(observation,indent=2),encoding='utf-8')
@@ -197,7 +204,8 @@ def collect(packages,kernel_build,adb):
                                  (not access or report['previous_boot_window_access_observed']) and
                                  (not xnu_stage or report['previous_boot_xnu_payload_stage_observed']) and
                                  (not cpu_cache or report['previous_boot_cpu_cache_roundtrip_observed']) and
-                                 (not pm_timer or report['previous_boot_pm_timer_observed']))
+                                 (not pm_timer or report['previous_boot_pm_timer_observed']) and
+                                 (not gic_roundtrip or report['previous_boot_gic_roundtrip_observed']))
     (out/'capture-result.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
     return report
 

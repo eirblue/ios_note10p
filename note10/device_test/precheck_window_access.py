@@ -28,6 +28,14 @@ def check(packages,kernel_build,backup,core_model,gate_model,init_model,adb):
         build=json.loads((kernel_build/'build-result.json').read_text())
         from pm_quiesce_binding import assert_scope as assert_quiesce_scope
         assert_quiesce_scope(kernel_build,build)
+        from gic_roundtrip_binding import assert_scope as assert_gic_scope,validate_model as validate_gic
+        gic_roundtrip=assert_gic_scope(kernel_build,build)
+        if gic_roundtrip!=bool(paired.get('gic_roundtrip_diagnostic')) or gic_roundtrip!=bool(diagnostic.get('gic_roundtrip_diagnostic')):
+            raise ValueError('GIC package scope differs from actual Image/config')
+        if gic_roundtrip:
+            if paired.get('gic_roundtrip_evidence_version')!=1 or diagnostic.get('gic_roundtrip_evidence_version')!=1:
+                raise ValueError('GIC package evidence version missing')
+            validate_gic(kernel_build,build)
         if not (build.get('build_passed') is True and build.get('window_access_diagnostic') is True and
                 build.get('window_access_evidence_version')==1 and build.get('reservation_evidence_version')==2):
             raise ValueError('Successful opt-in access kernel build required')
