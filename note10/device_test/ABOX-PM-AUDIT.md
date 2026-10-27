@@ -219,3 +219,14 @@ artifact passed source/Image/config and native model bindings for 79 ABOX,
 plan/package passed offline validation. No v22 staging, installation, reboot
 or controller journal was created. This completes the requested v21 physical
 cycle plus next compilation; v22 physical lifecycle observations remain pending.
+
+
+The v22 single physical cycle passed all 13 evaluations, automatic TWRP return
+and five partition integrity checks. The original probe get and late-init put
+both ran and returned success, with the sampled usage respectively increasing
+and decreasing normally. The valid-device late branch ran; a skipped late init
+was not established. A runtime reference and queued IPC remained later, while
+AUD target/applied/pending/inflight values were zero. Further ownership tracing
+is required. These observations do not prove globally atomic reference balance,
+DSP/global DMA shutdown or XNU execution. Raw captures and identifiers remain
+private. Direct result-driven test/build continuation is now user-authorized.
