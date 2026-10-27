@@ -40,9 +40,13 @@ A valid busy or failed-IPC observation is not an idle-state pass. The optional
 predicates; even that flag is not independent DSP/DMA shutdown proof. Registered
 DMA channel counts do not establish active hardware transfers. DSP WFI/reset,
 secure-world ownership, global DMA shutdown and XNU execution remain unverified.
-Real driver state and callback history stay in private captures. The source and
-PC models are ready; this new build still needs full compilation and its own
-fresh physical cycle at or above the user-authorized 10% battery minimum.
+Real driver state and callback history stay in private captures. The full
+[integrated kernel build](https://github.com/eirblue/ios_note10p/actions/runs/40452870987)
+passed at source `2baa761`. Its actual Image/config, bound native models and
+initial process passed local verification, and a fresh single-cycle package was
+prepared offline. Battery was below the user-authorized 10% minimum, so this
+build has no device staging, installation, reboot or physical result. Its ABOX
+observations and complete 13-item physical evaluation remain pending charging.
 
 The complete local regression suite passed 194 tests. The combined generated
 PM hook also passed the 25-case IOMMU and 42-case UFS/HCI actual-C models.
