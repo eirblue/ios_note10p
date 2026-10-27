@@ -38,7 +38,30 @@ PROBE_GET=b'#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n    {\n        int n10_before = 
 LATE_OLD=b'\tif (p_abox_data && p_abox_data->pdev)\n\t\tpm_runtime_put_sync_suspend(&p_abox_data->pdev->dev);\n\telse\n\t\tpr_err("%s: p_abox_data or pdev is null", __func__);'
 LATE_BODY=b'\tif (p_abox_data && p_abox_data->pdev) {\n#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n        struct device *dev = &p_abox_data->pdev->dev;\n        int n10_before, n10_ret, n10_after;\n        n10_abox_late_state(3);\n        n10_before = atomic_read(&dev->power.usage_count);\n        n10_ret = pm_runtime_put_sync_suspend(dev);\n        n10_after = atomic_read(&dev->power.usage_count);\n        n10_abox_lifecycle(dev, 1, n10_ret, n10_before, n10_after);\n#else\n\t\tpm_runtime_put_sync_suspend(&p_abox_data->pdev->dev);\n#endif\n\t} else {\n#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n        n10_abox_late_state(p_abox_data ? 2 : 1);\n#endif\n\t\tpr_err("%s: p_abox_data or pdev is null", __func__);\n\t}'
 
-def event_digest():return hashlib.sha256(b''.join(EVENT_BLOCKS)+(QOS_GET+QOS_PUT+QOS_WORK_BEGIN+QOS_WORK_END+PROBE_GET+LATE_BODY)).hexdigest()
+def system_block(call,kind):
+    statement=b'pm_runtime_get_noresume(dev);' if kind==2 else b'n10_ret = pm_runtime_put(dev);'
+    result=b'0' if kind==2 else b'n10_ret'
+    declarations=b'int n10_before, n10_after;' if kind==2 else b'int n10_before, n10_after, n10_ret;'
+    return (b'#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n    {\n        '+declarations+b'\n        n10_before = atomic_read(&dev->power.usage_count);\n        '+statement+
+        b'\n        n10_after = atomic_read(&dev->power.usage_count);\n        n10_abox_lifecycle(dev, '+str(kind).encode()+b', '+result+b', n10_before, n10_after);\n    }\n#else\n'+call+b'\n#endif')
+SYSTEM_GET=system_block(b'\tpm_runtime_get_noresume(dev);',2)
+SYSTEM_PUT=system_block(b'\tpm_runtime_put(dev);',3)
+SYSTEM_ERROR_PUT=system_block(b'\t\tpm_runtime_put(dev);',4)
+SYSTEM_BLOCKS=(SYSTEM_GET,SYSTEM_PUT,SYSTEM_ERROR_PUT)
+SYSTEM_PATCHED_SHA='7418b3f416308b7755b582b7e98199c912997cd566f8decae97259bdcb903419'
+
+def instrument_system(raw):
+    from prepare_dma_pm import PIN
+    suffix=b'\n#ifdef CONFIG_NOTE10_DMA_PM_AUDIT\n#include "note10_dma_pm.c"\n#endif\n'
+    if not raw.endswith(suffix) or hashlib.sha256(raw[:-len(suffix)]).hexdigest()!=PIN:raise ValueError('Pinned prepared PM core differs')
+    for old,new in ((b'\tpm_runtime_get_noresume(dev);',SYSTEM_GET),(b'\tpm_runtime_put(dev);',SYSTEM_PUT),(b'\t\tpm_runtime_put(dev);',SYSTEM_ERROR_PUT)):
+        # Match whole lines so error rollback cannot be mistaken for complete.
+        anchor=b'\n'+old+b'\n'
+        if raw.count(anchor)!=1:raise ValueError('PM core reference recipe differs')
+        raw=raw.replace(anchor,b'\n'+new+b'\n')
+    return b'#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n#include <linux/note10_abox_pm.h>\n#endif\n'+raw
+
+def event_digest():return hashlib.sha256(b''.join(EVENT_BLOCKS+SYSTEM_BLOCKS)+(QOS_GET+QOS_PUT+QOS_WORK_BEGIN+QOS_WORK_END+PROBE_GET+LATE_BODY)).hexdigest()
 
 def instrument_qos(raw):
     if hashlib.sha256(raw).hexdigest()!=PINS['sound/soc/samsung/abox/abox_qos.c']:raise ValueError('Pinned QoS source differs')
@@ -103,6 +126,10 @@ def prepare(source):
     source=Path(source)
     for name,digest in PINS.items():
         if hashlib.sha256((source/name).read_bytes()).hexdigest()!=digest:raise ValueError('Pinned ABOX input differs')
+    main=source/'drivers/base/power/main.c'
+    system=instrument_system(main.read_bytes())
+    if hashlib.sha256(system).hexdigest()!=SYSTEM_PATCHED_SHA:raise ValueError('Prepared PM core binding differs')
+    main.write_bytes(system)
     driver=source/'sound/soc/samsung/abox/abox.c';helper=driver.with_name('note10_abox_pm.c')
     if helper.exists():raise ValueError('ABOX observer already prepared')
     patched=instrument(driver.read_bytes())
@@ -117,5 +144,5 @@ def prepare(source):
     if raw.count(old)!=1:raise ValueError('ABOX report insertion differs')
     worker.write_bytes(b'#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n#include "note10_abox_pm_probe.c"\n#endif\n'+raw.replace(old,b'#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n    n10_report_abox_pm(pm.qgeneration);\n#endif\n'+old))
     config=source/'kernel/power/Kconfig';config.write_bytes(config.read_bytes()+b'\nconfig NOTE10_ABOX_PM_AUDIT\n\tbool "Experimental read-only ABOX driver and callback observations"\n\tdepends on NOTE10_IOMMU_PM_AUDIT && SND_SOC_SAMSUNG_ABOX=y\n\tdefault n\n')
-    return dict(abox_pm_audit_diagnostic=True,abox_pm_audit_evidence_version=5,abox_pm_source_pins=PINS,abox_patched_sha256=PATCHED_SHA,abox_qos_patched_sha256=QOS_PATCHED_SHA,
+    return dict(abox_pm_audit_diagnostic=True,abox_pm_audit_evidence_version=6,abox_system_patched_sha256=SYSTEM_PATCHED_SHA,abox_pm_source_pins=PINS,abox_patched_sha256=PATCHED_SHA,abox_qos_patched_sha256=QOS_PATCHED_SHA,
         abox_pm_sources_sha256={n:hashlib.sha256((HERE/n).read_bytes()).hexdigest() for n in SOURCES},audio_dsp_shutdown_verified=False)

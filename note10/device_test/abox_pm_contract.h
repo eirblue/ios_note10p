@@ -3,6 +3,7 @@
 #define NOTE10_ABOX_PM_CONTRACT_H
 struct device;
 struct n10_abox_pm_sample {
+    unsigned int system_get_count, system_get_result, system_get_negative, system_get_before, system_get_after, system_get_before_negative, system_get_after_negative, system_put_count, system_put_result, system_put_negative, system_put_before, system_put_after, system_put_before_negative, system_put_after_negative, system_error_put_count, system_error_put_result, system_error_put_negative, system_error_put_before, system_error_put_after, system_error_put_before_negative, system_error_put_after_negative;
     unsigned int late_state, probe_get_count, probe_get_result, probe_get_negative, probe_get_before, probe_get_after, probe_get_before_negative, probe_get_after_negative, late_put_count, late_put_result, late_put_negative, late_put_before, late_put_after, late_put_before_negative, late_put_after_negative;
     unsigned int phase, generation, seen, error;
     unsigned int enabled, restored, firmware, fw_version, audio, cpu_gear, runtime, usage, usage_negative;

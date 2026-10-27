@@ -25,6 +25,7 @@ void n10_abox_lifecycle(struct device *dev, unsigned int kind, int result, int b
 {
     unsigned long flags;
     struct n10_abox_pm_sample *h = &n10_abox_history;
+    if (kind >= 2 && dev->driver != &samsung_abox_driver.driver) return;
     spin_lock_irqsave(&n10_abox_event_lock, flags);
     if (n10_abox_event_device != dev) {
         memset(h, 0, sizeof(*h));
@@ -40,6 +41,21 @@ void n10_abox_lifecycle(struct device *dev, unsigned int kind, int result, int b
         ++h->late_put_count; h->late_put_result = n10_abox_magnitude(result); h->late_put_negative = result < 0;
         h->late_put_before = n10_abox_magnitude(before); h->late_put_before_negative = before < 0;
         h->late_put_after = n10_abox_magnitude(after); h->late_put_after_negative = after < 0;
+    }
+    else if (kind == 2) {
+        ++h->system_get_count; h->system_get_result = n10_abox_magnitude(result); h->system_get_negative = result < 0;
+        h->system_get_before = n10_abox_magnitude(before); h->system_get_before_negative = before < 0;
+        h->system_get_after = n10_abox_magnitude(after); h->system_get_after_negative = after < 0;
+    }
+    else if (kind == 3) {
+        ++h->system_put_count; h->system_put_result = n10_abox_magnitude(result); h->system_put_negative = result < 0;
+        h->system_put_before = n10_abox_magnitude(before); h->system_put_before_negative = before < 0;
+        h->system_put_after = n10_abox_magnitude(after); h->system_put_after_negative = after < 0;
+    }
+    else if (kind == 4) {
+        ++h->system_error_put_count; h->system_error_put_result = n10_abox_magnitude(result); h->system_error_put_negative = result < 0;
+        h->system_error_put_before = n10_abox_magnitude(before); h->system_error_put_before_negative = before < 0;
+        h->system_error_put_after = n10_abox_magnitude(after); h->system_error_put_after_negative = after < 0;
     }
     spin_unlock_irqrestore(&n10_abox_event_lock, flags);
 }
@@ -138,6 +154,27 @@ void n10_abox_pm_capture(unsigned int phase, unsigned int generation)
         spin_unlock_irqrestore(&n10_abox_event_lock, flags);
         goto unlock;
     }
+    s->system_get_count = n10_abox_history.system_get_count;
+    s->system_get_result = n10_abox_history.system_get_result;
+    s->system_get_negative = n10_abox_history.system_get_negative;
+    s->system_get_before = n10_abox_history.system_get_before;
+    s->system_get_after = n10_abox_history.system_get_after;
+    s->system_get_before_negative = n10_abox_history.system_get_before_negative;
+    s->system_get_after_negative = n10_abox_history.system_get_after_negative;
+    s->system_put_count = n10_abox_history.system_put_count;
+    s->system_put_result = n10_abox_history.system_put_result;
+    s->system_put_negative = n10_abox_history.system_put_negative;
+    s->system_put_before = n10_abox_history.system_put_before;
+    s->system_put_after = n10_abox_history.system_put_after;
+    s->system_put_before_negative = n10_abox_history.system_put_before_negative;
+    s->system_put_after_negative = n10_abox_history.system_put_after_negative;
+    s->system_error_put_count = n10_abox_history.system_error_put_count;
+    s->system_error_put_result = n10_abox_history.system_error_put_result;
+    s->system_error_put_negative = n10_abox_history.system_error_put_negative;
+    s->system_error_put_before = n10_abox_history.system_error_put_before;
+    s->system_error_put_after = n10_abox_history.system_error_put_after;
+    s->system_error_put_before_negative = n10_abox_history.system_error_put_before_negative;
+    s->system_error_put_after_negative = n10_abox_history.system_error_put_after_negative;
     s->late_state = n10_abox_late_observed;
     s->probe_get_count = n10_abox_history.probe_get_count;
     s->probe_get_result = n10_abox_history.probe_get_result;

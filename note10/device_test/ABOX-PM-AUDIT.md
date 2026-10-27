@@ -230,3 +230,35 @@ AUD target/applied/pending/inflight values were zero. Further ownership tracing
 is required. These observations do not prove globally atomic reference balance,
 DSP/global DMA shutdown or XNU execution. Raw captures and identifiers remain
 private. Direct result-driven test/build continuation is now user-authorized.
+
+
+## v23: observe the system PM core's original reference pair (evidence v6)
+
+The v22 private three-phase software samples show usage 0 before device PM,
+1 while system-prepared/suspended, and 0 after completion. The pinned
+`drivers/base/power/main.c` takes `pm_runtime_get_noresume()` in
+`device_prepare()` to prevent runtime suspend through the system transition,
+and calls the existing `pm_runtime_put()` in `device_complete()` or the
+prepare-error rollback. This is a concrete alternative to a leaked driver
+reference; v22 did not observe these calls, so attribution remains unverified.
+
+v23 keeps every previous diagnostic and companion, changes the main marker to
+`N10ABX6`, and requires `N10ABD1` with the signed before/after samples and original
+results for these three core call sites. The noresume API returns void; its
+result slot is a fixed zero, not a reported API success result. Core events are
+filtered to the bound ABOX driver before touching its memory-only history.
+No get/put, callback, barrier, flush, counter rewrite or MMIO operation is added.
+Original conditions, order and ignored put results are preserved. Exact pinned
+core input/output, generated blocks, observer/producer, Image/config and native
+model hashes are bound together; v5 evidence cannot satisfy v6.
+
+The 87-case actual-C model retains all prior 79 cases and adds the core call
+blocks with successful/error releases, prepare-error rollback, counter wrap,
+signed negative samples, foreign-device filtering and missing/invalid companion
+rejection. It executes exact generated core blocks under controlled PM stubs,
+not the entire hardware PM core. Default-off blocks preserve original calls.
+The PC regression suite passes 222 cases. All five frame types fit the existing
+896-byte payload buffer even at their unsigned field bounds. Physical v23
+observations remain pending. Counts/samples are not globally atomic ownership
+proof, and neither a balanced core pair nor diagnostic success establishes
+DSP/global DMA shutdown or XNU execution.
