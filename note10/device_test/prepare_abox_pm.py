@@ -34,7 +34,11 @@ QOS_WORK_END=b'#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n\tn10_abox_note(dev_abox, 21,
 QOS_PATCHED_SHA='75f3c217b7cc85a2d0a9576e5af0f34c25ffa8a76ef79e1f7dc96f48f3e9448c'
 QOS_TARGET_SHA='666d22452848a90e884a6a5d992363658dcf396d7baca3cb7e850f8f796636e2'
 
-def event_digest():return hashlib.sha256(b''.join(EVENT_BLOCKS)+(QOS_GET+QOS_PUT+QOS_WORK_BEGIN+QOS_WORK_END)).hexdigest()
+PROBE_GET=b'#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n    {\n        int n10_before = atomic_read(&dev->power.usage_count);\n        int n10_ret = pm_runtime_get(dev);\n        int n10_after = atomic_read(&dev->power.usage_count);\n        n10_abox_lifecycle(dev, 0, n10_ret, n10_before, n10_after);\n    }\n#else\n\tpm_runtime_get(dev);\n#endif'
+LATE_OLD=b'\tif (p_abox_data && p_abox_data->pdev)\n\t\tpm_runtime_put_sync_suspend(&p_abox_data->pdev->dev);\n\telse\n\t\tpr_err("%s: p_abox_data or pdev is null", __func__);'
+LATE_BODY=b'\tif (p_abox_data && p_abox_data->pdev) {\n#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n        struct device *dev = &p_abox_data->pdev->dev;\n        int n10_before, n10_ret, n10_after;\n        n10_abox_late_state(3);\n        n10_before = atomic_read(&dev->power.usage_count);\n        n10_ret = pm_runtime_put_sync_suspend(dev);\n        n10_after = atomic_read(&dev->power.usage_count);\n        n10_abox_lifecycle(dev, 1, n10_ret, n10_before, n10_after);\n#else\n\t\tpm_runtime_put_sync_suspend(&p_abox_data->pdev->dev);\n#endif\n\t} else {\n#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n        n10_abox_late_state(p_abox_data ? 2 : 1);\n#endif\n\t\tpr_err("%s: p_abox_data or pdev is null", __func__);\n\t}'
+
+def event_digest():return hashlib.sha256(b''.join(EVENT_BLOCKS)+(QOS_GET+QOS_PUT+QOS_WORK_BEGIN+QOS_WORK_END+PROBE_GET+LATE_BODY)).hexdigest()
 
 def instrument_qos(raw):
     if hashlib.sha256(raw).hexdigest()!=PINS['sound/soc/samsung/abox/abox_qos.c']:raise ValueError('Pinned QoS source differs')
@@ -89,9 +93,11 @@ def instrument(raw):
     notifier=notifier.replace(b'\treturn NOTIFY_DONE;',NOTIFY_DONE+b'\treturn NOTIFY_DONE;')
     if any(notifier.count(block)!=1 for block in (NOTIFY_BEGIN,NOTIFY_READY,NOTIFY_GATE,NOTIFY_SUSPEND,NOTIFY_BAD,NOTIFY_DONE)):raise ValueError('ABOX notifier event insertion differs')
     patched=patched[:start]+notifier+patched[end:]
+    if patched.count(b'\tpm_runtime_get(dev);')!=1 or patched.count(LATE_OLD)!=1:raise ValueError('ABOX lifecycle recipe differs')
+    patched=patched.replace(b'\tpm_runtime_get(dev);',PROBE_GET).replace(LATE_OLD,LATE_BODY)
     return b'#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n#include <linux/note10_abox_pm.h>\n#endif\n'+patched+b'\n#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n#include "note10_abox_pm.c"\n#endif\n'
 
-PATCHED_SHA='903367a1676df2c3c902f6592d70f870b5011336cbe995b926d5531ff992f946'
+PATCHED_SHA='703edcd950d2796e8afbd36d4e4e3bfb0884b3b585a41547ca509eee56dfd2ae'
 
 def prepare(source):
     source=Path(source)
@@ -111,5 +117,5 @@ def prepare(source):
     if raw.count(old)!=1:raise ValueError('ABOX report insertion differs')
     worker.write_bytes(b'#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n#include "note10_abox_pm_probe.c"\n#endif\n'+raw.replace(old,b'#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\n    n10_report_abox_pm(pm.qgeneration);\n#endif\n'+old))
     config=source/'kernel/power/Kconfig';config.write_bytes(config.read_bytes()+b'\nconfig NOTE10_ABOX_PM_AUDIT\n\tbool "Experimental read-only ABOX driver and callback observations"\n\tdepends on NOTE10_IOMMU_PM_AUDIT && SND_SOC_SAMSUNG_ABOX=y\n\tdefault n\n')
-    return dict(abox_pm_audit_diagnostic=True,abox_pm_audit_evidence_version=4,abox_pm_source_pins=PINS,abox_patched_sha256=PATCHED_SHA,abox_qos_patched_sha256=QOS_PATCHED_SHA,
+    return dict(abox_pm_audit_diagnostic=True,abox_pm_audit_evidence_version=5,abox_pm_source_pins=PINS,abox_patched_sha256=PATCHED_SHA,abox_qos_patched_sha256=QOS_PATCHED_SHA,
         abox_pm_sources_sha256={n:hashlib.sha256((HERE/n).read_bytes()).hexdigest() for n in SOURCES},audio_dsp_shutdown_verified=False)

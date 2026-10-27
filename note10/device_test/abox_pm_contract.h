@@ -3,6 +3,7 @@
 #define NOTE10_ABOX_PM_CONTRACT_H
 struct device;
 struct n10_abox_pm_sample {
+    unsigned int late_state, probe_get_count, probe_get_result, probe_get_negative, probe_get_before, probe_get_after, probe_get_before_negative, probe_get_after_negative, late_put_count, late_put_result, late_put_negative, late_put_before, late_put_after, late_put_before_negative, late_put_after_negative;
     unsigned int phase, generation, seen, error;
     unsigned int enabled, restored, firmware, fw_version, audio, cpu_gear, runtime, usage, usage_negative;
     unsigned int children, depth, runtime_error, prepared, suspended;
@@ -20,6 +21,8 @@ struct n10_abox_pm_sample {
     unsigned int qos_gets, qos_puts, qos_get_result, qos_get_negative, qos_put_result, qos_put_negative;
     unsigned int qos_worker_starts, qos_worker_finishes, qos_worker_inflight;
 };
+void n10_abox_late_state(unsigned int state);
+void n10_abox_lifecycle(struct device *dev, unsigned int kind, int result, int before, int after);
 void n10_abox_note(struct device *dev, unsigned int kind, int error);
 void n10_abox_pm_capture(unsigned int phase, unsigned int generation);
 void n10_abox_qos_capture(struct device *dev, struct n10_abox_pm_sample *out);

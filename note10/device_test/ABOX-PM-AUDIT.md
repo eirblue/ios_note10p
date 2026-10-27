@@ -181,3 +181,32 @@ paths and default-off blocks. Its actual Image/config, source/model bindings
 and initial process passed local verification; a fresh single-cycle package
 was prepared offline. There is no v4 device staging, installation, reboot or
 controller journal. Fresh v4 physical observations remain pending.
+
+
+## v21 physical result and v22 lifecycle observation
+
+The v21 single physical cycle passed all 13 bundled evaluations, automatic
+TWRP return and five partition integrity checks at the normal battery floor.
+AUD request target/applied values and pending/inflight work were zero at the
+suspend observation. ABOX still had a runtime reference and queued IPC, so the
+queued QoS-release hypothesis was not established and no barrier-order change
+was made. QoS get/put event counts cannot establish full reference ownership;
+the observed asynchronous get return also cannot independently prove a leak.
+
+The next build uses `N10ABX5` plus mandatory `N10ABL1` lifecycle companions.
+It observes the existing probe-time runtime get and the existing late-init
+conditional put: count, original signed result, and signed usage samples
+immediately before/after each original call. The original late init reports
+whether data was missing, the platform device was missing, or the valid-device
+branch ran. This state survives a later deferred probe without requiring a
+valid device at late init. No extra runtime request, firmware, MMIO, flush,
+reference decrement or power transition is introduced. Default-off paths keep
+the original calls and conditions.
+
+Late init preceding deferred probe is a hypothesis to evaluate on the device.
+Usage samples and event history are not globally atomic; counts can wrap and
+are not complete reference balance or ownership proof. The complete generated
+late-init function, exact probe block, actual observer/producer, QoS bodies,
+strict companion decoder and default-off paths are exercised by 79 native
+cases. Existing 13 evaluation items remain bundled. v22 physical observations
+and DSP/global DMA shutdown or XNU execution remain unverified.

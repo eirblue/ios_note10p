@@ -11,6 +11,39 @@ static unsigned int n10_abox_magnitude(int value)
     return value < 0 ? (unsigned int)(-(long long)value) : (unsigned int)value;
 }
 
+
+/* Late init can precede deferred probe: keep this state outside device history. */
+static unsigned int n10_abox_late_observed;
+void n10_abox_late_state(unsigned int state)
+{
+    unsigned long flags;
+    spin_lock_irqsave(&n10_abox_event_lock, flags);
+    n10_abox_late_observed = state;
+    spin_unlock_irqrestore(&n10_abox_event_lock, flags);
+}
+void n10_abox_lifecycle(struct device *dev, unsigned int kind, int result, int before, int after)
+{
+    unsigned long flags;
+    struct n10_abox_pm_sample *h = &n10_abox_history;
+    spin_lock_irqsave(&n10_abox_event_lock, flags);
+    if (n10_abox_event_device != dev) {
+        memset(h, 0, sizeof(*h));
+        n10_abox_event_device = dev;
+    }
+    if (!++h->events) ++h->events;
+    if (kind == 0) {
+        ++h->probe_get_count; h->probe_get_result = n10_abox_magnitude(result); h->probe_get_negative = result < 0;
+        h->probe_get_before = n10_abox_magnitude(before); h->probe_get_before_negative = before < 0;
+        h->probe_get_after = n10_abox_magnitude(after); h->probe_get_after_negative = after < 0;
+    }
+    else if (kind == 1) {
+        ++h->late_put_count; h->late_put_result = n10_abox_magnitude(result); h->late_put_negative = result < 0;
+        h->late_put_before = n10_abox_magnitude(before); h->late_put_before_negative = before < 0;
+        h->late_put_after = n10_abox_magnitude(after); h->late_put_after_negative = after < 0;
+    }
+    spin_unlock_irqrestore(&n10_abox_event_lock, flags);
+}
+
 void n10_abox_note(struct device *dev, unsigned int kind, int error)
 {
     unsigned long flags;
@@ -105,6 +138,21 @@ void n10_abox_pm_capture(unsigned int phase, unsigned int generation)
         spin_unlock_irqrestore(&n10_abox_event_lock, flags);
         goto unlock;
     }
+    s->late_state = n10_abox_late_observed;
+    s->probe_get_count = n10_abox_history.probe_get_count;
+    s->probe_get_result = n10_abox_history.probe_get_result;
+    s->probe_get_negative = n10_abox_history.probe_get_negative;
+    s->probe_get_before = n10_abox_history.probe_get_before;
+    s->probe_get_after = n10_abox_history.probe_get_after;
+    s->probe_get_before_negative = n10_abox_history.probe_get_before_negative;
+    s->probe_get_after_negative = n10_abox_history.probe_get_after_negative;
+    s->late_put_count = n10_abox_history.late_put_count;
+    s->late_put_result = n10_abox_history.late_put_result;
+    s->late_put_negative = n10_abox_history.late_put_negative;
+    s->late_put_before = n10_abox_history.late_put_before;
+    s->late_put_after = n10_abox_history.late_put_after;
+    s->late_put_before_negative = n10_abox_history.late_put_before_negative;
+    s->late_put_after_negative = n10_abox_history.late_put_after_negative;
     s->events = n10_abox_history.events; s->enables = n10_abox_history.enables;
     s->disables = n10_abox_history.disables; s->ipc_seen = n10_abox_history.ipc_seen;
     s->ipc_called = n10_abox_history.ipc_called; s->pending = n10_abox_history.pending;

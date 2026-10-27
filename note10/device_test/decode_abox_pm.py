@@ -9,6 +9,32 @@ EXTRA_FIELDS=('fw_downloads','fw_result','fw_negative','notify_prepares','notify
 QOS_FIELDS=('qos_seen','qos_error','qos_registered','qos_active','qos_target','qos_applied','qos_absolute','qos_default',
     'qos_first_id','qos_first_value','qos_work_pending','qos_gets','qos_puts','qos_get_result','qos_get_negative','qos_put_result','qos_put_negative','qos_worker_starts','qos_worker_finishes','qos_worker_inflight')
 
+LIFECYCLE_FIELDS=('late_state', 'probe_get_count', 'probe_get_result', 'probe_get_negative', 'probe_get_before', 'probe_get_after', 'probe_get_before_negative', 'probe_get_after_negative', 'late_put_count', 'late_put_result', 'late_put_negative', 'late_put_before', 'late_put_after', 'late_put_before_negative', 'late_put_after_negative')
+
+def lifecycle_frames(text,identity,completed):
+    phases={}
+    for row in frames(text,'N10ABL1',('id','seq','phase','generation')+LIFECYCLE_FIELDS+('status',),identity,12).values():
+        phase=row['phase'];next_generation=(row['generation']+1)&0xffffffff
+        if not next_generation:next_generation=1
+        if (phase>=3 or row['seq']%3!=phase or not 0<row['generation']<=0xffffffff or next_generation!=completed or row['status'] or
+            any(row[k]>0xffffffff for k in LIFECYCLE_FIELDS) or row['late_state']>3):
+            raise ValueError('Invalid ABOX lifecycle observation')
+        for prefix in ('probe_get','late_put'):
+            for field in ('result','before','after'):
+                negative=prefix+('_negative' if field=='result' else '_'+field+'_negative')
+                if row[negative] not in (0,1) or row[prefix+'_'+field]>(0x80000000 if row[negative] else 0x7fffffff) or (row[negative] and not row[prefix+'_'+field]):
+                    raise ValueError('Invalid signed lifecycle observation')
+            # Counts wrap: zero count cannot establish absence of a call.
+        if any(row['late_put_'+f] for f in ('count','result','negative','before','after','before_negative','after_negative')) and row['late_state']!=3:
+            raise ValueError('Late put requires the valid-device branch')
+        snapshot={k:v for k,v in row.items() if k!='seq'}
+        old=phases.setdefault(phase,dict(snapshot=snapshot,sequences=[]))
+        if old['snapshot']!=snapshot:raise ValueError('Conflicting ABOX lifecycle observations')
+        old['sequences'].append(row['seq'])
+    if set(phases)!=set(range(3)) or any(len(v['sequences'])<2 for v in phases.values()):
+        raise ValueError('Two intact ABOX lifecycle observations per phase required')
+    return phases
+
 def qos_frames(text,identity,completed):
     phases={}
     for row in frames(text,'N10ABQ1',('id','seq','phase','generation')+QOS_FIELDS+('status',),identity,12).values():
@@ -63,7 +89,7 @@ def prepare_frames(text,identity,completed):
 def decode(text,identity,completed):
     fields=('id','seq','phase','generation','seen','error')+FIELDS+('status',)
     phases={}
-    for row in frames(text,'N10ABX4',fields,identity,24).values():
+    for row in frames(text,'N10ABX5',fields,identity,24).values():
         phase=row['phase'];next_generation=(row['generation']+1)&0xffffffff
         if not next_generation:next_generation=1
         if (phase>=3 or row['seq']%3!=phase or not 0<row['generation']<=0xffffffff or
@@ -85,6 +111,7 @@ def decode(text,identity,completed):
         raise ValueError('Two intact ABOX observations per phase required')
     prepares=prepare_frames(text,identity,completed)
     qos=qos_frames(text,identity,completed)
+    lifecycle=lifecycle_frames(text,identity,completed)
     for phase in phases:
         core=phases[phase]['snapshot'];extra=prepares[phase]['snapshot']
         if core['generation']!=extra['generation']:raise ValueError('ABOX core/prepare generation differs')
@@ -94,6 +121,9 @@ def decode(text,identity,completed):
         if core['generation']!=view['generation']:raise ValueError('ABOX QoS generation differs')
         if not core['events'] and any(view[k] for k in QOS_FIELDS[11:]):raise ValueError('ABOX QoS history without events')
         core.update({k:view[k] for k in QOS_FIELDS})
+        life=lifecycle[phase]['snapshot']
+        if core['generation']!=life['generation']:raise ValueError('ABOX lifecycle generation differs')
+        core.update({k:life[k] for k in LIFECYCLE_FIELDS})
     suspended=phases[1]['snapshot']
     idle=(not any(suspended[k] for k in ('enabled','restored','firmware','fw_version','audio','usage','usage_negative','children',
         'runtime_error','depth','queued','pending','enable_error','ipc_error','worker_inflight','work_pending','pm_get_negative','fw_negative','suspend_negative','notify_bad',
@@ -101,6 +131,8 @@ def decode(text,identity,completed):
     return dict(abox_pm_driver_observed=True,phases=phases,abox_driver_idle_state_observed=idle,
         prepare_observations=prepares,normal_pm_prepare_observed=bool(suspended['notify_stage']),
         firmware_download_deferred=bool(suspended['fw_negative'] and suspended['fw_result']==11),
+        lifecycle_observations=lifecycle,bootstrap_lifecycle_observed=True,
+        lifecycle_usage_samples_are_not_atomic_ownership_proof=True,
         qos_observations=qos,aud_qos_driver_observed=True,qos_counts_are_not_reference_balance_proof=True,
         runtime_ownership_unbalanced=any(v['snapshot']['usage_negative'] for v in phases.values()),
         callback_history_is_current_boot_not_per_generation=True,cpu_gear_value_is_not_idle_proof=True,no_mmio_access=True,

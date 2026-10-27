@@ -7,7 +7,7 @@ import re
 import shutil
 import subprocess
 import sys
-from prepare_abox_pm import HERE,SOURCES,PATCHED_SHA,ENABLE_EVENT,BEGIN_EVENT,IPC_EVENT,END_EVENT,WORK_BEGIN,WORK_GET,WORK_GATE,WORK_END,QUEUE_PUT,QUEUE_GET,EVENT_BLOCKS,FW_EVENT,NOTIFY_BEGIN,NOTIFY_READY,NOTIFY_GATE,NOTIFY_SUSPEND,NOTIFY_BAD,NOTIFY_DONE,QOS_GET,QOS_PUT,QOS_WORK_BEGIN,QOS_WORK_END,QOS_PATCHED_SHA,QOS_TARGET_SHA,event_digest
+from prepare_abox_pm import HERE,SOURCES,PATCHED_SHA,ENABLE_EVENT,BEGIN_EVENT,IPC_EVENT,END_EVENT,WORK_BEGIN,WORK_GET,WORK_GATE,WORK_END,QUEUE_PUT,QUEUE_GET,EVENT_BLOCKS,FW_EVENT,NOTIFY_BEGIN,NOTIFY_READY,NOTIFY_GATE,NOTIFY_SUSPEND,NOTIFY_BAD,NOTIFY_DONE,QOS_GET,QOS_PUT,QOS_WORK_BEGIN,QOS_WORK_END,QOS_PATCHED_SHA,QOS_TARGET_SHA,PROBE_GET,LATE_BODY,event_digest
 from run_probe import ROOT
 from decode_abox_pm import decode
 ID='0123456789abcdef0123456789abcdef'
@@ -18,6 +18,8 @@ STUB=r'''
 #include <stdbool.h>
 #include <errno.h>
 typedef unsigned int u32;
+#define __init
+#define pr_err printf
 #define READ_ONCE(x) (*(volatile __typeof__(x) *)&(x))
 #define atomic_read(p) (*(p))
 #define scnprintf snprintf
@@ -45,6 +47,8 @@ static struct device_driver foreign_driver;
 static struct platform_device controller,other;
 static struct device_node node;
 static struct abox_data box;
+static struct abox_data *p_abox_data;
+static unsigned int late_calls;
 struct abox_qos_req {unsigned int id,val;};
 enum abox_qos_class {ABOX_QOS_AUD,ABOX_QOS_OTHER};
 struct pm_qos_request {int active,value;};
@@ -73,7 +77,8 @@ static int pm_runtime_get_sync(struct device*p){if(p!=&controller.dev)abort();++
 static int abox_can_calliope_ipc(struct device*p,struct abox_data*d){if(p!=&controller.dev || d!=&box)abort();++gate_calls;return mode!=27;}
 static void pm_runtime_mark_last_busy(struct device*p){if(p!=&controller.dev)abort();++q_busy_calls;}
 static int pm_runtime_put_autosuspend(struct device*p){if(p!=&controller.dev || ((mode==54 || mode==55 || mode==56 || mode==60) && q_busy_calls!=1))abort();++pm_put_calls;return mode==56?-EIO:0;}
-static int pm_runtime_get(struct device*p){if(p!=&controller.dev)abort();++qpm_get_calls;return mode==55?-EIO:0;}
+static int pm_runtime_get(struct device*p){if(p!=&controller.dev)abort();++qpm_get_calls;if(mode>=66)++p->power.usage_count;return mode==55?-EIO:mode==67?-115:0;}
+static int pm_runtime_put_sync_suspend(struct device*p){if(p!=&controller.dev)abort();++late_calls;--p->power.usage_count;return mode==71?-EBUSY:mode==78?(-2147483647-1):0;}
 static int abox_is_clearable(struct device*p,struct abox_data*d){if(p!=&controller.dev || d!=&box)abort();++clearable_calls;return mode!=39;}
 static int pm_runtime_suspend(struct device*p){if(p!=&controller.dev)abort();++suspend_calls;return mode==41?-EBUSY:0;}
 static int pm_qos_request_active(struct pm_qos_request*p){return p->active;}
@@ -83,6 +88,7 @@ static int pm_qos_request(enum abox_qos_class c){return abox_qos_aud.pm_qos.valu
 static void setup(void){
  memset(&controller,0,sizeof(controller));memset(&box,0,sizeof(box));memset(&abox_qos_aud,0,sizeof(abox_qos_aud));memset(other_qos,0,sizeof(other_qos));for(unsigned int i=0;i<5;++i)other_qos[i].qos_class=ABOX_QOS_OTHER;abox_qos_work=0;dev_abox=&controller.dev;
  controller.dev.driver=mode==4?&foreign_driver:&samsung_abox_driver.driver;
+ p_abox_data=&box;
  box.pdev=mode==6?NULL:&controller;box.if_count=1;box.rdma_count=4;box.wdma_count=4;
  controller.dev.power.runtime_status=2;controller.dev.power.is_prepared=phase==1;controller.dev.power.is_suspended=phase==1;
  if(mode==7)box.calliope_state=4;
@@ -148,6 +154,19 @@ int main(int argc,char**argv){
  if(mode==63)n10_abox_history.qos_worker_inflight=2;
  if(mode==64)event_qos_worker_begin();
  if(mode==65)abox_qos_work_func(NULL);
+ if(mode>=66){
+  if(mode==68){memset(&n10_abox_history,0,sizeof(n10_abox_history));n10_abox_event_device=NULL;p_abox_data=NULL;if(samsung_abox_late_initcall()!=0 || late_calls)return 97;}
+  if(mode==69){box.pdev=NULL;if(samsung_abox_late_initcall()!=0 || late_calls)return 98;box.pdev=&controller;}
+  if(mode==72)n10_abox_history.probe_get_count=0xffffffffU;
+  if(mode==73)controller.dev.power.usage_count=-1;
+  if(mode<=73 || mode==78){
+   event_probe_get(&controller.dev);
+   if(qpm_get_calls!=1)return 99;
+   if(mode==70 || mode==71 || mode==78){if(samsung_abox_late_initcall()!=0 || late_calls!=1 || controller.dev.power.usage_count)return 100;}
+  }
+  if(mode==74)n10_abox_late_state(4);
+  if(mode==77)n10_abox_lifecycle(&other.dev,0,0,0,1);
+ }
  if(n10_abox_pm_read(NULL,2)!=-EINVAL)return 80;
  for(phase=0;phase<3;++phase){
   setup();irq=saved_irq=mode==23?1:phase%2;old_box=box;old_dev=controller;old_qos=abox_qos_aud;old_qos_work=abox_qos_work;
@@ -156,6 +175,7 @@ int main(int argc,char**argv){
   if(node_refs || device_refs || device_locked || ipc_locked || event_locked || qos_locked || irq!=saved_irq || memcmp(&old_box,&box,sizeof(box)) || memcmp(&old_dev,&controller,sizeof(controller)) || memcmp(&old_qos,&abox_qos_aud,sizeof(old_qos)) || old_qos_work!=abox_qos_work)return 81;
  }
  if(mode==58)n10_abox_samples[1].qos_seen=0;
+ if(mode==76)n10_abox_samples[1].probe_get_negative=1;
  completed=begin+1;if(!completed)completed=1;n10_report_abox_pm(mode==16?begin:completed);return 0;
 }
 '''
@@ -179,7 +199,10 @@ def run(output,driver,dma_helper):
         (output/(name+'-compile.log')).write_bytes(made.stdout+made.stderr)
         if made.returncode:raise RuntimeError('Actual ABOX C model compilation failed')
         return exe
-    hooks='static int event_enable(struct device*dev,int ret){\n'+ENABLE_EVENT.decode()+'return ret;\n}\n'
+    start=driver.index(b'static int __init samsung_abox_late_initcall(');end=driver.index(b'late_initcall(samsung_abox_late_initcall);',start);late=driver[start:end]
+    if driver.count(PROBE_GET)!=1 or driver.count(LATE_BODY)!=1:raise ValueError('Lifecycle blocks differ')
+    hooks='static void event_probe_get(struct device*dev){\n'+PROBE_GET.decode()+'\n}\n'+late.decode()
+    hooks+='static int event_enable(struct device*dev,int ret){\n'+ENABLE_EVENT.decode()+'return ret;\n}\n'
     hooks+='static int event_disable(struct device*dev,struct abox_data*data,unsigned int state){\n'+BEGIN_EVENT.decode()+IPC_EVENT.decode()+'\n'+END_EVENT.decode()+'return 0;\n}\n'
     hooks+='static void event_worker(struct device*dev,struct abox_data*data){\n#ifdef CONFIG_NOTE10_ABOX_PM_AUDIT\nbool n10_can;\n#endif\n'+WORK_BEGIN.decode()+WORK_GET.decode()+'\n'+WORK_GATE.decode()+'\n; }\npm_runtime_put_autosuspend(dev);\n'+WORK_END.decode()+'}\n'
     hooks+='static int event_queue_put(struct abox_data*data,int ret){\n'+QUEUE_PUT.decode()+'return ret;\n}\n'
@@ -190,17 +213,18 @@ def run(output,driver,dma_helper):
     hooks+='static void event_qos_worker_begin(void){\n'+QOS_WORK_BEGIN.decode()+'}\n'
     exe=build('abox',STUB+sources['abox_pm_contract.h'].decode()+qos_target.decode()+clean(sources['abox_qos_pm_backend.c'].decode())+clean(sources['abox_pm_backend.c'].decode())+checksum+clean(sources['abox_pm_probe.c'].decode())+qos_apply.decode()+qos_worker.decode()+hooks+MAIN)
     rows=[]
-    for mode in range(66):
+    for mode in range(79):
         ran=subprocess.run([str(exe),str(mode)],capture_output=True,timeout=15);(output/f'mode-{mode}.log').write_bytes(ran.stdout+ran.stderr)
         if ran.returncode:raise ValueError('ABOX reference/lock/IRQ/state or unchanged callback result failed mode '+str(mode))
         text=ran.stdout.decode()
         if mode==44:text='\n'.join(line for line in text.splitlines() if not (line.startswith('N10ABR1 ') and 'phase=1 ' in line))
+        if mode==75:text='\n'.join(line for line in text.splitlines() if not (line.startswith('N10ABL1 ') and 'phase=1 ' in line))
         if mode==59:text='\n'.join(line for line in text.splitlines() if not (line.startswith('N10ABQ1 ') and 'phase=1 ' in line))
         try:
             observation=decode(text,ID,1 if mode==15 else 2);accepted=True
         except ValueError:accepted=False
         if accepted:
-            if observation['abox_driver_idle_state_observed']!=(mode in (0,15,23,27,29,30,35,38,39,40,42,49,54,60,62,65)):raise ValueError('ABOX idle interpretation differs')
+            if observation['abox_driver_idle_state_observed']!=(mode in (0,15,23,27,29,30,35,38,39,40,42,49,54,60,62,65,66,67,68,69,70,71,72,73,78)):raise ValueError('ABOX idle interpretation differs')
             expected={25:dict(worker_starts=1,worker_stage=1,worker_inflight=1),
                 26:dict(worker_starts=1,worker_finishes=1,worker_stage=4,pm_get_result=5,pm_get_negative=1),
                 27:dict(gate_seen=1,can_ipc=0,worker_finishes=1),
@@ -217,11 +241,18 @@ def run(output,driver,dma_helper):
                 54:dict(qos_gets=1,qos_puts=1,qos_get_negative=0,qos_put_negative=0),55:dict(qos_get_result=5,qos_get_negative=1),
                 56:dict(qos_put_result=5,qos_put_negative=1),57:dict(qos_first_id=42,qos_target=120,qos_applied=0,qos_work_pending=1),
                 60:dict(qos_gets=0,qos_puts=0),61:dict(qos_target=0xffffffff,qos_applied=0xffffffff,qos_first_value=0xffffffff),64:dict(qos_worker_starts=1,qos_worker_inflight=1),65:dict(qos_worker_starts=1,qos_worker_finishes=1,qos_worker_inflight=0)}
+            expected.update({66:dict(probe_get_count=1,probe_get_before=0,probe_get_after=1,late_state=0),
+                67:dict(probe_get_count=1,probe_get_result=115,probe_get_negative=1,probe_get_after=1),
+                68:dict(late_state=1,late_put_count=0,probe_get_count=1),69:dict(late_state=2,late_put_count=0),
+                70:dict(late_state=3,late_put_count=1,late_put_before=1,late_put_after=0),
+                71:dict(late_state=3,late_put_count=1,late_put_result=16,late_put_negative=1,late_put_after=0),
+                72:dict(probe_get_count=0,probe_get_after=1),73:dict(probe_get_before=1,probe_get_before_negative=1,probe_get_after=0),
+                78:dict(late_state=3,late_put_result=0x80000000,late_put_negative=1)})
             snapshot=observation['phases'][1]['snapshot']
             if any(snapshot[k]!=v for k,v in expected.get(mode,{}).items()):raise ValueError('ABOX worker/queue interpretation differs')
-        if accepted!=(mode in (0,15,17,18,19,20,23,24,25,26,27,28,29,30,31,35,36,37,38,39,40,41,42,45,46,47,48,49,54,55,56,57,60,61,62,64,65)):raise ValueError('ABOX strict decoder differs mode '+str(mode))
+        if accepted!=(mode in (0,15,17,18,19,20,23,24,25,26,27,28,29,30,31,35,36,37,38,39,40,41,42,45,46,47,48,49,54,55,56,57,60,61,62,64,65,66,67,68,69,70,71,72,73,78)):raise ValueError('ABOX strict decoder differs mode '+str(mode))
         rows.append(dict(mode=mode,passed=True,accepted=accepted))
-    disabled=build('disabled',STUB.replace('#define CONFIG_NOTE10_ABOX_PM_AUDIT','')+sources['abox_pm_contract.h'].decode()+qos_target.decode()+qos_apply.decode()+qos_worker.decode()+hooks+'int main(void){mode=17;setup();if(event_enable(&controller.dev,-EIO)!=-EIO || event_disable(&controller.dev,&box,3)!=0 || ipc_calls!=1)return 85;event_worker(&controller.dev,&box);if(pm_get_calls!=1 || gate_calls!=1 || pm_put_calls!=1 || event_queue_put(&box,-EBUSY)!=-EBUSY || event_queue_get(&box,-ENODATA)!=-ENODATA)return 88;mode=41;if(event_firmware(&controller.dev,-EAGAIN)!=0 || event_notifier(&controller.dev,&box,PM_SUSPEND_PREPARE)!=NOTIFY_BAD || clearable_calls!=1 || suspend_calls!=1)return 91;mode=54;abox_qos_aud.req_array[0]=(struct abox_qos_req){DEFAULT_CPU_GEAR_ID,100};abox_qos_apply(&abox_qos_aud);abox_qos_aud.req_array[0].val=0;abox_qos_apply(&abox_qos_aud);if(qpm_get_calls!=1 || pm_put_calls!=2)return 93;abox_qos_work_func(NULL);if(qpm_get_calls!=1 || pm_put_calls!=2)return 96;return 0;}')
+    disabled=build('disabled',STUB.replace('#define CONFIG_NOTE10_ABOX_PM_AUDIT','')+sources['abox_pm_contract.h'].decode()+qos_target.decode()+qos_apply.decode()+qos_worker.decode()+hooks+'int main(void){mode=17;setup();if(event_enable(&controller.dev,-EIO)!=-EIO || event_disable(&controller.dev,&box,3)!=0 || ipc_calls!=1)return 85;event_worker(&controller.dev,&box);if(pm_get_calls!=1 || gate_calls!=1 || pm_put_calls!=1 || event_queue_put(&box,-EBUSY)!=-EBUSY || event_queue_get(&box,-ENODATA)!=-ENODATA)return 88;mode=41;if(event_firmware(&controller.dev,-EAGAIN)!=0 || event_notifier(&controller.dev,&box,PM_SUSPEND_PREPARE)!=NOTIFY_BAD || clearable_calls!=1 || suspend_calls!=1)return 91;mode=54;abox_qos_aud.req_array[0]=(struct abox_qos_req){DEFAULT_CPU_GEAR_ID,100};abox_qos_apply(&abox_qos_aud);abox_qos_aud.req_array[0].val=0;abox_qos_apply(&abox_qos_aud);if(qpm_get_calls!=1 || pm_put_calls!=2)return 93;abox_qos_work_func(NULL);if(qpm_get_calls!=1 || pm_put_calls!=2)return 96;mode=70;setup();event_probe_get(&controller.dev);if(controller.dev.power.usage_count!=1 || samsung_abox_late_initcall()!=0 || late_calls!=1 || controller.dev.power.usage_count)return 101;mode=68;p_abox_data=NULL;if(samsung_abox_late_initcall()!=0 || late_calls!=1)return 102;return 0;}')
     off=subprocess.run([str(disabled)],capture_output=True,timeout=15);(output/'disabled.log').write_bytes(off.stdout+off.stderr)
     if off.returncode:raise ValueError('Default-off ABOX callback result changed')
     from test_dma_pm_native import STUB as DMA_STUB,MAIN as DMA_MAIN
@@ -233,7 +264,7 @@ def run(output,driver,dma_helper):
     decode_dma(ran.stdout.decode(),ID,2)
     result=dict(passed=True,cases=len(rows),outcomes=rows,source_sha256={n:hashlib.sha256(raw).hexdigest() for n,raw in sources.items()},
         patched_driver_sha256=PATCHED_SHA,patched_qos_driver_sha256=QOS_PATCHED_SHA,qos_target_sha256=QOS_TARGET_SHA,event_blocks_sha256=event_digest(),generated_dma_sha256=hashlib.sha256(raw).hexdigest(),
-        harness_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),actual_backend_executed=True,actual_probe_executed=True,
+        harness_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),generated_lifecycle_blocks_executed=True,actual_late_initcall_executed=True,actual_backend_executed=True,actual_probe_executed=True,
         generated_event_blocks_executed=True,generated_worker_blocks_executed=True,generated_queue_blocks_executed=True,generated_prepare_blocks_executed=True,actual_qos_backend_executed=True,actual_qos_apply_executed=True,actual_qos_worker_executed=True,generated_qos_blocks_executed=True,default_off_blocks_executed=True,generated_dma_hook_executed=True,hardware_verified=False)
     (output/'result.json').write_bytes((json.dumps(result,indent=2)+'\n').encode());return result
 
