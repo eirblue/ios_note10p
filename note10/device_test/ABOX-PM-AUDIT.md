@@ -380,3 +380,24 @@ non-null resume calls. Full PC regression passes 227 tests and all seven
 frame types fit the existing buffer. The next physical cycle retains all
 13 evaluation items and adds the guard/count observations in that same boot.
 DSP/global DMA shutdown and XNU execution remain unverified.
+
+
+The [v25 integrated kernel](https://github.com/eirblue/ios_note10p/actions/runs/40538317465)
+passed at source `42f042e`. Actual Image/config, guard metadata, 105 ABOX,
+25 IOMMU and 42 UFS/HCI C models, initial process and fresh package all passed
+offline verification. Its single physical cycle passed all 13 evaluations at
+76% battery, automatically returned to a new TWRP boot and passed all five
+partition integrity checks.
+
+This boot recorded no present-firmware callbacks, two absent callbacks, two
+guard skips and no callback runtime-resume calls. ABOX stayed runtime-suspended
+in all three snapshots; usage was zero around the ordinary protective system
+PM reference, QoS target/applied/pending values were zero, and the original
+QoS get/put counts were balanced. The driver recorded one enable and one
+disable, rather than the later re-enable seen previously. IOMMU runtime and
+policy-active counts were also zero. The IPC queue remained nonempty and was
+not discarded. These observations establish the tested software/runtime effect
+of this opt-in guard, not complete DSP/global DMA shutdown or XNU execution.
+A next bundled hardware observation will require bounded, source-validated PMU
+reads with control-bit and standby semantics stated separately from electrical
+power-off acknowledgment. Raw logs and identifiers remain private.
