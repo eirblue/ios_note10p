@@ -36,6 +36,14 @@ def check(packages,kernel_build,backup,core_model,gate_model,init_model,adb):
             if paired.get('gic_roundtrip_evidence_version')!=1 or diagnostic.get('gic_roundtrip_evidence_version')!=1:
                 raise ValueError('GIC package evidence version missing')
             validate_gic(kernel_build,build)
+        from dma_pm_binding import assert_scope as assert_dma_scope,validate_model as validate_dma
+        dma_pm_audit=assert_dma_scope(kernel_build,build)
+        if dma_pm_audit!=bool(paired.get('dma_pm_audit_diagnostic')) or dma_pm_audit!=bool(diagnostic.get('dma_pm_audit_diagnostic')):
+            raise ValueError('DMA PM package scope differs from actual Image/config')
+        if dma_pm_audit:
+            if paired.get('dma_pm_audit_evidence_version')!=1 or diagnostic.get('dma_pm_audit_evidence_version')!=1:
+                raise ValueError('DMA PM package evidence version differs')
+            validate_dma(kernel_build,build)
         if not (build.get('build_passed') is True and build.get('window_access_diagnostic') is True and
                 build.get('window_access_evidence_version')==1 and build.get('reservation_evidence_version')==2):
             raise ValueError('Successful opt-in access kernel build required')

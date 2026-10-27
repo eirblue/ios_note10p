@@ -65,6 +65,8 @@ def collect(packages,kernel_build,adb):
     assert_quiesce_scope(kernel_build,result)
     from gic_roundtrip_binding import assert_scope as assert_gic_scope
     gic_roundtrip=assert_gic_scope(kernel_build,result)
+    from dma_pm_binding import assert_scope as assert_dma_scope
+    dma_pm_audit=assert_dma_scope(kernel_build,result)
     if result.get('build_passed') is not True or result.get('early_xnu_reservation') is not True:
         raise ValueError('Successful reservation kernel build required')
     digest=hashlib.sha256(image).hexdigest()
@@ -97,6 +99,8 @@ def collect(packages,kernel_build,adb):
     if (paired.get('pm_timer_diagnostic') is True)!=pm_timer:raise ValueError('PM/timer package and kernel scope differ')
     if bool(paired.get('pm_quiesce_diagnostic'))!=pm_quiesce or (pm_quiesce and paired.get('pm_quiesce_evidence_version')!=1):
         raise ValueError('PM quiesce package and kernel contract differs')
+    if bool(paired.get('dma_pm_audit_diagnostic'))!=dma_pm_audit or (dma_pm_audit and paired.get('dma_pm_audit_evidence_version')!=1):
+        raise ValueError('DMA PM package and kernel contract differs')
     if xnu_stage and (paired.get('xnu_payload_sha256')!=result.get('xnu_payload_sha256') or
                       paired.get('xnu_payload_size')!=result.get('xnu_payload_size')):
         raise ValueError('XNU payload package and kernel build differ')
@@ -135,6 +139,7 @@ def collect(packages,kernel_build,adb):
             'pm_timer_required':pm_timer,'previous_boot_pm_timer_observed':False,
             'logs_sha256':{n:hashlib.sha256(d).hexdigest() for n,d in logs.items()},
             'gic_roundtrip_required':gic_roundtrip,'previous_boot_gic_roundtrip_observed':False,
+            'dma_pm_audit_required':dma_pm_audit,'previous_boot_dma_pm_audit_observed':False,
             'log_selections':{},'decode_failures':{}}
     for name,data in logs.items():
         try:
@@ -186,6 +191,12 @@ def collect(packages,kernel_build,adb):
                 from decode_gic_roundtrip import decode as decode_gic
                 observation['gic_cpu_roundtrip']=decode_gic(text,evidence_id)
                 report['previous_boot_gic_roundtrip_observed']=True
+            if dma_pm_audit:
+                from decode_dma_pm import decode as decode_dma
+                generations=observation['pm_timer']['quiescence']['attempts']
+                generation=generations[str(max(map(int,generations)))]['result']['generation']
+                observation['dma_pm_audit']=decode_dma(text,evidence_id,generation)
+                report['previous_boot_dma_pm_audit_observed']=True
         except ValueError as error:
             report['decode_failures'][name]=str(error);continue
         (out/'reservation-observation.json').write_text(json.dumps(observation,indent=2),encoding='utf-8')
@@ -205,7 +216,8 @@ def collect(packages,kernel_build,adb):
                                  (not xnu_stage or report['previous_boot_xnu_payload_stage_observed']) and
                                  (not cpu_cache or report['previous_boot_cpu_cache_roundtrip_observed']) and
                                  (not pm_timer or report['previous_boot_pm_timer_observed']) and
-                                 (not gic_roundtrip or report['previous_boot_gic_roundtrip_observed']))
+                                 (not gic_roundtrip or report['previous_boot_gic_roundtrip_observed']) and
+                                 (not dma_pm_audit or report['previous_boot_dma_pm_audit_observed']))
     (out/'capture-result.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
     return report
 

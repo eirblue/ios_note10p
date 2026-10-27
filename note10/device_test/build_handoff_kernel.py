@@ -20,7 +20,7 @@ REPOSITORY = 'corsicanu/android_kernel_samsung_universal9820'
 OUT = ROOT / 'note10/private/handoff-kernel'
 
 
-def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manifest=None,cpu_cache=False,pm_timer=False,auto_return=False,screen_log=False,gic_roundtrip=False):
+def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manifest=None,cpu_cache=False,pm_timer=False,auto_return=False,screen_log=False,gic_roundtrip=False,dma_pm_audit=False):
     if not sys.platform.startswith('linux'): raise RuntimeError('Linux CI host required')
     if os.environ.get('PLATFORM_VERSION')!='11' or os.environ.get('ANDROID_MAJOR_VERSION')!='r':
         raise ValueError('Pinned Samsung build requires PLATFORM_VERSION=11 and ANDROID_MAJOR_VERSION=r')
@@ -33,6 +33,7 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
     if auto_return and not pm_timer:raise ValueError('Auto return requires PM/timer diagnostic')
     if pm_timer and not cpu_cache:raise ValueError('PM/timer requires CPU/cache batch')
     if gic_roundtrip and not auto_return:raise ValueError('GIC roundtrip requires PM and automatic recovery')
+    if dma_pm_audit and not gic_roundtrip:raise ValueError('DMA PM audit requires the restored GIC/PM diagnostic')
     OUT.mkdir(parents=True,exist_ok=True)
     report = {'source_repository':REPOSITORY,'source_commit':COMMIT,
               'platform_version':os.environ['PLATFORM_VERSION'],
@@ -135,6 +136,14 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             run([sys.executable,str(ROOT/'note10/device_test/test_gic_roundtrip_native.py'),
                  '--output',str(OUT/'gic-roundtrip-model')],'03-gic-roundtrip-model.log')
             report['scope']='Restored PM plus reversible per-CPU GICv2 priority mask test; no distributor writes, IRQ ownership transfer or XNU branch'
+        if dma_pm_audit:
+            from prepare_dma_pm import prepare as prepare_dma
+            report.update(prepare_dma(source))
+            report['pm_quiesce_patched_sha256']['kernel/power/Kconfig']=hashlib.sha256((source/'kernel/power/Kconfig').read_bytes()).hexdigest()
+            report['patched_suspend_sha256']=hashlib.sha256((source/'kernel/power/suspend.c').read_bytes()).hexdigest()
+            run([sys.executable,str(ROOT/'note10/device_test/test_dma_pm_native.py'),
+                 '--output',str(OUT/'dma-pm-model')],'03-dma-pm-model.log')
+            report['scope']='Read-only DMA-capable device PM framework snapshots plus restored GIC/PM tests; no hardware DMA-idle or XNU branch claim'
         make=['make','-C',str(source),'O='+str(objects),'ARCH=arm64',
               'CC=clang-14','CROSS_COMPILE=aarch64-linux-gnu-',
               'CLANG_TRIPLE=aarch64-linux-gnu-','CROSS_COMPILE_ARM32=arm-linux-gnueabi-',
@@ -160,11 +169,13 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
         if screen_log:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_SCREEN_LOG'],'02-screen-log.log')
         if pm_timer:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_PM_QUIESCE'],'02-pm-quiesce.log')
         if gic_roundtrip:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_GIC_ROUNDTRIP'],'02-gic-roundtrip.log')
+        if dma_pm_audit:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_DMA_PM_AUDIT'],'02-dma-pm-audit.log')
         run([*make,'olddefconfig'],'03-olddefconfig.log')
         configured=config.read_text()
         required=('CONFIG_KEXEC=y','CONFIG_KEXEC_CORE=y','CONFIG_PM_SLEEP_SMP=y','CONFIG_ARM64_4K_PAGES=y')
         (OUT/'handoff.config').write_bytes(config.read_bytes())
         if gic_roundtrip:required+=('CONFIG_NOTE10_GIC_ROUNDTRIP=y','CONFIG_ARM_GIC=y')
+        if dma_pm_audit:required+=('CONFIG_NOTE10_DMA_PM_AUDIT=y',)
         if reserve:required+=('CONFIG_INITRAMFS_FORCE=y','CONFIG_CMDLINE_EXTEND=y','CONFIG_CMDLINE="rdinit=/init"')
         if xnu_payload is not None:required+=('CONFIG_CRYPTO=y','CONFIG_CRYPTO_HASH=y','CONFIG_CRYPTO_SHA256=y')
         if cpu_cache:required+=('CONFIG_HOTPLUG_CPU=y','CONFIG_SMP=y','CONFIG_PM_SLEEP_SMP=y')
@@ -217,6 +228,9 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
         if gic_roundtrip:
             from gic_roundtrip_binding import validate_model as validate_gic
             validate_gic(OUT,report)
+        if dma_pm_audit:
+            from dma_pm_binding import validate_model as validate_dma
+            validate_dma(OUT,report)
         if auto_return:
             from materialize_auto_cycle import SLOT
             if b'N10RET1' not in target.read_bytes() or target.read_bytes().count(SLOT+b'\0')!=1:raise ValueError('Auto-return marker/unique data slot missing')
@@ -245,5 +259,6 @@ if __name__=='__main__':
     parser.add_argument('--auto-return',action='store_true',help='Opt-in one-shot recovery request after 90 seconds; requires cycle token')
     parser.add_argument('--screen-log',action='store_true',help='Experimental top-left quarter panel console; requires auto return')
     parser.add_argument('--gic-roundtrip',action='store_true',help='Reversible GICv2 CPU priority mask diagnostic after restored PM')
+    parser.add_argument('--dma-pm-audit',action='store_true',help='Read-only DMA-capable device PM framework coverage snapshots')
     args=parser.parse_args();main(caps=args.caps,reserve=args.reserve,window_access=args.window_access,
-                                  xnu_payload=args.xnu_payload,xnu_manifest=args.xnu_payload_manifest,cpu_cache=args.cpu_cache,pm_timer=args.pm_timer,auto_return=args.auto_return,screen_log=args.screen_log,gic_roundtrip=args.gic_roundtrip)
+                                  xnu_payload=args.xnu_payload,xnu_manifest=args.xnu_payload_manifest,cpu_cache=args.cpu_cache,pm_timer=args.pm_timer,auto_return=args.auto_return,screen_log=args.screen_log,gic_roundtrip=args.gic_roundtrip,dma_pm_audit=args.dma_pm_audit)

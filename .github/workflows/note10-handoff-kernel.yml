@@ -42,6 +42,11 @@ on:
         type: boolean
         default: false
 
+      dma_pm_audit:
+        description: Read-only DMA-capable device PM framework snapshots; requires gic_roundtrip
+        type: boolean
+        default: false
+
       auto_return:
         description: Opt-in one-shot recovery request; cycle token required at BOOT packaging
         type: boolean
@@ -100,10 +105,18 @@ jobs:
           NOTE10_AUTO_RETURN: ${{ inputs.auto_return }}
           NOTE10_SCREEN_LOG: ${{ inputs.screen_log }}
           NOTE10_GIC_ROUNDTRIP: ${{ inputs.gic_roundtrip }}
+          NOTE10_DMA_PM_AUDIT: ${{ inputs.dma_pm_audit }}
         run: |
           if [ "$NOTE10_AUTO_RETURN" = true ] && [ "$NOTE10_PM_TIMER" != true ]; then
             echo "auto_return requires pm_timer=true" >&2
             exit 2
+          fi
+          if [ "$NOTE10_DMA_PM_AUDIT" = true ] && [ "$NOTE10_GIC_ROUNDTRIP" != true ]; then
+            echo "dma_pm_audit requires gic_roundtrip=true" >&2
+            exit 2
+          fi
+          if [ "$NOTE10_DMA_PM_AUDIT" = true ]; then
+            python note10/device_test/test_dma_pm_contract.py
           fi
           if [ "$NOTE10_GIC_ROUNDTRIP" = true ] && { [ "$NOTE10_AUTO_RETURN" != true ] || [ "$NOTE10_XNU_STAGE" != true ]; }; then
             echo "gic_roundtrip requires auto_return and xnu_stage" >&2
@@ -168,6 +181,7 @@ jobs:
           NOTE10_AUTO_RETURN: ${{ inputs.auto_return }}
           NOTE10_SCREEN_LOG: ${{ inputs.screen_log }}
           NOTE10_GIC_ROUNDTRIP: ${{ inputs.gic_roundtrip }}
+          NOTE10_DMA_PM_AUDIT: ${{ inputs.dma_pm_audit }}
         run: |
           count="$(find note10/private/xnu-input -name note10-experimental.macho -type f | wc -l)"
           [ "$count" -eq 1 ]
@@ -196,6 +210,9 @@ jobs:
             if [ "$NOTE10_AUTO_RETURN" != true ]; then exit 2; fi
             EXTRA+=(--gic-roundtrip)
           fi
+          if [ "$NOTE10_DMA_PM_AUDIT" = true ]; then
+            EXTRA+=(--dma-pm-audit)
+          fi
           python note10/device_test/build_handoff_kernel.py --caps --reserve --window-access \
             --xnu-payload note10/private/xnu-stage-payload/kernel.mem \
             --xnu-payload-manifest note10/private/xnu-stage-payload/payload-manifest.json "${EXTRA[@]}"
@@ -207,6 +224,8 @@ jobs:
           if-no-files-found: error
           path: |
             note10/private/handoff-kernel/build-result.json
+            note10/private/handoff-kernel/dma-pm-model/result.json
+            note10/private/handoff-kernel/dma-pm-model/*.log
             note10/private/handoff-kernel/*.log
             note10/private/handoff-kernel/*.config
             note10/private/handoff-kernel/Image
