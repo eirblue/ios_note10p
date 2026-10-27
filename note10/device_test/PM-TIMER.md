@@ -1,5 +1,23 @@
 # Devices-only PM and timer roundtrip (v6)
 
+## Headless physical PM roundtrip passed (2026-10-27)
+
+[Source 581688c](https://github.com/eirblue/ios_note10p/commit/581688c60eaccfc9b93ecb4b3bc88e34733d966b)
+and [kernel CI 40421302683](https://github.com/eirblue/ios_note10p/actions/runs/40421302683)
+passed one physical diagnostic cycle with `screen_log=false` and PM quiesce
+enabled. The same-build, same-cycle strict decoder accepted the reservation,
+RAM access, XNU data staging, CPU/cache and PM/timer evidence. The sole PM
+attempt completed TEST_DEVICES suspend/resume with PM/USB/wakeup/restoration
+errors all zero, and all eight timer snapshots restored their original values.
+The host observed a new TWRP boot after the one-shot recovery request; all five
+post-test partition hashes matched the expected baseline including diagnostic
+BOOT. Raw logs, device identifiers and packed images remain private.
+
+This resolves EBUSY for the tested headless devices-only PM path. It is one
+successful physical cycle, not a stability campaign or proof of all DMA engines
+stopping, GIC/MMU/cache handoff, XNU execution or iOS boot. The experimental
+screen console remains excluded from this validated configuration.
+
 ## Re-establish USB runtime idle after devices-only PM (2026-10-27)
 
 The pinned DWC3 system-suspend path takes a runtime reference, and its resume

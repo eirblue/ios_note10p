@@ -1,5 +1,12 @@
 # 작업 상태 (2026-10-20, Asia/Seoul)
 
+## 2026-10-27: 화면 로그를 끈 실기기 PM EBUSY 해결
+
+- 공개 소스 `581688c`, 커널 CI `40421302683`로 새 BOOT의 단일 자동 실기기 시험을 통과했다.
+- 시스템 PM 복귀 후 USB core의 runtime-active 상태를 정상 runtime-PM API로 다시 정지시키고 엄격한 quiesce 검사를 유지했다. PM·USB·wakeup·역순 복원 오류 모두 0, 8개 CPU 타이머 원래 값 복원을 확인했다.
+- 새 TWRP 부팅 ID로 자동 복귀를 확인하고 원시 로그를 보존했다. 사후 5개 파티션 해시는 진단 BOOT를 포함해 모두 예상값과 일치했다.
+- 검증 범위는 `screen_log=false`의 TEST_DEVICES 왕복 1회다. 전체 DMA 정지·GIC/MMU/cache 인계·XNU 실행·iOS 부팅이나 반복 안정성을 의미하지 않는다. 상세 결과와 범위는 `device_test/PM-TIMER.md`에 기록했다.
+
 ## 2026-10-27: 커널·XNU 우선, EBUSY 정상 정지 경로 준비
 
 - 사용자 우선순위는 커널 및 iOS 포팅이다. 화면 터미널은 보조 진단으로 진행한다.
