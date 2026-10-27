@@ -46,6 +46,16 @@ build in CI [40436768400](https://github.com/eirblue/ios_note10p/actions/runs/40
 The local regression suite passed 168 tests, and 27 actual-UFS-C cases plus
 the generated unlocked-DMA-hook executable passed. Actual Image/config/model
 bindings, PID1, packaged BOOT and native updater syntax checks passed.
-The first UFS physical cycle remains pending the established installation
-battery minimum. No installation, reboot or physical-cycle journal was started
-for this build, and no UFS hardware result is claimed.
+The first physical cycle passed on 2026-10-27, starting at 25% battery under
+the explicitly user-authorized 10% minimum. Each phase had eight intact matching
+records, with capture generation 1 and completed generation 2. Request, task and
+LRB masks were zero throughout. The suspended sample reported IRQ disabled,
+system suspended, power-down, link off, clocks off and gating suspended. The
+restored sample reported IRQ enabled, system flag clear, active power/link and
+clocks on. Existing PM, eight-CPU timer/GIC, DMA framework, RAM and payload checks
+passed in the same cycle. A fresh TWRP boot ID and all five partition hashes
+were verified after automatic return. No hardware register was read by the UFS
+observer; independent hardware DMA-idle and XNU execution remain unverified.
+
+The host-only battery policy update passed 169 regression tests. It changes
+neither this compiled kernel nor its model/source bindings.

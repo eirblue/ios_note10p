@@ -27,6 +27,13 @@ def pm_suspend_patch_bound(build,patch_model):
         build.get('dma_pm_audit_patched_sha256',{}).get('kernel/power/suspend.c')==DMA_GUARDED_SUSPEND_SHA)
 
 
+MINIMUM_INSTALL_BATTERY = 10
+
+def require_install_battery(battery):
+    if not MINIMUM_INSTALL_BATTERY <= battery <= 100:
+        raise ValueError(f'Charge to at least {MINIMUM_INSTALL_BATTERY} percent before manual install')
+
+
 def check(packages,kernel_build,backup,core_model,gate_model,init_model,adb):
     if not packages.resolve().is_relative_to((ROOT/'note10/private').resolve()):
         raise ValueError('Private package directory required')
@@ -173,7 +180,7 @@ def check(packages,kernel_build,backup,core_model,gate_model,init_model,adb):
         state=preflight(adb)
         if adb.text('shell','getprop','ro.bootloader')!=baseline['bootloader']:raise ValueError('Bootloader changed')
         battery=int(adb.text('shell','cat','/sys/class/power_supply/battery/capacity'))
-        if not 30<=battery<=100:raise ValueError('Charge to at least 30 percent before manual install')
+        require_install_battery(battery)
         native=[]
         for record in records:
             with zipfile.ZipFile(packages/record['file']) as archive:

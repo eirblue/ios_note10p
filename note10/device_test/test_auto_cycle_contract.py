@@ -251,5 +251,15 @@ class HostTests(unittest.TestCase):
             self.assertEqual(host.wait_recovery(FakeAdb(), 'old', 10, monotonic=lambda: clock[0], sleep=sleep), 'new')
 
 
+class BatteryPolicyTests(unittest.TestCase):
+    def test_user_authorized_floor_and_invalid_capacity(self):
+        from precheck_window_access import require_install_battery
+        for capacity in (10, 11, 30, 100):
+            require_install_battery(capacity)
+        for capacity in (-1, 0, 9, 101):
+            with self.assertRaises(ValueError):
+                require_install_battery(capacity)
+
+
 if __name__ == '__main__':
     unittest.main()

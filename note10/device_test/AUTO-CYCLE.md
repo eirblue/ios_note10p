@@ -64,7 +64,7 @@ The execution command is `auto_cycle.py run` with `--plan`, `--plan-sha256`, a
 fresh private `--output`, and `--execute`. Without `--execute` it refuses before
 constructing ADB. The default `--limit 1` performs one automatic roundtrip.
 
-The initial device must be the paired SM-N976N in root TWRP, with at least 30%
+The initial device must be the paired SM-N976N in root TWRP, with at least 10%
 battery and the exact five-partition baseline. The CLI must be `/sbin/twrp`.
 The device serial is bound for the whole run; journals store its hash. Installer
 errors, low battery, changed partitions, stale recovery boot IDs, missing cycle
@@ -96,3 +96,7 @@ Public references used for design: [TWRP command-line guide](https://twrp.me/faq
 [pinned Samsung recovery restart](https://github.com/corsicanu/android_kernel_samsung_universal9820/blob/55f042627bb7030c93550faafa117674d32b21d1/drivers/samsung/sec_reboot.c),
 and [pinned restart log dump](https://github.com/corsicanu/android_kernel_samsung_universal9820/blob/55f042627bb7030c93550faafa117674d32b21d1/kernel/reboot.c).
 Raw logs, device identifiers, addresses, backups and ZIPs stay private.
+
+The user explicitly authorized the 10% minimum on 2026-10-27. Plan validation
+and the immediate preinstall capacity check share this minimum; values below
+10 or above 100 stop before installation.

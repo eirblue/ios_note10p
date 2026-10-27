@@ -11,7 +11,7 @@ import time
 import uuid
 from run_probe import ROOT,Adb,preflight
 from stage_phase2 import stage,verify_packages
-from precheck_window_access import check
+from precheck_window_access import check, MINIMUM_INSTALL_BATTERY
 from collect_reservation import collect
 from decode_auto_return import decode as decode_return
 from materialize_auto_cycle import materialize,validate as validate_variant
@@ -50,7 +50,7 @@ def prepare_plan(*,kernel_build,backup,twrp,mkbootimg,current_packages,output,cy
         image_sha256=sha(kernel_build/'Image'),identity=result['reservation_evidence_id'],
         core_model=str(kernel_build.parent/'window-access-core-ci/result.json'),
         gate_model=str(kernel_build.parent/'window-access-gate-ci/result.json'),
-        init_model=str(kernel_build/'minimal-init-model.json'),minimum_battery=30,return_timeout_seconds=240,stages=stages)
+        init_model=str(kernel_build/'minimal-init-model.json'),minimum_battery=MINIMUM_INSTALL_BATTERY,return_timeout_seconds=240,stages=stages)
     save(output/'plan.json',plan)
     return dict(plan=str(output/'plan.json'),plan_sha256=sha(output/'plan.json'),cycles=cycles,device_operations=[])
 
@@ -59,7 +59,7 @@ def validate_plan(path,expected):
     path=private(path)
     if not re.fullmatch('[0-9a-f]{64}',expected or '') or sha(path)!=expected:raise ValueError('Exact reviewed plan SHA256 required')
     plan=read(path)
-    if plan.get('schema')!=1 or plan.get('kind')!='note10-bounded-auto-cycle' or plan.get('minimum_battery')!=30 or plan.get('return_timeout_seconds')!=240:raise ValueError('Unsupported cycle policy')
+    if plan.get('schema')!=1 or plan.get('kind')!='note10-bounded-auto-cycle' or plan.get('minimum_battery')!=MINIMUM_INSTALL_BATTERY or plan.get('return_timeout_seconds')!=240:raise ValueError('Unsupported cycle policy')
     stages=plan.get('stages',[])
     if not 1<=len(stages)<=5 or len({s['cycle'] for s in stages})!=len(stages):raise ValueError('Invalid cycle count or reused token')
     build=private(plan['kernel_build']);backup=private(plan['backup'])
