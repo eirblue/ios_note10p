@@ -44,7 +44,7 @@ static const char *dev_name(struct device *dev){if(!device_locked)abort();return
 #define spin_lock_irqsave(p,f) do{if((p)!=&controllers[device_index].lock || !device_locked || spin_locked++)abort();(f)=irq;irq=1;}while(0)
 #define spin_unlock_irqrestore(p,f) do{if((p)!=&controllers[device_index].lock || !spin_locked || !irq)abort();spin_locked=0;irq=(f);}while(0)
 static int driver_for_each_device(struct device_driver *driver,struct device *start,void *ctx,int(*fn)(struct device*,void*)){
- unsigned int count=mode==10?65:3;int error;
+ unsigned int count=mode==10?65:(mode==21?64:(mode==22?9:3));int error;
  if(driver!=&exynos_sysmmu_driver.driver || start || refs)abort();
  if(mode==1)return -EIO;if(mode==2)return 0;
  for(device_index=0;device_index<count;++device_index){
@@ -70,6 +70,9 @@ static void setup(void){
   if(mode==17)controllers[i].activations=1025;
   if(mode==16 && phase==1)devices[i].name[0]='x';
   if(mode==19){controllers[i].no_rpm_control=0;controllers[i].is_suspended=0;}
+  if(mode==10 || mode==21){controllers[i].runtime_active=0;controllers[i].no_rpm_control=0;controllers[i].hold_rpm_on_boot=0;devices[i].power.syscore=0;}
+  if(mode==23){memset(devices[i].name,'a',80);devices[i].name[80]=0;}
+  if(mode==24)strcpy(devices[i].name,"sysmmu.same");
   if(mode==20)memset(devices[i].name,'a',sizeof(devices[i].name));
  }
 }
@@ -107,12 +110,12 @@ def run(output,header,dma_helper):
         return exe
     exe=build('iommu',STUB+helpers+sources['iommu_pm_contract.h'].decode()+clean(sources['iommu_pm_backend.c'].decode())+checksum+clean(sources['iommu_pm_probe.c'].decode())+MAIN)
     rows=[]
-    for mode in range(21):
+    for mode in range(25):
         ran=subprocess.run([str(exe),str(mode)],capture_output=True,timeout=15);(output/f'mode-{mode}.log').write_bytes(ran.stdout+ran.stderr)
         if ran.returncode:raise ValueError('IOMMU reference/lock/IRQ/state model failed mode '+str(mode))
         try:decode(ran.stdout.decode(),ID,1 if mode==14 else 2);accepted=True
         except ValueError:accepted=False
-        if accepted!=(mode in (0,14,18,19)):raise ValueError('IOMMU strict decoder differs mode '+str(mode))
+        if accepted!=(mode in (0,14,18,19,21)):raise ValueError('IOMMU strict decoder differs mode '+str(mode))
         rows.append(dict(mode=mode,passed=True,accepted=accepted))
     from test_dma_pm_native import STUB as DMA_STUB,MAIN as DMA_MAIN
     raw=Path(dma_helper).read_bytes()

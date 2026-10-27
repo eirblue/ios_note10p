@@ -36,6 +36,7 @@ static int n10_iommu_visit(struct device *dev, void *context)
     s->boot_hold += !!data->hold_rpm_on_boot;
     s->secure_configured += !!data->securebase;
     s->mapped += !!data->pgtable;
+    s->policy_active += !!(is_sysmmu_active(data) && is_runtime_active_or_enabled(data));
     s->syscore += !!dev->power.syscore;
     s->prepared += !!dev->power.is_prepared;
     s->pm_suspended += !!dev->power.is_suspended;
@@ -43,6 +44,28 @@ static int n10_iommu_visit(struct device *dev, void *context)
     s->runtime_other += runtime_state != RPM_ACTIVE && runtime_state != RPM_SUSPENDED;
     s->names_xor ^= hash;
     s->names_sum += hash;
+    if (data->runtime_active || data->no_rpm_control || data->hold_rpm_on_boot || dev->power.syscore) {
+        struct n10_iommu_pm_detail *d;
+        if (s->detail_count >= 8 || !i || i >= 64) {
+            spin_unlock_irqrestore(&data->lock, flags);
+            goto unlock;
+        }
+        d = &s->details[s->detail_count++];
+        memcpy(d->name, name, i);
+        d->length = i;
+        d->activations = data->activations;
+        d->runtime_count = data->runtime_active;
+        d->manual = data->no_rpm_control;
+        d->active = !!is_sysmmu_active(data);
+        d->suspended = !!data->is_suspended;
+        d->effective = !!(is_sysmmu_active(data) && is_runtime_active_or_enabled(data));
+        d->syscore = !!dev->power.syscore;
+        d->prepared = !!dev->power.is_prepared;
+        d->pm_suspended = !!dev->power.is_suspended;
+        d->hold = !!data->hold_rpm_on_boot;
+        d->secure = !!data->securebase;
+        d->mapped = !!data->pgtable;
+    }
     spin_unlock_irqrestore(&data->lock, flags);
     error = 0;
 unlock:

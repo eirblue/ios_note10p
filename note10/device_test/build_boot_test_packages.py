@@ -129,7 +129,7 @@ def build(backup,prototype,output,current_packages=None):
     if ufs_pm_audit and (not dma_pm_audit or metadata.get('ufs_pm_audit_evidence_version')!=2):
         raise ValueError('Incomplete UFS PM audit package contract')
     iommu_pm_audit=metadata.get('iommu_pm_audit_diagnostic') is True
-    if iommu_pm_audit and (not ufs_pm_audit or metadata.get('iommu_pm_audit_evidence_version')!=1):
+    if iommu_pm_audit and (not ufs_pm_audit or metadata.get('iommu_pm_audit_evidence_version')!=2):
         raise ValueError('Incomplete IOMMU PM audit package contract')
     if dma_pm_audit and (not gic_roundtrip or metadata.get('dma_pm_audit_evidence_version')!=1):
         raise ValueError('Incomplete DMA PM audit package contract')
@@ -168,7 +168,7 @@ def build(backup,prototype,output,current_packages=None):
             'gic_roundtrip_diagnostic':gic_roundtrip,'gic_roundtrip_evidence_version':1 if gic_roundtrip else None,
             'dma_pm_audit_diagnostic':dma_pm_audit,'dma_pm_audit_evidence_version':1 if dma_pm_audit else None,
             'ufs_pm_audit_diagnostic':ufs_pm_audit,'ufs_pm_audit_evidence_version':2 if ufs_pm_audit else None,
-            'iommu_pm_audit_diagnostic':iommu_pm_audit,'iommu_pm_audit_evidence_version':1 if iommu_pm_audit else None,
+            'iommu_pm_audit_diagnostic':iommu_pm_audit,'iommu_pm_audit_evidence_version':2 if iommu_pm_audit else None,
             'xnu_payload_sha256':metadata.get('xnu_payload_sha256') if xnu_stage else None,
             'xnu_payload_size':metadata.get('xnu_payload_size') if xnu_stage else None,
             'builder_device_operations':[],'device_boot_tested':False,'deployment_ready':False,'packages':[]}
@@ -197,7 +197,7 @@ def build(backup,prototype,output,current_packages=None):
         metadata['ufs_pm_audit_diagnostic']=ufs_pm_audit and mode=='diagnostic'
         metadata['ufs_pm_audit_evidence_version']=2 if ufs_pm_audit and mode=='diagnostic' else None
         metadata['iommu_pm_audit_diagnostic']=iommu_pm_audit and mode=='diagnostic'
-        metadata['iommu_pm_audit_evidence_version']=1 if iommu_pm_audit and mode=='diagnostic' else None
+        metadata['iommu_pm_audit_evidence_version']=2 if iommu_pm_audit and mode=='diagnostic' else None
         metadata['screen_log_diagnostic']=screen_log and mode=='diagnostic'
         metadata['auto_return_diagnostic']=auto_return and mode=='diagnostic'
         metadata['auto_cycle_token']=cycle if auto_return and mode=='diagnostic' else None

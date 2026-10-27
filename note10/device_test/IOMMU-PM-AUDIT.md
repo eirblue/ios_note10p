@@ -44,3 +44,30 @@ with fresh automatic TWRP return and all five partition hashes. The actual
 IOMMU C model passed 21 cases, UFS/HCI passed 42, and host regression passed 181.
 Logical IOMMU activity remained at the devices-only suspend boundary.
 These results do not establish hardware IOMMU/DMA shutdown or XNU execution.
+
+## Selected identities and policy predicate (version 2, physical test pending)
+
+`N10MMU2` retains the aggregate snapshots and adds the exact driver policy-active
+count using the three pinned inline helpers. Logical activation references,
+runtime eligibility and manual enable state remain separate from hardware proof.
+Selected identities cover every registered controller with a runtime count,
+manual-control setting, boot hold or syscore flag. At most eight identities per
+phase and 63 name bytes are allowed; overflow fails instead of truncating or
+omitting a controller. Names are hex-encoded in private `N10MMD1` records and
+must decode to printable device names. No page-table or secure-base address is
+recorded. Real controller names and raw logs are not published.
+
+Four copies of each selected identity (or an explicit empty-list sentinel) are
+emitted per phase. At least two intact matching copies for every index are
+required. Their generation, count, policy predicate and exception coverage must
+match the aggregate. Duplicate names, changed syscore identities and missing
+records reject the diagnostic. When all registered controllers are selected,
+their names must also reproduce the complete aggregate name digest. The bounded
+report cache is static under the single reporting worker to avoid growing the
+kernel stack with the identity array.
+
+All prior diagnostics remain in the same boot. The local regression suite
+passed 185 tests, and 25 actual-IOMMU-C cases cover normal and error paths,
+zero-selected and 64-registered inventories, exception/name bounds, ambiguous
+names, IRQ/reference restoration and the exact pinned policy helpers. Version 2
+still requires its own full kernel build and a fresh physical evaluation.

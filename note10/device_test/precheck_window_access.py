@@ -79,7 +79,7 @@ def check(packages,kernel_build,backup,core_model,gate_model,init_model,adb):
         if iommu_pm_audit!=bool(paired.get('iommu_pm_audit_diagnostic')) or iommu_pm_audit!=bool(diagnostic.get('iommu_pm_audit_diagnostic')):
             raise ValueError('IOMMU PM package scope differs from actual Image/config')
         if iommu_pm_audit:
-            if paired.get('iommu_pm_audit_evidence_version')!=1 or diagnostic.get('iommu_pm_audit_evidence_version')!=1:
+            if paired.get('iommu_pm_audit_evidence_version')!=2 or diagnostic.get('iommu_pm_audit_evidence_version')!=2:
                 raise ValueError('IOMMU PM package evidence version differs')
             validate_iommu(kernel_build,build)
         if not (build.get('build_passed') is True and build.get('window_access_diagnostic') is True and
