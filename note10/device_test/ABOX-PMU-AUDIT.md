@@ -51,4 +51,21 @@ refusal. There are no write/PM/clock APIs available to the model. The generated
 DMA call executes only after releasing the list mutex. The retained ABOX 105,
 UFS/HCI 42 and IOMMU 25 actual-C cases pass with the combined hook, and full PC
 regression passes 236 tests. The real package regression also verifies the new
-PMU version in pair/record/ZIP metadata. Physical PMU observations are pending.
+PMU version in pair/record/ZIP metadata.
+
+## Single physical result
+
+Source `08d944ccc584bb7b24819ded5b74e729645e0639`, CI `40545543987`,
+passed one fresh physical diagnostic cycle with all 14 evaluations, automatic
+TWRP return and five expected partition hashes. The preinstall battery was 73%.
+Both cores supplied all four intact copies in every phase without read errors.
+In phases 0/1/2, both power and enable control bits were zero; masked standby
+values were 0x11 for core 0 and 0x1 for core 1. These are observations of the
+pinned control/standby fields, not electrical power-off acknowledgments.
+
+The retained guard skipped both absent-firmware callbacks with zero callback
+resumes. ABOX remained runtime-suspended and the system PM reference was
+balanced. This single cycle does not establish repeated stability, full DMA
+quiescence, hardware ownership handoff or XNU execution. The next source review
+examines DMA status and the existing clock-held disable path; it must not add
+peripheral reads while the device is runtime-suspended.
