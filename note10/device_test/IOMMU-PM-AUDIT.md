@@ -45,7 +45,7 @@ IOMMU C model passed 21 cases, UFS/HCI passed 42, and host regression passed 181
 Logical IOMMU activity remained at the devices-only suspend boundary.
 These results do not establish hardware IOMMU/DMA shutdown or XNU execution.
 
-## Selected identities and policy predicate (version 2, physical test pending)
+## Selected identities and policy predicate (version 2, physical test passed)
 
 `N10MMU2` retains the aggregate snapshots and adds the exact driver policy-active
 count using the three pinned inline helpers. Logical activation references,
@@ -69,5 +69,13 @@ kernel stack with the identity array.
 All prior diagnostics remain in the same boot. The local regression suite
 passed 185 tests, and 25 actual-IOMMU-C cases cover normal and error paths,
 zero-selected and 64-registered inventories, exception/name bounds, ambiguous
-names, IRQ/reference restoration and the exact pinned policy helpers. Version 2
-still requires its own full kernel build and a fresh physical evaluation.
+names, IRQ/reference restoration and the exact pinned policy helpers. Version 2 completed its own full kernel build and fresh physical evaluation.
+
+Version 2 source `188c8339b7afccf5da5fa4f6bd4f084434dcd38b` passed full kernel
+build [40447515344](https://github.com/eirblue/ios_note10p/actions/runs/40447515344).
+The fresh combined physical cycle passed every required evaluation, automatic
+TWRP return and all five partition hashes. The selected runtime/syscore/manual
+controller identities matched their aggregate policy counts and remained private.
+Host regression passed 185 cases and the actual IOMMU C model passed 25.
+At the devices-only boundary, 1 selected controller identities and 1 policy-active instances were observed.
+This policy observation does not establish hardware DMA/IOMMU shutdown or XNU execution.

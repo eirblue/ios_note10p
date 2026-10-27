@@ -502,3 +502,9 @@ Exynos SoC MASTER 및 플랫폼 archive 입력 분리:
 - [통합 커널 CI 40443986097](https://github.com/eirblue/ios_note10p/actions/runs/40443986097)와 새 실기기 1회 시험이 통과했다. 자동으로 새 TWRP 부팅 ID로 돌아왔고, BOOT 및 원본 비BOOT 4개 파티션의 해시를 확인했다. PC 회귀 181개, UFS/HCI 실제 C 42개, IOMMU 실제 C 21개가 통과했다.
 - UFS의 클록 유지 콜백에서 HCE와 transfer/task doorbell 0을 관측했다. IOMMU는 등록 드라이버의 활성/runtime/PM 및 부팅 hold·secure 설정·페이지 테이블 존재 플래그를 읽었다. 주소나 원시 기기 로그는 공개하지 않는다.
 - IOMMU의 정상 시스템 suspend 콜백은 late 단계에 등록되어 있어 devices-only 결과를 전체 하드웨어 DMA 정지로 확대하지 않는다. 실제 XNU 실행과 GIC/MMU 소유권 인계는 미검증이다. 상세 [IOMMU 관측](device_test/IOMMU-PM-AUDIT.md), [UFS/HCI 관측](device_test/UFS-PM-AUDIT.md).
+
+
+## 2026-10-27: IOMMU 식별·정책 관측 묶음 통과
+
+- [확장 커널 CI 40447515344](https://github.com/eirblue/ios_note10p/actions/runs/40447515344)와 새 실기기 시험이 통과했다. 기존 9개 진단 및 CPU 기능·자동 복귀·파티션 무결성을 포함한 평가 12개 중 12개가 통과했고, 모든 필수 항목이 통과했다.
+- runtime/syscore/manual-control 대상 1개와 드라이버 정책상 활성 1개를 관측해 같은 세대의 집계와 대조했다. 실제 컨트롤러 이름과 주소는 비공개로 보관한다. 정책상 활성 여부를 실제 DMA 전송이나 하드웨어 정지 증거로 확대하지 않는다. PC 회귀 185개 및 실제 IOMMU C 25개가 통과했다.
