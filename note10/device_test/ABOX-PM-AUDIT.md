@@ -44,9 +44,16 @@ Real driver state and callback history stay in private captures. The full
 [integrated kernel build](https://github.com/eirblue/ios_note10p/actions/runs/40452870987)
 passed at source `2baa761`. Its actual Image/config, bound native models and
 initial process passed local verification, and a fresh single-cycle package was
-prepared offline. Battery was below the user-authorized 10% minimum, so this
-build has no device staging, installation, reboot or physical result. Its ABOX
-observations and complete 13-item physical evaluation remain pending charging.
+prepared offline. The user then explicitly requested proceeding with this test
+despite the reported battery below 10%. A private authorization bound to this
+exact plan permitted one cycle with a 7% floor; the public 10% default remains
+unchanged, and the exception does not apply to subsequent builds.
+
+The fresh physical cycle passed all 13 evaluation items, returned automatically
+to a new TWRP boot and passed all five partition checks. All three ABOX phases
+were observed, but the conservative software-idle predicate was false. Runtime
+ownership and queued work remained visible; valid observation is not an idle
+or shutdown result. Detailed driver state and callback history remain private.
 
 The complete local regression suite passed 194 tests. The combined generated
 PM hook also passed the 25-case IOMMU and 42-case UFS/HCI actual-C models.
