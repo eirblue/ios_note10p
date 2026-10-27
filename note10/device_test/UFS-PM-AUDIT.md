@@ -40,3 +40,12 @@ These are software driver observations, not independent hardware DMA-idle or
 global DMA shutdown proof. Other DMA engines, secure-world ownership, GIC/MMU
 handoff and XNU execution remain unverified. Every new build requires a fresh
 single physical cycle; raw logs and packed BOOT images stay private.
+
+Source `65ed7864c15bf168cf9dbfb540fd0080d402579e` passed the full kernel
+build in CI [40436768400](https://github.com/eirblue/ios_note10p/actions/runs/40436768400).
+The local regression suite passed 168 tests, and 27 actual-UFS-C cases plus
+the generated unlocked-DMA-hook executable passed. Actual Image/config/model
+bindings, PID1, packaged BOOT and native updater syntax checks passed.
+The first UFS physical cycle remains pending the established installation
+battery minimum. No installation, reboot or physical-cycle journal was started
+for this build, and no UFS hardware result is claimed.
