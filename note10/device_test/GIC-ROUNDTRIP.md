@@ -32,5 +32,17 @@ out of the new gate. Source, decoder and actual-C model hashes are checked
 before packaging and device installation. Native tests execute the actual
 backend and producer with banked-MMIO and CPU/IRQ stubs, including write-address
 and value allowlists, restoration faults and strict real-checksum decoding.
-PC models do not establish physical GIC behavior. The first new-build physical
-cycle remains required; raw logs and packed device images stay private.
+PC models do not establish physical GIC behavior. Every new build still requires
+its own physical cycle; raw logs and packed device images stay private.
+
+On 2026-10-27 KST, source `576d134b2c75e8d952b1d50b35d424bf83bba053`
+and CI run [40425216720](https://github.com/eirblue/ios_note10p/actions/runs/40425216720)
+passed one physical SM-N976N cycle with screen logging disabled. All eight CPUs
+reported 32 intact matching records: PMR `0xf0 -> 0 -> 0xf0`, CTLR `1` and
+BPR `3` unchanged, and local IRQ flags preserved. The online mask stayed `0xff`.
+The preceding devices-only PM/quiesce chain passed in one attempt with zero
+USB, wake and restoration errors; all eight timer records and the staged XNU
+payload SHA256 passed. The host observed the same device returning automatically
+to a fresh TWRP boot and verified all five partition hashes after collection.
+This verifies this reversible CPU PMR test on one cycle. DMA shutdown, interrupt
+ownership transfer, MMU/cache shutdown and XNU execution remain unverified.
