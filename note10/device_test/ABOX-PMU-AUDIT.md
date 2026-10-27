@@ -157,7 +157,17 @@ and disabled-instrumentation callbacks, comparing predicate, control, forced
 retry, callback return and skip-flag behavior. It also executes the pinned USB
 and OTG predicate bodies and checks IRQ/lock preservation, missing/foreign or
 duplicate owners, overflow, signed results, mixed histories and copy isolation.
-The PMU 88 scenarios still pass. Full regression passes 244 tests, including
+The PMU 88 scenarios still pass. Full regression passes 245 tests, including
 malformed nested models and missing/corrupt/conflicting policy evidence. The
 maximum policy payload is 313 bytes inside its 384-byte buffer. The retained
 ABOX 105, UFS/HCI 42 and IOMMU 25 implementations and DMA hook are unchanged.
+
+
+The first v28 CI stopped before kernel compilation and before any device write:
+the FSYS preparer initially compared the already-instrumented OTG file with its
+upstream hash. The corrected binding requires the exact preceding USB observer
+output (SHA256 dff1dfda801d201c2c395a39b6919e76e6f9a8aa34be27dd9546c978b009d321)
+and separately verifies that the original `otg_is_connect` function body is
+unchanged. A regression reconstructs the complete preceding USB preparation
+from its three pinned upstream inputs, accepts the actual prepared composition
+and rejects an unprepared file. No USB runtime behavior was changed by this fix.

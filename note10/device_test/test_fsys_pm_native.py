@@ -7,7 +7,7 @@ import re
 import shutil
 import subprocess
 import sys
-from prepare_fsys_pm import HERE,PINS,instrument
+from prepare_fsys_pm import HERE,PINS,instrument,validate_otg
 from run_probe import ROOT
 
 STUB=r'''
@@ -108,7 +108,7 @@ def run(output,pd_driver,otg_source):
     # Recover and verify the original source via the known private input alongside caller.
     original=Path(pd_driver).with_name('exynos-pd-original.c').read_bytes()
     if hashlib.sha256(original).hexdigest()!=PINS['drivers/soc/samsung/exynos-pd.c'] or driver!=instrument(original):raise ValueError('Actual prepared power-domain callback differs')
-    if hashlib.sha256(otg).hexdigest()!=PINS['drivers/usb/dwc3/otg.c']:raise ValueError('Pinned OTG predicate input differs')
+    validate_otg(otg)
     original=original.decode();driver=driver.decode();otg=otg.decode()
     predicate=function(original,'static bool exynos_pd_power_down_ok_usb(')
     otg_body=function(otg,'u32 otg_is_connect(').replace('otg_is_connect','original_otg_is_connect')

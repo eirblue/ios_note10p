@@ -162,6 +162,21 @@ class BindingTests(unittest.TestCase):
         self.assertFalse(validate_model(self.root,{}))
 
 class CompositionTests(unittest.TestCase):
+    def test_prepared_usb_composition_preserves_original_predicate(self):
+        import urllib.request
+        from prepare_pm_quiesce import _prepare_usb,PINS as USB_PINS
+        from prepare_fsys_pm import validate_otg
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            for name in ('drivers/usb/notify/usb_notify.c','drivers/usb/dwc3/dwc3-exynos.c','drivers/usb/dwc3/otg.c'):
+                raw=urllib.request.urlopen('https://raw.githubusercontent.com/corsicanu/android_kernel_samsung_universal9820/55f042627bb7030c93550faafa117674d32b21d1/'+name,timeout=40).read()
+                self.assertEqual(hashlib.sha256(raw).hexdigest(),USB_PINS[name])
+                p=root/name;p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(raw)
+                if name.endswith('/otg.c'):
+                    with self.assertRaises(ValueError):validate_otg(raw)
+            _prepare_usb(root)
+            validate_otg((root/'drivers/usb/dwc3/otg.c').read_bytes())
+
     def test_exact_guard_core_prefix_and_default_off_suffix(self):
         import urllib.request
         from prepare_abox_pm import instrument_core as base

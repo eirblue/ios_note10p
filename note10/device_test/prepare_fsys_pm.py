@@ -5,8 +5,14 @@ HERE=Path(__file__).resolve().parent
 PINS={
  'drivers/soc/samsung/exynos-pd.c':'85b06712441f23b94f2ee0a2dfd924d5d8596a5ff7fb74c042a1f3a7bd467cbf',
  'include/soc/samsung/exynos-pd.h':'4ec0ed654af9671fd4157e79619d4f6d9919bf1db9672691b241e89330bebffe',
- 'drivers/usb/dwc3/otg.c':'f8ca1ef72d8eaef9e9377b6ebb6b26bc12c8290d0b502a18bc8fc191017d12de',
+ 'drivers/usb/dwc3/otg.c':'dff1dfda801d201c2c395a39b6919e76e6f9a8aa34be27dd9546c978b009d321',
 }
+OTG_PREDICATE_SHA='5382bdd22c24cbb137fedbe814cb756dae4d765aa6910714196a4262952f4a96'
+def validate_otg(raw):
+ import re
+ match=re.search(rb'u32 otg_is_connect\([^}]+\}',raw)
+ if hashlib.sha256(raw).hexdigest()!=PINS['drivers/usb/dwc3/otg.c'] or not match or hashlib.sha256(match.group()).hexdigest()!=OTG_PREDICATE_SHA:raise ValueError('Prepared USB source/original predicate differs')
+
 PREFIX=b'#ifdef CONFIG_NOTE10_ABOX_PMU_AUDIT\n#include <linux/note10_abox_pmu.h>\n#endif\n'
 SUFFIX=b'\n#ifdef CONFIG_NOTE10_ABOX_PMU_AUDIT\n#include "note10_fsys_pm.c"\n#endif\n'
 def note(event,result='0'):
@@ -33,5 +39,6 @@ def prepare(source):
  source=Path(source)
  for n,h in PINS.items():
   if hashlib.sha256((source/n).read_bytes()).hexdigest()!=h:raise ValueError('FSYS source pin differs: '+n)
+ validate_otg((source/'drivers/usb/dwc3/otg.c').read_bytes())
  p=source/'drivers/soc/samsung/exynos-pd.c';original=p.read_bytes();p.with_name('exynos-pd-original.c').write_bytes(original);p.write_bytes(instrument(original));p.with_name('note10_fsys_pm.c').write_bytes((HERE/'fsys_pm_backend.c').read_bytes())
  return dict(fsys_pd_source_pins=PINS,fsys_pd_patched_sha256=hashlib.sha256(p.read_bytes()).hexdigest())
