@@ -60,7 +60,7 @@ observer; independent hardware DMA-idle and XNU execution remain unverified.
 The host-only battery policy update passed 169 regression tests. It changes
 neither this compiled kernel nor its model/source bindings.
 
-## Held-clock HCI extension (version 2, physical test pending)
+## Held-clock HCI extension (version 2, physical test passed)
 
 `N10UFS2` retains the three driver snapshots and adds a single hardware read
 sample from the pinned `ufshcd_suspend` callback, after host IRQ disable and
@@ -83,5 +83,12 @@ are checked separately. All 170 host regression tests passed locally.
 
 These observations describe one callback boundary; they do not establish
 persistent DMA shutdown, other DMA engines or safe XNU/GIC/MMU ownership.
-The version 1 physical result above remains historical evidence only. The
-version 2 kernel must complete its own build and fresh single physical test.
+The version 1 result above is a separate earlier physical test. Version 2
+completed its own full kernel build and a fresh single physical cycle.
+
+Version 2 source `d3e4b480fe67db199850396ef5c05576074a5207` passed full kernel
+build [40441266724](https://github.com/eirblue/ios_note10p/actions/runs/40441266724).
+Its fresh physical cycle passed the strict held-clock HCI observation, existing
+PM/GIC/DMA/RAM/payload tests, automatic TWRP return and all five partition hashes.
+Controller enable and both doorbells were zero at the recorded boundary.
+No claim of persistent DMA shutdown or XNU execution is made.
