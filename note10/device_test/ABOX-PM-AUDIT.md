@@ -57,3 +57,35 @@ or shutdown result. Detailed driver state and callback history remain private.
 
 The complete local regression suite passed 194 tests. The combined generated
 PM hook also passed the 25-case IOMMU and 42-case UFS/HCI actual-C models.
+
+## Next build: worker and queue observations (evidence v2)
+
+`N10ABX2` adds normal IPC worker starts/completions, its last observed stage and
+in-flight flag, the signed-magnitude result of its original runtime get, and
+the original firmware gate result. Successful queue puts/gets, full/empty
+returns and the memory-only work-pending bit supplement the existing queue
+indices. History belongs to this boot/device; it does not identify every
+runtime reference owner or establish a causal relationship between sequential
+snapshots. Queue events run after releasing the original queue lock, and the
+history lock is never nested with it. Counts may wrap; no reference balance is
+inferred from those counts.
+
+The original runtime get, firmware gate and runtime put still execute once in
+the same order. Their return/branch semantics are preserved, including the
+original ignored runtime-get result. No extra get/put, flush, IPC request,
+firmware read or power operation is introduced. Default-off builds retain the
+original paths. The 36-case actual-C model exercises the observer/producer and
+exact generated event blocks, including positive/negative runtime returns,
+false/true gates, incomplete/completed work, pending work and full/empty queues;
+it does not execute the full hardware worker. The local regression suite passed
+201 tests. Existing UFS/HCI, IOMMU and other diagnostics remain bundled.
+
+The CPU gear value alone is no longer part of the software-idle predicate: the
+original driver's idle decision uses a separate QoS ownership query, not a zero
+gear comparison. Completed historical worker/queue counts also do not prevent
+current software idle. Active work, pending work or a negative last runtime-get
+result prevent that optional flag. This correction does not alter the previous
+physical result: its runtime ownership and nonempty queue independently failed
+the idle predicates. Evidence v1 is not accepted as v2; the next build and its
+new physical observations are still pending. The one-cycle low-battery exception
+has been consumed; future physical cycles retain the 10% default minimum.

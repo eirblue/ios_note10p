@@ -25,6 +25,12 @@ void n10_abox_note(struct device *dev, unsigned int kind, int error)
     else if (kind == 2) { h->pending = 1; h->ipc_called = 0; h->ipc_error = 0; }
     else if (kind == 3) { ++h->ipc_seen; h->ipc_called = 1; h->ipc_error = n10_abox_magnitude(error); }
     else if (kind == 4) { ++h->disables; h->pending = 0; }
+    else if (kind == 5) { ++h->worker_starts; h->worker_stage = 1; h->worker_inflight = 1; h->gate_seen = 0; h->can_ipc = 0; h->pm_get_result = 0; h->pm_get_negative = 0; }
+    else if (kind == 6) { h->worker_stage = 2; h->pm_get_result = n10_abox_magnitude(error); h->pm_get_negative = error < 0; }
+    else if (kind == 7) { h->worker_stage = 3; h->gate_seen = 1; h->can_ipc = !!error; }
+    else if (kind == 8) { ++h->worker_finishes; h->worker_stage = 4; h->worker_inflight = 0; }
+    else if (kind == 9) { if (!error) ++h->puts; else if (error == -EBUSY) ++h->put_busy; }
+    else if (kind == 10) { if (!error) ++h->gets; else if (error == -ENODATA) ++h->get_empty; }
     spin_unlock_irqrestore(&n10_abox_event_lock, flags);
 }
 
@@ -70,6 +76,7 @@ void n10_abox_pm_capture(unsigned int phase, unsigned int generation)
     s->suspended = !!pdev->dev.power.is_suspended;
     s->interfaces = READ_ONCE(data->if_count);
     s->rdma = READ_ONCE(data->rdma_count); s->wdma = READ_ONCE(data->wdma_count);
+    s->work_pending = !!work_pending(&data->ipc_work);
     spin_lock_irqsave(&data->ipc_queue_lock, flags);
     s->head = data->ipc_queue_start; s->tail = data->ipc_queue_end;
     spin_unlock_irqrestore(&data->ipc_queue_lock, flags);
@@ -88,6 +95,12 @@ void n10_abox_pm_capture(unsigned int phase, unsigned int generation)
     s->disables = n10_abox_history.disables; s->ipc_seen = n10_abox_history.ipc_seen;
     s->ipc_called = n10_abox_history.ipc_called; s->pending = n10_abox_history.pending;
     s->enable_error = n10_abox_history.enable_error; s->ipc_error = n10_abox_history.ipc_error;
+    s->worker_starts = n10_abox_history.worker_starts; s->worker_finishes = n10_abox_history.worker_finishes;
+    s->worker_stage = n10_abox_history.worker_stage; s->worker_inflight = n10_abox_history.worker_inflight;
+    s->pm_get_result = n10_abox_history.pm_get_result; s->pm_get_negative = n10_abox_history.pm_get_negative;
+    s->gate_seen = n10_abox_history.gate_seen; s->can_ipc = n10_abox_history.can_ipc;
+    s->puts = n10_abox_history.puts; s->put_busy = n10_abox_history.put_busy;
+    s->gets = n10_abox_history.gets; s->get_empty = n10_abox_history.get_empty;
     spin_unlock_irqrestore(&n10_abox_event_lock, flags);
     s->error = 0;
 unlock:

@@ -18,10 +18,41 @@ def evidence(change=None):
             row.update({k:0 for k in FIELDS});row.update(runtime=2,interfaces=1,rdma=4,wdma=4,events=3,enables=1,disables=1,status=0)
             if change:change(phase,copy_index,row)
             body=f'id={ID} '+' '.join(f'{k}={v:d}' if k in decimal else f'{k}={v:x}' for k,v in row.items())
-            result+=f'N10ABX1 {body} checksum={checksum(body.encode()):08x}\n'
+            result+=f'N10ABX2 {body} checksum={checksum(body.encode()):08x}\n'
     return result
 
 class DecoderTests(unittest.TestCase):
+    def test_completed_worker_history_does_not_prevent_current_idle(self):
+        def change(phase,copy,row):
+            row.update(cpu_gear=12,worker_starts=1,worker_finishes=1,worker_stage=4,pm_get_result=1,gate_seen=1,can_ipc=1)
+        result=decode(evidence(change),ID,2)
+        self.assertTrue(result['abox_driver_idle_state_observed'])
+        self.assertTrue(result['cpu_gear_value_is_not_idle_proof'])
+    def test_pending_work_inflight_and_negative_pm_result_are_not_idle(self):
+        for values in (dict(work_pending=1),dict(worker_starts=1,worker_stage=1,worker_inflight=1),
+                       dict(worker_starts=1,worker_stage=4,worker_finishes=1,gate_seen=1,pm_get_negative=1,pm_get_result=5)):
+            def change(phase,copy,row):row.update(values)
+            result=decode(evidence(change),ID,2)
+            self.assertTrue(result['abox_pm_driver_observed'])
+            self.assertFalse(result['abox_driver_idle_state_observed'])
+    def test_pending_work_is_independent_of_callback_history(self):
+        def change(phase,copy,row):row.update(events=0,enables=0,disables=0,work_pending=1)
+        self.assertTrue(decode(evidence(change),ID,2)['abox_pm_driver_observed'])
+    def test_invalid_worker_observations_are_rejected(self):
+        for values in (dict(worker_starts=1,worker_stage=5),dict(can_ipc=1),dict(pm_get_negative=1),
+                       dict(work_pending=2),dict(worker_inflight=1),dict(worker_starts=1,gate_seen=2)):
+            def change(phase,copy,row):row.update(values)
+            with self.subTest(values=values),self.assertRaises(ValueError):decode(evidence(change),ID,2)
+    def test_v1_frames_are_not_v2_evidence(self):
+        with self.assertRaises(ValueError):decode(evidence().replace('N10ABX2','N10ABX1'),ID,2)
+    def test_worker_and_queue_counts_are_not_error_codes(self):
+        def change(phase,copy,row):row.update(worker_starts=5000,worker_finishes=5000,worker_stage=4,gate_seen=1,puts=9000,gets=9000)
+        self.assertTrue(decode(evidence(change),ID,2)['abox_driver_idle_state_observed'])
+    def test_minimum_signed_pm_return_magnitude_is_retained(self):
+        def change(phase,copy,row):row.update(worker_starts=1,worker_stage=2,worker_inflight=1,pm_get_result=0x80000000,pm_get_negative=1)
+        result=decode(evidence(change),ID,2)
+        self.assertEqual(result['phases'][1]['snapshot']['pm_get_result'],0x80000000)
+        self.assertFalse(result['abox_driver_idle_state_observed'])
     def test_idle_is_driver_state_not_hardware_shutdown(self):
         result=decode(evidence(),ID,2)
         self.assertTrue(result['abox_driver_idle_state_observed']);self.assertFalse(result['audio_dsp_shutdown_verified'])
@@ -50,14 +81,14 @@ class BindingTests(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup);self.root=Path(self.tmp.name)
         actual={n:hashlib.sha256((HERE/n).read_bytes()).hexdigest() for n in SOURCES}
-        self.build=dict(abox_pm_audit_diagnostic=True,abox_pm_audit_evidence_version=1,iommu_pm_audit_diagnostic=True,
+        self.build=dict(abox_pm_audit_diagnostic=True,abox_pm_audit_evidence_version=2,iommu_pm_audit_diagnostic=True,
             abox_pm_source_pins=PINS,abox_pm_sources_sha256=actual,abox_patched_sha256=PATCHED_SHA)
-        self.model=dict(passed=True,cases=25,outcomes=[dict(mode=i,passed=True,accepted=i in (0,15,17,18,19,20,23,24)) for i in range(25)],
+        self.model=dict(passed=True,cases=36,outcomes=[dict(mode=i,passed=True,accepted=i in (0,15,17,18,19,20,23,24,25,26,27,28,29,30,31,35)) for i in range(36)],
             source_sha256=actual,patched_driver_sha256=PATCHED_SHA,event_blocks_sha256=event_digest(),
             generated_dma_sha256=hashlib.sha256(instrument_dma((HERE/'dma_pm_backend.c').read_bytes())).hexdigest(),
             harness_sha256=hashlib.sha256((HERE/'test_abox_pm_native.py').read_bytes()).hexdigest(),actual_backend_executed=True,
-            actual_probe_executed=True,generated_event_blocks_executed=True,default_off_blocks_executed=True,generated_dma_hook_executed=True,hardware_verified=False)
-        (self.root/'Image').write_bytes(b'PC FIXTURE N10ABX1');(self.root/'handoff.config').write_bytes(b'CONFIG_NOTE10_ABOX_PM_AUDIT=y\n');(self.root/'abox-pm-model').mkdir()
+            actual_probe_executed=True,generated_event_blocks_executed=True,generated_worker_blocks_executed=True,generated_queue_blocks_executed=True,default_off_blocks_executed=True,generated_dma_hook_executed=True,hardware_verified=False)
+        (self.root/'Image').write_bytes(b'PC FIXTURE N10ABX2');(self.root/'handoff.config').write_bytes(b'CONFIG_NOTE10_ABOX_PM_AUDIT=y\n');(self.root/'abox-pm-model').mkdir()
     def validate(self):
         (self.root/'abox-pm-model/result.json').write_text(json.dumps(self.model));return validate_model(self.root,self.build)
     def test_complete(self):self.assertTrue(self.validate())
@@ -70,7 +101,7 @@ class BindingTests(unittest.TestCase):
             old=self.build[key];self.build[key]=None
             with self.assertRaises(ValueError):self.validate()
             self.build[key]=old
-        for key in ('generated_dma_sha256','patched_driver_sha256','event_blocks_sha256','generated_event_blocks_executed','default_off_blocks_executed','actual_backend_executed','actual_probe_executed','generated_dma_hook_executed','harness_sha256'):
+        for key in ('generated_dma_sha256','patched_driver_sha256','event_blocks_sha256','generated_event_blocks_executed','generated_worker_blocks_executed','generated_queue_blocks_executed','default_off_blocks_executed','actual_backend_executed','actual_probe_executed','generated_dma_hook_executed','harness_sha256'):
             old=self.model[key];self.model[key]=None
             with self.assertRaises(ValueError):self.validate()
             self.model[key]=old
