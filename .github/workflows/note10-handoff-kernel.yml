@@ -48,7 +48,7 @@ on:
         default: false
 
       ufs_pm_audit:
-        description: Read-only UFS PM snapshots and held-clock HCI reads; requires dma_pm_audit
+        description: Bundled UFS/HCI and registered IOMMU PM observations; requires dma_pm_audit
         type: boolean
         default: false
 
@@ -128,6 +128,7 @@ jobs:
           if [ "$NOTE10_UFS_PM_AUDIT" = true ]; then
             if [ "$NOTE10_DMA_PM_AUDIT" != true ]; then exit 2; fi
             python note10/device_test/test_ufs_pm_contract.py
+            python note10/device_test/test_iommu_pm_contract.py
           fi
           if [ "$NOTE10_GIC_ROUNDTRIP" = true ] && { [ "$NOTE10_AUTO_RETURN" != true ] || [ "$NOTE10_XNU_STAGE" != true ]; }; then
             echo "gic_roundtrip requires auto_return and xnu_stage" >&2
@@ -184,7 +185,7 @@ jobs:
           run-id: ${{ inputs.xnu_artifact_run_id }}
           github-token: ${{ github.token }}
           path: note10/private/xnu-input
-      - name: Materialize XNU data-only RAM payload
+      - name: Materialize XNU data and build integrated diagnostics
         if: inputs.xnu_stage
         env:
           NOTE10_CPU_CACHE: ${{ inputs.cpu_cache }}
@@ -239,6 +240,8 @@ jobs:
           if-no-files-found: error
           path: |
             note10/private/handoff-kernel/build-result.json
+            note10/private/handoff-kernel/iommu-pm-model/result.json
+            note10/private/handoff-kernel/iommu-pm-model/*.log
             note10/private/handoff-kernel/ufs-pm-model/result.json
             note10/private/handoff-kernel/ufs-pm-model/*.log
             note10/private/handoff-kernel/dma-pm-model/result.json
