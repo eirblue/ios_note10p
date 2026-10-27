@@ -11,6 +11,21 @@ from prepare_reservation_kernel import verify_embedded_init
 from run_probe import Adb,preflight
 from stage_phase2 import verify_packages
 
+# Exact outputs of the pinned base guard and its read-only DMA observer recipe.
+# The recipe integration test recomputes both; neither hash substitutes for the
+# existing actual-C/source/model checks or the Image/config scope checks.
+BASE_GUARDED_SUSPEND_SHA='8d7d2afaf265f9c944cc8ffc69303d06a8fc1bca53382ceff449c9da1b79b3d1'
+DMA_GUARDED_SUSPEND_SHA='d9e4a9e8e23188c0ca1758993066ed06c379b19d35c67ae40bc0f6eada77a947'
+
+def pm_suspend_patch_bound(build,patch_model):
+    if build.get('dma_pm_audit_diagnostic') is not True:
+        return patch_model.get('patched_sha256')==build.get('patched_suspend_sha256')
+    from prepare_pm_diagnostic import SUSPEND_SHA
+    return (patch_model.get('source_sha256')==SUSPEND_SHA and
+        patch_model.get('patched_sha256')==BASE_GUARDED_SUSPEND_SHA and
+        build.get('patched_suspend_sha256')==DMA_GUARDED_SUSPEND_SHA and
+        build.get('dma_pm_audit_patched_sha256',{}).get('kernel/power/suspend.c')==DMA_GUARDED_SUSPEND_SHA)
+
 
 def check(packages,kernel_build,backup,core_model,gate_model,init_model,adb):
     if not packages.resolve().is_relative_to((ROOT/'note10/private').resolve()):
@@ -89,7 +104,7 @@ def check(packages,kernel_build,backup,core_model,gate_model,init_model,adb):
             if (not cpu_cache or build.get('pm_timer_evidence_version')!=1 or pm_model.get('passed') is not True or
                 len(pm_model.get('cases',[]))!=32 or pm_model.get('first_delay_ms')!=30000 or
                 build.get('boot_binding_evidence_version')!=1 or pm_model.get('max_pm_attempts')!=3 or pm_model.get('timer_precedes_pm') is not True or patch_model.get('passed') is not True or patch_model.get('cases')!=8 or
-                patch_model.get('patched_sha256')!=build.get('patched_suspend_sha256') or
+                not pm_suspend_patch_bound(build,patch_model) or
                 pm_model.get('payload_sha256')!=build.get('xnu_payload_sha256') or
                 pm_model.get('payload_size')!=build.get('xnu_payload_size') or
                 pm_model.get('cpu_source_sha256')!=build.get('cpu_cache_source_sha256')):

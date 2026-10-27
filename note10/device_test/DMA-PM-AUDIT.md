@@ -32,3 +32,10 @@ The native model checks no device/list mutation, bounded traversal, missing or
 duplicate phases, changed generation/inventory, restored-flag faults and corrupt
 count sums. A new-build physical cycle remains required. This audit grants no
 DMA shutdown, GIC ownership, MMU/cache handoff or XNU execution claim.
+
+The host checks the exact two-stage suspend-source composition: the existing
+guarded PM patch model has its own pinned output hash, while the added DMA
+observer recipe has a different final output hash. Both must match their fixed
+recipes; comparing those two legitimate stages directly would reject the audit
+before installation. The integration test executes both actual preparation
+recipes against the pinned upstream source and rejects wrong base/final hashes.

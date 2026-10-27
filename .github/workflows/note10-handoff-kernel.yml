@@ -117,6 +117,7 @@ jobs:
           fi
           if [ "$NOTE10_DMA_PM_AUDIT" = true ]; then
             python note10/device_test/test_dma_pm_contract.py
+            python note10/device_test/test_pm_suspend_binding.py
           fi
           if [ "$NOTE10_GIC_ROUNDTRIP" = true ] && { [ "$NOTE10_AUTO_RETURN" != true ] || [ "$NOTE10_XNU_STAGE" != true ]; }; then
             echo "gic_roundtrip requires auto_return and xnu_stage" >&2
