@@ -494,3 +494,11 @@ Exynos SoC MASTER 및 플랫폼 archive 입력 분리:
 - RAM 접근·XNU 데이터 적재·CPU/cache는 통과했다. 8개 CPU의 타이머 clear/restore 기록 256개도 정상이다. PM은 3회 모두 EBUSY(16)로 device 단계 전에 중단됐다. 각 시도에 USB·DECON 활성 wakeup source가 관측됐으나 개별 소스 인과관계는 미확정이다.
 - 전체 진단 실패로 반복을 중단했다. 자동 왕복 자체는 성공했지만 반복 허용용 single_cycle_verified는 발급하지 않았다. 복귀 후 BOOT는 이번 진단 이미지이고 recovery/DTB/DTBO/vbmeta는 원본과 일치한다. 기기는 TWRP에 있으며 XNU는 실행하지 않았다.
 - 다음 빌드 요청 확정: 화면 왼쪽 위 가로 1/2 × 세로 1/2(면적 1/4) 터미널 로그 창. 현재 generic console 경로로는 표시 불가하며 DPU 전용 경로가 필요하다. 요구사항/소스 조사는 완료, 구현·실화면 검증은 남았다. 비공개 quarter-screen-preparation-20261026/PLAN.ko.md 참조.
+
+
+## 2026-10-27: 단일 부팅 묶음 평가
+
+- USB/DECON 정상 PM 경로로 EBUSY를 해소한 뒤 RAM 접근, XNU 데이터 적재, CPU/cache 왕복, timer/PM, GIC PMR 복원, DMA 프레임워크, UFS/HCI 및 등록 IOMMU 관측을 한 빌드·부팅에서 검증했다. 항목별 필수 판정과 전체 판정을 함께 저장한다.
+- [통합 커널 CI 40443986097](https://github.com/eirblue/ios_note10p/actions/runs/40443986097)와 새 실기기 1회 시험이 통과했다. 자동으로 새 TWRP 부팅 ID로 돌아왔고, BOOT 및 원본 비BOOT 4개 파티션의 해시를 확인했다. PC 회귀 181개, UFS/HCI 실제 C 42개, IOMMU 실제 C 21개가 통과했다.
+- UFS의 클록 유지 콜백에서 HCE와 transfer/task doorbell 0을 관측했다. IOMMU는 등록 드라이버의 활성/runtime/PM 및 부팅 hold·secure 설정·페이지 테이블 존재 플래그를 읽었다. 주소나 원시 기기 로그는 공개하지 않는다.
+- IOMMU의 정상 시스템 suspend 콜백은 late 단계에 등록되어 있어 devices-only 결과를 전체 하드웨어 DMA 정지로 확대하지 않는다. 실제 XNU 실행과 GIC/MMU 소유권 인계는 미검증이다. 상세 [IOMMU 관측](device_test/IOMMU-PM-AUDIT.md), [UFS/HCI 관측](device_test/UFS-PM-AUDIT.md).

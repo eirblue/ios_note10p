@@ -34,6 +34,13 @@ A devices-only test does not establish that it ran. Active IOMMU observations
 are valid inventory results, never successful hardware-shutdown claims. This
 covers registered driver instances only, collected sequentially, and does not
 prove unregistered hardware coverage, a globally atomic snapshot, DMA shutdown,
-secure-world isolation or XNU execution. The new combined build still needs
-its own full compilation and a fresh physical cycle with automatic recovery
-and five-partition integrity. Raw captures and packed BOOT images stay private.
+secure-world isolation or XNU execution. The combined build completed its own full compilation and fresh physical
+cycle with automatic recovery and five-partition integrity. Raw captures and packed BOOT images stay private.
+
+Source `1995d9348d57a0557c6c460697eb4dd25fda7e21` passed full kernel build
+[40443986097](https://github.com/eirblue/ios_note10p/actions/runs/40443986097).
+All nine required diagnostic categories passed in one physical boot, together
+with fresh automatic TWRP return and all five partition hashes. The actual
+IOMMU C model passed 21 cases, UFS/HCI passed 42, and host regression passed 181.
+Logical IOMMU activity remained at the devices-only suspend boundary.
+These results do not establish hardware IOMMU/DMA shutdown or XNU execution.
