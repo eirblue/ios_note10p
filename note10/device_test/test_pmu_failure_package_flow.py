@@ -26,6 +26,11 @@ def main():
         for n in names:shutil.copytree(src/n,art/n)
         config=(src/'handoff.config').read_bytes();(art/'handoff.config').write_bytes(config)
         b=json.loads((src/'build-result.json').read_text(encoding='utf8'))
+        # This fixture exercises packaging before the actual Image build is marked complete.
+        # Only the isolated synthetic copy is marked successful; never modify the source report.
+        b['build_passed']=True
+        if b.get('xnu_payload_stage_diagnostic') is True:
+            b['xnu_payload_initramfs_verified']=True  # synthetic embedded-init check is mocked below
         image=bytearray(128);image[56:60]=b'ARM\x64';struct.pack_into('<Q',image,8,0)
         image=bytes(image)+b'N10RET1'+b''.join(CALLBACKS+PRECONDITIONS+BRANCH)+MARKER
         (art/'Image').write_bytes(image);b['image_sha256']=sha(image);b['image_size']=len(image);b['effective_config_sha256']=sha(config)
