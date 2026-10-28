@@ -115,6 +115,12 @@ def check(packages,kernel_build,backup,core_model,gate_model,init_model,adb):
         if settle_scope:
             if any(m.get('pmu_settle_evidence_version')!=1 for m in (paired,diagnostic)):raise ValueError('Timed PMU package version differs')
             validate_settle(kernel_build,build)
+        from pm_cpus_binding import assert_scope as assert_cpu_scope,validate_model as validate_cpus
+        cpu_scope=assert_cpu_scope(kernel_build,build)
+        if any(cpu_scope!=bool(m.get('pm_cpus_diagnostic')) for m in (paired,diagnostic)):raise ValueError('CPU noirq package scope differs')
+        if cpu_scope:
+            if any(m.get('pm_cpus_evidence_version')!=1 for m in (paired,diagnostic)):raise ValueError('CPU noirq package version differs')
+            validate_cpus(kernel_build,build)
         if not (build.get('build_passed') is True and build.get('window_access_diagnostic') is True and
                 build.get('window_access_evidence_version')==1 and build.get('reservation_evidence_version')==2):
             raise ValueError('Successful opt-in access kernel build required')

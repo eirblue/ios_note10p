@@ -48,7 +48,7 @@ on:
         default: false
 
       ufs_pm_audit:
-        description: Bundle UFS/HCI, IOMMU, ABOX, guarded late/noirq, FSYS and immediate/timed PMU observations; requires dma_pm_audit
+        description: Bundle UFS/HCI, IOMMU, ABOX, guarded noirq CPU hotplug/timer restoration and PMU observations; requires dma_pm_audit
         type: boolean
         default: false
 
@@ -133,6 +133,7 @@ jobs:
             python note10/device_test/test_abox_pmu_contract.py
             python note10/device_test/test_pm_noirq_contract.py
             python note10/device_test/test_pmu_settle_contract.py
+            python note10/device_test/test_pm_cpus_contract.py
           fi
           if [ "$NOTE10_GIC_ROUNDTRIP" = true ] && { [ "$NOTE10_AUTO_RETURN" != true ] || [ "$NOTE10_XNU_STAGE" != true ]; }; then
             echo "gic_roundtrip requires auto_return and xnu_stage" >&2
@@ -254,6 +255,16 @@ jobs:
             note10/private/handoff-kernel/pm-noirq-pmu-model/*.log
             note10/private/handoff-kernel/pmu-settle-model/result.json
             note10/private/handoff-kernel/pmu-settle-model/*.log
+            note10/private/handoff-kernel/pm-cpus-model/result.json
+            note10/private/handoff-kernel/pm-cpus-model/*.log
+            note10/private/handoff-kernel/pm-cpus-pmu-model/result.json
+            note10/private/handoff-kernel/pm-cpus-pmu-model/*.log
+            note10/private/handoff-kernel/pm-cpus-hotplug-model/result.json
+            note10/private/handoff-kernel/pm-cpus-hotplug-model/*.log
+            note10/private/handoff-kernel/pm-cpus-timer-model/result.json
+            note10/private/handoff-kernel/pm-cpus-timer-model/*.log
+            note10/private/handoff-kernel/pm-cpus-queue-model/result.json
+            note10/private/handoff-kernel/pm-cpus-queue-model/*.log
             note10/private/handoff-kernel/fsys-pm-model/result.json
             note10/private/handoff-kernel/fsys-pm-model/*.log
             note10/private/handoff-kernel/iommu-pm-model/result.json

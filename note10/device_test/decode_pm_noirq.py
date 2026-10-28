@@ -19,7 +19,7 @@ def group(text,tag,fields,identity,completed):
     if len(sequences)<2:raise ValueError('Two intact noirq copies per lane required')
     return dict(snapshot=snapshot,sequences=sequences)
 
-def decode(text,identity,completed):
+def decode(text,identity,completed,cpu_roundtrip=False):
     summary=group(text,'N10PNQ1',SUMMARY,identity,completed)
     restore=group(text,'N10PNR1',RESTORE,identity,completed)
     domains=group(text,'N10PND1',DOMAIN,identity,completed)
@@ -36,6 +36,7 @@ def decode(text,identity,completed):
     domains['sampled_off']=[name for i,(name,_,_) in enumerate(DOMAINS) if not ((d['before']|d['state']|d['after'])&(1<<i))]
     return dict(pm_late_noirq_roundtrip_observed=True,noirq_pmu_domain_status_observed=True,
                 summary=summary,restore=restore,power_domains=domains,
-                source_guard_blocks_nonboot_cpu_disable=True,source_guard_blocks_syscore=True,
+                source_guard_blocks_nonboot_cpu_disable=not cpu_roundtrip,source_guard_blocks_syscore=True,
+                source_guard_blocks_irq_disable=True,cpu_roundtrip_separately_required=cpu_roundtrip,
                 real_platform_sleep_entered=False,sequential_domain_reads_are_not_atomic=True,
                 global_dma_shutdown_verified=False,xnu_executed=False)

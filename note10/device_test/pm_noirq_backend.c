@@ -1,6 +1,9 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /* Included in the bound suspend core. PM mutex protects the entire transaction. */
 #include <linux/note10_pm_noirq.h>
+#ifdef CONFIG_NOTE10_PM_CPUS_TEST
+#include <linux/note10_pm_cpus.h>
+#endif
 static struct n10_pm_noirq_sample n10_pm_noirq_last;
 static unsigned int n10_pm_noirq_ops_mask(void)
 {
@@ -60,6 +63,9 @@ void n10_pm_noirq_note(unsigned int event, int result)
         if (!s->late_ok || !s->noirq_ok || s->point++ || !n10_pm_noirq_ready(PM_SUSPEND_MEM))
             s->bad = 1;
         if (!s->bad) n10_pmu_noirq_capture(s->generation);
+#ifdef CONFIG_NOTE10_PM_CPUS_TEST
+        if (!s->bad) s->error = n10_pm_cpus_roundtrip(s->generation);
+#endif
         break;
     case 8: ++s->blocked; break;
     default: s->bad = 1; break;
@@ -71,6 +77,9 @@ int n10_pm_noirq_finish(int result)
     if (!n10_pm_noirq_owned()) return -EPERM;
     if (s->generation != n10_pm_active->qgeneration || s->seen != 1 || s->finished) { s->bad = 1; return -EIO; }
     s->finished = 1; s->stage = 7; s->original_error = result;
+#ifdef CONFIG_NOTE10_PM_CPUS_TEST
+    if (s->error) result = s->error;
+#endif
     s->post_early = READ_ONCE(suspend_stats.failed_resume_early);
     s->post_noirq = READ_ONCE(suspend_stats.failed_resume_noirq);
     /* Never let an EBUSY retry hide an earlier late/noirq restoration failure. */
@@ -102,4 +111,8 @@ int n10_pm_noirq_read(struct n10_pm_noirq_sample *out,
 
 #ifdef CONFIG_NOTE10_PMU_SETTLE
 #include "note10_pmu_settle_gate.c"
+#endif
+
+#ifdef CONFIG_NOTE10_PM_CPUS_TEST
+#include "note10_pm_cpus.c"
 #endif

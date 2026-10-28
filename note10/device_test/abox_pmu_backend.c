@@ -192,3 +192,7 @@ int n10_pmu_noirq_read(struct n10_pmu_noirq_sample *out, unsigned int completed)
 #ifdef CONFIG_NOTE10_PMU_SETTLE
 #include "note10_pmu_settle.c"
 #endif
+
+#ifdef CONFIG_NOTE10_PM_CPUS_TEST
+#include "note10_pm_cpus_pmu.c"
+#endif
