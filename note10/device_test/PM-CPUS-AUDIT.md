@@ -42,8 +42,31 @@ and 18 actual post-restore timer producer scenarios. Six scheduling adapter
 scenarios cover queue allocation/retry failures and the
 unchanged disabled path. The existing noirq, PMU,
 FSYS and timed PMU models are also retained. CI and one fresh physical test
-are pending. Screen logging stays off, and no raw device evidence is public.
+passed. Screen logging stays off, and no raw device evidence is public.
 
 These checks establish only their individually reported software and bounded
 register observations. They do not establish complete global DMA shutdown,
 secure-world quiescence, hardware GIC/MMU/cache handoff, XNU execution or iOS boot.
+
+## v31 physical result, 2026-10-28
+
+Source `102b674ec83c8cf9fc16082b0b49884ed1c4d1a5`, CI
+[`40620987599`](https://github.com/eirblue/ios_note10p/actions/runs/40620987599)
+passed all 22 evaluations in one new-build physical cycle. Automatic TWRP
+return and five post-test partition hashes passed. Battery was 25% before
+installation. Raw logs, identifiers and device images remain private.
+
+The CPU observer recorded one attempted freeze and one paired enable, online
+masks 0xff → 0x01 → 0xff, CPU0 at the stop, and zero original/final errors.
+All 16 CPU-stop PMU configuration/status/recheck bits were zero, with no read
+error or configuration recheck difference. The preceding noirq bank was also
+zero. These are sequential bounded observations while CPU0 alone was online.
+
+All eight post-PM timer callbacks ran once. Each CNTKCTL_EL1 value matched its
+pre-PM restored value, 0xb6, and CNTFRQ_EL0 was 26 MHz. The readback observer
+performed no register writes. Timed PMU samples completed at 1,004, 5,132 and
+15,116 milliseconds; their three masks were consistently 0x4088, matching the
+same remaining DPU, EMBEDDED_G3D and FSYS0A domains observed in v30.
+
+This verifies this single paired hotplug/noirq diagnostic and its restoration
+evidence. It does not establish global DMA shutdown or execution of XNU/iOS.

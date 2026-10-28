@@ -3,7 +3,8 @@
 ## 2026-10-28: noirq CPU 정지·복원과 PMU·타이머 통합 준비
 
 - v31은 기존 19개 평가에 noirq CPU 정지·복원, CPU 정지 시점의 PMU 관측, 8개 CPU 복원 후 타이머 읽기를 함께 추가해 22개 평가를 준비한다. 기존 TEST_PLATFORM 가드 안에서 원본 CPU API를 반드시 짝지어 호출하고 0xff→0x01→0xff 마스크를 검사한다.
-- 전체 회귀 272개, 실제 suspend·noirq·hotplug 통합 90개, CPU 정지 PMU 63개, 원본 hotplug 28개, 타이머 읽기 18개가 통과했다. 빌드와 새 단일 실기기 시험은 대기 중이다. [PM-CPUS-AUDIT.md](device_test/PM-CPUS-AUDIT.md)에 범위를 기록했다.
+- 전체 회귀 272개, 실제 suspend·noirq·hotplug 통합 90개, CPU 정지 PMU 63개, 원본 hotplug 28개, 타이머 읽기 18개, 작업 큐 6개가 통과했다. v31 `102b674`, CI `40620987599`의 단일 실기기 시험도 22개 평가, 자동복귀와 5개 파티션 무결성을 통과했다.
+- CPU 마스크 0xff→0x01→0xff, CPU0만 온라인인 시점의 16개 PMU 도메인 비트 0, 오류 0을 관측했다. 복원 후 8개 CPU 모두 타이머 제어값 0xb6와 주파수 26MHz가 원래 값과 일치했다. 이후 시간별 PMU 마스크는 0x4088이었다. 전체 DMA 정지·XNU 실행은 증명하지 않는다. [PM-CPUS-AUDIT.md](device_test/PM-CPUS-AUDIT.md)에 결과와 범위를 기록했다.
 
 ## 2026-10-28: 복원 뒤 시간별 PMU 관측 준비
 
