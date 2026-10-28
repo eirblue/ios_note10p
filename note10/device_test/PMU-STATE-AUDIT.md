@@ -5,3 +5,9 @@ The default-off audit records bounded software state for used CPU0 PMU event slo
 For each used slot the audit checks the PMU association before reading the slot index and remaining event fields. Software-running means exactly zero hardware-state flags. STOPPED is a valid observation and is distinct from future callback eligibility; affinity, current CPU and generic ACTIVE state are separate fields. An empty or absent PMU observation establishes no eligibility. These software observations do not establish physical counter enablement or safe execution of a CPU-PM callback.
 
 The synthetic source and protocol models are PC-side checks; they do not demonstrate PMU restoration on hardware. The diagnostic does not directly execute CPU-PM or run XNU.
+
+## Validation on 2026-10-29
+
+Source `d4709039decdc1fea3f20fd2308eebf92a58422e` passed [CI run 40752209407](https://github.com/eirblue/ios_note10p/actions/runs/40752209407). The actual prepared-source PC models cover nine getter cases, five capture/chain cases and ten worker paths. Collector checks accept a legitimate STOPPED observation and reject missing or malformed evidence. Thirteen binding mutations, four new package-flow cases and the prior package flows passed; all 19 source/configuration/model bindings were verified against the completed artifact.
+
+One physical diagnostic cycle passed all 38 evaluations, including the new software observation, automatic TWRP return and five post-test partition hashes. The immediate pre-install battery reading was 59%. After verified recovery, both TWRP and panel brightness settings read back as literal raw value 10. This was an observation and regression test; it did not invoke CPU-PM callbacks or establish physical PMU restoration, global DMA shutdown or XNU execution.

@@ -1,5 +1,12 @@
 # 작업 상태 (2026-10-20, Asia/Seoul)
 
+## 2026-10-29: v41 PMU 소프트웨어 상태 관측과 실기기 회귀 통과
+
+- 기존 단일 CPU0 관측 경로에서 사용 중인 PMU 이벤트의 소유권·슬롯·소프트웨어 상태를 읽는 기본 비활성 감사를 추가했다. 실행 중·STOPPED·CPU affinity와 실제 실행 CPU를 구분하며, 범위는 [PMU-STATE-AUDIT.md](device_test/PMU-STATE-AUDIT.md)에 기록했다.
+- 소스 `d4709039decdc1fea3f20fd2308eebf92a58422e`의 [CI 40752209407](https://github.com/eirblue/ios_note10p/actions/runs/40752209407)가 통과했다. 실제 준비 소스의 PC 모델, 결속 변조 13개와 새 패키지 흐름 4개를 포함해 19개 소스·설정·모델 결속을 확인했다.
+- 실기기 단일 시험에서 기존 37개와 새 상태 관측을 합친 38개 평가, 자동 TWRP 복귀와 사후 5개 파티션 해시가 모두 통과했다. 설치 직전 배터리는 59%였고 복귀 후 TWRP와 패널 밝기 설정값은 각각 raw 10으로 확인했다.
+- 소프트웨어 상태 관측은 실제 카운터 활성화나 CPU-PM 호출의 안전성을 증명하지 않는다. 직접 CPU-PM 호출, 하드웨어 복원 시험, XNU 실행과 iOS 부팅은 수행하지 않았다.
+
 ## 2026-10-29: v40 GIC 우선순위 복원 가드와 실기기 회귀 통과
 
 - 단일 banked GIC를 대상으로 기본 비활성 우선순위 복원 가드를 추가했다. 지원 구성과 복원 범위는 [GIC-PRIORITY-RESTORE.md](device_test/GIC-PRIORITY-RESTORE.md)에 기록했다.
