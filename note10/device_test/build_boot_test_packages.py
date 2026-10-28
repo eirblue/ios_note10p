@@ -154,6 +154,10 @@ def build(backup,prototype,output,current_packages=None):
     from pm_preconditions_binding import MARKERS as precondition_markers
     if any((marker in raw)!=pm_preconditions for marker in precondition_markers):raise ValueError('Prototype preconditions Image scope differs')
     if pm_preconditions and (not pm_callbacks or metadata.get('pm_preconditions_version')!=1):raise ValueError('Incomplete preconditions package contract')
+    pm_branch=metadata.get('pm_branch_diagnostic') is True
+    from pm_branch_binding import MARKERS as branch_markers
+    if any((marker in raw)!=pm_branch for marker in branch_markers):raise ValueError('Prototype branch Image scope differs')
+    if pm_branch and (not pm_preconditions or metadata.get('pm_branch_version')!=1):raise ValueError('Incomplete branch package contract')
     pm_irq=metadata.get('pm_irq_diagnostic') is True
     if pm_irq and (not pm_edge or not pm_post_arch or not pm_cpus or metadata.get('pm_irq_evidence_version')!=1):raise ValueError('Incomplete CPU0 IRQ package contract')
     if dma_pm_audit and (not gic_roundtrip or metadata.get('dma_pm_audit_evidence_version')!=1):
@@ -202,6 +206,7 @@ def build(backup,prototype,output,current_packages=None):
             'pm_edge_inventory_diagnostic':pm_edge,'pm_edge_inventory_evidence_version':1 if pm_edge else None,
             'pm_callbacks_diagnostic':pm_callbacks,'pm_callbacks_evidence_version':1 if pm_callbacks else None,
             'pm_preconditions_diagnostic':pm_preconditions,'pm_preconditions_version':1 if pm_preconditions else None,
+            'pm_branch_diagnostic':pm_branch,'pm_branch_version':1 if pm_branch else None,
             'pm_irq_diagnostic':pm_irq,'pm_irq_evidence_version':1 if pm_irq else None,
             'abox_pmu_audit_diagnostic':abox_pmu_audit,'abox_pmu_audit_evidence_version':3 if abox_pmu_audit else None,
             'abox_pm_audit_diagnostic':abox_pm_audit,'abox_pm_audit_evidence_version':8 if abox_pm_audit else None,
@@ -249,6 +254,8 @@ def build(backup,prototype,output,current_packages=None):
         metadata['pm_callbacks_evidence_version']=1 if pm_callbacks and mode=='diagnostic' else None
         metadata['pm_preconditions_diagnostic']=pm_preconditions and mode=='diagnostic'
         metadata['pm_preconditions_version']=1 if pm_preconditions and mode=='diagnostic' else None
+        metadata['pm_branch_diagnostic']=pm_branch and mode=='diagnostic'
+        metadata['pm_branch_version']=1 if pm_branch and mode=='diagnostic' else None
         metadata['pm_irq_diagnostic']=pm_irq and mode=='diagnostic'
         metadata['pm_irq_evidence_version']=1 if pm_irq and mode=='diagnostic' else None
         metadata['abox_pmu_audit_diagnostic']=abox_pmu_audit and mode=='diagnostic'

@@ -145,6 +145,12 @@ def check(packages,kernel_build,backup,core_model,gate_model,init_model,adb):
         if preconditions_scope:
             if any(m.get('pm_preconditions_version')!=1 for m in (paired,diagnostic)):raise ValueError('Preconditions package version differs')
             validate_preconditions(kernel_build,build)
+        from pm_branch_binding import assert_scope as assert_branch_scope,validate_model as validate_branch
+        branch_scope=assert_branch_scope(kernel_build,build)
+        if any(branch_scope!=bool(m.get('pm_branch_diagnostic')) for m in (paired,diagnostic)):raise ValueError('Branch package scope differs')
+        if branch_scope:
+            if any(m.get('pm_branch_version')!=1 for m in (paired,diagnostic)):raise ValueError('Branch package version differs')
+            validate_branch(kernel_build,build)
         from pm_irq_binding import assert_scope as assert_irq_scope,validate_model as validate_irq
         irq_scope=assert_irq_scope(kernel_build,build)
         if any(irq_scope!=bool(m.get('pm_irq_diagnostic')) for m in (paired,diagnostic)):raise ValueError('CPU0 IRQ package scope differs')

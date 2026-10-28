@@ -324,6 +324,30 @@ jobs:
             note10/private/handoff-kernel/pm-preconditions-worker-model/*.c
             note10/private/handoff-kernel/pm-preconditions-worker-model/*.log
             note10/private/handoff-kernel/pm-preconditions-worker-model/result.json
+            note10/private/handoff-kernel/pm-branch-prepared/
+            note10/private/handoff-kernel/pm-branch-binding-model/result.json
+            note10/private/handoff-kernel/pm-branch-scope-model/result.json
+            note10/private/handoff-kernel/pm-branch-native-model/*.c
+            note10/private/handoff-kernel/pm-branch-native-model/*.log
+            note10/private/handoff-kernel/pm-branch-native-model/result.json
+            note10/private/handoff-kernel/pm-branch-producer-model/*.c
+            note10/private/handoff-kernel/pm-branch-producer-model/*.log
+            note10/private/handoff-kernel/pm-branch-producer-model/result.json
+            note10/private/handoff-kernel/pm-branch-pmu-source-model/*.c
+            note10/private/handoff-kernel/pm-branch-pmu-source-model/*.log
+            note10/private/handoff-kernel/pm-branch-pmu-source-model/result.json
+            note10/private/handoff-kernel/pm-branch-gic-source-model/*.c
+            note10/private/handoff-kernel/pm-branch-gic-source-model/*.log
+            note10/private/handoff-kernel/pm-branch-gic-source-model/result.json
+            note10/private/handoff-kernel/pm-branch-lifecycle-model/*.c
+            note10/private/handoff-kernel/pm-branch-lifecycle-model/*.log
+            note10/private/handoff-kernel/pm-branch-lifecycle-model/result.json
+            note10/private/handoff-kernel/pm-branch-worker-model/*.c
+            note10/private/handoff-kernel/pm-branch-worker-model/*.log
+            note10/private/handoff-kernel/pm-branch-worker-model/result.json
+            note10/private/handoff-kernel/pm-branch-caller-model/*.c
+            note10/private/handoff-kernel/pm-branch-caller-model/*.log
+            note10/private/handoff-kernel/pm-branch-caller-model/result.json
             note10/private/handoff-kernel/pm-irq-native-model/mode-0.log
             note10/private/handoff-kernel/pm-irq-native-model/mode-19.log
             note10/private/handoff-kernel/pm-irq-native-model/mode-11.log

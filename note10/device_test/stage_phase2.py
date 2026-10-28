@@ -33,6 +33,10 @@ def verify_packages(directory):
                 raise ValueError('Preconditions package record differs')
             if record.get('mode')=='diagnostic' and (bool(meta.get('pm_preconditions_diagnostic'))!=bool(result.get('pm_preconditions_diagnostic')) or meta.get('pm_preconditions_version')!=result.get('pm_preconditions_version')):
                 raise ValueError('Preconditions package pair differs')
+            if bool(meta.get('pm_branch_diagnostic'))!=bool(record.get('pm_branch_diagnostic')) or meta.get('pm_branch_version')!=record.get('pm_branch_version'):
+                raise ValueError('Branch package record differs')
+            if record.get('mode')=='diagnostic' and (bool(meta.get('pm_branch_diagnostic'))!=bool(result.get('pm_branch_diagnostic')) or meta.get('pm_branch_version')!=result.get('pm_branch_version')):
+                raise ValueError('Branch package pair differs')
             if bool(meta.get('abox_failed_fw_resume_guard'))!=bool(record.get('abox_failed_fw_resume_guard')) or (record.get('mode')=='diagnostic' and bool(meta.get('abox_failed_fw_resume_guard'))!=bool(result.get('abox_failed_fw_resume_guard'))):raise ValueError('Failed-firmware guard package scope differs')
             if meta['writes']!=['boot'] or meta['automatic_reboot'] is not False:raise ValueError('Unexpected installer scope')
             if meta.get('xnu_payload_stage_diagnostic') is True and (
