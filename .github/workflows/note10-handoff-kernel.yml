@@ -298,6 +298,11 @@ jobs:
             note10/private/handoff-kernel/pm-callbacks-decoder-model/
             note10/private/handoff-kernel/pm-callbacks-binding-model/
             note10/private/handoff-kernel/pm-callbacks-coverage-model/result.json
+            note10/private/handoff-kernel/cpu-pm-failure-guard-model/result.json
+            note10/private/handoff-kernel/cpu-pm-failure-guard-model/*.c
+            note10/private/handoff-kernel/cpu-pm-failure-guard-model/*.log
+            note10/private/handoff-kernel/pm-build-concurrency-model/result.json
+            note10/private/handoff-kernel/pm-build-concurrency-model/*.log
             note10/private/handoff-kernel/pm-irq-native-model/mode-0.log
             note10/private/handoff-kernel/pm-irq-native-model/mode-19.log
             note10/private/handoff-kernel/pm-irq-native-model/mode-11.log

@@ -10,6 +10,7 @@ def assert_scope(root,build):
  if any((m in image)!=enabled for m in MARKERS):raise ValueError('Callback actual Image/config scope differs')
  guard=b'CONFIG_NOTE10_CPU_PM_FAILURE_GUARD=y' in config
  if (b'N10CPUGUARD1' in image)!=guard:raise ValueError('CPU PM guard Image/config scope differs')
+ if guard and not enabled:raise ValueError('CPU PM guard requires callback inventory')
  if enabled!=(build.get('pm_callbacks_diagnostic') is True):raise ValueError('Callback metadata cannot downgrade actual scope')
  if enabled and (build.get('pm_callbacks_evidence_version')!=1 or any(x not in config for x in REQUIRED) or any(('CONFIG_'+n+'='+v).encode() in config for n in FORBIDDEN for v in ('y','m'))):raise ValueError('Callback config prerequisites differ')
  return enabled
@@ -122,7 +123,7 @@ def validate_model(root,build):
  if record!=binding_inputs(build):raise ValueError('Callback binding input differs')
  coverage=json.loads((root/'pm-callbacks-coverage-model/result.json').read_text(encoding='utf-8'))
  source=Path(__file__).parent/'test_pm_callbacks_full_binding.py'
- if coverage.get('passed') is not True or coverage.get('cases')!=11 or any(not x.get('passed') for x in coverage.get('outcomes',[])) or coverage.get('harness_sha256')!=hashlib.sha256(source.read_bytes()).hexdigest() or coverage.get('binding_sha256')!=hashlib.sha256(Path(__file__).read_bytes()).hexdigest() or coverage.get('binding_input_sha256')!=hashlib.sha256((root/'pm-callbacks-binding-input.json').read_bytes()).hexdigest():raise ValueError('Callback binding mutation proof differs')
+ if coverage.get('passed') is not True or coverage.get('cases')!=12 or any(not x.get('passed') for x in coverage.get('outcomes',[])) or coverage.get('harness_sha256')!=hashlib.sha256(source.read_bytes()).hexdigest() or coverage.get('binding_sha256')!=hashlib.sha256(Path(__file__).read_bytes()).hexdigest() or coverage.get('binding_input_sha256')!=hashlib.sha256((root/'pm-callbacks-binding-input.json').read_bytes()).hexdigest():raise ValueError('Callback binding mutation proof differs')
  model_dirs=('prepared-binding','lock','dispatcher','families','producer','decoder','binding','integration');manifest={};outcomes={}
  for name in model_dirs:
   directory=root/('pm-callbacks-'+name+'-model');report=json.loads((directory/'result.json').read_text(encoding='utf-8'));outcomes[name]=report.get('outcomes',[])
@@ -138,5 +139,5 @@ def validate_model(root,build):
   'integration':{'success','later_gic_failure','family0_failure','capture_and_restore_failure','family1_failure','family2_failure','family3_failure','irq_failure','pmu_cpu_failure','pmu_pre_failure','off_success','off_restore_failure'}}
  if any({row.get('case') for row in outcomes[k]}!=v for k,v in expected_ids.items()):raise ValueError('Callback coverage case IDs differ')
  if {row.get('mode') for row in outcomes['dispatcher']}!={0,1,2,3,4,5,6,7,8,10,11,12,13,20,21,22,23} or {(r.get('family'),r.get('mode')) for r in outcomes['families']}!={(f,m) for f in range(4) for m in range(7)} or {(r.get('family'),r.get('success'),r.get('initial_irq_disabled')) for r in outcomes['lock']}!={(f,s,i) for f in (0,1) for s in (0,1) for i in (0,1)}:raise ValueError('Callback native case IDs differ')
- if {r.get('case') for r in coverage['outcomes']}!={'baseline','metadata_omitted','image_marker','snapshot_corrupt','snapshot_extra','intermediate_mismatch','producer_log','source_model','guard_missing','guard_source','guard_log'}:raise ValueError('Callback binding mutation case IDs differ')
+ if {r.get('case') for r in coverage['outcomes']}!={'baseline','metadata_omitted','image_marker','snapshot_corrupt','snapshot_extra','intermediate_mismatch','producer_log','source_model','guard_missing','guard_source','guard_log','guard_scope'}:raise ValueError('Callback binding mutation case IDs differ')
  return True

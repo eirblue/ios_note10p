@@ -26,6 +26,14 @@ def main():
   old=copy.deepcopy(build['pm_callbacks_intermediate_sha256']);reject('intermediate_mismatch',lambda:build['pm_callbacks_intermediate_sha256'].__setitem__('kernel/power/suspend.c','0'*64),lambda:build.update(pm_callbacks_intermediate_sha256=old))
   log=work/'pm-callbacks-producer-model/mode-0.log';raw=log.read_bytes();reject('producer_log',lambda:log.write_bytes(raw+b'x'),lambda:log.write_bytes(raw))
   model=work/'pm-callbacks-dispatcher-model/result.json';raw=model.read_bytes();alter=json.loads(raw);alter['source_sha256']['pm_callbacks_backend.c']='0'*64;reject('source_model',lambda:model.write_text(json.dumps(alter),encoding='utf-8'),lambda:model.write_bytes(raw))
+  cfg=work/'handoff.config';origcfg=cfg.read_bytes();img=work/'Image';origimg=img.read_bytes();oldmeta=build['pm_callbacks_diagnostic']
+  def omit_inventory():
+   cfg.write_bytes(origcfg.replace(b'CONFIG_NOTE10_PM_CALLBACK_INVENTORY=y',b'# CONFIG_NOTE10_PM_CALLBACK_INVENTORY is not set'))
+   data=origimg
+   for marker in MARKERS:data=data.replace(marker,b'X'*len(marker))
+   img.write_bytes(data);build['pm_callbacks_diagnostic']=False
+  def restore_inventory():cfg.write_bytes(origcfg);img.write_bytes(origimg);build['pm_callbacks_diagnostic']=oldmeta
+  reject('guard_scope',omit_inventory,restore_inventory)
   guard=work/'cpu-pm-failure-guard-model/result.json';raw=guard.read_bytes();reject('guard_missing',lambda:guard.unlink(),lambda:guard.write_bytes(raw))
   alter=json.loads(raw);alter['source_sha256']['kernel/cpu_pm.c']='0'*64;reject('guard_source',lambda:guard.write_text(json.dumps(alter),encoding='utf-8'),lambda:guard.write_bytes(raw))
   log=work/'cpu-pm-failure-guard-model/case-0.log';raw=log.read_bytes();reject('guard_log',lambda:log.write_bytes(raw+b'x'),lambda:log.write_bytes(raw))
