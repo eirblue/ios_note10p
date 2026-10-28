@@ -103,6 +103,8 @@ def collect(packages,kernel_build,adb):
     pmu_settle=assert_settle_scope(kernel_build,result)
     from pm_cpus_binding import assert_scope as assert_cpu_scope
     pm_cpus=assert_cpu_scope(kernel_build,result)
+    from pm_post_arch_binding import assert_scope as assert_post_scope
+    pm_post_arch=assert_post_scope(kernel_build,result)
     if result.get('build_passed') is not True or result.get('early_xnu_reservation') is not True:
         raise ValueError('Successful reservation kernel build required')
     digest=hashlib.sha256(image).hexdigest()
@@ -147,6 +149,7 @@ def collect(packages,kernel_build,adb):
     if bool(paired.get('pm_noirq_diagnostic'))!=pm_noirq or (pm_noirq and paired.get('pm_noirq_evidence_version')!=1):raise ValueError('Noirq package/kernel scope differs')
     if bool(paired.get('pmu_settle_diagnostic'))!=pmu_settle or (pmu_settle and paired.get('pmu_settle_evidence_version')!=1):raise ValueError('Timed PMU package/kernel scope differs')
     if bool(paired.get('pm_cpus_diagnostic'))!=pm_cpus or (pm_cpus and paired.get('pm_cpus_evidence_version')!=1):raise ValueError('CPU noirq package/kernel scope differs')
+    if bool(paired.get('pm_post_arch_diagnostic'))!=pm_post_arch or (pm_post_arch and paired.get('pm_post_arch_evidence_version')!=1):raise ValueError('Post-PM CPU package/kernel scope differs')
     if bool(paired.get('abox_pmu_audit_diagnostic'))!=abox_pmu_audit or (abox_pmu_audit and paired.get('abox_pmu_audit_evidence_version')!=3):raise ValueError('PMU package/kernel scope differs')
     if xnu_stage and (paired.get('xnu_payload_sha256')!=result.get('xnu_payload_sha256') or
                       paired.get('xnu_payload_size')!=result.get('xnu_payload_size')):
@@ -195,6 +198,8 @@ def collect(packages,kernel_build,adb):
             'pm_cpus_noirq_required':pm_cpus,'previous_boot_pm_cpus_noirq_observed':False,
             'cpu_stop_pmu_domains_required':pm_cpus,'previous_boot_cpu_stop_pmu_domains_observed':False,
             'pm_cpus_timers_required':pm_cpus,'previous_boot_pm_cpus_timers_observed':False,
+            'pm_cpus_arch_restore_required':pm_post_arch,'previous_boot_pm_cpus_arch_restore_observed':False,
+            'pm_cpus_payload_readback_required':pm_post_arch,'previous_boot_pm_cpus_payload_readback_observed':False,
             'noirq_pmu_domains_required':pm_noirq,'previous_boot_noirq_pmu_domains_observed':False,
             'fsys0a_policy_required':abox_pmu_audit,'previous_boot_fsys0a_policy_observed':False,
             'pmu_domain_status_required':abox_pmu_audit,'previous_boot_pmu_domain_status_observed':False,
@@ -284,6 +289,11 @@ def collect(packages,kernel_build,adb):
                 report['previous_boot_pm_cpus_noirq_observed']=observation['pm_cpus']['pm_cpus_noirq_roundtrip_observed']
                 report['previous_boot_cpu_stop_pmu_domains_observed']=observation['pm_cpus']['cpu_stop_pmu_domains_observed']
                 report['previous_boot_pm_cpus_timers_observed']=observation['pm_cpus']['timers']['pm_cpus_timer_restore_observed']
+            if pm_post_arch:
+                from decode_pm_post_arch import decode as decode_post_arch
+                observation['pm_post_arch']=decode_post_arch(text,evidence_id,pm_completed_generation(observation['pm_timer']),cpu_observation,result['xnu_payload_size'])
+                report['previous_boot_pm_cpus_arch_restore_observed']=observation['pm_post_arch']['pm_cpus_arch_restore_observed']
+                report['previous_boot_pm_cpus_payload_readback_observed']=observation['pm_post_arch']['pm_cpus_payload_readback_observed']
         except ValueError as error:
             report['decode_failures'][name]=str(error);continue
         (out/'reservation-observation.json').write_text(json.dumps(observation,indent=2),encoding='utf-8')
@@ -311,9 +321,10 @@ def collect(packages,kernel_build,adb):
                                  (not abox_pmu_audit or (report['previous_boot_abox_pmu_audit_observed'] and report['previous_boot_pmu_domain_status_observed'] and report['previous_boot_fsys0a_policy_observed'])) and
                                  (not pm_noirq or (report['previous_boot_pm_late_noirq_observed'] and report['previous_boot_noirq_pmu_domains_observed'])) and
                                  (not pmu_settle or report['previous_boot_pmu_settle_observed']) and
-                                 (not pm_cpus or (report['previous_boot_pm_cpus_noirq_observed'] and report['previous_boot_cpu_stop_pmu_domains_observed'] and report['previous_boot_pm_cpus_timers_observed'])))
+                                 (not pm_cpus or (report['previous_boot_pm_cpus_noirq_observed'] and report['previous_boot_cpu_stop_pmu_domains_observed'] and report['previous_boot_pm_cpus_timers_observed'])) and
+                                 (not pm_post_arch or (report['previous_boot_pm_cpus_arch_restore_observed'] and report['previous_boot_pm_cpus_payload_readback_observed'])))
     report['evaluation_items']={}
-    for item in ('reservation','window_access','xnu_payload_stage','cpu_cache_roundtrip','pm_timer','gic_roundtrip','dma_pm_audit','ufs_pm_audit','iommu_pm_audit','abox_pm_audit','abox_pmu_audit','pmu_domain_status','fsys0a_policy','pm_late_noirq','noirq_pmu_domains','pmu_settle','pm_cpus_noirq','cpu_stop_pmu_domains','pm_cpus_timers'):
+    for item in ('reservation','window_access','xnu_payload_stage','cpu_cache_roundtrip','pm_timer','gic_roundtrip','dma_pm_audit','ufs_pm_audit','iommu_pm_audit','abox_pm_audit','abox_pmu_audit','pmu_domain_status','fsys0a_policy','pm_late_noirq','noirq_pmu_domains','pmu_settle','pm_cpus_noirq','cpu_stop_pmu_domains','pm_cpus_timers','pm_cpus_arch_restore','pm_cpus_payload_readback'):
         required=item=='reservation' or report[item+'_required']
         observed=report['previous_boot_'+item+'_observed']
         report['evaluation_items'][item]={'required':required,'status':'passed' if observed else ('failed' if required else 'not_requested')}

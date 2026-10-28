@@ -121,6 +121,12 @@ def check(packages,kernel_build,backup,core_model,gate_model,init_model,adb):
         if cpu_scope:
             if any(m.get('pm_cpus_evidence_version')!=1 for m in (paired,diagnostic)):raise ValueError('CPU noirq package version differs')
             validate_cpus(kernel_build,build)
+        from pm_post_arch_binding import assert_scope as assert_post_scope,validate_model as validate_post
+        post_scope=assert_post_scope(kernel_build,build)
+        if any(post_scope!=bool(m.get('pm_post_arch_diagnostic')) for m in (paired,diagnostic)):raise ValueError('Post-PM CPU package scope differs')
+        if post_scope:
+            if any(m.get('pm_post_arch_evidence_version')!=1 for m in (paired,diagnostic)):raise ValueError('Post-PM CPU package version differs')
+            validate_post(kernel_build,build)
         if not (build.get('build_passed') is True and build.get('window_access_diagnostic') is True and
                 build.get('window_access_evidence_version')==1 and build.get('reservation_evidence_version')==2):
             raise ValueError('Successful opt-in access kernel build required')

@@ -134,6 +134,7 @@ jobs:
             python note10/device_test/test_pm_noirq_contract.py
             python note10/device_test/test_pmu_settle_contract.py
             python note10/device_test/test_pm_cpus_contract.py
+            python note10/device_test/test_pm_post_arch_contract.py
           fi
           if [ "$NOTE10_GIC_ROUNDTRIP" = true ] && { [ "$NOTE10_AUTO_RETURN" != true ] || [ "$NOTE10_XNU_STAGE" != true ]; }; then
             echo "gic_roundtrip requires auto_return and xnu_stage" >&2
@@ -265,6 +266,8 @@ jobs:
             note10/private/handoff-kernel/pm-cpus-timer-model/*.log
             note10/private/handoff-kernel/pm-cpus-queue-model/result.json
             note10/private/handoff-kernel/pm-cpus-queue-model/*.log
+            note10/private/handoff-kernel/pm-post-arch-model/result.json
+            note10/private/handoff-kernel/pm-post-arch-model/*.log
             note10/private/handoff-kernel/fsys-pm-model/result.json
             note10/private/handoff-kernel/fsys-pm-model/*.log
             note10/private/handoff-kernel/iommu-pm-model/result.json

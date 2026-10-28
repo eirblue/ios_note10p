@@ -102,6 +102,8 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output,auto_cycle_token=None):
     validate_settle(kernel_build,build)
     from pm_cpus_binding import validate_model as validate_cpus
     validate_cpus(kernel_build,build)
+    from pm_post_arch_binding import validate_model as validate_post_arch
+    validate_post_arch(kernel_build,build)
     if hashlib.sha256(config).hexdigest()!=build['effective_config_sha256']:
         raise ValueError('Config differs from kernel build report')
     required={'CONFIG_BLK_DEV_INITRD=y','CONFIG_RD_LZMA=y','CONFIG_KEXEC=y','CONFIG_KEXEC_CORE=y','CONFIG_ARM64_4K_PAGES=y'}
@@ -209,6 +211,8 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output,auto_cycle_token=None):
             'pmu_settle_evidence_version':build.get('pmu_settle_evidence_version'),
             'pm_cpus_diagnostic':build.get('pm_cpus_diagnostic') is True,
             'pm_cpus_evidence_version':build.get('pm_cpus_evidence_version'),
+            'pm_post_arch_diagnostic':build.get('pm_post_arch_diagnostic') is True,
+            'pm_post_arch_evidence_version':build.get('pm_post_arch_evidence_version'),
             'abox_pmu_audit_diagnostic':build.get('abox_pmu_audit_diagnostic') is True,
             'abox_pmu_audit_evidence_version':build.get('abox_pmu_audit_evidence_version'),
             'abox_pm_audit_diagnostic':build.get('abox_pm_audit_diagnostic') is True,

@@ -33,7 +33,7 @@ class PackageTests(unittest.TestCase):
                 cpu_cache_roundtrip_diagnostic=True,pm_timer_diagnostic=True,auto_return_diagnostic=True,auto_cycle_token='c'*32,
                 gic_roundtrip_diagnostic=True,gic_roundtrip_evidence_version=1,dma_pm_audit_diagnostic=True,dma_pm_audit_evidence_version=1,
                 ufs_pm_audit_diagnostic=True,ufs_pm_audit_evidence_version=2,iommu_pm_audit_diagnostic=True,iommu_pm_audit_evidence_version=2,abox_failed_fw_resume_guard=True,abox_pm_audit_diagnostic=True,abox_pm_audit_evidence_version=8,
-                abox_pmu_audit_diagnostic=True,abox_pmu_audit_evidence_version=3,pm_noirq_diagnostic=True,pm_noirq_evidence_version=1,pmu_settle_diagnostic=True,pmu_settle_evidence_version=1,pm_cpus_diagnostic=True,pm_cpus_evidence_version=1)
+                abox_pmu_audit_diagnostic=True,abox_pmu_audit_evidence_version=3,pm_noirq_diagnostic=True,pm_noirq_evidence_version=1,pmu_settle_diagnostic=True,pmu_settle_evidence_version=1,pm_cpus_diagnostic=True,pm_cpus_evidence_version=1,pm_post_arch_diagnostic=True,pm_post_arch_evidence_version=1)
             prototype.with_suffix('.json').write_text(json.dumps(metadata))
             packages=fs/'packages'
             with patch('build_boot_test_packages.read_verified_backup',return_value=parts):result=build(backup,prototype,packages)
@@ -46,6 +46,9 @@ class PackageTests(unittest.TestCase):
                 self.assertEqual(json.loads(archive.read('manifest.json'))['pm_noirq_evidence_version'],1)
                 self.assertEqual(json.loads(archive.read('manifest.json'))['pmu_settle_evidence_version'],1)
                 self.assertEqual(json.loads(archive.read('manifest.json'))['pm_cpus_evidence_version'],1)
+                self.assertEqual(json.loads(archive.read('manifest.json'))['pm_post_arch_evidence_version'],1)
+            (packages/'package-result.json').write_text(json.dumps(dict(result,pm_post_arch_evidence_version=None)))
+            with self.assertRaisesRegex(ValueError,'package pair differs'):verify_packages(packages)
             for old_version in (5,6,7,None):
                 changed=dict(result,abox_pm_audit_evidence_version=old_version)
                 (packages/'package-result.json').write_text(json.dumps(changed))
