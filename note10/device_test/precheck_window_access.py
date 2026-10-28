@@ -133,6 +133,12 @@ def check(packages,kernel_build,backup,core_model,gate_model,init_model,adb):
         if edge_scope:
             if any(m.get('pm_edge_inventory_evidence_version')!=1 for m in (paired,diagnostic)):raise ValueError('PM edge package version differs')
             validate_edge(kernel_build,build)
+        from pm_irq_binding import assert_scope as assert_irq_scope,validate_model as validate_irq
+        irq_scope=assert_irq_scope(kernel_build,build)
+        if any(irq_scope!=bool(m.get('pm_irq_diagnostic')) for m in (paired,diagnostic)):raise ValueError('CPU0 IRQ package scope differs')
+        if irq_scope:
+            if any(m.get('pm_irq_evidence_version')!=1 for m in (paired,diagnostic)):raise ValueError('CPU0 IRQ package version differs')
+            validate_irq(kernel_build,build)
         if not (build.get('build_passed') is True and build.get('window_access_diagnostic') is True and
                 build.get('window_access_evidence_version')==1 and build.get('reservation_evidence_version')==2):
             raise ValueError('Successful opt-in access kernel build required')

@@ -86,3 +86,5 @@ C:\Python314\python.exe -X utf8 note10/device_test/build_bundle.py
 
 생성 경로: `note10/private/device-test/`. ZIP은 재현 가능한 고정 타임스탬프로 만들며, 포함 파일 해시와 실행 범위를 기록한다.
 TWRP ZIP 실행 인터페이스 참고: [TWRP Commandline Guide](https://twrp.me/faq/openrecoveryscript.html).
+
+선택적 CPU0 IRQ 및 GIC 읽기 전용 관측의 범위와 검증 조건은 [PM-IRQ-AUDIT.md](PM-IRQ-AUDIT.md)에 설명한다.

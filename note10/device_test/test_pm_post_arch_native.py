@@ -113,7 +113,7 @@ static void n10_cpu_checkpoint(unsigned int p,u64 m){(void)p;(void)m;}
 static int n10_pm_devices_test(struct n10_pm_result*p){++pm_calls;p->qgeneration=2;p->devices=mode==2?0:1;p->resumed=1;return mode==1?-5:0;}
 static void n10_report_pm_cpus(unsigned int g){(void)g;}
 static void n10_report_pm_cpu_timers(unsigned int g){(void)g;}
-static void n10_test_gic(void){++gic_calls;}
+static int n10_test_gic(void){++gic_calls;return mode==9?-5:0;}
 static int n10_report_post_arch(void*p,unsigned int g){(void)p;if(g!=2)abort();++observer_calls;return mode==6?-5:0;}
 static void n10_pm_cpus_schedule(unsigned long d){(void)d;++schedule_calls;}
 #define msecs_to_jiffies(n) (n)
@@ -122,7 +122,7 @@ static u32 n10_frame_checksum(const char*p,int n){(void)p;(void)n;return 0;}
 WORKER_MAIN = r'''
 int main(int argc,char**argv){int wanted,success;mode=atoi(argv[1]);n10_pm_worker(NULL);
  wanted=mode==0||mode==5||mode==6;success=mode==0;
- if(observer_calls!=wanted || gic_calls!=(mode==0||mode==4||mode==5||mode==6))abort();
+ if(observer_calls!=wanted || gic_calls!=(mode==0||mode==4||mode==5||mode==6||mode==9))abort();
  if(schedule_calls || (mode==7?pm_calls!=0:pm_calls!=1))abort();
  printf("WORKER_RESULT observer=%d gic=%d sha=%d success=%d\n",observer_calls,gic_calls,sha_count,success);return 0;}
 '''
@@ -147,17 +147,17 @@ def run_worker(worker, out, compiler):
     (out/'worker-compile.log').write_bytes(built.stdout+built.stderr)
     if built.returncode: raise ValueError('Prepared PM worker model compilation failed')
     rows=[]
-    for mode in range(8):
+    for mode in (*range(8),9):
         ran=subprocess.run([str(exe),str(mode)],capture_output=True,timeout=15)
         (out/f'worker-{mode}.log').write_bytes(ran.stdout+ran.stderr)
         if ran.returncode: raise ValueError('Prepared worker disposition failed: '+str(mode))
-        text=ran.stdout.decode();expected=0 if mode==0 else 7 if mode in (4,5,6) else 6 if mode==3 else 5 if mode==2 else 4 if mode==1 else 3
+        text=ran.stdout.decode();expected=0 if mode==0 else 7 if mode in (4,5,6,9) else 6 if mode==3 else 5 if mode==2 else 4 if mode==1 else 3
         if not re.search(r'N10PMT1 .* status='+str(expected)+r' checksum=',text):
             raise ValueError('Prepared worker status differs: '+str(mode))
         rows.append(dict(mode=mode,passed=True,accepted=mode==0))
-    return dict(cases=8,outcomes=rows,worker_sha256=hashlib.sha256(raw).hexdigest(),
+    return dict(cases=9,outcomes=rows,worker_sha256=hashlib.sha256(raw).hexdigest(),
                 actual_prepared_worker_executed=True,pm_failure_blocks_observer=True,
-                before_and_after_sha_failures_refused=True,observer_failure_refused=True)
+                before_and_after_sha_failures_refused=True,observer_failure_refused=True,gic_failure_blocks_observers=True)
 
 
 def run(output, worker):

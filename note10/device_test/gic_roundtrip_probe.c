@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /* Called only after the successful restored PM/payload checks. */
 #include <linux/note10_gic_roundtrip.h>
-static void n10_test_gic(void)
+static int n10_test_gic(void)
 {
     struct n10_gic_sample samples[8] = {0};
     unsigned long long before = n10_online_bits(), after;
@@ -28,4 +28,5 @@ static void n10_test_gic(void)
             pr_info("N10GIC2 %s checksum=%08x\n", frame, n10_frame_checksum(frame, count));
         }
     }
+    return error;
 }

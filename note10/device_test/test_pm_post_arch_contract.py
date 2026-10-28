@@ -52,8 +52,8 @@ class BindingTests(unittest.TestCase):
             gic_roundtrip_diagnostic=True,cpu_cache_roundtrip_diagnostic=True,pm_post_arch_sources_sha256=self.hashes,pm_post_arch_source_pins=PINS,pm_post_arch_worker_sha256='f'*64)
         model=dict(passed=True,cases=37,outcomes=[dict(mode=i,passed=True,accepted=i in (0,1)) for i in range(37)],
             actual_producer_executed=True,asid_only_change_accepted=True,per_cpu_faults_refused=True,no_register_writes=True,online_set_locked=True,hardware_verified=False,source_sha256=self.hashes)
-        model['worker_model']=dict(cases=8,outcomes=[dict(mode=i,passed=True,accepted=i==0) for i in range(8)],worker_sha256='f'*64,
-            actual_prepared_worker_executed=True,pm_failure_blocks_observer=True,before_and_after_sha_failures_refused=True,observer_failure_refused=True)
+        model['worker_model']=dict(cases=9,outcomes=[dict(mode=i,passed=True,accepted=i==0) for i in (*range(8),9)],worker_sha256='f'*64,
+            actual_prepared_worker_executed=True,pm_failure_blocks_observer=True,before_and_after_sha_failures_refused=True,observer_failure_refused=True,gic_failure_blocks_observers=True)
         (self.root/'pm-post-arch-model').mkdir();(self.root/'pm-post-arch-model/result.json').write_text(json.dumps(model))
     def test_required_configuration_and_markers(self):
         self.assertTrue(validate_model(self.root,self.build))

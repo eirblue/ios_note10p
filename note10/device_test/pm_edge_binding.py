@@ -18,6 +18,8 @@ def validate_model(root,build):
     if not assert_scope(root,build):return False
     actual={n:hashlib.sha256((HERE/n).read_bytes()).hexdigest() for n in SOURCES}
     if build.get('pm_edge_sources_sha256')!=actual or build.get('pm_edge_source_pins')!=PINS:raise ValueError('PM edge source binding differs')
+    from pm_irq_binding import assert_scope as assert_irq_scope
+    irq_enabled=assert_irq_scope(root,build)
     prepared=build.get('pm_edge_prepared_sha256')
     expected_helpers={
        'drivers/base/power/note10_pm_edge_dma.c':'pm_edge_dma_backend.c',
@@ -36,7 +38,7 @@ def validate_model(root,build):
         prepared['drivers/base/power/main.c']!='271c104727a0266b9803c667fe5bddb8da679cc3f54d7cd5052d163b54e66270' or
         prepared['drivers/iommu/exynos-iommu.c']!='121f9001105ac9456418269fa31b7bd4a12726dbefd924c5c5c27c1564889260' or
         prepared['drivers/base/syscore.c']!='d15cab08efd46310218cfb08a056d16362f77a0252c3bce2c36158ae3eddf0d6' or
-        prepared['kernel/power/Kconfig']!=build.get('pm_quiesce_patched_sha256',{}).get('kernel/power/Kconfig')):
+        (not irq_enabled and prepared['kernel/power/Kconfig']!=build.get('pm_quiesce_patched_sha256',{}).get('kernel/power/Kconfig'))):
         raise ValueError('PM edge prepared helper binding differs')
     root=Path(root)
     cases=(('dma',18,{0,14,21,28},'test_pm_edge_dma_native.py'),('iommu',32,{0,14,19,21,29},'test_pm_edge_iommu_native.py'),('syscore',25,{0,15,24},'test_pm_edge_syscore_native.py'))

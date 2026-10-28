@@ -205,6 +205,13 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             run([sys.executable,str(ROOT/'note10/device_test/test_pm_edge_integration_native.py'),'--source-root',str(source),'--raw-suspend',str(source/'kernel/power/suspend-upstream.c'),'--header',str(source/'include/linux/suspend.h'),'--output',str(OUT/'pm-edge-integration-model')],'03-pm-edge-integration-model.log')
             run([sys.executable,str(ROOT/'note10/device_test/test_pm_edge_decoder.py'),'--producer-dir',str(OUT/'pm-edge-integration-model'),'--output',str(OUT/'pm-edge-decoder-model')],'03-pm-edge-decoder-model.log')
             run([sys.executable,str(ROOT/'note10/device_test/test_pm_edge_binding.py'),'--output',str(OUT/'pm-edge-binding-model')],'03-pm-edge-binding-model.log')
+            from prepare_pm_irq import prepare as prepare_irq
+            report.update(prepare_irq(source))
+            report['pm_quiesce_patched_sha256']['kernel/power/Kconfig']=hashlib.sha256((source/'kernel/power/Kconfig').read_bytes()).hexdigest()
+            run([sys.executable,str(ROOT/'note10/device_test/test_pm_irq_native.py'),'--output',str(OUT/'pm-irq-native-model')],'03-pm-irq-native-model.log')
+            run([sys.executable,str(ROOT/'note10/device_test/test_pm_irq_decoder.py'),'--native',str(OUT/'pm-irq-native-model'),'--output',str(OUT/'pm-irq-decoder-model')],'03-pm-irq-decoder-model.log')
+            run([sys.executable,str(ROOT/'note10/device_test/test_pm_irq_integration_native.py'),'--source-root',str(source),'--output',str(OUT/'pm-irq-integration-model')],'03-pm-irq-integration-model.log')
+            run([sys.executable,str(ROOT/'note10/device_test/test_pm_irq_binding.py'),'--edge-artifact',str(OUT),'--source-root',str(source),'--native',str(OUT/'pm-irq-native-model'),'--decoder',str(OUT/'pm-irq-decoder-model'),'--integration',str(OUT/'pm-irq-integration-model'),'--output',str(OUT/'pm-irq-binding-model')],'03-pm-irq-binding-model.log')
             report['scope']='Bundled PM, CPU architecture and payload observations; no global DMA shutdown or XNU execution claim'
         make=['make','-C',str(source),'O='+str(objects),'ARCH=arm64',
               'CC=clang-14','CROSS_COMPILE=aarch64-linux-gnu-',
@@ -232,7 +239,7 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
         if pm_timer:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_PM_QUIESCE'],'02-pm-quiesce.log')
         if gic_roundtrip:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_GIC_ROUNDTRIP'],'02-gic-roundtrip.log')
         if dma_pm_audit:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_DMA_PM_AUDIT'],'02-dma-pm-audit.log')
-        if ufs_pm_audit:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_UFS_PM_AUDIT','--enable','NOTE10_IOMMU_PM_AUDIT','--enable','NOTE10_ABOX_PM_AUDIT','--enable','NOTE10_ABOX_FW_FAILURE_GUARD','--enable','NOTE10_ABOX_PMU_AUDIT','--enable','NOTE10_PM_NOIRQ_TEST','--enable','NOTE10_PMU_SETTLE','--enable','NOTE10_PM_CPUS_TEST','--enable','NOTE10_PM_POST_ARCH','--enable','NOTE10_PM_EDGE_INVENTORY'],'02-ufs-pm-audit.log')
+        if ufs_pm_audit:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_UFS_PM_AUDIT','--enable','NOTE10_IOMMU_PM_AUDIT','--enable','NOTE10_ABOX_PM_AUDIT','--enable','NOTE10_ABOX_FW_FAILURE_GUARD','--enable','NOTE10_ABOX_PMU_AUDIT','--enable','NOTE10_PM_NOIRQ_TEST','--enable','NOTE10_PMU_SETTLE','--enable','NOTE10_PM_CPUS_TEST','--enable','NOTE10_PM_POST_ARCH','--enable','NOTE10_PM_EDGE_INVENTORY','--enable','NOTE10_PM_IRQ_TEST'],'02-ufs-pm-audit.log')
         run([*make,'olddefconfig'],'03-olddefconfig.log')
         configured=config.read_text()
         required=('CONFIG_KEXEC=y','CONFIG_KEXEC_CORE=y','CONFIG_PM_SLEEP_SMP=y','CONFIG_ARM64_4K_PAGES=y')
@@ -240,7 +247,7 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
         if gic_roundtrip:required+=('CONFIG_NOTE10_GIC_ROUNDTRIP=y','CONFIG_ARM_GIC=y')
         if dma_pm_audit:required+=('CONFIG_NOTE10_DMA_PM_AUDIT=y',)
         if ufs_pm_audit:required+=('CONFIG_NOTE10_UFS_PM_AUDIT=y','CONFIG_SCSI_UFSHCD=y','CONFIG_SCSI_UFS_EXYNOS=y','CONFIG_NOTE10_IOMMU_PM_AUDIT=y','CONFIG_EXYNOS_IOMMU=y','CONFIG_NOTE10_ABOX_PM_AUDIT=y','CONFIG_NOTE10_ABOX_FW_FAILURE_GUARD=y','CONFIG_SND_SOC_SAMSUNG_ABOX=y','CONFIG_NOTE10_ABOX_PMU_AUDIT=y','CONFIG_EXYNOS_PMU=y','CONFIG_SOC_EXYNOS9820=y','CONFIG_EXYNOS_PM_DOMAINS=y','CONFIG_USB_DWC3_EXYNOS=y','CONFIG_NOTE10_PM_NOIRQ_TEST=y','CONFIG_NOTE10_PMU_SETTLE=y','CONFIG_NOTE10_PM_CPUS_TEST=y')
-        if ufs_pm_audit:required+=('CONFIG_NOTE10_PM_POST_ARCH=y','CONFIG_NOTE10_PM_EDGE_INVENTORY=y','CONFIG_KALLSYMS=y')
+        if ufs_pm_audit:required+=('CONFIG_NOTE10_PM_POST_ARCH=y','CONFIG_NOTE10_PM_EDGE_INVENTORY=y','CONFIG_NOTE10_PM_IRQ_TEST=y','CONFIG_PREEMPT_COUNT=y','CONFIG_KALLSYMS=y')
         if reserve:required+=('CONFIG_INITRAMFS_FORCE=y','CONFIG_CMDLINE_EXTEND=y','CONFIG_CMDLINE="rdinit=/init"')
         if xnu_payload is not None:required+=('CONFIG_CRYPTO=y','CONFIG_CRYPTO_HASH=y','CONFIG_CRYPTO_SHA256=y')
         if cpu_cache:required+=('CONFIG_HOTPLUG_CPU=y','CONFIG_SMP=y','CONFIG_PM_SLEEP_SMP=y')
@@ -315,6 +322,8 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             validate_post_arch(OUT,report)
             from pm_edge_binding import validate_model as validate_edge
             validate_edge(OUT,report)
+            from pm_irq_binding import validate_model as validate_irq
+            validate_irq(OUT,report)
         if auto_return:
             from materialize_auto_cycle import SLOT
             if b'N10RET1' not in target.read_bytes() or target.read_bytes().count(SLOT+b'\0')!=1:raise ValueError('Auto-return marker/unique data slot missing')

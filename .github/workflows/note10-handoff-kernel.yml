@@ -282,6 +282,13 @@ jobs:
             note10/private/handoff-kernel/pm-edge-integration-model/producer-8.log
             note10/private/handoff-kernel/pm-edge-decoder-model/result.json
             note10/private/handoff-kernel/pm-edge-binding-model/result.json
+            note10/private/handoff-kernel/pm-irq-native-model/result.json
+            note10/private/handoff-kernel/pm-irq-decoder-model/result.json
+            note10/private/handoff-kernel/pm-irq-integration-model/result.json
+            note10/private/handoff-kernel/pm-irq-binding-model/result.json
+            note10/private/handoff-kernel/pm-irq-native-model/mode-0.log
+            note10/private/handoff-kernel/pm-irq-native-model/mode-19.log
+            note10/private/handoff-kernel/pm-irq-native-model/mode-11.log
             note10/private/handoff-kernel/pm-post-arch-model/*.log
             note10/private/handoff-kernel/fsys-pm-model/result.json
             note10/private/handoff-kernel/fsys-pm-model/*.log

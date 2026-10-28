@@ -43,11 +43,11 @@ def validate_model(root, build):
     if not isinstance(worker,dict):
         raise ValueError('Missing prepared worker proof')
     rows = worker.get('outcomes')
-    if (worker.get('cases') != 8 or not isinstance(rows,list) or len(rows) != 8 or
-        any(not isinstance(r,dict) for r in rows) or {r.get('mode') for r in rows} != set(range(8)) or
+    if (worker.get('cases') != 9 or not isinstance(rows,list) or len(rows) != 9 or
+        any(not isinstance(r,dict) for r in rows) or {r.get('mode') for r in rows} != (set(range(8)) | {9}) or
         any(r.get('passed') is not True or r.get('accepted') != (r.get('mode') == 0) for r in rows) or
         worker.get('worker_sha256') != build.get('pm_post_arch_worker_sha256') or
         any(worker.get(k) is not True for k in ('actual_prepared_worker_executed','pm_failure_blocks_observer',
-            'before_and_after_sha_failures_refused','observer_failure_refused'))):
+            'before_and_after_sha_failures_refused','observer_failure_refused','gic_failure_blocks_observers'))):
         raise ValueError('Prepared worker native proof differs')
     return True

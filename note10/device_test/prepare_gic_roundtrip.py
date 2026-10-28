@@ -17,7 +17,7 @@ def prepare(source):
     text=worker.read_bytes();anchor=b'    status = 0;\nreport:'
     if text.count(anchor)!=1:raise ValueError('PM worker GIC insertion point differs')
     worker.with_name('note10_gic_roundtrip_probe.c').write_bytes((HERE/'gic_roundtrip_probe.c').read_bytes())
-    text=b'#ifdef CONFIG_NOTE10_GIC_ROUNDTRIP\n#include "note10_gic_roundtrip_probe.c"\n#endif\n'+text.replace(anchor,b'#ifdef CONFIG_NOTE10_GIC_ROUNDTRIP\n    n10_test_gic();\n    result = n10_sha256(memory, length, digest);\n    if (result || memcmp(digest, expected, sizeof(expected))) goto report;\n#endif\n'+anchor)
+    text=b'#ifdef CONFIG_NOTE10_GIC_ROUNDTRIP\n#include "note10_gic_roundtrip_probe.c"\n#endif\n'+text.replace(anchor,b'#ifdef CONFIG_NOTE10_GIC_ROUNDTRIP\n    if (n10_test_gic()) goto report;\n    result = n10_sha256(memory, length, digest);\n    if (result || memcmp(digest, expected, sizeof(expected))) goto report;\n#endif\n'+anchor)
     worker.write_bytes(text)
     config=source/'kernel/power/Kconfig'
     if b'config NOTE10_GIC_ROUNDTRIP' in config.read_bytes():raise ValueError('Existing GIC diagnostic Kconfig')

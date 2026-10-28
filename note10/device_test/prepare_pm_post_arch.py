@@ -23,7 +23,7 @@ def prepare(source):
     anchor = b'static bool n10_timer_done;'
     tail = b'    status = 0;\nreport:'
     if (raw.count(anchor) != 1 or raw.count(tail) != 1 or
-        raw.count(b'    n10_test_gic();') != 1 or
+        raw.count(b'    if (n10_test_gic()) goto report;') != 1 or
         raw.count(b'    n10_report_pm_cpus(pm.qgeneration);') != 1 or
         raw.count(b'n10_report_pm_cpu_timers(pm.qgeneration)') != 1):
         raise ValueError('Post-PM prerequisites or insertion point differ')

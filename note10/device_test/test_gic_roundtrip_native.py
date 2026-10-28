@@ -86,7 +86,7 @@ int main(int argc,char**argv){
  if(mode==16)bank[2][1]=original[2]=256;
  if(mode==15)for(i=0;i<8;++i)bank[i][1]=original[i]=128;
  if(n10_gic_roundtrip(NULL,8)!=-EINVAL || n10_gic_roundtrip(tmp,7)!=-EINVAL)return 80;
- n10_test_gic();
+ {int reported=n10_test_gic();if ((reported==0)!=(mode==0 || mode==15 || mode==17))return 83;}
  if(locked || dist[0]!=(mode==4?0:1) || dist[1]!=0x467)return 81;
  for(i=0;i<8;++i){
   unsigned int want=2;
