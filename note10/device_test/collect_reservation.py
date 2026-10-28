@@ -105,6 +105,9 @@ def collect(packages,kernel_build,adb):
     pm_cpus=assert_cpu_scope(kernel_build,result)
     from pm_post_arch_binding import assert_scope as assert_post_scope
     pm_post_arch=assert_post_scope(kernel_build,result)
+    from pm_edge_binding import assert_scope as assert_edge_scope,validate_model as validate_edge
+    pm_edge=assert_edge_scope(kernel_build,result)
+    if pm_edge:validate_edge(kernel_build,result)
     if result.get('build_passed') is not True or result.get('early_xnu_reservation') is not True:
         raise ValueError('Successful reservation kernel build required')
     digest=hashlib.sha256(image).hexdigest()
@@ -150,6 +153,7 @@ def collect(packages,kernel_build,adb):
     if bool(paired.get('pmu_settle_diagnostic'))!=pmu_settle or (pmu_settle and paired.get('pmu_settle_evidence_version')!=1):raise ValueError('Timed PMU package/kernel scope differs')
     if bool(paired.get('pm_cpus_diagnostic'))!=pm_cpus or (pm_cpus and paired.get('pm_cpus_evidence_version')!=1):raise ValueError('CPU noirq package/kernel scope differs')
     if bool(paired.get('pm_post_arch_diagnostic'))!=pm_post_arch or (pm_post_arch and paired.get('pm_post_arch_evidence_version')!=1):raise ValueError('Post-PM CPU package/kernel scope differs')
+    if bool(paired.get('pm_edge_inventory_diagnostic'))!=pm_edge or (pm_edge and paired.get('pm_edge_inventory_evidence_version')!=1):raise ValueError('PM edge package/kernel scope differs')
     if bool(paired.get('abox_pmu_audit_diagnostic'))!=abox_pmu_audit or (abox_pmu_audit and paired.get('abox_pmu_audit_evidence_version')!=3):raise ValueError('PMU package/kernel scope differs')
     if xnu_stage and (paired.get('xnu_payload_sha256')!=result.get('xnu_payload_sha256') or
                       paired.get('xnu_payload_size')!=result.get('xnu_payload_size')):
@@ -200,6 +204,9 @@ def collect(packages,kernel_build,adb):
             'pm_cpus_timers_required':pm_cpus,'previous_boot_pm_cpus_timers_observed':False,
             'pm_cpus_arch_restore_required':pm_post_arch,'previous_boot_pm_cpus_arch_restore_observed':False,
             'pm_cpus_payload_readback_required':pm_post_arch,'previous_boot_pm_cpus_payload_readback_observed':False,
+            'dma_noirq_coverage_required':pm_edge,'previous_boot_dma_noirq_coverage_observed':False,
+            'iommu_noirq_inventory_required':pm_edge,'previous_boot_iommu_noirq_inventory_observed':False,
+            'syscore_inventory_required':pm_edge,'previous_boot_syscore_inventory_observed':False,
             'noirq_pmu_domains_required':pm_noirq,'previous_boot_noirq_pmu_domains_observed':False,
             'fsys0a_policy_required':abox_pmu_audit,'previous_boot_fsys0a_policy_observed':False,
             'pmu_domain_status_required':abox_pmu_audit,'previous_boot_pmu_domain_status_observed':False,
@@ -294,6 +301,11 @@ def collect(packages,kernel_build,adb):
                 observation['pm_post_arch']=decode_post_arch(text,evidence_id,pm_completed_generation(observation['pm_timer']),cpu_observation,result['xnu_payload_size'])
                 report['previous_boot_pm_cpus_arch_restore_observed']=observation['pm_post_arch']['pm_cpus_arch_restore_observed']
                 report['previous_boot_pm_cpus_payload_readback_observed']=observation['pm_post_arch']['pm_cpus_payload_readback_observed']
+            if pm_edge:
+                from decode_pm_edge import decode as decode_edge
+                observation['pm_edge']=decode_edge(text,evidence_id,pm_completed_generation(observation['pm_timer']),observation['dma_pm_audit'],observation['iommu_pm_audit'])
+                for key in ('dma_noirq_coverage','iommu_noirq_inventory','syscore_inventory'):
+                    report['previous_boot_'+key+'_observed']=observation['pm_edge'][key]
         except ValueError as error:
             report['decode_failures'][name]=str(error);continue
         (out/'reservation-observation.json').write_text(json.dumps(observation,indent=2),encoding='utf-8')
@@ -322,9 +334,10 @@ def collect(packages,kernel_build,adb):
                                  (not pm_noirq or (report['previous_boot_pm_late_noirq_observed'] and report['previous_boot_noirq_pmu_domains_observed'])) and
                                  (not pmu_settle or report['previous_boot_pmu_settle_observed']) and
                                  (not pm_cpus or (report['previous_boot_pm_cpus_noirq_observed'] and report['previous_boot_cpu_stop_pmu_domains_observed'] and report['previous_boot_pm_cpus_timers_observed'])) and
-                                 (not pm_post_arch or (report['previous_boot_pm_cpus_arch_restore_observed'] and report['previous_boot_pm_cpus_payload_readback_observed'])))
+                                 (not pm_post_arch or (report['previous_boot_pm_cpus_arch_restore_observed'] and report['previous_boot_pm_cpus_payload_readback_observed'])) and
+                                 (not pm_edge or all(report['previous_boot_'+key+'_observed'] for key in ('dma_noirq_coverage','iommu_noirq_inventory','syscore_inventory'))))
     report['evaluation_items']={}
-    for item in ('reservation','window_access','xnu_payload_stage','cpu_cache_roundtrip','pm_timer','gic_roundtrip','dma_pm_audit','ufs_pm_audit','iommu_pm_audit','abox_pm_audit','abox_pmu_audit','pmu_domain_status','fsys0a_policy','pm_late_noirq','noirq_pmu_domains','pmu_settle','pm_cpus_noirq','cpu_stop_pmu_domains','pm_cpus_timers','pm_cpus_arch_restore','pm_cpus_payload_readback'):
+    for item in ('reservation','window_access','xnu_payload_stage','cpu_cache_roundtrip','pm_timer','gic_roundtrip','dma_pm_audit','ufs_pm_audit','iommu_pm_audit','abox_pm_audit','abox_pmu_audit','pmu_domain_status','fsys0a_policy','pm_late_noirq','noirq_pmu_domains','pmu_settle','pm_cpus_noirq','cpu_stop_pmu_domains','pm_cpus_timers','pm_cpus_arch_restore','pm_cpus_payload_readback','dma_noirq_coverage','iommu_noirq_inventory','syscore_inventory'):
         required=item=='reservation' or report[item+'_required']
         observed=report['previous_boot_'+item+'_observed']
         report['evaluation_items'][item]={'required':required,'status':'passed' if observed else ('failed' if required else 'not_requested')}

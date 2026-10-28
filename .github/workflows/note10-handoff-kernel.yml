@@ -267,6 +267,21 @@ jobs:
             note10/private/handoff-kernel/pm-cpus-queue-model/result.json
             note10/private/handoff-kernel/pm-cpus-queue-model/*.log
             note10/private/handoff-kernel/pm-post-arch-model/result.json
+            note10/private/handoff-kernel/pm-edge-dma-model/result.json
+            note10/private/handoff-kernel/pm-edge-iommu-model/result.json
+            note10/private/handoff-kernel/pm-edge-syscore-model/result.json
+            note10/private/handoff-kernel/pm-edge-integration-model/result.json
+            note10/private/handoff-kernel/pm-edge-integration-model/producer-0.log
+            note10/private/handoff-kernel/pm-edge-integration-model/producer-1.log
+            note10/private/handoff-kernel/pm-edge-integration-model/producer-2.log
+            note10/private/handoff-kernel/pm-edge-integration-model/producer-3.log
+            note10/private/handoff-kernel/pm-edge-integration-model/producer-4.log
+            note10/private/handoff-kernel/pm-edge-integration-model/producer-5.log
+            note10/private/handoff-kernel/pm-edge-integration-model/producer-6.log
+            note10/private/handoff-kernel/pm-edge-integration-model/producer-7.log
+            note10/private/handoff-kernel/pm-edge-integration-model/producer-8.log
+            note10/private/handoff-kernel/pm-edge-decoder-model/result.json
+            note10/private/handoff-kernel/pm-edge-binding-model/result.json
             note10/private/handoff-kernel/pm-post-arch-model/*.log
             note10/private/handoff-kernel/fsys-pm-model/result.json
             note10/private/handoff-kernel/fsys-pm-model/*.log

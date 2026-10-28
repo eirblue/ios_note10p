@@ -127,6 +127,12 @@ def check(packages,kernel_build,backup,core_model,gate_model,init_model,adb):
         if post_scope:
             if any(m.get('pm_post_arch_evidence_version')!=1 for m in (paired,diagnostic)):raise ValueError('Post-PM CPU package version differs')
             validate_post(kernel_build,build)
+        from pm_edge_binding import assert_scope as assert_edge_scope,validate_model as validate_edge
+        edge_scope=assert_edge_scope(kernel_build,build)
+        if any(edge_scope!=bool(m.get('pm_edge_inventory_diagnostic')) for m in (paired,diagnostic)):raise ValueError('PM edge package scope differs')
+        if edge_scope:
+            if any(m.get('pm_edge_inventory_evidence_version')!=1 for m in (paired,diagnostic)):raise ValueError('PM edge package version differs')
+            validate_edge(kernel_build,build)
         if not (build.get('build_passed') is True and build.get('window_access_diagnostic') is True and
                 build.get('window_access_evidence_version')==1 and build.get('reservation_evidence_version')==2):
             raise ValueError('Successful opt-in access kernel build required')
