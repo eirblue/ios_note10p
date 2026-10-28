@@ -31,7 +31,7 @@ def main():
    try:
     status=Path('/proc')/str(pid)/'stat'
     if not status.exists() or status.read_text().split(') ')[1].startswith('Z'):return
-   except FileNotFoundError:return
+   except (FileNotFoundError,ProcessLookupError):return
    time.sleep(.02)
   raise AssertionError('child survived cancellation')
  command,pid=spawned('compiler-failure',True)
