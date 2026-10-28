@@ -1,5 +1,12 @@
 # 작업 상태 (2026-10-20, Asia/Seoul)
 
+## 2026-10-29: v42 PMU 제어 상태 관측과 실기기 회귀 통과
+
+- 기존 단일 CPU0 관측 경로에 기본 비활성 PMU 제어 상태 감사를 추가했다. 관측 범위와 접근 조건은 [PMU-CONTROL-AUDIT.md](device_test/PMU-CONTROL-AUDIT.md)에 기록했다.
+- 소스 `ca2260145601a65cf82fd9177a2a702c0daafd5a`의 [CI 40760960052](https://github.com/eirblue/ios_note10p/actions/runs/40760960052)가 통과했다. 실제 준비 소스와 PC 합성 모델을 포함한 20개 결속을 확인했다.
+- 실기기 단일 시험에서 39개 평가 전부, 자동 TWRP 복귀와 사후 5개 파티션 해시가 통과했다. 설치 직전 배터리는 52%였고 복귀 후 TWRP와 패널 밝기 설정값은 각각 raw 10으로 확인했다.
+- 관측은 EL1에서 보이는 상태에 한정된다. 상위 EL 접근 환경은 가정이며 동기 레지스터 접근 예외는 포착하지 않는다. 직접 CPU-PM 호출, 전체 하드웨어 복원, XNU 실행과 iOS 부팅은 검증하지 않았다.
+
 ## 2026-10-29: v41 PMU 소프트웨어 상태 관측과 실기기 회귀 통과
 
 - 기존 단일 CPU0 관측 경로에서 사용 중인 PMU 이벤트의 소유권·슬롯·소프트웨어 상태를 읽는 기본 비활성 감사를 추가했다. 실행 중·STOPPED·CPU affinity와 실제 실행 CPU를 구분하며, 범위는 [PMU-STATE-AUDIT.md](device_test/PMU-STATE-AUDIT.md)에 기록했다.
