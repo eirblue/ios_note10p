@@ -1,5 +1,8 @@
 # Bounded ABOX PMU control and standby observations
 
+The next guarded late/noirq extension keeps this v3 evidence intact and adds an
+independent snapshot lane; see [PM-NOIRQ-AUDIT.md](PM-NOIRQ-AUDIT.md).
+
 The v25 failed-firmware completion guard passed its single physical cycle:
 two absent callbacks were skipped, ABOX stayed runtime-suspended through the
 three software snapshots, and the normal system PM reference was balanced.

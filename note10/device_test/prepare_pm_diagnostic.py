@@ -50,12 +50,14 @@ def patch_suspend(raw):
 
 def prepare(source):
     path=source/'kernel/power/suspend.c'
-    patched=patch_suspend(path.read_bytes())
+    original=path.read_bytes()
+    patched=patch_suspend(original)
     targets={source/'include/linux/note10_pm_contract.h':HERE/'pm_test_contract.h',
              source/'include/linux/note10_pm_quiesce.h':HERE/'pm_quiesce_core.h',
              path.with_name('note10_pm_devices_backend.c'):HERE/'pm_devices_backend.c'}
     if any(p.exists() for p in targets):raise ValueError('Existing PM diagnostic extension')
-    for target,original in targets.items():target.write_bytes(original.read_bytes())
+    for target,source_file in targets.items():target.write_bytes(source_file.read_bytes())
+    path.with_name('suspend-upstream.c').write_bytes(original)
     path.write_bytes(patched)
     return {'pm_failure_stage_evidence_version':1,'pm_timer_diagnostic':True,'pm_timer_evidence_version':1,'boot_binding_evidence_version':1,
         'pm_timer_source_sha256':hashlib.sha256((HERE/'pm_timer_roundtrip.c').read_bytes()).hexdigest(),

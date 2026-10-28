@@ -9,6 +9,11 @@ struct n10_fsys_pm_sample {
 void n10_fsys_note(struct exynos_pm_domain *pd, unsigned int event, int result);
 int n10_fsys_gate(struct exynos_pm_domain *pd);
 void n10_fsys_pm_read(struct n10_fsys_pm_sample *out);
+struct n10_pmu_noirq_sample {
+    unsigned int generation, seen, error, before, state, after;
+};
+void n10_pmu_noirq_capture(unsigned int generation);
+int n10_pmu_noirq_read(struct n10_pmu_noirq_sample *out, unsigned int completed);
 struct n10_abox_pmu_sample {
     struct n10_fsys_pm_sample fsys;
     unsigned int phase, generation, seen, error, count;

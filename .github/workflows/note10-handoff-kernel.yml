@@ -48,7 +48,7 @@ on:
         default: false
 
       ufs_pm_audit:
-        description: Bundle UFS/HCI, IOMMU, ABOX firmware guard and bounded PMU, 16-domain status and passive FSYS policy traces; requires dma_pm_audit
+        description: Bundle UFS/HCI, IOMMU, ABOX, PMU and guarded late/noirq restoration with 16-domain and FSYS traces; requires dma_pm_audit
         type: boolean
         default: false
 
@@ -131,6 +131,7 @@ jobs:
             python note10/device_test/test_iommu_pm_contract.py
             python note10/device_test/test_abox_pm_contract.py
             python note10/device_test/test_abox_pmu_contract.py
+            python note10/device_test/test_pm_noirq_contract.py
           fi
           if [ "$NOTE10_GIC_ROUNDTRIP" = true ] && { [ "$NOTE10_AUTO_RETURN" != true ] || [ "$NOTE10_XNU_STAGE" != true ]; }; then
             echo "gic_roundtrip requires auto_return and xnu_stage" >&2
@@ -246,6 +247,10 @@ jobs:
             note10/private/handoff-kernel/abox-pm-model/*.log
             note10/private/handoff-kernel/abox-pmu-model/result.json
             note10/private/handoff-kernel/abox-pmu-model/*.log
+            note10/private/handoff-kernel/pm-noirq-model/result.json
+            note10/private/handoff-kernel/pm-noirq-model/*.log
+            note10/private/handoff-kernel/pm-noirq-pmu-model/result.json
+            note10/private/handoff-kernel/pm-noirq-pmu-model/*.log
             note10/private/handoff-kernel/fsys-pm-model/result.json
             note10/private/handoff-kernel/fsys-pm-model/*.log
             note10/private/handoff-kernel/iommu-pm-model/result.json

@@ -21,6 +21,12 @@ def pm_suspend_patch_bound(build,patch_model):
     if build.get('dma_pm_audit_diagnostic') is not True:
         return patch_model.get('patched_sha256')==build.get('patched_suspend_sha256')
     from prepare_pm_diagnostic import SUSPEND_SHA
+    if build.get('pm_noirq_diagnostic') is True:
+        from prepare_pm_noirq import BASE_SHA,FINAL_SHA
+        return (patch_model.get('source_sha256')==SUSPEND_SHA and patch_model.get('patched_sha256')==BASE_GUARDED_SUSPEND_SHA and
+            BASE_SHA==DMA_GUARDED_SUSPEND_SHA and build.get('pm_noirq_base_suspend_sha256')==BASE_SHA and
+            build.get('pm_noirq_final_suspend_sha256')==FINAL_SHA and build.get('patched_suspend_sha256')==FINAL_SHA and
+            build.get('dma_pm_audit_patched_sha256',{}).get('kernel/power/suspend.c')==BASE_SHA)
     return (patch_model.get('source_sha256')==SUSPEND_SHA and
         patch_model.get('patched_sha256')==BASE_GUARDED_SUSPEND_SHA and
         build.get('patched_suspend_sha256')==DMA_GUARDED_SUSPEND_SHA and
@@ -97,6 +103,12 @@ def check(packages,kernel_build,backup,core_model,gate_model,init_model,adb):
         if pmu_scope:
             if any(m.get('abox_pmu_audit_evidence_version')!=3 for m in (paired,diagnostic)):raise ValueError('PMU package evidence version differs')
             validate_pmu(kernel_build,build)
+        from pm_noirq_binding import assert_scope as assert_noirq_scope,validate_model as validate_noirq
+        noirq_scope=assert_noirq_scope(kernel_build,build)
+        if any(noirq_scope!=bool(m.get('pm_noirq_diagnostic')) for m in (paired,diagnostic)):raise ValueError('Noirq package scope differs')
+        if noirq_scope:
+            if any(m.get('pm_noirq_evidence_version')!=1 for m in (paired,diagnostic)):raise ValueError('Noirq package evidence version differs')
+            validate_noirq(kernel_build,build)
         if not (build.get('build_passed') is True and build.get('window_access_diagnostic') is True and
                 build.get('window_access_evidence_version')==1 and build.get('reservation_evidence_version')==2):
             raise ValueError('Successful opt-in access kernel build required')
