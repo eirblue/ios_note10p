@@ -8,6 +8,8 @@ from prepare_dma_pm import HERE
 PINS = {
  'kernel/cpu_pm.c':'25cf098329a8f3d5487b6779726796b42081935a2bba4bb4a596d1e95f48fee1',
  'kernel/notifier.c':'ab19243be9cf32c9943fcdc352fef42357274ed4bbc9043f770f62e77bc968c5',
+ 'include/linux/notifier.h':'5a770c245e4491579b2572c795ab107ae9a6f0860b20f9331de27e1f005de7ba',
+ 'include/linux/cpu_pm.h':'08f396bad11b548ec4225b28a14fbf3a567659a84787ebed0f981616721e73de',
  'drivers/base/syscore.c':'fcb46388e39a3ca03c37cf334124a9b7a4f6d1c19881147a59399b934856f8ab',
  'kernel/irq/generic-chip.c':'6c83ea18ef12d6590efb1bd699e96e690d95b934543b27f1f89742d202d9d545',
  'kernel/time/clocksource.c':'a56b96cd62bcd7f00800f76574f6edbdfadd8d8cda64d88c61dcc707a127f8c9',

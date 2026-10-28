@@ -73,9 +73,9 @@ def _validate_core(root,build):
  verify_composition(root,intermediate)
  if b'CONFIG_NOTE10_CPU_PM_FAILURE_GUARD=y' in (root/'handoff.config').read_bytes().splitlines():
   directory=root/'cpu-pm-failure-guard-model'; model=json.loads((directory/'result.json').read_text(encoding='utf-8'))
-  expected={'kernel/cpu_pm.c':final['kernel/cpu_pm.c'],'kernel/notifier.c':PINS['kernel/notifier.c'],'drivers/base/syscore.c':PINS['drivers/base/syscore.c']}
+  expected={'kernel/cpu_pm.c':final['kernel/cpu_pm.c'],'kernel/notifier.c':PINS['kernel/notifier.c'],'drivers/base/syscore.c':PINS['drivers/base/syscore.c'],'include/linux/notifier.h':PINS['include/linux/notifier.h'],'include/linux/cpu_pm.h':PINS['include/linux/cpu_pm.h']}
   logs={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in directory.glob('*.log')}
-  cases=[0,1,*range(10,16),*range(20,26),30,31,32,33]
+  cases=[0,1,*range(10,16),*range(20,26),30,31,32,33,34]
   lifecycle=json.loads((root/'pm-build-concurrency-model/result.json').read_text(encoding='utf-8'))
   if lifecycle.get('passed') is not True or lifecycle.get('cases')!=['overlap','compiler-failure','validator-failure','timeout','interrupt','sigterm'] or lifecycle.get('harness_sha256')!=actual['test_pm_build_concurrency.py'] or lifecycle.get('helper_sha256')!=actual['pm_build_concurrency.py']:raise ValueError('Image process lifecycle proof differs')
   if model.get('passed') is not True or model.get('guard_off_body_equivalent') is not True or model.get('hardware_verified') is not False or model.get('source_sha256')!=expected or model.get('harness_sha256')!=actual['test_cpu_pm_failure_guard_native.py'] or model.get('generated_c_sha256')!=hashlib.sha256((directory/'guard.c').read_bytes()).hexdigest() or model.get('log_sha256')!=logs or model.get('outcomes')!=[{'case':x,'passed':True} for x in cases]:raise ValueError('CPU PM guard proof differs')
