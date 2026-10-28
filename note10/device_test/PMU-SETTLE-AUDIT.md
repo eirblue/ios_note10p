@@ -16,7 +16,9 @@ PMU_ALIVE configuration/status/configuration tuples: 48 reads, 144 total.
 There are no added power, clock, device PM, reset or firmware requests and no
 workqueue flush. The observer cannot force the sampled domain state.
 
-The PM mutex protects each bounded read lane. The prior owner must be released,
+The PM mutex protects each bounded read lane; contention fails immediately
+without waiting. Time is measured again after the last read, and a completion
+past 30 seconds fails even when it began within the limit. The prior owner must be released,
 the PM test level restored, and the successful noirq transaction, regular
 samples and restore counters must still match. The lane rejects missing,
 out-of-order or duplicate samples, stale generations and every read failure.
@@ -25,9 +27,10 @@ generation and completion, correct target and measured elapsed time. Targets
 are relative to the end of PM reporting, and valid execution is bounded to
 30 seconds; they are not exact scheduling guarantees. Samples remain sequential.
 
-The new C models cover 183 actual PMU/gate scenarios, including all 144 read
-fault positions, and 12 actual delayed-worker scenarios covering early/late
-execution, scheduling errors, failed reads, duplicate arming and jiffies wrap.
+The new C models cover 184 actual PMU/gate scenarios, including all 144 read
+fault positions, and 13 actual delayed-worker scenarios covering early/late
+execution, scheduling errors, failed reads, duplicate arming, jiffies wrap,
+PM mutex contention and a last read finishing beyond the deadline.
 Missing real PMU configuration must fail without reads. Full regression is
 262 tests. CI and the single v30 physical cycle are pending.
 

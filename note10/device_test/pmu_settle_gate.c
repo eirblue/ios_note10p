@@ -9,7 +9,7 @@ int n10_pm_settle_capture(struct n10_pmu_settle_sample *out,
     if (!out) return -EINVAL;
     memset(out, 0, sizeof(*out));out->completed = completed;out->index = index;out->error = 5;
     if (!completed || index >= 3 || irqs_disabled()) return -EINVAL;
-    mutex_lock(&pm_mutex);
+    if (!mutex_trylock(&pm_mutex)) return -EBUSY;
     following = n10_pm_noirq_last.generation + 1;
     if (!following) following = 1;
     if (!n10_pm_owner && !n10_pm_active && pm_test_level == TEST_NONE && following == completed &&

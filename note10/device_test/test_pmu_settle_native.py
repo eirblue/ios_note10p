@@ -27,6 +27,7 @@ static void *n10_pm_owner,*n10_pm_active;
 static struct {int failed_resume_early,failed_resume_noirq;} suspend_stats;
 static int irqs_disabled(void){return irq;}
 static void mutex_lock(unsigned int*p){if(pm_mutex || irq)abort();pm_mutex=1;}
+static int mutex_trylock(unsigned int*p){if(irq)abort();if(pm_mutex)return 0;pm_mutex=1;return 1;}
 static void mutex_unlock(unsigned int*p){if(!pm_mutex)abort();pm_mutex=0;}
 static int regmap_read(struct regmap*m,unsigned int offset,unsigned int*out){
  static const unsigned int table[16][2]=DOMAIN_ARRAY;
@@ -91,12 +92,13 @@ int main(int argc,char**argv){
  if(st_mode==174)n10_pm_noirq_last.ops_mask=1;
  if(st_mode==175)++n10_pm_noirq_last.generation;
  if(st_mode==182)index=3;
+ if(st_mode==183)pm_mutex=1;
  saved=irq;memset(&out,0,sizeof(out));
  for(i=index;i<3 || i==index;++i){ret=n10_pm_settle_capture(st_mode==168?NULL:&out,completed,i);if(ret || i>=2)break;}
  if(st_mode==178){ret=n10_pm_settle_capture(&out,completed,2);if(st_reads!=144)abort();}
  if(st_mode==179){ret=n10_pm_settle_capture(&out,completed,0);if(st_reads!=1)abort();}
  if(st_mode==180){baseline(5);for(i=0;i<3;++i){ret=n10_pm_settle_capture(&out,6,i);if(ret)abort();}}
- if(irq!=saved || pm_mutex || refs[0] || refs[1] || refs[2] || locks[0] || locks[1] || locks[2] || node_refs)abort();
+ if(irq!=saved || pm_mutex!=(st_mode==183) || refs[0] || refs[1] || refs[2] || locks[0] || locks[1] || locks[2] || node_refs)abort();
  printf("{\"mode\":%u,\"ret\":%d,\"reads\":%u,\"before\":%u,\"state\":%u,\"after\":%u}\n",st_mode,ret,st_reads,out.before,out.state,out.after);return 0;
 }
 '''
@@ -130,6 +132,7 @@ static int n10_pm_settle_capture(struct n10_pmu_settle_sample*s,unsigned int gen
  if(generation!=completed || index!=captures++)abort();memset(s,0,sizeof(*s));
  s->generation=generation==1?0xffffffffU:generation-1;s->completed=generation;s->index=index;
  if((wm==5 && index==0)||(wm==6 && index==1)){s->error=4;return -EIO;}
+ if(wm==12 && index==2)jiffies+=30001;
  s->before=s->state=s->after=index==0?0xffff:index==1?0x4000:0;return 0;
 }
 '''
@@ -168,7 +171,7 @@ def run(output,core_driver,pmu_source,domain_source):
         if made.returncode:raise ValueError('Settle C model compilation failed: '+name)
         return exe
     exe=build('settle',common+DRIVER);rows=[]
-    for mode in range(183):
+    for mode in range(184):
         ran=subprocess.run([str(exe),str(mode)],capture_output=True,timeout=15);(output/f'pmu-{mode}.log').write_bytes(ran.stdout+ran.stderr)
         if ran.returncode:raise ValueError('Settle lifetime/IRQ/lock invariant failed mode '+str(mode))
         row=json.loads(ran.stdout);accepted=row['ret']==0
@@ -179,7 +182,7 @@ def run(output,core_driver,pmu_source,domain_source):
     checksum=re.search(r'static u32 n10_frame_checksum[^}]+}',(HERE/'xnu_reserve.c').read_text()).group()
     wh=clean((HERE/'pmu_settle_contract.h').read_text()).replace('int n10_pm_settle_capture(','static int n10_pm_settle_capture(')
     worker=build('worker',WORKER_STUB+wh+WORKER_DRIVER+checksum+clean((HERE/'pmu_settle_probe.c').read_text())+WORKER_MAIN);worker_rows=[]
-    for mode in range(12):
+    for mode in range(13):
         ran=subprocess.run([str(worker),str(mode)],capture_output=True,timeout=15);(output/f'worker-{mode}.log').write_bytes(ran.stdout+ran.stderr)
         if ran.returncode:raise ValueError('Settle actual worker scheduling invariant failed mode '+str(mode))
         try:decode(ran.stdout.decode(),IDENTITY,1 if mode==8 else 2);accepted=True
@@ -194,10 +197,11 @@ return n10_pmu_settle_capture(&out,2,0)!=-EIO || out.error!=2 || st_reads || rea
 ''')
     ran=subprocess.run([str(missing)],capture_output=True,timeout=15);(output/'missing-config.log').write_bytes(ran.stdout+ran.stderr)
     if ran.returncode:raise ValueError('Disabled PMU stub accepted in timed lane')
-    result=dict(passed=True,cases=183,outcomes=rows,worker_cases=12,worker_outcomes=worker_rows,
+    result=dict(passed=True,cases=184,outcomes=rows,worker_cases=13,worker_outcomes=worker_rows,
         actual_pmu_api_and_gate_executed=True,actual_delayed_worker_executed=True,all_144_read_faults_refused=True,
         no_pm_owner_or_device_locks_in_read_lane=True,default_power_requests_unchanged=True,generation_wrap_and_reset_executed=True,
         missing_config_refused_without_reads=True,
+        pm_mutex_contention_refused_without_wait=True,last_read_completion_deadline_checked=True,
         hardware_verified=False,source_sha256={n:hashlib.sha256((HERE/n).read_bytes()).hexdigest() for n in SOURCES},
         regular_backend_sha256=hashlib.sha256((HERE/'abox_pmu_backend.c').read_bytes()).hexdigest(),
         noirq_backend_sha256=hashlib.sha256((HERE/'pm_noirq_backend.c').read_bytes()).hexdigest(),

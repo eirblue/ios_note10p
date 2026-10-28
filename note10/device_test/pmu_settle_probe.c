@@ -41,6 +41,8 @@ static void n10_settle_worker(struct work_struct *unused)
         n10_settle_record(&sample, target, elapsed, -EIO);n10_settle_index = 3;return;
     }
     status = n10_pm_settle_capture(&sample, n10_settle_generation, n10_settle_index);
+    elapsed = jiffies_to_msecs(jiffies - n10_settle_start);
+    if (elapsed > 30000) { sample.error = 8; status = -EIO; }
     n10_settle_record(&sample, target, elapsed, status);
     if (status) { n10_settle_index = 3; return; }
     if (++n10_settle_index >= 3) return;

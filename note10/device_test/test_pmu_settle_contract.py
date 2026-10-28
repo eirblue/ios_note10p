@@ -48,10 +48,11 @@ class BindingTests(unittest.TestCase):
         actual={n:hashlib.sha256((HERE/n).read_bytes()).hexdigest() for n in SOURCES}
         self.build=dict(pmu_settle_diagnostic=True,pmu_settle_evidence_version=1,pm_noirq_diagnostic=True,pm_noirq_evidence_version=1,pmu_settle_sources_sha256=actual)
         def reads(i):return i if 1<=i<=144 else 144 if i in (0,176,177,178,181) else 288 if i==180 else 1 if i==179 else 0
-        self.model=dict(passed=True,cases=183,outcomes=[dict(mode=i,passed=True,accepted=i in (0,176,177,180,181),reads=reads(i)) for i in range(183)],
-            worker_cases=12,worker_outcomes=[dict(mode=i,passed=True,accepted=i in (0,1,2,8,9,10,11)) for i in range(12)],
+        self.model=dict(passed=True,cases=184,outcomes=[dict(mode=i,passed=True,accepted=i in (0,176,177,180,181),reads=reads(i)) for i in range(184)],
+            worker_cases=13,worker_outcomes=[dict(mode=i,passed=True,accepted=i in (0,1,2,8,9,10,11)) for i in range(13)],
             actual_pmu_api_and_gate_executed=True,actual_delayed_worker_executed=True,all_144_read_faults_refused=True,
             no_pm_owner_or_device_locks_in_read_lane=True,default_power_requests_unchanged=True,generation_wrap_and_reset_executed=True,missing_config_refused_without_reads=True,
+            pm_mutex_contention_refused_without_wait=True,last_read_completion_deadline_checked=True,
             hardware_verified=False,source_sha256=actual,
             regular_backend_sha256=hashlib.sha256((HERE/'abox_pmu_backend.c').read_bytes()).hexdigest(),
             noirq_backend_sha256=hashlib.sha256((HERE/'pm_noirq_backend.c').read_bytes()).hexdigest(),
