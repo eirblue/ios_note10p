@@ -346,6 +346,19 @@ jobs:
             note10/private/handoff-kernel/pmu-state-collector-model/result.json
             note10/private/handoff-kernel/pmu-state-binding-model/result.json
             note10/private/handoff-kernel/pmu-state-package-flow-model/result.json
+            note10/private/handoff-kernel/pmu-control-prepared/**
+            note10/private/handoff-kernel/pmu-control-native-model/*.c
+            note10/private/handoff-kernel/pmu-control-native-model/*.log
+            note10/private/handoff-kernel/pmu-control-native-model/result.json
+            note10/private/handoff-kernel/pmu-control-final-lifecycle-model/*.c
+            note10/private/handoff-kernel/pmu-control-final-lifecycle-model/*.log
+            note10/private/handoff-kernel/pmu-control-final-lifecycle-model/result.json
+            note10/private/handoff-kernel/pmu-control-worker-model/*.c
+            note10/private/handoff-kernel/pmu-control-worker-model/*.log
+            note10/private/handoff-kernel/pmu-control-worker-model/result.json
+            note10/private/handoff-kernel/pmu-control-collector-model/result.json
+            note10/private/handoff-kernel/pmu-control-binding-model/result.json
+            note10/private/handoff-kernel/pmu-control-package-flow-model/result.json
             note10/private/handoff-kernel/pmu-failure-binding-model/result.json
             note10/private/handoff-kernel/pmu-failure-package-flow-model/result.json
             note10/private/handoff-kernel/pmu-failure-prepared/**

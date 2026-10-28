@@ -123,6 +123,8 @@ def collect(packages,kernel_build,adb):
     gic_priority=validate_priority(kernel_build,result)
     from pmu_state_binding import validate as validate_state
     pmu_state=validate_state(kernel_build,result)
+    from pmu_control_binding import validate as validate_control
+    pmu_control=validate_control(kernel_build,result)
     from pm_irq_binding import assert_scope as assert_irq_scope,validate_model as validate_irq
     pm_irq=assert_irq_scope(kernel_build,result)
     if pm_irq:validate_irq(kernel_build,result)
@@ -178,6 +180,7 @@ def collect(packages,kernel_build,adb):
     if bool(paired.get('pmu_failure_restore'))!=pmu_failure or (pmu_failure and paired.get('pmu_failure_restore_version')!=1):raise ValueError('Failure guard package/kernel scope differs')
     if bool(paired.get('gic_priority_restore'))!=gic_priority or (gic_priority and paired.get('gic_priority_restore_version')!=1):raise ValueError('GIC priority package/kernel scope differs')
     if bool(paired.get('pmu_state_audit'))!=pmu_state or (pmu_state and paired.get('pmu_state_audit_version')!=1):raise ValueError('PMU state package/kernel scope differs')
+    if bool(paired.get('pmu_control_audit'))!=pmu_control or (pmu_control and paired.get('pmu_control_audit_version')!=1):raise ValueError('PMU control package/kernel scope differs')
     if bool(paired.get('pm_irq_diagnostic'))!=pm_irq or (pm_irq and paired.get('pm_irq_evidence_version')!=1):raise ValueError('CPU0 IRQ package/kernel scope differs')
     if bool(paired.get('abox_pmu_audit_diagnostic'))!=abox_pmu_audit or (abox_pmu_audit and paired.get('abox_pmu_audit_evidence_version')!=3):raise ValueError('PMU package/kernel scope differs')
     if xnu_stage and (paired.get('xnu_payload_sha256')!=result.get('xnu_payload_sha256') or
@@ -213,6 +216,7 @@ def collect(packages,kernel_build,adb):
             'partition_writes':False,'rebooted':False,'xnu_executed':False,
             'gic_priority_restore_scope_verified':gic_priority,
             'pmu_state_audit_scope_verified':pmu_state,
+            'pmu_control_audit_scope_verified':pmu_control,
             'previous_boot_reservation_observed':False,
             'window_access_required':access,'previous_boot_window_access_observed':False,
             'xnu_payload_stage_required':xnu_stage,'previous_boot_xnu_payload_stage_observed':False,
@@ -367,6 +371,10 @@ def collect(packages,kernel_build,adb):
                 from decode_pmu_state import decode as decode_state
                 observation['pmu_state']=decode_state(text,evidence_id,pm_completed_generation(observation['pm_timer']),observation['pm_preconditions'],observation['pm_branch'])
                 report['previous_boot_cpu0_pmu_state_audit_observed']=True
+            if pmu_control:
+                from decode_pmu_control import decode as decode_control
+                observation['pmu_control']=decode_control(text,evidence_id,pm_completed_generation(observation['pm_timer']),observation['pm_preconditions'],observation['pm_branch'],observation['pmu_state'])
+                report['previous_boot_cpu0_pmu_control_audit_observed']=True
         except ValueError as error:
             report['decode_failures'][name]=str(error);continue
         (out/'reservation-observation.json').write_text(json.dumps(observation,indent=2),encoding='utf-8')
@@ -405,6 +413,10 @@ def collect(packages,kernel_build,adb):
         report['cpu0_pmu_state_audit_required']=True
         report.setdefault('previous_boot_cpu0_pmu_state_audit_observed',False)
         report['diagnostic_passed']=report['diagnostic_passed'] and report['previous_boot_cpu0_pmu_state_audit_observed']
+    if pmu_control:
+        report['cpu0_pmu_control_audit_required']=True
+        report.setdefault('previous_boot_cpu0_pmu_control_audit_observed',False)
+        report['diagnostic_passed']=report['diagnostic_passed'] and report['previous_boot_cpu0_pmu_control_audit_observed']
     report['evaluation_items']={}
     for item in ('reservation','window_access','xnu_payload_stage','cpu_cache_roundtrip','pm_timer','gic_roundtrip','dma_pm_audit','ufs_pm_audit','iommu_pm_audit','abox_pm_audit','abox_pmu_audit','pmu_domain_status','fsys0a_policy','pm_late_noirq','noirq_pmu_domains','pmu_settle','pm_cpus_noirq','cpu_stop_pmu_domains','pm_cpus_timers','pm_cpus_arch_restore','pm_cpus_payload_readback','dma_noirq_coverage','iommu_noirq_inventory','syscore_inventory','cpu0_irq_arch_timer','cpu0_irq_gic_readback','cpu_pm_notifier_inventory','generic_irq_callback_inventory','clocksource_callback_inventory','clockevent_callback_inventory','cpu0_pm_software_context','cpu0_gic_restore_inputs','cpu0_pmu_branch_audit','cpu0_gic_priority_footprint'):
         required=item=='reservation' or report[item+'_required']
@@ -412,6 +424,8 @@ def collect(packages,kernel_build,adb):
         report['evaluation_items'][item]={'required':required,'status':'passed' if observed else ('failed' if required else 'not_requested')}
     if pmu_state:
         report['evaluation_items']['cpu0_pmu_state_audit']={'required':True,'status':'passed' if report['previous_boot_cpu0_pmu_state_audit_observed'] else 'failed'}
+    if pmu_control:
+        report['evaluation_items']['cpu0_pmu_control_audit']={'required':True,'status':'passed' if report['previous_boot_cpu0_pmu_control_audit_observed'] else 'failed'}
     (out/'capture-result.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
     return report
 
