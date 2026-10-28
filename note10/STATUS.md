@@ -1,5 +1,13 @@
 # 작업 상태 (2026-10-20, Asia/Seoul)
 
+
+## 2026-10-29: v44 RCU 실행 문맥 관측과 단일 실기기 회귀 통과
+
+- 기본 비활성 RCU 문맥 감사를 추가해 기존 CPU0 notifier 관측 경로에서 RAM 전용 소프트웨어 상태를 제한적으로 읽는다. [관측 범위와 한계](device_test/RCU-CONTEXT-AUDIT.md).
+- 소스 `86e6f9c76fc1e156653fb66e621a873126a15b37`의 [CI 40775233439](https://github.com/eirblue/ios_note10p/actions/runs/40775233439)가 통과했다.
+- 단일 실기기 시험 1회에서 41개 평가가 모두 통과했고, 자동 TWRP 복귀와 사후 5개 파티션 해시 검증을 확인했다. 설치 전 배터리는 41%였으며, pre/post 무결성 확인 뒤 TWRP와 패널 raw 밝기를 10으로 확인했다.
+- 이 감사는 RAM 전용 관측이며 직접 CPU-PM 호출을 하지 않는다. 개별 필드 읽기는 원자적 스냅샷이 아니며 readiness, 완전한 하드웨어 복원, XNU 실행 또는 iOS 부팅을 증명하지 않는다.
+
 ## 2026-10-29: v43 FPSIMD 참조 관측과 실기기 회귀 통과
 
 - 기존 단일 CPU0 관측 경로에 기본 비활성 FPSIMD 참조 감사를 추가했다. 소프트웨어 참조의 의미와 관측 범위는 [FPSIMD-REFERENCE-AUDIT.md](device_test/FPSIMD-REFERENCE-AUDIT.md)에 기록했다.
