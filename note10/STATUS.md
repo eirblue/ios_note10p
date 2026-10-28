@@ -613,3 +613,10 @@ Exynos SoC MASTER 및 플랫폼 archive 입력 분리:
 - [v32 통합 커널 CI 40624098218](https://github.com/eirblue/ios_note10p/actions/runs/40624098218)와 새 실기기 시험 1회가 통과했다. 기존 22개와 새 2개를 묶은 평가 24개가 모두 통과했다.
 - PM 복귀 후 8개 CPU의 아키텍처 설정 비교와 페이로드 읽기 검사가 통과했다. 자동 TWRP 복귀와 5개 파티션 무결성도 통과했으며 설치 직전 배터리는 21%였다.
 - PC 회귀 275개, 실제 관측 코드 C 오류 주입 37개, 조합된 PM 작업 경로 8개가 통과했다. 전체 DMA 종료, GIC/MMU/cache 인계 및 XNU 실행은 검증되지 않았다. 상세 [PM 이후 CPU 관측](device_test/PM-POST-ARCH-AUDIT.md).
+
+## 2026-10-28: v33 PM 경계 읽기 전용 관측 시험 통과
+
+- 공개 소스 `4fec819`, [통합 커널 CI 40632421099](https://github.com/eirblue/ios_note10p/actions/runs/40632421099)와 새 실기기 시험 1회가 통과했다. 기존 평가와 새 3개를 묶은 27개 평가, 자동 TWRP 복귀 및 사후 5개 파티션 무결성 검사가 모두 통과했다.
+- PM 목록 1,388개 중 DMA 가능 장치는 277개였다. late/noirq 경계에서 각각 276개는 해당 PM 플래그가 설정됐고 1개는 syscore 예외였으며 미포함 범주는 0개였다. 이 값은 프레임워크 경유 여부이며 하드웨어 DMA 정지를 뜻하지 않는다.
+- 등록 IOMMU 18개 중 17개에서 해당 late/noirq 플래그를 관측했고 1개는 syscore 예외였다. 드라이버 소프트웨어 조건상 active 12개, runtime-active 0개였다. syscore callback 등록 11개는 시험 전후 순서와 이름이 동일했다. [PM-EDGE-INVENTORY.md](device_test/PM-EDGE-INVENTORY.md)에 관측 범위와 한계를 기록했다.
+- 실제 syscore 호출, 전체 DMA 정지, GIC/MMU/cache 인계, XNU 실행과 iOS 부팅은 확인하지 않았다.

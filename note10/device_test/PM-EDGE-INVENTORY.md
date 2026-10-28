@@ -13,3 +13,13 @@ Each successful record has two distinct checksummed copies tied to the build ide
 The diagnostic does not establish secure-world quiescence, syscore suspend/resume execution, GIC/MMU/cache handoff, XNU execution, or iOS boot. Per-device identities and callback inventories remain private capture data.
 
 The prepared-file manifest binds the exact modified helper bytes and fixed upstream compositions. Kconfig is cross-checked between the build report and the prepared-source integration model. Like the existing build proof, this relies on the source commit and CI artifact provenance; matching alterations to both metadata and model output are not an independent reconstruction of the complete Kconfig composition.
+
+## Physical result, 2026-10-28
+
+Source `4fec819c4b4c7a78179dfe0175ba635cbafa8214` and [CI 40632421099](https://github.com/eirblue/ios_note10p/actions/runs/40632421099) passed one physical diagnostic cycle. All 27 evaluations passed, automatic recovery returned to TWRP, and all five post-test partition hashes matched their expected values.
+
+The framework inventory contained 1,388 devices, including 277 DMA-capable devices. At each of the successful late and noirq boundaries, 276 DMA-capable devices had the corresponding PM flag set and one was a syscore exception; none remained in the uncovered category. These flags describe PM framework coverage, not hardware DMA idleness.
+
+The registered IOMMU inventory contained 18 controllers. At each boundary 17 had the corresponding PM flag and one was a syscore exception. Twelve controllers were active according to the driver's software predicate; zero met its runtime-active predicate. Activity was recorded rather than required to be zero. The syscore callback inventory contained 11 registered entries and matched exactly in order and callback names before and after the diagnostic. The syscore device exception is not proof of a registered syscore callback.
+
+These results do not establish hardware DMA shutdown, secure-world quiescence, syscore callback execution, GIC/MMU/cache handoff, XNU execution, iOS boot, or repeated-cycle stability. Detailed device and callback identities remain in the private capture.
