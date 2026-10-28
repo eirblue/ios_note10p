@@ -286,6 +286,18 @@ jobs:
             note10/private/handoff-kernel/pm-irq-decoder-model/result.json
             note10/private/handoff-kernel/pm-irq-integration-model/result.json
             note10/private/handoff-kernel/pm-irq-binding-model/result.json
+            note10/private/handoff-kernel/pm-callbacks-prepared/
+            note10/private/handoff-kernel/pm-callbacks-prepared-binding.json
+            note10/private/handoff-kernel/pm-callbacks-binding-input.json
+            note10/private/handoff-kernel/pm-callbacks-prepared-binding-model/
+            note10/private/handoff-kernel/pm-callbacks-lock-model/
+            note10/private/handoff-kernel/pm-callbacks-dispatcher-model/
+            note10/private/handoff-kernel/pm-callbacks-families-model/
+            note10/private/handoff-kernel/pm-callbacks-producer-model/
+            note10/private/handoff-kernel/pm-callbacks-integration-model/
+            note10/private/handoff-kernel/pm-callbacks-decoder-model/
+            note10/private/handoff-kernel/pm-callbacks-binding-model/
+            note10/private/handoff-kernel/pm-callbacks-coverage-model/result.json
             note10/private/handoff-kernel/pm-irq-native-model/mode-0.log
             note10/private/handoff-kernel/pm-irq-native-model/mode-19.log
             note10/private/handoff-kernel/pm-irq-native-model/mode-11.log

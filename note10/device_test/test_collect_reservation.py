@@ -86,6 +86,7 @@ class CollectorTests(unittest.TestCase):
             image=b'Linux version 4.14.113-note10-reserve-pc (fixture)\0'
             if version2 and not missing_image_id:image+=self.identity.encode()+b'\0'
             digest=hashlib.sha256(image).hexdigest();(build/'Image').write_bytes(image)
+            (build/'handoff.config').write_text('# CONFIG_NOTE10_PM_CALLBACK_INVENTORY is not set\n')
             report={'build_passed':True,'early_xnu_reservation':True,'image_sha256':digest}
             if version2:report.update(reservation_evidence_version=2,reservation_evidence_id=self.identity)
             if access:report.update(window_access_diagnostic=True,window_access_evidence_version=1)

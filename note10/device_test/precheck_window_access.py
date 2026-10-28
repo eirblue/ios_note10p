@@ -133,6 +133,12 @@ def check(packages,kernel_build,backup,core_model,gate_model,init_model,adb):
         if edge_scope:
             if any(m.get('pm_edge_inventory_evidence_version')!=1 for m in (paired,diagnostic)):raise ValueError('PM edge package version differs')
             validate_edge(kernel_build,build)
+        from pm_callbacks_binding import assert_scope as assert_callbacks_scope,validate_model as validate_callbacks
+        callbacks_scope=assert_callbacks_scope(kernel_build,build)
+        if any(callbacks_scope!=bool(m.get('pm_callbacks_diagnostic')) for m in (paired,diagnostic)):raise ValueError('Callback package scope differs')
+        if callbacks_scope:
+            if any(m.get('pm_callbacks_evidence_version')!=1 for m in (paired,diagnostic)):raise ValueError('Callback package version differs')
+            validate_callbacks(kernel_build,build)
         from pm_irq_binding import assert_scope as assert_irq_scope,validate_model as validate_irq
         irq_scope=assert_irq_scope(kernel_build,build)
         if any(irq_scope!=bool(m.get('pm_irq_diagnostic')) for m in (paired,diagnostic)):raise ValueError('CPU0 IRQ package scope differs')

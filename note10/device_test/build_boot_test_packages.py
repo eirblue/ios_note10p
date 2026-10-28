@@ -146,6 +146,10 @@ def build(backup,prototype,output,current_packages=None):
     if pm_post_arch and (not pm_cpus or not gic_roundtrip or not cpu_cache or metadata.get('pm_post_arch_evidence_version')!=1):raise ValueError('Incomplete post-PM CPU package contract')
     pm_edge=metadata.get('pm_edge_inventory_diagnostic') is True
     if pm_edge and (not pm_post_arch or not dma_pm_audit or not iommu_pm_audit or metadata.get('pm_edge_inventory_evidence_version')!=1):raise ValueError('Incomplete PM edge package contract')
+    pm_callbacks=metadata.get('pm_callbacks_diagnostic') is True
+    from pm_callbacks_binding import MARKERS as callback_markers
+    if any((marker in raw)!=pm_callbacks for marker in callback_markers):raise ValueError('Prototype callback Image scope differs')
+    if pm_callbacks and (metadata.get('pm_irq_diagnostic') is not True or metadata.get('pm_callbacks_evidence_version')!=1):raise ValueError('Incomplete callback package contract')
     pm_irq=metadata.get('pm_irq_diagnostic') is True
     if pm_irq and (not pm_edge or not pm_post_arch or not pm_cpus or metadata.get('pm_irq_evidence_version')!=1):raise ValueError('Incomplete CPU0 IRQ package contract')
     if dma_pm_audit and (not gic_roundtrip or metadata.get('dma_pm_audit_evidence_version')!=1):
@@ -192,6 +196,7 @@ def build(backup,prototype,output,current_packages=None):
             'pm_cpus_diagnostic':pm_cpus,'pm_cpus_evidence_version':1 if pm_cpus else None,
             'pm_post_arch_diagnostic':pm_post_arch,'pm_post_arch_evidence_version':1 if pm_post_arch else None,
             'pm_edge_inventory_diagnostic':pm_edge,'pm_edge_inventory_evidence_version':1 if pm_edge else None,
+            'pm_callbacks_diagnostic':pm_callbacks,'pm_callbacks_evidence_version':1 if pm_callbacks else None,
             'pm_irq_diagnostic':pm_irq,'pm_irq_evidence_version':1 if pm_irq else None,
             'abox_pmu_audit_diagnostic':abox_pmu_audit,'abox_pmu_audit_evidence_version':3 if abox_pmu_audit else None,
             'abox_pm_audit_diagnostic':abox_pm_audit,'abox_pm_audit_evidence_version':8 if abox_pm_audit else None,
@@ -235,6 +240,8 @@ def build(backup,prototype,output,current_packages=None):
         metadata['pm_post_arch_evidence_version']=1 if pm_post_arch and mode=='diagnostic' else None
         metadata['pm_edge_inventory_diagnostic']=pm_edge and mode=='diagnostic'
         metadata['pm_edge_inventory_evidence_version']=1 if pm_edge and mode=='diagnostic' else None
+        metadata['pm_callbacks_diagnostic']=pm_callbacks and mode=='diagnostic'
+        metadata['pm_callbacks_evidence_version']=1 if pm_callbacks and mode=='diagnostic' else None
         metadata['pm_irq_diagnostic']=pm_irq and mode=='diagnostic'
         metadata['pm_irq_evidence_version']=1 if pm_irq and mode=='diagnostic' else None
         metadata['abox_pmu_audit_diagnostic']=abox_pmu_audit and mode=='diagnostic'

@@ -18,10 +18,13 @@ def validate_model(root,build):
  if not assert_scope(root,build):return False
  root=Path(root);actual={n:hashlib.sha256((HERE/n).read_bytes()).hexdigest() for n in SOURCES}
  if build.get('pm_irq_source_pins')!=PINS or build.get('pm_irq_sources_sha256')!=actual:raise ValueError('CPU0 IRQ source binding differs')
+ from pm_callbacks_binding import assert_scope as assert_callbacks_scope
+ callbacks_enabled=assert_callbacks_scope(root,build)
  prepared=build.get('pm_irq_prepared_sha256')
+ prior_config=(build.get('pm_callbacks_intermediate_sha256',{}).get('kernel/power/Kconfig') if callbacks_enabled else build.get('pm_quiesce_patched_sha256',{}).get('kernel/power/Kconfig'))
  helpers={'include/linux/note10_pm_irq.h':'pm_irq_contract.h','kernel/power/note10_pm_irq.c':'pm_irq_backend.c','drivers/irqchip/note10_pm_irq_gic.c':'pm_irq_gic_backend.c','arch/arm64/mm/note10_pm_irq_probe.c':'pm_irq_probe.c'}
  expected=set(helpers)|{'kernel/power/note10_pm_cpus.c','arch/arm64/mm/note10_pm_timer_roundtrip.c','drivers/irqchip/irq-gic.c','kernel/power/suspend.c','kernel/power/Kconfig'}
- if not isinstance(prepared,dict) or set(prepared)!=expected or any(not isinstance(v,str) or len(v)!=64 or any(c not in '0123456789abcdef' for c in v) for v in prepared.values()) or any(prepared[k]!=actual[v] for k,v in helpers.items()) or prepared['kernel/power/suspend.c']!=FINAL_SHA or prepared['drivers/irqchip/irq-gic.c']!='2df647363116dbdf69860e7d8c2b8491a0b383f7020633f11dee4ca0f21ed9f5' or prepared['kernel/power/note10_pm_cpus.c']!=hashlib.sha256(instrument_cpu((HERE/'pm_cpus_backend.c').read_bytes())).hexdigest() or prepared['kernel/power/Kconfig']!=build.get('pm_quiesce_patched_sha256',{}).get('kernel/power/Kconfig'):
+ if not isinstance(prepared,dict) or set(prepared)!=expected or any(not isinstance(v,str) or len(v)!=64 or any(c not in '0123456789abcdef' for c in v) for v in prepared.values()) or any(prepared[k]!=actual[v] for k,v in helpers.items()) or prepared['kernel/power/suspend.c']!=FINAL_SHA or prepared['drivers/irqchip/irq-gic.c']!='2df647363116dbdf69860e7d8c2b8491a0b383f7020633f11dee4ca0f21ed9f5' or prepared['kernel/power/note10_pm_cpus.c']!=hashlib.sha256(instrument_cpu((HERE/'pm_cpus_backend.c').read_bytes())).hexdigest() or prepared['kernel/power/Kconfig']!=prior_config:
   raise ValueError('CPU0 IRQ prepared source differs')
  native=json.loads((root/'pm-irq-native-model/result.json').read_text());rows=native.get('outcomes')
  expected_sources={n:actual[n] for n in ('pm_irq_contract.h','pm_irq_backend.c','pm_irq_gic_backend.c','pm_irq_probe.c')}

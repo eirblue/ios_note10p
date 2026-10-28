@@ -212,6 +212,19 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             run([sys.executable,str(ROOT/'note10/device_test/test_pm_irq_decoder.py'),'--native',str(OUT/'pm-irq-native-model'),'--output',str(OUT/'pm-irq-decoder-model')],'03-pm-irq-decoder-model.log')
             run([sys.executable,str(ROOT/'note10/device_test/test_pm_irq_integration_native.py'),'--source-root',str(source),'--output',str(OUT/'pm-irq-integration-model')],'03-pm-irq-integration-model.log')
             run([sys.executable,str(ROOT/'note10/device_test/test_pm_irq_binding.py'),'--edge-artifact',str(OUT),'--source-root',str(source),'--native',str(OUT/'pm-irq-native-model'),'--decoder',str(OUT/'pm-irq-decoder-model'),'--integration',str(OUT/'pm-irq-integration-model'),'--output',str(OUT/'pm-irq-binding-model')],'03-pm-irq-binding-model.log')
+            from prepare_pm_callbacks import prepare as prepare_callbacks, snapshot_prepared as snapshot_callbacks
+            report.update(prepare_callbacks(source))
+            snapshot_callbacks(source,OUT/'pm-callbacks-prepared',report['pm_callbacks_prepared_sha256'])
+            (OUT/'pm-callbacks-prepared-binding.json').write_text(json.dumps({'final':report['pm_callbacks_prepared_sha256'],'intermediate':report['pm_callbacks_intermediate_sha256']},indent=2)+'\n',encoding='utf-8')
+            run([sys.executable,str(ROOT/'note10/device_test/test_pm_callbacks_prepared_binding.py'),'--artifact',str(OUT),'--output',str(OUT/'pm-callbacks-prepared-binding-model')],'03-pm-callbacks-prepared-binding.log')
+            run([sys.executable,str(ROOT/'note10/device_test/test_pm_callbacks_lock_native.py'),'--source-root',str(source),'--output',str(OUT/'pm-callbacks-lock-model')],'03-pm-callbacks-lock.log')
+            run([sys.executable,str(ROOT/'note10/device_test/test_pm_callbacks_dispatcher_native.py'),'--output',str(OUT/'pm-callbacks-dispatcher-model')],'03-pm-callbacks-dispatcher.log')
+            run([sys.executable,str(ROOT/'note10/device_test/test_pm_callbacks_families_native.py'),'--output',str(OUT/'pm-callbacks-families-model')],'03-pm-callbacks-families.log')
+            run([sys.executable,str(ROOT/'note10/device_test/test_pm_callbacks_producer.py'),'--output',str(OUT/'pm-callbacks-producer-model')],'03-pm-callbacks-producer.log')
+            run([sys.executable,str(ROOT/'note10/device_test/test_pm_callbacks_decoder.py'),'--native',str(OUT/'pm-callbacks-producer-model'),'--output',str(OUT/'pm-callbacks-decoder-model')],'03-pm-callbacks-decoder.log')
+            run([sys.executable,str(ROOT/'note10/device_test/test_pm_callbacks_binding.py'),'--output',str(OUT/'pm-callbacks-binding-model')],'03-pm-callbacks-binding.log')
+            run([sys.executable,str(ROOT/'note10/device_test/test_pm_callbacks_integration_native.py'),'--source-root',str(source),'--output',str(OUT/'pm-callbacks-integration-model')],'03-pm-callbacks-integration.log')
+            report['pm_quiesce_patched_sha256']['kernel/power/Kconfig']=hashlib.sha256((source/'kernel/power/Kconfig').read_bytes()).hexdigest()
             report['scope']='Bundled PM, CPU architecture and payload observations; no global DMA shutdown or XNU execution claim'
         make=['make','-C',str(source),'O='+str(objects),'ARCH=arm64',
               'CC=clang-14','CROSS_COMPILE=aarch64-linux-gnu-',
@@ -239,7 +252,7 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
         if pm_timer:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_PM_QUIESCE'],'02-pm-quiesce.log')
         if gic_roundtrip:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_GIC_ROUNDTRIP'],'02-gic-roundtrip.log')
         if dma_pm_audit:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_DMA_PM_AUDIT'],'02-dma-pm-audit.log')
-        if ufs_pm_audit:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_UFS_PM_AUDIT','--enable','NOTE10_IOMMU_PM_AUDIT','--enable','NOTE10_ABOX_PM_AUDIT','--enable','NOTE10_ABOX_FW_FAILURE_GUARD','--enable','NOTE10_ABOX_PMU_AUDIT','--enable','NOTE10_PM_NOIRQ_TEST','--enable','NOTE10_PMU_SETTLE','--enable','NOTE10_PM_CPUS_TEST','--enable','NOTE10_PM_POST_ARCH','--enable','NOTE10_PM_EDGE_INVENTORY','--enable','NOTE10_PM_IRQ_TEST'],'02-ufs-pm-audit.log')
+        if ufs_pm_audit:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_UFS_PM_AUDIT','--enable','NOTE10_IOMMU_PM_AUDIT','--enable','NOTE10_ABOX_PM_AUDIT','--enable','NOTE10_ABOX_FW_FAILURE_GUARD','--enable','NOTE10_ABOX_PMU_AUDIT','--enable','NOTE10_PM_NOIRQ_TEST','--enable','NOTE10_PMU_SETTLE','--enable','NOTE10_PM_CPUS_TEST','--enable','NOTE10_PM_POST_ARCH','--enable','NOTE10_PM_EDGE_INVENTORY','--enable','NOTE10_PM_IRQ_TEST','--enable','NOTE10_PM_CALLBACK_INVENTORY','--set-val','LOG_BUF_SHIFT','21'],'02-ufs-pm-audit.log')
         run([*make,'olddefconfig'],'03-olddefconfig.log')
         configured=config.read_text()
         required=('CONFIG_KEXEC=y','CONFIG_KEXEC_CORE=y','CONFIG_PM_SLEEP_SMP=y','CONFIG_ARM64_4K_PAGES=y')
@@ -247,7 +260,7 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
         if gic_roundtrip:required+=('CONFIG_NOTE10_GIC_ROUNDTRIP=y','CONFIG_ARM_GIC=y')
         if dma_pm_audit:required+=('CONFIG_NOTE10_DMA_PM_AUDIT=y',)
         if ufs_pm_audit:required+=('CONFIG_NOTE10_UFS_PM_AUDIT=y','CONFIG_SCSI_UFSHCD=y','CONFIG_SCSI_UFS_EXYNOS=y','CONFIG_NOTE10_IOMMU_PM_AUDIT=y','CONFIG_EXYNOS_IOMMU=y','CONFIG_NOTE10_ABOX_PM_AUDIT=y','CONFIG_NOTE10_ABOX_FW_FAILURE_GUARD=y','CONFIG_SND_SOC_SAMSUNG_ABOX=y','CONFIG_NOTE10_ABOX_PMU_AUDIT=y','CONFIG_EXYNOS_PMU=y','CONFIG_SOC_EXYNOS9820=y','CONFIG_EXYNOS_PM_DOMAINS=y','CONFIG_USB_DWC3_EXYNOS=y','CONFIG_NOTE10_PM_NOIRQ_TEST=y','CONFIG_NOTE10_PMU_SETTLE=y','CONFIG_NOTE10_PM_CPUS_TEST=y')
-        if ufs_pm_audit:required+=('CONFIG_NOTE10_PM_POST_ARCH=y','CONFIG_NOTE10_PM_EDGE_INVENTORY=y','CONFIG_NOTE10_PM_IRQ_TEST=y','CONFIG_PREEMPT_COUNT=y','CONFIG_KALLSYMS=y')
+        if ufs_pm_audit:required+=('CONFIG_NOTE10_PM_POST_ARCH=y','CONFIG_NOTE10_PM_EDGE_INVENTORY=y','CONFIG_NOTE10_PM_IRQ_TEST=y','CONFIG_NOTE10_PM_CALLBACK_INVENTORY=y','CONFIG_LOG_BUF_SHIFT=21','CONFIG_PREEMPT_COUNT=y','CONFIG_KALLSYMS=y')
         if reserve:required+=('CONFIG_INITRAMFS_FORCE=y','CONFIG_CMDLINE_EXTEND=y','CONFIG_CMDLINE="rdinit=/init"')
         if xnu_payload is not None:required+=('CONFIG_CRYPTO=y','CONFIG_CRYPTO_HASH=y','CONFIG_CRYPTO_SHA256=y')
         if cpu_cache:required+=('CONFIG_HOTPLUG_CPU=y','CONFIG_SMP=y','CONFIG_PM_SLEEP_SMP=y')
@@ -322,6 +335,10 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             validate_post_arch(OUT,report)
             from pm_edge_binding import validate_model as validate_edge
             validate_edge(OUT,report)
+            from pm_callbacks_binding import validate_model as validate_callbacks, binding_inputs as callback_binding_inputs
+            (OUT/'pm-callbacks-binding-input.json').write_text(json.dumps(callback_binding_inputs(report),indent=2)+'\n',encoding='utf-8')
+            run([sys.executable,str(ROOT/'note10/device_test/test_pm_callbacks_full_binding.py'),'--artifact',str(OUT),'--output',str(OUT/'pm-callbacks-coverage-model')],'03-pm-callbacks-coverage.log')
+            validate_callbacks(OUT,report)
             from pm_irq_binding import validate_model as validate_irq
             validate_irq(OUT,report)
         if auto_return:

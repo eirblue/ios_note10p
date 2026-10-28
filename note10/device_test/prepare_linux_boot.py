@@ -106,6 +106,8 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output,auto_cycle_token=None):
     validate_post_arch(kernel_build,build)
     from pm_edge_binding import validate_model as validate_edge
     validate_edge(kernel_build,build)
+    from pm_callbacks_binding import validate_model as validate_callbacks
+    validate_callbacks(kernel_build,build)
     from pm_irq_binding import validate_model as validate_irq
     validate_irq(kernel_build,build)
     if hashlib.sha256(config).hexdigest()!=build['effective_config_sha256']:
@@ -219,6 +221,8 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output,auto_cycle_token=None):
             'pm_post_arch_evidence_version':build.get('pm_post_arch_evidence_version'),
             'pm_edge_inventory_diagnostic':build.get('pm_edge_inventory_diagnostic') is True,
             'pm_edge_inventory_evidence_version':build.get('pm_edge_inventory_evidence_version'),
+            'pm_callbacks_diagnostic':build.get('pm_callbacks_diagnostic') is True,
+            'pm_callbacks_evidence_version':build.get('pm_callbacks_evidence_version'),
             'pm_irq_diagnostic':build.get('pm_irq_diagnostic') is True,
             'pm_irq_evidence_version':build.get('pm_irq_evidence_version'),
             'abox_pmu_audit_diagnostic':build.get('abox_pmu_audit_diagnostic') is True,
