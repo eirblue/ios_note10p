@@ -10,6 +10,7 @@ def main():
   for n in ('handoff.config','Image','pm-callbacks-prepared-binding.json') :shutil.copyfile(artifact/n,work/n)
   for n in ('prepared','prepared-binding-model','lock-model','dispatcher-model','families-model','producer-model','integration-model','decoder-model','binding-model'):
    shutil.copytree(artifact/('pm-callbacks-'+n),work/('pm-callbacks-'+n))
+  for n in ('cpu-pm-failure-guard-model','pm-build-concurrency-model'):shutil.copytree(artifact/n,work/n)
   if not _validate_core(work,build):raise AssertionError('baseline disabled')
   rows.append({'case':'baseline','passed':True})
   def reject(name,change,restore):
@@ -25,6 +26,9 @@ def main():
   old=copy.deepcopy(build['pm_callbacks_intermediate_sha256']);reject('intermediate_mismatch',lambda:build['pm_callbacks_intermediate_sha256'].__setitem__('kernel/power/suspend.c','0'*64),lambda:build.update(pm_callbacks_intermediate_sha256=old))
   log=work/'pm-callbacks-producer-model/mode-0.log';raw=log.read_bytes();reject('producer_log',lambda:log.write_bytes(raw+b'x'),lambda:log.write_bytes(raw))
   model=work/'pm-callbacks-dispatcher-model/result.json';raw=model.read_bytes();alter=json.loads(raw);alter['source_sha256']['pm_callbacks_backend.c']='0'*64;reject('source_model',lambda:model.write_text(json.dumps(alter),encoding='utf-8'),lambda:model.write_bytes(raw))
+  guard=work/'cpu-pm-failure-guard-model/result.json';raw=guard.read_bytes();reject('guard_missing',lambda:guard.unlink(),lambda:guard.write_bytes(raw))
+  alter=json.loads(raw);alter['source_sha256']['kernel/cpu_pm.c']='0'*64;reject('guard_source',lambda:guard.write_text(json.dumps(alter),encoding='utf-8'),lambda:guard.write_bytes(raw))
+  log=work/'cpu-pm-failure-guard-model/case-0.log';raw=log.read_bytes();reject('guard_log',lambda:log.write_bytes(raw+b'x'),lambda:log.write_bytes(raw))
  model_dirs=('prepared-binding','lock','dispatcher','families','producer','decoder','binding','integration')
  manifest={};cases={}
  for name in model_dirs:

@@ -1,13 +1,15 @@
 """Fail-closed binding for callback inventory Image, config and model evidence."""
 import hashlib,json
 from pathlib import Path
-from prepare_pm_callbacks import HERE,PINS,SOURCES,FILES
+from prepare_pm_callbacks import HERE,PINS,SOURCES,FILES,reverse_guard,GUARD_CONFIG,GUARD_MARKER
 MARKERS=(b'N10CBS1',b'N10CBR1',b'N10CBQ1')
 REQUIRED=(b'CONFIG_NOTE10_PM_IRQ_TEST=y',b'CONFIG_CPU_PM=y',b'CONFIG_GENERIC_IRQ_CHIP=y',b'CONFIG_GENERIC_CLOCKEVENTS=y',b'CONFIG_SMP=y',b'CONFIG_PREEMPT_COUNT=y',b'CONFIG_KALLSYMS=y',b'CONFIG_LOG_BUF_SHIFT=21')
 FORBIDDEN=('DEBUG_SNAPSHOT_SPINLOCK','DEBUG_SPINLOCK','DEBUG_MUTEXES','DEBUG_LOCK_ALLOC','TRACE_IRQFLAGS','DEBUG_SNAPSHOT_IRQ_DISABLED','DEBUG_SNAPSHOT_REG')
 def assert_scope(root,build):
  root=Path(root);config=(root/'handoff.config').read_bytes().splitlines();image=(root/'Image').read_bytes();enabled=b'CONFIG_NOTE10_PM_CALLBACK_INVENTORY=y' in config
  if any((m in image)!=enabled for m in MARKERS):raise ValueError('Callback actual Image/config scope differs')
+ guard=b'CONFIG_NOTE10_CPU_PM_FAILURE_GUARD=y' in config
+ if (b'N10CPUGUARD1' in image)!=guard:raise ValueError('CPU PM guard Image/config scope differs')
  if enabled!=(build.get('pm_callbacks_diagnostic') is True):raise ValueError('Callback metadata cannot downgrade actual scope')
  if enabled and (build.get('pm_callbacks_evidence_version')!=1 or any(x not in config for x in REQUIRED) or any(('CONFIG_'+n+'='+v).encode() in config for n in FORBIDDEN for v in ('y','m'))):raise ValueError('Callback config prerequisites differ')
  return enabled
@@ -30,7 +32,12 @@ def verify_composition(root,intermediate):
   if hashlib.sha256(raw).hexdigest()!=intermediate[path]:raise ValueError('Callback intermediate composition differs: '+path)
  for name,helper in (('kernel/cpu_pm.c','note10_pm_callbacks_cpu_pm.c'),('kernel/irq/generic-chip.c','note10_pm_callbacks_irq.c'),('kernel/time/clocksource.c','note10_pm_callbacks_clocksource.c'),('kernel/time/clockevents.c','note10_pm_callbacks_clockevent.c')):
   raw=(snapshot/name).read_bytes();suffix=('\n#ifdef CONFIG_NOTE10_PM_CALLBACK_INVENTORY\n#include "'+helper+'"\n#endif\n').encode()
-  if not raw.endswith(suffix) or hashlib.sha256(raw[:-len(suffix)]).hexdigest()!=PINS[name]:raise ValueError('Callback pinned TU composition differs: '+name)
+  if not raw.endswith(suffix):raise ValueError('Callback pinned TU suffix differs: '+name)
+  body=raw[:-len(suffix)]
+  if name=='kernel/cpu_pm.c':
+   if not body.endswith(GUARD_MARKER):raise ValueError('CPU PM guard marker differs')
+   body=reverse_guard(body[:-len(GUARD_MARKER)])
+  if hashlib.sha256(body).hexdigest()!=PINS[name]:raise ValueError('Callback pinned TU composition differs: '+name)
  cpu='kernel/power/note10_pm_cpus.c';raw=(snapshot/cpu).read_bytes();prefix=b'#ifdef CONFIG_NOTE10_PM_CALLBACK_INVENTORY\n#include <linux/note10_pm_callbacks.h>\n#endif\n'
  if not raw.startswith(prefix):raise ValueError('Callback CPU include differs')
  raw=raw[len(prefix):];raw=reverse(raw,b'#ifdef CONFIG_NOTE10_PM_CALLBACK_INVENTORY\n    if (!result) result = n10_cb_capture(1, generation);\n#endif\n    /* Mandatory even when freeze_secondary_cpus failed part-way. */',b'    /* Mandatory even when freeze_secondary_cpus failed part-way. */')
@@ -46,6 +53,7 @@ def verify_composition(root,intermediate):
  raw=reverse(raw,b'    int result, error = 0, i;\n#ifdef CONFIG_NOTE10_PM_CALLBACK_INVENTORY\n    bool callbacks_reported = false;\n#endif',b'    int result, error = 0, i;')
  raw=reverse(raw,b'#ifdef CONFIG_NOTE10_PM_CALLBACK_INVENTORY\n    callbacks_reported = true;\n    if (n10_report_pm_callbacks(pm.qgeneration, 0)) goto report;\n#endif\n    status = 0;\nreport:\n#ifdef CONFIG_NOTE10_PM_CALLBACK_INVENTORY\n    if (status && !callbacks_reported && pm.qgeneration && after == 255 && num_online_cpus() == 8 && !irqs_disabled())\n        (void)n10_report_pm_callbacks(pm.qgeneration, -EIO);\n#endif',b'    status = 0;\nreport:');same(worker,raw)
  config='kernel/power/Kconfig';raw=(snapshot/config).read_bytes();suffix=b'\nconfig NOTE10_PM_CALLBACK_INVENTORY\n\tbool "Experimental PM callback metadata inventory"\n\tdepends on NOTE10_PM_IRQ_TEST && CPU_PM && GENERIC_IRQ_CHIP && GENERIC_CLOCKEVENTS && SMP && PREEMPT_COUNT && KALLSYMS && !DEBUG_SNAPSHOT_SPINLOCK && !DEBUG_SPINLOCK && !DEBUG_MUTEXES && !DEBUG_LOCK_ALLOC\n\tdefault n\n'
+ suffix+=GUARD_CONFIG
  if not raw.endswith(suffix):raise ValueError('Callback Kconfig differs')
  same(config,raw[:-len(suffix)])
 
@@ -62,6 +70,14 @@ def _validate_core(root,build):
  expected_prior={'kernel/power/note10_pm_cpus.c':prior_irq.get('kernel/power/note10_pm_cpus.c'),'arch/arm64/mm/note10_pm_timer_roundtrip.c':prior_irq.get('arch/arm64/mm/note10_pm_timer_roundtrip.c'),'kernel/power/Kconfig':prior_irq.get('kernel/power/Kconfig'),'kernel/power/note10_pm_noirq.c':prior_edge.get('kernel/power/note10_pm_noirq.c'),'drivers/base/power/note10_dma_pm.c':prior_edge.get('drivers/base/power/note10_dma_pm.c'),'kernel/power/suspend.c':prior_irq.get('kernel/power/suspend.c')}
  if intermediate!=expected_prior or any(not v for v in expected_prior.values()):raise ValueError('Callback intermediate prerequisite differs')
  verify_composition(root,intermediate)
+ if b'CONFIG_NOTE10_CPU_PM_FAILURE_GUARD=y' in (root/'handoff.config').read_bytes().splitlines():
+  directory=root/'cpu-pm-failure-guard-model'; model=json.loads((directory/'result.json').read_text(encoding='utf-8'))
+  expected={'kernel/cpu_pm.c':final['kernel/cpu_pm.c'],'kernel/notifier.c':PINS['kernel/notifier.c'],'drivers/base/syscore.c':PINS['drivers/base/syscore.c']}
+  logs={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in directory.glob('*.log')}
+  cases=[0,1,*range(10,16),*range(20,26),30,31,32,33]
+  lifecycle=json.loads((root/'pm-build-concurrency-model/result.json').read_text(encoding='utf-8'))
+  if lifecycle.get('passed') is not True or lifecycle.get('cases')!=['overlap','compiler-failure','validator-failure','timeout','interrupt','sigterm'] or lifecycle.get('harness_sha256')!=actual['test_pm_build_concurrency.py'] or lifecycle.get('helper_sha256')!=actual['pm_build_concurrency.py']:raise ValueError('Image process lifecycle proof differs')
+  if model.get('passed') is not True or model.get('guard_off_body_equivalent') is not True or model.get('hardware_verified') is not False or model.get('source_sha256')!=expected or model.get('harness_sha256')!=actual['test_cpu_pm_failure_guard_native.py'] or model.get('generated_c_sha256')!=hashlib.sha256((directory/'guard.c').read_bytes()).hexdigest() or model.get('log_sha256')!=logs or model.get('outcomes')!=[{'case':x,'passed':True} for x in cases]:raise ValueError('CPU PM guard proof differs')
  prepared_meta=json.loads((root/'pm-callbacks-prepared-binding.json').read_text(encoding='utf-8'))
  if prepared_meta!={'final':final,'intermediate':intermediate}:raise ValueError('Callback prepared map differs')
  prepared_model=json.loads((root/'pm-callbacks-prepared-binding-model/result.json').read_text(encoding='utf-8'))
@@ -106,7 +122,7 @@ def validate_model(root,build):
  if record!=binding_inputs(build):raise ValueError('Callback binding input differs')
  coverage=json.loads((root/'pm-callbacks-coverage-model/result.json').read_text(encoding='utf-8'))
  source=Path(__file__).parent/'test_pm_callbacks_full_binding.py'
- if coverage.get('passed') is not True or coverage.get('cases')!=8 or any(not x.get('passed') for x in coverage.get('outcomes',[])) or coverage.get('harness_sha256')!=hashlib.sha256(source.read_bytes()).hexdigest() or coverage.get('binding_sha256')!=hashlib.sha256(Path(__file__).read_bytes()).hexdigest() or coverage.get('binding_input_sha256')!=hashlib.sha256((root/'pm-callbacks-binding-input.json').read_bytes()).hexdigest():raise ValueError('Callback binding mutation proof differs')
+ if coverage.get('passed') is not True or coverage.get('cases')!=11 or any(not x.get('passed') for x in coverage.get('outcomes',[])) or coverage.get('harness_sha256')!=hashlib.sha256(source.read_bytes()).hexdigest() or coverage.get('binding_sha256')!=hashlib.sha256(Path(__file__).read_bytes()).hexdigest() or coverage.get('binding_input_sha256')!=hashlib.sha256((root/'pm-callbacks-binding-input.json').read_bytes()).hexdigest():raise ValueError('Callback binding mutation proof differs')
  model_dirs=('prepared-binding','lock','dispatcher','families','producer','decoder','binding','integration');manifest={};outcomes={}
  for name in model_dirs:
   directory=root/('pm-callbacks-'+name+'-model');report=json.loads((directory/'result.json').read_text(encoding='utf-8'));outcomes[name]=report.get('outcomes',[])
@@ -122,5 +138,5 @@ def validate_model(root,build):
   'integration':{'success','later_gic_failure','family0_failure','capture_and_restore_failure','family1_failure','family2_failure','family3_failure','irq_failure','pmu_cpu_failure','pmu_pre_failure','off_success','off_restore_failure'}}
  if any({row.get('case') for row in outcomes[k]}!=v for k,v in expected_ids.items()):raise ValueError('Callback coverage case IDs differ')
  if {row.get('mode') for row in outcomes['dispatcher']}!={0,1,2,3,4,5,6,7,8,10,11,12,13,20,21,22,23} or {(r.get('family'),r.get('mode')) for r in outcomes['families']}!={(f,m) for f in range(4) for m in range(7)} or {(r.get('family'),r.get('success'),r.get('initial_irq_disabled')) for r in outcomes['lock']}!={(f,s,i) for f in (0,1) for s in (0,1) for i in (0,1)}:raise ValueError('Callback native case IDs differ')
- if {r.get('case') for r in coverage['outcomes']}!={'baseline','metadata_omitted','image_marker','snapshot_corrupt','snapshot_extra','intermediate_mismatch','producer_log','source_model'}:raise ValueError('Callback binding mutation case IDs differ')
+ if {r.get('case') for r in coverage['outcomes']}!={'baseline','metadata_omitted','image_marker','snapshot_corrupt','snapshot_extra','intermediate_mismatch','producer_log','source_model','guard_missing','guard_source','guard_log'}:raise ValueError('Callback binding mutation case IDs differ')
  return True

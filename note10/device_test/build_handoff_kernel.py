@@ -216,14 +216,6 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             report.update(prepare_callbacks(source))
             snapshot_callbacks(source,OUT/'pm-callbacks-prepared',report['pm_callbacks_prepared_sha256'])
             (OUT/'pm-callbacks-prepared-binding.json').write_text(json.dumps({'final':report['pm_callbacks_prepared_sha256'],'intermediate':report['pm_callbacks_intermediate_sha256']},indent=2)+'\n',encoding='utf-8')
-            run([sys.executable,str(ROOT/'note10/device_test/test_pm_callbacks_prepared_binding.py'),'--artifact',str(OUT),'--output',str(OUT/'pm-callbacks-prepared-binding-model')],'03-pm-callbacks-prepared-binding.log')
-            run([sys.executable,str(ROOT/'note10/device_test/test_pm_callbacks_lock_native.py'),'--source-root',str(source),'--output',str(OUT/'pm-callbacks-lock-model')],'03-pm-callbacks-lock.log')
-            run([sys.executable,str(ROOT/'note10/device_test/test_pm_callbacks_dispatcher_native.py'),'--output',str(OUT/'pm-callbacks-dispatcher-model')],'03-pm-callbacks-dispatcher.log')
-            run([sys.executable,str(ROOT/'note10/device_test/test_pm_callbacks_families_native.py'),'--output',str(OUT/'pm-callbacks-families-model')],'03-pm-callbacks-families.log')
-            run([sys.executable,str(ROOT/'note10/device_test/test_pm_callbacks_producer.py'),'--output',str(OUT/'pm-callbacks-producer-model')],'03-pm-callbacks-producer.log')
-            run([sys.executable,str(ROOT/'note10/device_test/test_pm_callbacks_decoder.py'),'--native',str(OUT/'pm-callbacks-producer-model'),'--output',str(OUT/'pm-callbacks-decoder-model')],'03-pm-callbacks-decoder.log')
-            run([sys.executable,str(ROOT/'note10/device_test/test_pm_callbacks_binding.py'),'--output',str(OUT/'pm-callbacks-binding-model')],'03-pm-callbacks-binding.log')
-            run([sys.executable,str(ROOT/'note10/device_test/test_pm_callbacks_integration_native.py'),'--source-root',str(source),'--output',str(OUT/'pm-callbacks-integration-model')],'03-pm-callbacks-integration.log')
             report['pm_quiesce_patched_sha256']['kernel/power/Kconfig']=hashlib.sha256((source/'kernel/power/Kconfig').read_bytes()).hexdigest()
             report['scope']='Bundled PM, CPU architecture and payload observations; no global DMA shutdown or XNU execution claim'
         make=['make','-C',str(source),'O='+str(objects),'ARCH=arm64',
@@ -252,7 +244,7 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
         if pm_timer:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_PM_QUIESCE'],'02-pm-quiesce.log')
         if gic_roundtrip:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_GIC_ROUNDTRIP'],'02-gic-roundtrip.log')
         if dma_pm_audit:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_DMA_PM_AUDIT'],'02-dma-pm-audit.log')
-        if ufs_pm_audit:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_UFS_PM_AUDIT','--enable','NOTE10_IOMMU_PM_AUDIT','--enable','NOTE10_ABOX_PM_AUDIT','--enable','NOTE10_ABOX_FW_FAILURE_GUARD','--enable','NOTE10_ABOX_PMU_AUDIT','--enable','NOTE10_PM_NOIRQ_TEST','--enable','NOTE10_PMU_SETTLE','--enable','NOTE10_PM_CPUS_TEST','--enable','NOTE10_PM_POST_ARCH','--enable','NOTE10_PM_EDGE_INVENTORY','--enable','NOTE10_PM_IRQ_TEST','--enable','NOTE10_PM_CALLBACK_INVENTORY','--set-val','LOG_BUF_SHIFT','21'],'02-ufs-pm-audit.log')
+        if ufs_pm_audit:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_UFS_PM_AUDIT','--enable','NOTE10_IOMMU_PM_AUDIT','--enable','NOTE10_ABOX_PM_AUDIT','--enable','NOTE10_ABOX_FW_FAILURE_GUARD','--enable','NOTE10_ABOX_PMU_AUDIT','--enable','NOTE10_PM_NOIRQ_TEST','--enable','NOTE10_PMU_SETTLE','--enable','NOTE10_PM_CPUS_TEST','--enable','NOTE10_PM_POST_ARCH','--enable','NOTE10_PM_EDGE_INVENTORY','--enable','NOTE10_PM_IRQ_TEST','--enable','NOTE10_PM_CALLBACK_INVENTORY','--enable','NOTE10_CPU_PM_FAILURE_GUARD','--set-val','LOG_BUF_SHIFT','21'],'02-ufs-pm-audit.log')
         run([*make,'olddefconfig'],'03-olddefconfig.log')
         configured=config.read_text()
         required=('CONFIG_KEXEC=y','CONFIG_KEXEC_CORE=y','CONFIG_PM_SLEEP_SMP=y','CONFIG_ARM64_4K_PAGES=y')
@@ -260,7 +252,7 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
         if gic_roundtrip:required+=('CONFIG_NOTE10_GIC_ROUNDTRIP=y','CONFIG_ARM_GIC=y')
         if dma_pm_audit:required+=('CONFIG_NOTE10_DMA_PM_AUDIT=y',)
         if ufs_pm_audit:required+=('CONFIG_NOTE10_UFS_PM_AUDIT=y','CONFIG_SCSI_UFSHCD=y','CONFIG_SCSI_UFS_EXYNOS=y','CONFIG_NOTE10_IOMMU_PM_AUDIT=y','CONFIG_EXYNOS_IOMMU=y','CONFIG_NOTE10_ABOX_PM_AUDIT=y','CONFIG_NOTE10_ABOX_FW_FAILURE_GUARD=y','CONFIG_SND_SOC_SAMSUNG_ABOX=y','CONFIG_NOTE10_ABOX_PMU_AUDIT=y','CONFIG_EXYNOS_PMU=y','CONFIG_SOC_EXYNOS9820=y','CONFIG_EXYNOS_PM_DOMAINS=y','CONFIG_USB_DWC3_EXYNOS=y','CONFIG_NOTE10_PM_NOIRQ_TEST=y','CONFIG_NOTE10_PMU_SETTLE=y','CONFIG_NOTE10_PM_CPUS_TEST=y')
-        if ufs_pm_audit:required+=('CONFIG_NOTE10_PM_POST_ARCH=y','CONFIG_NOTE10_PM_EDGE_INVENTORY=y','CONFIG_NOTE10_PM_IRQ_TEST=y','CONFIG_NOTE10_PM_CALLBACK_INVENTORY=y','CONFIG_LOG_BUF_SHIFT=21','CONFIG_PREEMPT_COUNT=y','CONFIG_KALLSYMS=y')
+        if ufs_pm_audit:required+=('CONFIG_NOTE10_PM_POST_ARCH=y','CONFIG_NOTE10_PM_EDGE_INVENTORY=y','CONFIG_NOTE10_PM_IRQ_TEST=y','CONFIG_NOTE10_PM_CALLBACK_INVENTORY=y','CONFIG_NOTE10_CPU_PM_FAILURE_GUARD=y','CONFIG_LOG_BUF_SHIFT=21','CONFIG_PREEMPT_COUNT=y','CONFIG_KALLSYMS=y')
         if reserve:required+=('CONFIG_INITRAMFS_FORCE=y','CONFIG_CMDLINE_EXTEND=y','CONFIG_CMDLINE="rdinit=/init"')
         if xnu_payload is not None:required+=('CONFIG_CRYPTO=y','CONFIG_CRYPTO_HASH=y','CONFIG_CRYPTO_SHA256=y')
         if cpu_cache:required+=('CONFIG_HOTPLUG_CPU=y','CONFIG_SMP=y','CONFIG_PM_SLEEP_SMP=y')
@@ -281,7 +273,24 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             # The parent Makefile owns ./cal_9820/*.o; that subdirectory has
             # no Makefile and cannot be invoked as a standalone Kbuild target.
             run([*make,'-j2','drivers/video/fbdev/exynos/dpu20/'],'04-display-objects.log')
-        run([*make,'-j'+str(min(os.cpu_count() or 2,8)),'Image'],'04-build.log',timeout=1500)
+        if ufs_pm_audit:
+            from pm_build_concurrency import run_concurrent
+            def validate_final():
+                run([sys.executable,str(ROOT/'note10/device_test/test_pm_callbacks_prepared_binding.py'),'--artifact',str(OUT),'--output',str(OUT/'pm-callbacks-prepared-binding-model')],'03-pm-callbacks-prepared-binding.log')
+                run([sys.executable,str(ROOT/'note10/device_test/test_pm_callbacks_lock_native.py'),'--source-root',str(source),'--output',str(OUT/'pm-callbacks-lock-model')],'03-pm-callbacks-lock.log')
+                run([sys.executable,str(ROOT/'note10/device_test/test_pm_callbacks_dispatcher_native.py'),'--output',str(OUT/'pm-callbacks-dispatcher-model')],'03-pm-callbacks-dispatcher.log')
+                run([sys.executable,str(ROOT/'note10/device_test/test_pm_callbacks_families_native.py'),'--output',str(OUT/'pm-callbacks-families-model')],'03-pm-callbacks-families.log')
+                run([sys.executable,str(ROOT/'note10/device_test/test_pm_callbacks_producer.py'),'--output',str(OUT/'pm-callbacks-producer-model')],'03-pm-callbacks-producer.log')
+                run([sys.executable,str(ROOT/'note10/device_test/test_pm_callbacks_decoder.py'),'--native',str(OUT/'pm-callbacks-producer-model'),'--output',str(OUT/'pm-callbacks-decoder-model')],'03-pm-callbacks-decoder.log')
+                run([sys.executable,str(ROOT/'note10/device_test/test_pm_callbacks_binding.py'),'--output',str(OUT/'pm-callbacks-binding-model')],'03-pm-callbacks-binding.log')
+                run([sys.executable,str(ROOT/'note10/device_test/test_pm_callbacks_integration_native.py'),'--source-root',str(source),'--output',str(OUT/'pm-callbacks-integration-model')],'03-pm-callbacks-integration.log')
+                run([sys.executable,str(ROOT/'note10/device_test/test_pm_build_concurrency.py'),'--output',str(OUT/'pm-build-concurrency-model')],'03-pm-build-concurrency.log')
+                run([sys.executable,str(ROOT/'note10/device_test/test_cpu_pm_failure_guard_native.py'),'--source-root',str(source),'--output',str(OUT/'cpu-pm-failure-guard-model')],'03-cpu-pm-failure-guard.log')
+            command=[*make,'-j'+str(min(os.cpu_count() or 2,8)),'Image']
+            report['commands'].append(command)
+            run_concurrent(command, OUT/'04-build.log', validate_final, timeout=1500)
+        else:
+            run([*make,'-j'+str(min(os.cpu_count() or 2,8)),'Image'],'04-build.log',timeout=1500)
         image=objects/'arch/arm64/boot/Image'
         with image.open('rb') as stream:header=stream.read(64)
         if len(header)!=64 or header[56:60]!=b'ARM\x64':raise ValueError('Missing ARM64 Image header')

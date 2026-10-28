@@ -8,6 +8,7 @@ from prepare_dma_pm import HERE
 PINS = {
  'kernel/cpu_pm.c':'25cf098329a8f3d5487b6779726796b42081935a2bba4bb4a596d1e95f48fee1',
  'kernel/notifier.c':'ab19243be9cf32c9943fcdc352fef42357274ed4bbc9043f770f62e77bc968c5',
+ 'drivers/base/syscore.c':'fcb46388e39a3ca03c37cf334124a9b7a4f6d1c19881147a59399b934856f8ab',
  'kernel/irq/generic-chip.c':'6c83ea18ef12d6590efb1bd699e96e690d95b934543b27f1f89742d202d9d545',
  'kernel/time/clocksource.c':'a56b96cd62bcd7f00800f76574f6edbdfadd8d8cda64d88c61dcc707a127f8c9',
  'kernel/time/clockevents.c':'2c62669cb18b13176b339dca314e2e8216da7261d27854e79a336e27338175b8',
@@ -19,12 +20,26 @@ PINS = {
  'arch/arm64/include/asm/spinlock.h':'aac67319de0ae323dc7ab912aaaba8547a603729931ce3c328ad789877e2aad8',
  'kernel/locking/spinlock.c':'d4ce3d228f6fccdfd241dfe4ed23986c2ef94ffd9111341f25fb20502748214c',
 }
-SOURCES=('pm_callbacks_contract.h','pm_callbacks_backend.c','pm_callbacks_cpu_pm_backend.c','pm_callbacks_irq_backend.c','pm_callbacks_clocksource_backend.c','pm_callbacks_clockevent_backend.c','pm_callbacks_probe.c','prepare_pm_callbacks.py','decode_pm_callbacks.py','pm_callbacks_binding.py','test_pm_callbacks_dispatcher_native.py','test_pm_callbacks_families_native.py','test_pm_callbacks_producer.py','test_pm_callbacks_integration_native.py','test_pm_callbacks_lock_native.py','test_pm_callbacks_decoder.py','test_pm_callbacks_binding.py','test_pm_callbacks_prepared_binding.py','test_pm_callbacks_full_binding.py')
+SOURCES=('pm_callbacks_contract.h','pm_callbacks_backend.c','pm_callbacks_cpu_pm_backend.c','pm_callbacks_irq_backend.c','pm_callbacks_clocksource_backend.c','pm_callbacks_clockevent_backend.c','pm_callbacks_probe.c','prepare_pm_callbacks.py','decode_pm_callbacks.py','pm_callbacks_binding.py','test_pm_callbacks_dispatcher_native.py','test_pm_callbacks_families_native.py','test_pm_callbacks_producer.py','test_pm_callbacks_integration_native.py','test_pm_callbacks_lock_native.py','test_pm_callbacks_decoder.py','test_pm_callbacks_binding.py','test_pm_callbacks_prepared_binding.py','test_pm_callbacks_full_binding.py','test_cpu_pm_failure_guard_native.py','pm_build_concurrency.py','test_pm_build_concurrency.py')
 FILES={'include/linux/note10_pm_callbacks.h':'pm_callbacks_contract.h','kernel/power/note10_pm_callbacks.c':'pm_callbacks_backend.c','kernel/note10_pm_callbacks_cpu_pm.c':'pm_callbacks_cpu_pm_backend.c','kernel/irq/note10_pm_callbacks_irq.c':'pm_callbacks_irq_backend.c','kernel/time/note10_pm_callbacks_clocksource.c':'pm_callbacks_clocksource_backend.c','kernel/time/note10_pm_callbacks_clockevent.c':'pm_callbacks_clockevent_backend.c','arch/arm64/mm/note10_pm_callbacks_probe.c':'pm_callbacks_probe.c'}
 def replace(raw, old, new):
     if raw.count(old)!=1: raise ValueError('Callback composition anchor differs')
     return raw.replace(old,new)
 def sha(raw): return hashlib.sha256(raw).hexdigest()
+GUARD_NR_OLD = b'\tint nr_calls;'
+GUARD_NR_NEW = b'#ifdef CONFIG_NOTE10_CPU_PM_FAILURE_GUARD\n\tint nr_calls = 0;\n#else\n\tint nr_calls;\n#endif'
+GUARD_EXIT_OLD = b'\tret = cpu_cluster_pm_enter();\n\treturn ret;'
+GUARD_EXIT_NEW = b'\tret = cpu_cluster_pm_enter();\n#ifdef CONFIG_NOTE10_CPU_PM_FAILURE_GUARD\n\tif (ret)\n\t\tcpu_pm_exit();\n#endif\n\treturn ret;'
+GUARD_MARKER = b'\n#ifdef CONFIG_NOTE10_CPU_PM_FAILURE_GUARD\nstatic const char n10_cpu_pm_failure_guard_marker[] __used = "N10CPUGUARD1";\n#endif\n'
+GUARD_CONFIG = b'\nconfig NOTE10_CPU_PM_FAILURE_GUARD\n\tbool "Repair CPU PM failure bookkeeping"\n\tdepends on NOTE10_PM_CALLBACK_INVENTORY && CPU_PM && PM\n\tdefault n\n'
+def apply_guard(raw):
+    if raw.count(GUARD_NR_OLD) != 2: raise ValueError('CPU PM count anchors differ')
+    return replace(raw.replace(GUARD_NR_OLD, GUARD_NR_NEW), GUARD_EXIT_OLD, GUARD_EXIT_NEW)
+
+def reverse_guard(raw):
+    if raw.count(GUARD_NR_NEW) != 2: raise ValueError('CPU PM guard count differs')
+    return replace(raw.replace(GUARD_NR_NEW, GUARD_NR_OLD), GUARD_EXIT_NEW, GUARD_EXIT_OLD)
+
 def prepare(source):
     source=Path(source)
     for name,digest in PINS.items():
@@ -53,9 +68,9 @@ def prepare(source):
         if p.exists(): raise ValueError('Callback helper already exists')
         p.write_bytes((HERE/name).read_bytes())
     for target,helper in (('kernel/cpu_pm.c','note10_pm_callbacks_cpu_pm.c'),('kernel/irq/generic-chip.c','note10_pm_callbacks_irq.c'),('kernel/time/clocksource.c','note10_pm_callbacks_clocksource.c'),('kernel/time/clockevents.c','note10_pm_callbacks_clockevent.c')):
-        p=source/target;p.write_bytes(p.read_bytes()+('\n#ifdef CONFIG_NOTE10_PM_CALLBACK_INVENTORY\n#include "'+helper+'"\n#endif\n').encode())
+        p=source/target; body=p.read_bytes(); body=apply_guard(body)+GUARD_MARKER if target=='kernel/cpu_pm.c' else body; p.write_bytes(body+('\n#ifdef CONFIG_NOTE10_PM_CALLBACK_INVENTORY\n#include "'+helper+'"\n#endif\n').encode())
     cpu.write_bytes(raw); noirq.write_bytes(noirq_raw); dma.write_bytes(dma_raw); worker.write_bytes(work)
-    config=source/'kernel/power/Kconfig'; config.write_bytes(config.read_bytes()+b'\nconfig NOTE10_PM_CALLBACK_INVENTORY\n\tbool "Experimental PM callback metadata inventory"\n\tdepends on NOTE10_PM_IRQ_TEST && CPU_PM && GENERIC_IRQ_CHIP && GENERIC_CLOCKEVENTS && SMP && PREEMPT_COUNT && KALLSYMS && !DEBUG_SNAPSHOT_SPINLOCK && !DEBUG_SPINLOCK && !DEBUG_MUTEXES && !DEBUG_LOCK_ALLOC\n\tdefault n\n')
+    config=source/'kernel/power/Kconfig'; config.write_bytes(config.read_bytes()+b'\nconfig NOTE10_PM_CALLBACK_INVENTORY\n\tbool "Experimental PM callback metadata inventory"\n\tdepends on NOTE10_PM_IRQ_TEST && CPU_PM && GENERIC_IRQ_CHIP && GENERIC_CLOCKEVENTS && SMP && PREEMPT_COUNT && KALLSYMS && !DEBUG_SNAPSHOT_SPINLOCK && !DEBUG_SPINLOCK && !DEBUG_MUTEXES && !DEBUG_LOCK_ALLOC\n\tdefault n\n'+GUARD_CONFIG)
     if sha(suspend.read_bytes())!=FINAL_SHA: raise ValueError('Guarded suspend changed')
     paths=[cpu,noirq,dma,worker,suspend,config]+[source/p for p in FILES]+[source/p for p in ('kernel/cpu_pm.c','kernel/irq/generic-chip.c','kernel/time/clocksource.c','kernel/time/clockevents.c')]
     return {'pm_callbacks_diagnostic':True,'pm_callbacks_evidence_version':1,'pm_callbacks_source_pins':PINS,'pm_callbacks_sources_sha256':{n:sha((HERE/n).read_bytes()) for n in SOURCES},'pm_callbacks_intermediate_sha256':intermediate,'pm_callbacks_prepared_sha256':{str(p.relative_to(source)).replace('\\','/'):sha(p.read_bytes()) for p in paths}}
