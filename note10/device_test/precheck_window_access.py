@@ -109,6 +109,12 @@ def check(packages,kernel_build,backup,core_model,gate_model,init_model,adb):
         if noirq_scope:
             if any(m.get('pm_noirq_evidence_version')!=1 for m in (paired,diagnostic)):raise ValueError('Noirq package evidence version differs')
             validate_noirq(kernel_build,build)
+        from pmu_settle_binding import assert_scope as assert_settle_scope,validate_model as validate_settle
+        settle_scope=assert_settle_scope(kernel_build,build)
+        if any(settle_scope!=bool(m.get('pmu_settle_diagnostic')) for m in (paired,diagnostic)):raise ValueError('Timed PMU package scope differs')
+        if settle_scope:
+            if any(m.get('pmu_settle_evidence_version')!=1 for m in (paired,diagnostic)):raise ValueError('Timed PMU package version differs')
+            validate_settle(kernel_build,build)
         if not (build.get('build_passed') is True and build.get('window_access_diagnostic') is True and
                 build.get('window_access_evidence_version')==1 and build.get('reservation_evidence_version')==2):
             raise ValueError('Successful opt-in access kernel build required')

@@ -99,3 +99,7 @@ int n10_pm_noirq_read(struct n10_pm_noirq_sample *out,
         return -EIO;
     return 0;
 }
+
+#ifdef CONFIG_NOTE10_PMU_SETTLE
+#include "note10_pmu_settle_gate.c"
+#endif

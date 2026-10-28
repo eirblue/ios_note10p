@@ -188,3 +188,7 @@ int n10_pmu_noirq_read(struct n10_pmu_noirq_sample *out, unsigned int completed)
     return 0;
 }
 #endif
+
+#ifdef CONFIG_NOTE10_PMU_SETTLE
+#include "note10_pmu_settle.c"
+#endif
