@@ -129,6 +129,8 @@ def collect(packages,kernel_build,adb):
     fpsimd_reference=validate_fpsimd(kernel_build,result)
     from rcu_context_binding import validate as validate_rcu
     rcu_context=validate_rcu(kernel_build,result)
+    from ehld_lock_binding import validate as validate_ehld_lock
+    ehld_lock=validate_ehld_lock(kernel_build,result)
     from pm_irq_binding import assert_scope as assert_irq_scope,validate_model as validate_irq
     pm_irq=assert_irq_scope(kernel_build,result)
     if pm_irq:validate_irq(kernel_build,result)
@@ -187,6 +189,7 @@ def collect(packages,kernel_build,adb):
     if bool(paired.get('pmu_control_audit'))!=pmu_control or (pmu_control and paired.get('pmu_control_audit_version')!=1):raise ValueError('PMU control package/kernel scope differs')
     if bool(paired.get('fpsimd_reference_audit'))!=fpsimd_reference or (fpsimd_reference and paired.get('fpsimd_reference_audit_version')!=1):raise ValueError('FPSIMD reference package/kernel scope differs')
     if bool(paired.get('rcu_context_audit'))!=rcu_context or (rcu_context and paired.get('rcu_context_audit_version')!=1):raise ValueError('RCU context package/kernel scope differs')
+    if bool(paired.get('ehld_lock_audit'))!=ehld_lock or (ehld_lock and paired.get('ehld_lock_audit_version')!=1):raise ValueError('EHLD lock package/kernel scope differs')
     if bool(paired.get('pm_irq_diagnostic'))!=pm_irq or (pm_irq and paired.get('pm_irq_evidence_version')!=1):raise ValueError('CPU0 IRQ package/kernel scope differs')
     if bool(paired.get('abox_pmu_audit_diagnostic'))!=abox_pmu_audit or (abox_pmu_audit and paired.get('abox_pmu_audit_evidence_version')!=3):raise ValueError('PMU package/kernel scope differs')
     if xnu_stage and (paired.get('xnu_payload_sha256')!=result.get('xnu_payload_sha256') or
@@ -225,6 +228,7 @@ def collect(packages,kernel_build,adb):
             'pmu_control_audit_scope_verified':pmu_control,
             'fpsimd_reference_audit_scope_verified':fpsimd_reference,
             'rcu_context_audit_scope_verified':rcu_context,
+            'ehld_lock_audit_scope_verified':ehld_lock,
             'previous_boot_reservation_observed':False,
             'window_access_required':access,'previous_boot_window_access_observed':False,
             'xnu_payload_stage_required':xnu_stage,'previous_boot_xnu_payload_stage_observed':False,
@@ -280,6 +284,7 @@ def collect(packages,kernel_build,adb):
             text=selected.decode(errors='replace')
             if not fpsimd_reference and 'N10FPS' in text:raise ValueError('unexpected FPSIMD reference evidence')
             if not rcu_context and 'N10RC' in text:raise ValueError('unexpected RCU context evidence')
+            if not ehld_lock and 'N10EL' in text:raise ValueError('unexpected EHLD lock evidence')
             if result.get('pm_failure_stage_evidence_version')==1:
                 from decode_pm_timer import decode_stages
                 report['pm_failure_stage_observation']=decode_stages(text,evidence_id)
@@ -393,6 +398,10 @@ def collect(packages,kernel_build,adb):
                 from decode_rcu_context import decode as decode_rcu
                 observation['rcu_context']=decode_rcu(text,evidence_id,pm_completed_generation(observation['pm_timer']),observation['pm_preconditions'])
                 report['previous_boot_cpu0_rcu_context_audit_observed']=True
+            if ehld_lock:
+                from decode_ehld_lock import decode as decode_ehld_lock
+                observation['ehld_lock']=decode_ehld_lock(text,evidence_id,pm_completed_generation(observation['pm_timer']),observation['pm_preconditions'])
+                report['previous_boot_cpu0_ehld_lock_audit_observed']=True
         except ValueError as error:
             report['decode_failures'][name]=str(error);continue
         (out/'reservation-observation.json').write_text(json.dumps(observation,indent=2),encoding='utf-8')
@@ -443,6 +452,10 @@ def collect(packages,kernel_build,adb):
         report['cpu0_rcu_context_audit_required']=True
         report.setdefault('previous_boot_cpu0_rcu_context_audit_observed',False)
         report['diagnostic_passed']=report['diagnostic_passed'] and report['previous_boot_cpu0_rcu_context_audit_observed']
+    if ehld_lock:
+        report['cpu0_ehld_lock_audit_required']=True
+        report.setdefault('previous_boot_cpu0_ehld_lock_audit_observed',False)
+        report['diagnostic_passed']=report['diagnostic_passed'] and report['previous_boot_cpu0_ehld_lock_audit_observed']
     report['evaluation_items']={}
     for item in ('reservation','window_access','xnu_payload_stage','cpu_cache_roundtrip','pm_timer','gic_roundtrip','dma_pm_audit','ufs_pm_audit','iommu_pm_audit','abox_pm_audit','abox_pmu_audit','pmu_domain_status','fsys0a_policy','pm_late_noirq','noirq_pmu_domains','pmu_settle','pm_cpus_noirq','cpu_stop_pmu_domains','pm_cpus_timers','pm_cpus_arch_restore','pm_cpus_payload_readback','dma_noirq_coverage','iommu_noirq_inventory','syscore_inventory','cpu0_irq_arch_timer','cpu0_irq_gic_readback','cpu_pm_notifier_inventory','generic_irq_callback_inventory','clocksource_callback_inventory','clockevent_callback_inventory','cpu0_pm_software_context','cpu0_gic_restore_inputs','cpu0_pmu_branch_audit','cpu0_gic_priority_footprint'):
         required=item=='reservation' or report[item+'_required']
@@ -456,6 +469,8 @@ def collect(packages,kernel_build,adb):
         report['evaluation_items']['cpu0_fpsimd_reference_audit']={'required':True,'status':'passed' if report['previous_boot_cpu0_fpsimd_reference_audit_observed'] else 'failed'}
     if rcu_context:
         report['evaluation_items']['cpu0_rcu_context_audit']={'required':True,'status':'passed' if report['previous_boot_cpu0_rcu_context_audit_observed'] else 'failed'}
+    if ehld_lock:
+        report['evaluation_items']['cpu0_ehld_lock_audit']={'required':True,'status':'passed' if report['previous_boot_cpu0_ehld_lock_audit_observed'] else 'failed'}
     (out/'capture-result.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
     return report
 

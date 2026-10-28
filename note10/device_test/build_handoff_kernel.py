@@ -33,7 +33,7 @@ def branch_source_path(out, model):
     return source
 
 
-def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manifest=None,cpu_cache=False,pm_timer=False,auto_return=False,screen_log=False,gic_roundtrip=False,dma_pm_audit=False,ufs_pm_audit=False):
+def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manifest=None,cpu_cache=False,pm_timer=False,auto_return=False,screen_log=False,gic_roundtrip=False,dma_pm_audit=False,ufs_pm_audit=False,ehld_lock_audit=False):
     if not sys.platform.startswith('linux'): raise RuntimeError('Linux CI host required')
     if os.environ.get('PLATFORM_VERSION')!='11' or os.environ.get('ANDROID_MAJOR_VERSION')!='r':
         raise ValueError('Pinned Samsung build requires PLATFORM_VERSION=11 and ANDROID_MAJOR_VERSION=r')
@@ -48,6 +48,7 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
     if gic_roundtrip and not auto_return:raise ValueError('GIC roundtrip requires PM and automatic recovery')
     if dma_pm_audit and not gic_roundtrip:raise ValueError('DMA PM audit requires the restored GIC/PM diagnostic')
     if ufs_pm_audit and not dma_pm_audit:raise ValueError('UFS PM audit requires the DMA PM framework audit')
+    if ehld_lock_audit and not ufs_pm_audit:raise ValueError('EHLD lock audit requires the full preserved v44 diagnostic bundle')
     OUT.mkdir(parents=True,exist_ok=True)
     report = {'source_repository':REPOSITORY,'source_commit':COMMIT,
               'platform_version':os.environ['PLATFORM_VERSION'],
@@ -56,6 +57,7 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
               'device_operations':[],'deployment_ready':False,'device_boot_tested':False,
               'scope':'Linux shutdown-host build feasibility; not XNU or an installable image',
               'builtin_cpu_diagnostic':caps,
+              'ehld_lock_audit':False,
               'commands':[]}
     def run(arguments, log_name, timeout=120):
         report['commands'].append(arguments)
@@ -280,6 +282,19 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             report['rcu_context_package_sources_sha256']={n:hashlib.sha256((ROOT/'note10/device_test'/n).read_bytes()).hexdigest() for n in rcu_package_sources}
             report['rcu_context_collector_dependencies_sha256']={n:hashlib.sha256((ROOT/'note10/device_test'/n).read_bytes()).hexdigest() for n in rcu_collector_dependencies}
             report['rcu_context_snapshot_sha256']=snapshot_rcu(source,OUT/'rcu-context-prepared',report)
+            if ehld_lock_audit:
+                from prepare_ehld_lock_audit import prepare as prepare_ehld,snapshot as snapshot_ehld
+                from ehld_lock_binding import SOURCES as ehld_sources,PACKAGE_SOURCES as ehld_packages,COLLECTOR_DEPENDENCIES as ehld_collector
+                from ehld_lock_profile import snapshot_profile
+                report.update(prepare_ehld(source,report));report['ehld_lock_audit']=True
+                report['ehld_lock_sources_sha256']={n:hashlib.sha256((ROOT/'note10/device_test'/n).read_bytes()).hexdigest() for n in ehld_sources}
+                report['ehld_lock_package_sources_sha256']={n:hashlib.sha256((ROOT/'note10/device_test'/n).read_bytes()).hexdigest() for n in ehld_packages}
+                report['ehld_lock_collector_dependencies_sha256']={n:hashlib.sha256((ROOT/'note10/device_test'/n).read_bytes()).hexdigest() for n in ehld_collector}
+                report['ehld_lock_profile_inputs_sha256']=snapshot_profile(source,OUT/'ehld-lock-profile-inputs')
+                report['ehld_lock_snapshot_sha256']=snapshot_ehld(source,OUT/'ehld-lock-prepared',report)
+                prior=OUT/'ehld-lock-v44-composition-input.json'
+                prior.write_text(json.dumps({'snapshot_sha256':report['rcu_context_snapshot_sha256']},indent=2)+'\n',encoding='utf-8',newline='\n')
+                run([sys.executable,str(ROOT/'note10/device_test/test_ehld_lock_composition.py'),'--v44-source',str(OUT/'rcu-context-prepared'),'--v44-composition',str(prior),'--output',str(OUT/'ehld-lock-composition-model')],'03-ehld-lock-composition.log')
             report['pm_quiesce_patched_sha256']['kernel/power/Kconfig']=report['pm_callbacks_prepared_sha256']['kernel/power/Kconfig']
             report['scope']='Bundled PM, CPU architecture and payload observations; no global DMA shutdown or XNU execution claim'
         make=['make','-C',str(source),'O='+str(objects),'ARCH=arm64',
@@ -309,6 +324,10 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
         if gic_roundtrip:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_GIC_ROUNDTRIP'],'02-gic-roundtrip.log')
         if dma_pm_audit:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_DMA_PM_AUDIT'],'02-dma-pm-audit.log')
         if ufs_pm_audit:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_UFS_PM_AUDIT','--enable','NOTE10_IOMMU_PM_AUDIT','--enable','NOTE10_ABOX_PM_AUDIT','--enable','NOTE10_ABOX_FW_FAILURE_GUARD','--enable','NOTE10_ABOX_PMU_AUDIT','--enable','NOTE10_PM_NOIRQ_TEST','--enable','NOTE10_PMU_SETTLE','--enable','NOTE10_PM_CPUS_TEST','--enable','NOTE10_PM_POST_ARCH','--enable','NOTE10_PM_EDGE_INVENTORY','--enable','NOTE10_PM_IRQ_TEST','--enable','NOTE10_PM_CALLBACK_INVENTORY','--enable','NOTE10_CPU_PM_FAILURE_GUARD','--enable','NOTE10_CPU_PM_PRECONDITIONS','--enable','NOTE10_CPU_PM_BRANCH_AUDIT','--enable','NOTE10_PMU_FAILURE_RESTORE','--enable','NOTE10_GIC_PRIORITY_RESTORE','--enable','NOTE10_PMU_STATE_AUDIT','--enable','NOTE10_PMU_CONTROL_AUDIT','--enable','NOTE10_FPSIMD_REFERENCE_AUDIT','--enable','NOTE10_RCU_CONTEXT_AUDIT','--set-val','LOG_BUF_SHIFT','21'],'02-ufs-pm-audit.log')
+        if ehld_lock_audit:
+            run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_EHLD_LOCK_AUDIT'],'02-ehld-lock-audit.log')
+            from ehld_lock_profile import apply_profile
+            report['ehld_lock_profile_source_sha256']=apply_profile(source,config,run)
         run([*make,'olddefconfig'],'03-olddefconfig.log')
         configured=config.read_text()
         required=('CONFIG_KEXEC=y','CONFIG_KEXEC_CORE=y','CONFIG_PM_SLEEP_SMP=y','CONFIG_ARM64_4K_PAGES=y')
@@ -317,6 +336,7 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
         if dma_pm_audit:required+=('CONFIG_NOTE10_DMA_PM_AUDIT=y',)
         if ufs_pm_audit:required+=('CONFIG_NOTE10_UFS_PM_AUDIT=y','CONFIG_SCSI_UFSHCD=y','CONFIG_SCSI_UFS_EXYNOS=y','CONFIG_NOTE10_IOMMU_PM_AUDIT=y','CONFIG_EXYNOS_IOMMU=y','CONFIG_NOTE10_ABOX_PM_AUDIT=y','CONFIG_NOTE10_ABOX_FW_FAILURE_GUARD=y','CONFIG_SND_SOC_SAMSUNG_ABOX=y','CONFIG_NOTE10_ABOX_PMU_AUDIT=y','CONFIG_EXYNOS_PMU=y','CONFIG_SOC_EXYNOS9820=y','CONFIG_EXYNOS_PM_DOMAINS=y','CONFIG_USB_DWC3_EXYNOS=y','CONFIG_NOTE10_PM_NOIRQ_TEST=y','CONFIG_NOTE10_PMU_SETTLE=y','CONFIG_NOTE10_PM_CPUS_TEST=y')
         if ufs_pm_audit:required+=('CONFIG_NOTE10_PM_POST_ARCH=y','CONFIG_NOTE10_PM_EDGE_INVENTORY=y','CONFIG_NOTE10_PM_IRQ_TEST=y','CONFIG_NOTE10_PM_CALLBACK_INVENTORY=y','CONFIG_NOTE10_CPU_PM_FAILURE_GUARD=y','CONFIG_NOTE10_CPU_PM_PRECONDITIONS=y','CONFIG_NOTE10_CPU_PM_BRANCH_AUDIT=y','CONFIG_NOTE10_PMU_FAILURE_RESTORE=y','CONFIG_NOTE10_GIC_PRIORITY_RESTORE=y','CONFIG_NOTE10_PMU_STATE_AUDIT=y','CONFIG_NOTE10_PMU_CONTROL_AUDIT=y','CONFIG_NOTE10_FPSIMD_REFERENCE_AUDIT=y','CONFIG_NOTE10_RCU_CONTEXT_AUDIT=y','CONFIG_PREEMPT_RCU=y','CONFIG_ARM_GIC_MAX_NR=1','CONFIG_LOG_BUF_SHIFT=21','CONFIG_PREEMPT_COUNT=y','CONFIG_KALLSYMS=y')
+        if ehld_lock_audit:required+=('CONFIG_NOTE10_EHLD_LOCK_AUDIT=y','CONFIG_EXYNOS_EHLD=y','CONFIG_PREEMPT_COUNT=y')
         if reserve:required+=('CONFIG_INITRAMFS_FORCE=y','CONFIG_CMDLINE_EXTEND=y','CONFIG_CMDLINE="rdinit=/init"')
         if xnu_payload is not None:required+=('CONFIG_CRYPTO=y','CONFIG_CRYPTO_HASH=y','CONFIG_CRYPTO_SHA256=y')
         if cpu_cache:required+=('CONFIG_HOTPLUG_CPU=y','CONFIG_SMP=y','CONFIG_PM_SLEEP_SMP=y')
@@ -326,6 +346,10 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
         if pm_timer:required+=('CONFIG_NOTE10_PM_QUIESCE=y','CONFIG_USB_NOTIFY_LAYER=y','CONFIG_USB_NOTIFIER=y','CONFIG_USB_DWC3=y','CONFIG_USB_DWC3_EXYNOS=y')
         missing=[line for line in required if line not in configured.splitlines()]
         if missing:raise ValueError('Required Kconfig options missing: '+', '.join(missing))
+        if ehld_lock_audit:
+            from ehld_lock_profile import verify_config
+            report['ehld_lock_profile_result']=verify_config(config.read_bytes())
+            run([sys.executable,str(ROOT/'note10/device_test/test_ehld_lock_profile.py'),'--source',str(source),'--output',str(OUT/'ehld-lock-profile-model')],'03-ehld-lock-profile.log')
         if ufs_pm_audit and 'CONFIG_GIC_NON_BANKED=y' in configured.splitlines():raise ValueError('GIC priority guard requires banked GIC')
         report['effective_config_sha256']=hashlib.sha256(config.read_bytes()).hexdigest()
         if caps:run([*make,'drivers/misc/note10_handoff_caps.o'],'04-caps-object.log')
@@ -391,6 +415,12 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
                 run([sys.executable,str(ROOT/'note10/device_test/test_rcu_context_worker.py'),'--source-root',str(OUT/'rcu-context-prepared'),'--cc','clang-14','--output',str(OUT/'rcu-context-worker-model')],'03-rcu-context-worker.log')
                 run([sys.executable,str(ROOT/'note10/device_test/test_rcu_context_decoder.py'),'--output',str(OUT/'rcu-context-decoder-model')],'03-rcu-context-decoder.log')
                 run([sys.executable,str(ROOT/'note10/device_test/test_rcu_context_collector.py'),'--report',str(OUT/'build-result.json'),'--output',str(OUT/'rcu-context-collector-model')],'03-rcu-context-collector.log')
+                if ehld_lock_audit:
+                    run([sys.executable,str(ROOT/'note10/device_test/test_ehld_lock_native.py'),'--source-root',str(OUT/'ehld-lock-prepared'),'--output',str(OUT/'ehld-lock-native-model'),'--cc','clang-14'],'03-ehld-lock-native.log')
+                    run([sys.executable,str(ROOT/'note10/device_test/test_ehld_lock_final_lifecycle.py'),'--source-root',str(OUT/'ehld-lock-prepared'),'--output',str(OUT/'ehld-lock-final-lifecycle-model'),'--cc','clang-14'],'03-ehld-lock-final-lifecycle.log')
+                    run([sys.executable,str(ROOT/'note10/device_test/test_ehld_lock_worker.py'),'--source-root',str(OUT/'ehld-lock-prepared'),'--output',str(OUT/'ehld-lock-worker-model'),'--cc','clang-14'],'03-ehld-lock-worker.log')
+                    run([sys.executable,str(ROOT/'note10/device_test/test_ehld_lock_decoder.py'),'--output',str(OUT/'ehld-lock-decoder-model')],'03-ehld-lock-decoder.log')
+                    run([sys.executable,str(ROOT/'note10/device_test/test_ehld_lock_collector.py'),'--report',str(OUT/'build-result.json'),'--output',str(OUT/'ehld-lock-collector-model')],'03-ehld-lock-collector.log')
             command=[*make,'-j'+str(min(os.cpu_count() or 2,8)),'Image']
             report['commands'].append(command)
             run_concurrent(command, OUT/'04-build.log', validate_final, timeout=1500)
@@ -407,9 +437,12 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
         # Copy only the completed output; retain object-tree logs for diagnosis.
         import shutil
         shutil.copyfile(image,target)
-        if ufs_pm_audit:
+        if ufs_pm_audit and not ehld_lock_audit:
             for name,digest in report['rcu_context_snapshot_sha256'].items():
                 if hashlib.sha256((source/name).read_bytes()).hexdigest()!=digest:raise ValueError('Final Image source changed after RCU context snapshot: '+name)
+        if ehld_lock_audit:
+            for name,digest in report['ehld_lock_snapshot_sha256'].items():
+                if hashlib.sha256((source/name).read_bytes()).hexdigest()!=digest:raise ValueError('Final Image source changed after EHLD lock snapshot: '+name)
         if reserve and target.read_bytes().count(report['reservation_evidence_id'].encode())!=1:
             raise ValueError('Unique reservation evidence ID not embedded in Image')
         if xnu_payload is not None:
@@ -423,6 +456,7 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             raise ValueError('PM/timer evidence markers missing from Linux Image')
         if pm_timer and b'N10PMS1' not in target.read_bytes():raise ValueError('PM failure stage marker missing')
         if pm_timer and b'N10QSC1' not in target.read_bytes():raise ValueError('PM quiesce marker missing')
+        if ehld_lock_audit and any(marker not in target.read_bytes() for marker in (b'N10ELM1',b'N10ELQ1')):raise ValueError('EHLD lock audit Image markers missing')
         if pm_timer:
             from pm_quiesce_binding import validate_model as validate_quiesce
             validate_quiesce(OUT,report)
@@ -472,9 +506,11 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             from prepare_pmu_control_flow_compat import prepare as prepare_control_compat
             from prepare_fpsimd_reference_flow_compat import prepare as prepare_fpsimd_compat
             from prepare_rcu_context_flow_compat import prepare as prepare_rcu_compat
+            from prepare_ehld_lock_flow_compat import prepare as prepare_ehld_compat
             import tempfile
             with tempfile.TemporaryDirectory() as temp:
-                old41=prepare_control_compat(prepare_fpsimd_compat(prepare_rcu_compat(OUT,Path(temp)/'v43-fixture'),Path(temp)/'v42-fixture'),Path(temp)/'v41-fixture')
+                ehld_base=prepare_ehld_compat(OUT,Path(temp)/'v44-fixture') if ehld_lock_audit else OUT
+                old41=prepare_control_compat(prepare_fpsimd_compat(prepare_rcu_compat(ehld_base,Path(temp)/'v43-fixture'),Path(temp)/'v42-fixture'),Path(temp)/'v41-fixture')
                 old40=prepare_state_compat(old41,Path(temp)/'v40-fixture')
                 prior_flow=prepare_prior_flow(old40,Path(temp)/'v39-fixture')
                 run([sys.executable,str(ROOT/'note10/device_test/test_pmu_failure_package_flow.py'),'--artifact',str(prior_flow),'--output',str(OUT/'pmu-failure-package-flow-model')],'03-pmu-failure-package-flow.log')
@@ -483,7 +519,8 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             from gic_priority_binding import validate as validate_priority
             validate_priority(OUT,report,require_package_flow=False)
             with tempfile.TemporaryDirectory() as temp:
-                old41=prepare_control_compat(prepare_fpsimd_compat(prepare_rcu_compat(OUT,Path(temp)/'v43-fixture'),Path(temp)/'v42-fixture'),Path(temp)/'v41-fixture')
+                ehld_base=prepare_ehld_compat(OUT,Path(temp)/'v44-fixture') if ehld_lock_audit else OUT
+                old41=prepare_control_compat(prepare_fpsimd_compat(prepare_rcu_compat(ehld_base,Path(temp)/'v43-fixture'),Path(temp)/'v42-fixture'),Path(temp)/'v41-fixture')
                 old40=prepare_state_compat(old41,Path(temp)/'v40-fixture')
                 run([sys.executable,str(ROOT/'note10/device_test/test_gic_priority_package_flow.py'),'--artifact',str(old40),'--output',str(OUT/'gic-priority-package-flow-model')],'03-gic-priority-package-flow.log')
             validate_priority(OUT,report)
@@ -491,28 +528,42 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             from pmu_state_binding import validate as validate_state
             validate_state(OUT,report,require_package_flow=False)
             with tempfile.TemporaryDirectory() as temp:
-                old41=prepare_control_compat(prepare_fpsimd_compat(prepare_rcu_compat(OUT,Path(temp)/'v43-fixture'),Path(temp)/'v42-fixture'),Path(temp)/'v41-fixture')
+                ehld_base=prepare_ehld_compat(OUT,Path(temp)/'v44-fixture') if ehld_lock_audit else OUT
+                old41=prepare_control_compat(prepare_fpsimd_compat(prepare_rcu_compat(ehld_base,Path(temp)/'v43-fixture'),Path(temp)/'v42-fixture'),Path(temp)/'v41-fixture')
                 run([sys.executable,str(ROOT/'note10/device_test/test_pmu_state_package_flow.py'),'--artifact',str(old41),'--output',str(OUT/'pmu-state-package-flow-model')],'03-pmu-state-package-flow.log')
             validate_state(OUT,report)
             run([sys.executable,str(ROOT/'note10/device_test/test_pmu_control_binding.py'),'--artifact',str(OUT),'--output',str(OUT/'pmu-control-binding-model')],'03-pmu-control-binding.log')
             from pmu_control_binding import validate as validate_control
             validate_control(OUT,report,require_package_flow=False)
             with tempfile.TemporaryDirectory() as temp:
-                old42=prepare_fpsimd_compat(prepare_rcu_compat(OUT,Path(temp)/'v43-fixture'),Path(temp)/'v42-fixture')
+                ehld_base=prepare_ehld_compat(OUT,Path(temp)/'v44-fixture') if ehld_lock_audit else OUT
+                old42=prepare_fpsimd_compat(prepare_rcu_compat(ehld_base,Path(temp)/'v43-fixture'),Path(temp)/'v42-fixture')
                 run([sys.executable,str(ROOT/'note10/device_test/test_pmu_control_package_flow.py'),'--artifact',str(old42),'--output',str(OUT/'pmu-control-package-flow-model')],'03-pmu-control-package-flow.log')
             validate_control(OUT,report)
             run([sys.executable,str(ROOT/'note10/device_test/test_fpsimd_reference_binding.py'),'--artifact',str(OUT),'--output',str(OUT/'fpsimd-reference-binding-model')],'03-fpsimd-reference-binding.log')
             from fpsimd_reference_binding import validate as validate_fpsimd
             validate_fpsimd(OUT,report,require_package_flow=False)
             with tempfile.TemporaryDirectory() as temp:
-                old43=prepare_rcu_compat(OUT,Path(temp)/'v43-fixture')
+                ehld_base=prepare_ehld_compat(OUT,Path(temp)/'v44-fixture') if ehld_lock_audit else OUT
+                old43=prepare_rcu_compat(ehld_base,Path(temp)/'v43-fixture')
                 run([sys.executable,str(ROOT/'note10/device_test/test_fpsimd_reference_package_flow.py'),'--artifact',str(old43),'--output',str(OUT/'fpsimd-reference-package-flow-model')],'03-fpsimd-reference-package-flow.log')
             validate_fpsimd(OUT,report)
             run([sys.executable,str(ROOT/'note10/device_test/test_rcu_context_binding.py'),'--artifact',str(OUT),'--output',str(OUT/'rcu-context-binding-model')],'03-rcu-context-binding.log')
             from rcu_context_binding import validate as validate_rcu
             validate_rcu(OUT,report,require_package_flow=False)
-            run([sys.executable,str(ROOT/'note10/device_test/test_rcu_context_package_flow.py'),'--artifact',str(OUT),'--output',str(OUT/'rcu-context-package-flow-model')],'03-rcu-context-package-flow.log')
+            with tempfile.TemporaryDirectory() as temp:
+                rcu_flow_input=prepare_ehld_compat(OUT,Path(temp)/'v44-fixture') if ehld_lock_audit else OUT
+                run([sys.executable,str(ROOT/'note10/device_test/test_rcu_context_package_flow.py'),'--artifact',str(rcu_flow_input),'--output',str(OUT/'rcu-context-package-flow-model')],'03-rcu-context-package-flow.log')
             validate_rcu(OUT,report)
+        if ehld_lock_audit:
+            (OUT/'Image').write_bytes(target.read_bytes())
+            (OUT/'handoff.config').write_bytes((OUT/'objects/.config').read_bytes())
+            (OUT/'build-result.json').write_text(json.dumps(report,indent=2)+'\n',encoding='utf-8',newline='\n')
+            run([sys.executable,str(ROOT/'note10/device_test/test_ehld_lock_binding.py'),'--artifact',str(OUT),'--output',str(OUT/'ehld-lock-binding-model')],'03-ehld-lock-binding.log')
+            from ehld_lock_binding import validate as validate_ehld
+            validate_ehld(OUT,report,require_package_flow=False)
+            run([sys.executable,str(ROOT/'note10/device_test/test_ehld_lock_package_flow.py'),'--artifact',str(OUT),'--output',str(OUT/'ehld-lock-package-flow-model')],'03-ehld-lock-package-flow.log')
+            validate_ehld(OUT,report)
             from pm_irq_binding import validate_model as validate_irq
             validate_irq(OUT,report)
         if auto_return:
@@ -545,5 +596,6 @@ if __name__=='__main__':
     parser.add_argument('--gic-roundtrip',action='store_true',help='Reversible GICv2 CPU priority mask diagnostic after restored PM')
     parser.add_argument('--dma-pm-audit',action='store_true',help='Read-only DMA-capable device PM framework coverage snapshots')
     parser.add_argument('--ufs-pm-audit',action='store_true',help='Read-only Exynos UFS driver queue/link/clock/IRQ snapshots')
+    parser.add_argument('--ehld-lock-audit',action='store_true',help='Experimental CPU0 EHLD ctrl lock-availability observation with a pinned no-dynamic-probes profile')
     args=parser.parse_args();main(caps=args.caps,reserve=args.reserve,window_access=args.window_access,
-                                  xnu_payload=args.xnu_payload,xnu_manifest=args.xnu_payload_manifest,cpu_cache=args.cpu_cache,pm_timer=args.pm_timer,auto_return=args.auto_return,screen_log=args.screen_log,gic_roundtrip=args.gic_roundtrip,dma_pm_audit=args.dma_pm_audit,ufs_pm_audit=args.ufs_pm_audit)
+                                  xnu_payload=args.xnu_payload,xnu_manifest=args.xnu_payload_manifest,cpu_cache=args.cpu_cache,pm_timer=args.pm_timer,auto_return=args.auto_return,screen_log=args.screen_log,gic_roundtrip=args.gic_roundtrip,dma_pm_audit=args.dma_pm_audit,ufs_pm_audit=args.ufs_pm_audit,ehld_lock_audit=args.ehld_lock_audit)

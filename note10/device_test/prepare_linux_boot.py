@@ -124,6 +124,8 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output,auto_cycle_token=None):
     validate_fpsimd(kernel_build,build)
     from rcu_context_binding import validate as validate_rcu
     validate_rcu(kernel_build,build)
+    from ehld_lock_binding import validate as validate_ehld
+    validate_ehld(kernel_build,build)
     from pm_irq_binding import validate_model as validate_irq
     validate_irq(kernel_build,build)
     if hashlib.sha256(config).hexdigest()!=build['effective_config_sha256']:
@@ -255,6 +257,8 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output,auto_cycle_token=None):
             'fpsimd_reference_audit_version':build.get('fpsimd_reference_audit_version'),
             'rcu_context_audit':build.get('rcu_context_audit') is True,
             'rcu_context_audit_version':build.get('rcu_context_audit_version'),
+            'ehld_lock_audit':build.get('ehld_lock_audit') is True,
+            'ehld_lock_audit_version':build.get('ehld_lock_audit_version'),
             'pm_irq_diagnostic':build.get('pm_irq_diagnostic') is True,
             'pm_irq_evidence_version':build.get('pm_irq_evidence_version'),
             'abox_pmu_audit_diagnostic':build.get('abox_pmu_audit_diagnostic') is True,

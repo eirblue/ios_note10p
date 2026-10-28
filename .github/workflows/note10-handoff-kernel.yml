@@ -51,6 +51,10 @@ on:
         description: Bundle UFS/HCI, IOMMU, ABOX, guarded noirq CPU hotplug/timer restoration and PMU observations; requires dma_pm_audit
         type: boolean
         default: false
+      ehld_lock_audit:
+        description: Observe CPU0 EHLD lock availability with dynamic probe instrumentation disabled; requires xnu_stage and ufs_pm_audit
+        type: boolean
+        default: false
 
       auto_return:
         description: Opt-in one-shot recovery request; cycle token required at BOOT packaging
@@ -112,7 +116,12 @@ jobs:
           NOTE10_GIC_ROUNDTRIP: ${{ inputs.gic_roundtrip }}
           NOTE10_DMA_PM_AUDIT: ${{ inputs.dma_pm_audit }}
           NOTE10_UFS_PM_AUDIT: ${{ inputs.ufs_pm_audit }}
+          NOTE10_EHLD_LOCK_AUDIT: ${{ inputs.ehld_lock_audit }}
         run: |
+          if [ "$NOTE10_EHLD_LOCK_AUDIT" = true ] && { [ "$NOTE10_XNU_STAGE" != true ] || [ "$NOTE10_UFS_PM_AUDIT" != true ]; }; then
+            echo "ehld_lock_audit requires xnu_stage=true and ufs_pm_audit=true" >&2
+            exit 2
+          fi
           if [ "$NOTE10_AUTO_RETURN" = true ] && [ "$NOTE10_PM_TIMER" != true ]; then
             echo "auto_return requires pm_timer=true" >&2
             exit 2
@@ -201,6 +210,7 @@ jobs:
           NOTE10_GIC_ROUNDTRIP: ${{ inputs.gic_roundtrip }}
           NOTE10_DMA_PM_AUDIT: ${{ inputs.dma_pm_audit }}
           NOTE10_UFS_PM_AUDIT: ${{ inputs.ufs_pm_audit }}
+          NOTE10_EHLD_LOCK_AUDIT: ${{ inputs.ehld_lock_audit }}
         run: |
           count="$(find note10/private/xnu-input -name note10-experimental.macho -type f | wc -l)"
           [ "$count" -eq 1 ]
@@ -234,6 +244,10 @@ jobs:
           fi
           if [ "$NOTE10_UFS_PM_AUDIT" = true ]; then
             EXTRA+=(--ufs-pm-audit)
+          fi
+          if [ "$NOTE10_EHLD_LOCK_AUDIT" = true ]; then
+            if [ "$NOTE10_UFS_PM_AUDIT" != true ]; then exit 2; fi
+            EXTRA+=(--ehld-lock-audit)
           fi
           python note10/device_test/build_handoff_kernel.py --caps --reserve --window-access \
             --xnu-payload note10/private/xnu-stage-payload/kernel.mem \
@@ -387,6 +401,18 @@ jobs:
             note10/private/handoff-kernel/rcu-context-collector-model/result.json
             note10/private/handoff-kernel/rcu-context-binding-model/result.json
             note10/private/handoff-kernel/rcu-context-package-flow-model/result.json
+            note10/private/handoff-kernel/ehld-lock-profile-inputs/**
+            note10/private/handoff-kernel/ehld-lock-prepared/**
+            note10/private/handoff-kernel/ehld-lock-v44-composition-input.json
+            note10/private/handoff-kernel/ehld-lock-composition-model/**
+            note10/private/handoff-kernel/ehld-lock-profile-model/**
+            note10/private/handoff-kernel/ehld-lock-native-model/**
+            note10/private/handoff-kernel/ehld-lock-final-lifecycle-model/**
+            note10/private/handoff-kernel/ehld-lock-worker-model/**
+            note10/private/handoff-kernel/ehld-lock-decoder-model/**
+            note10/private/handoff-kernel/ehld-lock-collector-model/**
+            note10/private/handoff-kernel/ehld-lock-binding-model/**
+            note10/private/handoff-kernel/ehld-lock-package-flow-model/**
             note10/private/handoff-kernel/pmu-failure-binding-model/result.json
             note10/private/handoff-kernel/pmu-failure-package-flow-model/result.json
             note10/private/handoff-kernel/pmu-failure-prepared/**

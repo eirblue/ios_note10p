@@ -174,6 +174,10 @@ def check(packages,kernel_build,backup,core_model,gate_model,init_model,adb):
         rcu_scope=validate_rcu(kernel_build,build)
         if any(rcu_scope!=bool(m.get('rcu_context_audit')) or (rcu_scope and m.get('rcu_context_audit_version')!=1) for m in (paired,diagnostic)):raise ValueError('RCU context package scope differs')
         report['rcu_context_audit_scope_verified']=rcu_scope
+        from ehld_lock_binding import validate as validate_ehld
+        ehld_scope=validate_ehld(kernel_build,build)
+        if any(ehld_scope!=bool(m.get('ehld_lock_audit')) or (ehld_scope and m.get('ehld_lock_audit_version')!=1) for m in (paired,diagnostic)):raise ValueError('EHLD lock package scope differs')
+        report['ehld_lock_audit_scope_verified']=ehld_scope
         from pm_irq_binding import assert_scope as assert_irq_scope,validate_model as validate_irq
         irq_scope=assert_irq_scope(kernel_build,build)
         if any(irq_scope!=bool(m.get('pm_irq_diagnostic')) for m in (paired,diagnostic)):raise ValueError('CPU0 IRQ package scope differs')
