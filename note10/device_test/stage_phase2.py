@@ -57,6 +57,10 @@ def verify_packages(directory):
                 raise ValueError('FPSIMD reference package metadata differs')
             if record.get('mode')=='diagnostic' and (bool(meta.get('fpsimd_reference_audit'))!=bool(result.get('fpsimd_reference_audit')) or meta.get('fpsimd_reference_audit_version')!=result.get('fpsimd_reference_audit_version')):
                 raise ValueError('FPSIMD reference package pair differs')
+            if bool(meta.get('rcu_context_audit'))!=bool(record.get('rcu_context_audit')) or meta.get('rcu_context_audit_version')!=record.get('rcu_context_audit_version'):
+                raise ValueError('RCU context package metadata differs')
+            if record.get('mode')=='diagnostic' and (bool(meta.get('rcu_context_audit'))!=bool(result.get('rcu_context_audit')) or meta.get('rcu_context_audit_version')!=result.get('rcu_context_audit_version')):
+                raise ValueError('RCU context package pair differs')
             if bool(meta.get('abox_failed_fw_resume_guard'))!=bool(record.get('abox_failed_fw_resume_guard')) or (record.get('mode')=='diagnostic' and bool(meta.get('abox_failed_fw_resume_guard'))!=bool(result.get('abox_failed_fw_resume_guard'))):raise ValueError('Failed-firmware guard package scope differs')
             if meta['writes']!=['boot'] or meta['automatic_reboot'] is not False:raise ValueError('Unexpected installer scope')
             if meta.get('xnu_payload_stage_diagnostic') is True and (

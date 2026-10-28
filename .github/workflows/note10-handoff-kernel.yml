@@ -373,6 +373,20 @@ jobs:
             note10/private/handoff-kernel/fpsimd-reference-collector-model/result.json
             note10/private/handoff-kernel/fpsimd-reference-binding-model/result.json
             note10/private/handoff-kernel/fpsimd-reference-package-flow-model/result.json
+            note10/private/handoff-kernel/rcu-context-prepared/**
+            note10/private/handoff-kernel/rcu-context-native-model/*.c
+            note10/private/handoff-kernel/rcu-context-native-model/*.log
+            note10/private/handoff-kernel/rcu-context-native-model/result.json
+            note10/private/handoff-kernel/rcu-context-final-lifecycle-model/*.c
+            note10/private/handoff-kernel/rcu-context-final-lifecycle-model/*.log
+            note10/private/handoff-kernel/rcu-context-final-lifecycle-model/result.json
+            note10/private/handoff-kernel/rcu-context-worker-model/*.c
+            note10/private/handoff-kernel/rcu-context-worker-model/*.log
+            note10/private/handoff-kernel/rcu-context-worker-model/result.json
+            note10/private/handoff-kernel/rcu-context-decoder-model/result.json
+            note10/private/handoff-kernel/rcu-context-collector-model/result.json
+            note10/private/handoff-kernel/rcu-context-binding-model/result.json
+            note10/private/handoff-kernel/rcu-context-package-flow-model/result.json
             note10/private/handoff-kernel/pmu-failure-binding-model/result.json
             note10/private/handoff-kernel/pmu-failure-package-flow-model/result.json
             note10/private/handoff-kernel/pmu-failure-prepared/**

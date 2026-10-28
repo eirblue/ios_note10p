@@ -178,6 +178,10 @@ def build(backup,prototype,output,current_packages=None):
     from fpsimd_reference_binding import MARKERS as fpsimd_markers
     if any((marker in raw)!=fpsimd_reference for marker in fpsimd_markers):raise ValueError('Prototype FPSIMD reference Image scope differs')
     if fpsimd_reference and (not pmu_control or metadata.get('fpsimd_reference_audit_version')!=1):raise ValueError('Incomplete FPSIMD reference package contract')
+    rcu_context=metadata.get('rcu_context_audit') is True
+    from rcu_context_binding import MARKERS as rcu_markers
+    if any((marker in raw)!=rcu_context for marker in rcu_markers):raise ValueError('Prototype RCU context Image scope differs')
+    if rcu_context and (not fpsimd_reference or metadata.get('rcu_context_audit_version')!=1):raise ValueError('Incomplete RCU context package contract')
     pm_irq=metadata.get('pm_irq_diagnostic') is True
     if pm_irq and (not pm_edge or not pm_post_arch or not pm_cpus or metadata.get('pm_irq_evidence_version')!=1):raise ValueError('Incomplete CPU0 IRQ package contract')
     if dma_pm_audit and (not gic_roundtrip or metadata.get('dma_pm_audit_evidence_version')!=1):
@@ -232,6 +236,7 @@ def build(backup,prototype,output,current_packages=None):
             'pmu_state_audit':pmu_state,'pmu_state_audit_version':1 if pmu_state else None,
             'pmu_control_audit':pmu_control,'pmu_control_audit_version':1 if pmu_control else None,
             'fpsimd_reference_audit':fpsimd_reference,'fpsimd_reference_audit_version':1 if fpsimd_reference else None,
+            'rcu_context_audit':rcu_context,'rcu_context_audit_version':1 if rcu_context else None,
             'pm_irq_diagnostic':pm_irq,'pm_irq_evidence_version':1 if pm_irq else None,
             'abox_pmu_audit_diagnostic':abox_pmu_audit,'abox_pmu_audit_evidence_version':3 if abox_pmu_audit else None,
             'abox_pm_audit_diagnostic':abox_pm_audit,'abox_pm_audit_evidence_version':8 if abox_pm_audit else None,
@@ -291,6 +296,8 @@ def build(backup,prototype,output,current_packages=None):
         metadata['pmu_control_audit_version']=1 if pmu_control and mode=='diagnostic' else None
         metadata['fpsimd_reference_audit']=fpsimd_reference and mode=='diagnostic'
         metadata['fpsimd_reference_audit_version']=1 if fpsimd_reference and mode=='diagnostic' else None
+        metadata['rcu_context_audit']=rcu_context and mode=='diagnostic'
+        metadata['rcu_context_audit_version']=1 if rcu_context and mode=='diagnostic' else None
         metadata['pm_irq_diagnostic']=pm_irq and mode=='diagnostic'
         metadata['pm_irq_evidence_version']=1 if pm_irq and mode=='diagnostic' else None
         metadata['abox_pmu_audit_diagnostic']=abox_pmu_audit and mode=='diagnostic'
