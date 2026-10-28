@@ -266,6 +266,13 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             report['pmu_control_package_sources_sha256']={n:hashlib.sha256((ROOT/'note10/device_test'/n).read_bytes()).hexdigest() for n in control_package_sources}
             report['pmu_control_collector_dependencies_sha256']={n:hashlib.sha256((ROOT/'note10/device_test'/n).read_bytes()).hexdigest() for n in control_collector_dependencies}
             report['pmu_control_snapshot_sha256']=snapshot_control(source,OUT/'pmu-control-prepared',report)
+            from prepare_fpsimd_reference_audit import prepare as prepare_fpsimd, snapshot as snapshot_fpsimd
+            from fpsimd_reference_binding import SOURCES as fpsimd_sources, PACKAGE_SOURCES as fpsimd_package_sources, COLLECTOR_DEPENDENCIES as fpsimd_collector_dependencies
+            report.update(prepare_fpsimd(source,report))
+            report['fpsimd_reference_sources_sha256']={n:hashlib.sha256((ROOT/'note10/device_test'/n).read_bytes()).hexdigest() for n in fpsimd_sources}
+            report['fpsimd_reference_package_sources_sha256']={n:hashlib.sha256((ROOT/'note10/device_test'/n).read_bytes()).hexdigest() for n in fpsimd_package_sources}
+            report['fpsimd_reference_collector_dependencies_sha256']={n:hashlib.sha256((ROOT/'note10/device_test'/n).read_bytes()).hexdigest() for n in fpsimd_collector_dependencies}
+            report['fpsimd_reference_snapshot_sha256']=snapshot_fpsimd(source,OUT/'fpsimd-reference-prepared',report)
             report['pm_quiesce_patched_sha256']['kernel/power/Kconfig']=report['pm_callbacks_prepared_sha256']['kernel/power/Kconfig']
             report['scope']='Bundled PM, CPU architecture and payload observations; no global DMA shutdown or XNU execution claim'
         make=['make','-C',str(source),'O='+str(objects),'ARCH=arm64',
@@ -294,7 +301,7 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
         if pm_timer:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_PM_QUIESCE'],'02-pm-quiesce.log')
         if gic_roundtrip:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_GIC_ROUNDTRIP'],'02-gic-roundtrip.log')
         if dma_pm_audit:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_DMA_PM_AUDIT'],'02-dma-pm-audit.log')
-        if ufs_pm_audit:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_UFS_PM_AUDIT','--enable','NOTE10_IOMMU_PM_AUDIT','--enable','NOTE10_ABOX_PM_AUDIT','--enable','NOTE10_ABOX_FW_FAILURE_GUARD','--enable','NOTE10_ABOX_PMU_AUDIT','--enable','NOTE10_PM_NOIRQ_TEST','--enable','NOTE10_PMU_SETTLE','--enable','NOTE10_PM_CPUS_TEST','--enable','NOTE10_PM_POST_ARCH','--enable','NOTE10_PM_EDGE_INVENTORY','--enable','NOTE10_PM_IRQ_TEST','--enable','NOTE10_PM_CALLBACK_INVENTORY','--enable','NOTE10_CPU_PM_FAILURE_GUARD','--enable','NOTE10_CPU_PM_PRECONDITIONS','--enable','NOTE10_CPU_PM_BRANCH_AUDIT','--enable','NOTE10_PMU_FAILURE_RESTORE','--enable','NOTE10_GIC_PRIORITY_RESTORE','--enable','NOTE10_PMU_STATE_AUDIT','--enable','NOTE10_PMU_CONTROL_AUDIT','--set-val','LOG_BUF_SHIFT','21'],'02-ufs-pm-audit.log')
+        if ufs_pm_audit:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_UFS_PM_AUDIT','--enable','NOTE10_IOMMU_PM_AUDIT','--enable','NOTE10_ABOX_PM_AUDIT','--enable','NOTE10_ABOX_FW_FAILURE_GUARD','--enable','NOTE10_ABOX_PMU_AUDIT','--enable','NOTE10_PM_NOIRQ_TEST','--enable','NOTE10_PMU_SETTLE','--enable','NOTE10_PM_CPUS_TEST','--enable','NOTE10_PM_POST_ARCH','--enable','NOTE10_PM_EDGE_INVENTORY','--enable','NOTE10_PM_IRQ_TEST','--enable','NOTE10_PM_CALLBACK_INVENTORY','--enable','NOTE10_CPU_PM_FAILURE_GUARD','--enable','NOTE10_CPU_PM_PRECONDITIONS','--enable','NOTE10_CPU_PM_BRANCH_AUDIT','--enable','NOTE10_PMU_FAILURE_RESTORE','--enable','NOTE10_GIC_PRIORITY_RESTORE','--enable','NOTE10_PMU_STATE_AUDIT','--enable','NOTE10_PMU_CONTROL_AUDIT','--enable','NOTE10_FPSIMD_REFERENCE_AUDIT','--set-val','LOG_BUF_SHIFT','21'],'02-ufs-pm-audit.log')
         run([*make,'olddefconfig'],'03-olddefconfig.log')
         configured=config.read_text()
         required=('CONFIG_KEXEC=y','CONFIG_KEXEC_CORE=y','CONFIG_PM_SLEEP_SMP=y','CONFIG_ARM64_4K_PAGES=y')
@@ -302,7 +309,7 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
         if gic_roundtrip:required+=('CONFIG_NOTE10_GIC_ROUNDTRIP=y','CONFIG_ARM_GIC=y')
         if dma_pm_audit:required+=('CONFIG_NOTE10_DMA_PM_AUDIT=y',)
         if ufs_pm_audit:required+=('CONFIG_NOTE10_UFS_PM_AUDIT=y','CONFIG_SCSI_UFSHCD=y','CONFIG_SCSI_UFS_EXYNOS=y','CONFIG_NOTE10_IOMMU_PM_AUDIT=y','CONFIG_EXYNOS_IOMMU=y','CONFIG_NOTE10_ABOX_PM_AUDIT=y','CONFIG_NOTE10_ABOX_FW_FAILURE_GUARD=y','CONFIG_SND_SOC_SAMSUNG_ABOX=y','CONFIG_NOTE10_ABOX_PMU_AUDIT=y','CONFIG_EXYNOS_PMU=y','CONFIG_SOC_EXYNOS9820=y','CONFIG_EXYNOS_PM_DOMAINS=y','CONFIG_USB_DWC3_EXYNOS=y','CONFIG_NOTE10_PM_NOIRQ_TEST=y','CONFIG_NOTE10_PMU_SETTLE=y','CONFIG_NOTE10_PM_CPUS_TEST=y')
-        if ufs_pm_audit:required+=('CONFIG_NOTE10_PM_POST_ARCH=y','CONFIG_NOTE10_PM_EDGE_INVENTORY=y','CONFIG_NOTE10_PM_IRQ_TEST=y','CONFIG_NOTE10_PM_CALLBACK_INVENTORY=y','CONFIG_NOTE10_CPU_PM_FAILURE_GUARD=y','CONFIG_NOTE10_CPU_PM_PRECONDITIONS=y','CONFIG_NOTE10_CPU_PM_BRANCH_AUDIT=y','CONFIG_NOTE10_PMU_FAILURE_RESTORE=y','CONFIG_NOTE10_GIC_PRIORITY_RESTORE=y','CONFIG_NOTE10_PMU_STATE_AUDIT=y','CONFIG_NOTE10_PMU_CONTROL_AUDIT=y','CONFIG_ARM_GIC_MAX_NR=1','CONFIG_LOG_BUF_SHIFT=21','CONFIG_PREEMPT_COUNT=y','CONFIG_KALLSYMS=y')
+        if ufs_pm_audit:required+=('CONFIG_NOTE10_PM_POST_ARCH=y','CONFIG_NOTE10_PM_EDGE_INVENTORY=y','CONFIG_NOTE10_PM_IRQ_TEST=y','CONFIG_NOTE10_PM_CALLBACK_INVENTORY=y','CONFIG_NOTE10_CPU_PM_FAILURE_GUARD=y','CONFIG_NOTE10_CPU_PM_PRECONDITIONS=y','CONFIG_NOTE10_CPU_PM_BRANCH_AUDIT=y','CONFIG_NOTE10_PMU_FAILURE_RESTORE=y','CONFIG_NOTE10_GIC_PRIORITY_RESTORE=y','CONFIG_NOTE10_PMU_STATE_AUDIT=y','CONFIG_NOTE10_PMU_CONTROL_AUDIT=y','CONFIG_NOTE10_FPSIMD_REFERENCE_AUDIT=y','CONFIG_ARM_GIC_MAX_NR=1','CONFIG_LOG_BUF_SHIFT=21','CONFIG_PREEMPT_COUNT=y','CONFIG_KALLSYMS=y')
         if reserve:required+=('CONFIG_INITRAMFS_FORCE=y','CONFIG_CMDLINE_EXTEND=y','CONFIG_CMDLINE="rdinit=/init"')
         if xnu_payload is not None:required+=('CONFIG_CRYPTO=y','CONFIG_CRYPTO_HASH=y','CONFIG_CRYPTO_SHA256=y')
         if cpu_cache:required+=('CONFIG_HOTPLUG_CPU=y','CONFIG_SMP=y','CONFIG_PM_SLEEP_SMP=y')
@@ -367,6 +374,11 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
                 run([sys.executable,str(ROOT/'note10/device_test/test_pmu_control_worker.py'),'--source-root',str(OUT/'pmu-control-prepared'),'--output',str(OUT/'pmu-control-worker-model')],'03-pmu-control-worker.log')
                 run([sys.executable,str(ROOT/'note10/device_test/test_pmu_control_decoder.py')],'03-pmu-control-decoder.log')
                 run([sys.executable,str(ROOT/'note10/device_test/test_pmu_control_collector.py'),'--report',str(OUT/'build-result.json'),'--output',str(OUT/'pmu-control-collector-model')],'03-pmu-control-collector.log')
+                run([sys.executable,str(ROOT/'note10/device_test/test_fpsimd_reference_native.py'),'--source-root',str(OUT/'fpsimd-reference-prepared'),'--cc','clang-14','--output',str(OUT/'fpsimd-reference-native-model')],'03-fpsimd-reference-native.log')
+                run([sys.executable,str(ROOT/'note10/device_test/test_fpsimd_reference_final_lifecycle.py'),'--source-root',str(OUT/'fpsimd-reference-prepared'),'--cc','clang-14','--output',str(OUT/'fpsimd-reference-final-lifecycle-model')],'03-fpsimd-reference-final-lifecycle.log')
+                run([sys.executable,str(ROOT/'note10/device_test/test_fpsimd_reference_worker.py'),'--source-root',str(OUT/'fpsimd-reference-prepared'),'--cc','clang-14','--output',str(OUT/'fpsimd-reference-worker-model')],'03-fpsimd-reference-worker.log')
+                run([sys.executable,str(ROOT/'note10/device_test/test_fpsimd_reference_decoder.py'),'--output',str(OUT/'fpsimd-reference-decoder-model')],'03-fpsimd-reference-decoder.log')
+                run([sys.executable,str(ROOT/'note10/device_test/test_fpsimd_reference_collector.py'),'--report',str(OUT/'build-result.json'),'--output',str(OUT/'fpsimd-reference-collector-model')],'03-fpsimd-reference-collector.log')
             command=[*make,'-j'+str(min(os.cpu_count() or 2,8)),'Image']
             report['commands'].append(command)
             run_concurrent(command, OUT/'04-build.log', validate_final, timeout=1500)
@@ -384,8 +396,8 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
         import shutil
         shutil.copyfile(image,target)
         if ufs_pm_audit:
-            for name,digest in report['pmu_control_snapshot_sha256'].items():
-                if hashlib.sha256((source/name).read_bytes()).hexdigest()!=digest:raise ValueError('Final Image source changed after PMU control snapshot: '+name)
+            for name,digest in report['fpsimd_reference_snapshot_sha256'].items():
+                if hashlib.sha256((source/name).read_bytes()).hexdigest()!=digest:raise ValueError('Final Image source changed after FPSIMD reference snapshot: '+name)
         if reserve and target.read_bytes().count(report['reservation_evidence_id'].encode())!=1:
             raise ValueError('Unique reservation evidence ID not embedded in Image')
         if xnu_payload is not None:
@@ -446,9 +458,10 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             from prepare_pmu_failure_flow_compat import prepare as prepare_prior_flow
             from prepare_pmu_state_flow_compat import prepare as prepare_state_compat
             from prepare_pmu_control_flow_compat import prepare as prepare_control_compat
+            from prepare_fpsimd_reference_flow_compat import prepare as prepare_fpsimd_compat
             import tempfile
             with tempfile.TemporaryDirectory() as temp:
-                old41=prepare_control_compat(OUT,Path(temp)/'v41-fixture')
+                old41=prepare_control_compat(prepare_fpsimd_compat(OUT,Path(temp)/'v42-fixture'),Path(temp)/'v41-fixture')
                 old40=prepare_state_compat(old41,Path(temp)/'v40-fixture')
                 prior_flow=prepare_prior_flow(old40,Path(temp)/'v39-fixture')
                 run([sys.executable,str(ROOT/'note10/device_test/test_pmu_failure_package_flow.py'),'--artifact',str(prior_flow),'--output',str(OUT/'pmu-failure-package-flow-model')],'03-pmu-failure-package-flow.log')
@@ -457,7 +470,7 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             from gic_priority_binding import validate as validate_priority
             validate_priority(OUT,report,require_package_flow=False)
             with tempfile.TemporaryDirectory() as temp:
-                old41=prepare_control_compat(OUT,Path(temp)/'v41-fixture')
+                old41=prepare_control_compat(prepare_fpsimd_compat(OUT,Path(temp)/'v42-fixture'),Path(temp)/'v41-fixture')
                 old40=prepare_state_compat(old41,Path(temp)/'v40-fixture')
                 run([sys.executable,str(ROOT/'note10/device_test/test_gic_priority_package_flow.py'),'--artifact',str(old40),'--output',str(OUT/'gic-priority-package-flow-model')],'03-gic-priority-package-flow.log')
             validate_priority(OUT,report)
@@ -465,14 +478,21 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             from pmu_state_binding import validate as validate_state
             validate_state(OUT,report,require_package_flow=False)
             with tempfile.TemporaryDirectory() as temp:
-                old41=prepare_control_compat(OUT,Path(temp)/'v41-fixture')
+                old41=prepare_control_compat(prepare_fpsimd_compat(OUT,Path(temp)/'v42-fixture'),Path(temp)/'v41-fixture')
                 run([sys.executable,str(ROOT/'note10/device_test/test_pmu_state_package_flow.py'),'--artifact',str(old41),'--output',str(OUT/'pmu-state-package-flow-model')],'03-pmu-state-package-flow.log')
             validate_state(OUT,report)
             run([sys.executable,str(ROOT/'note10/device_test/test_pmu_control_binding.py'),'--artifact',str(OUT),'--output',str(OUT/'pmu-control-binding-model')],'03-pmu-control-binding.log')
             from pmu_control_binding import validate as validate_control
             validate_control(OUT,report,require_package_flow=False)
-            run([sys.executable,str(ROOT/'note10/device_test/test_pmu_control_package_flow.py'),'--artifact',str(OUT),'--output',str(OUT/'pmu-control-package-flow-model')],'03-pmu-control-package-flow.log')
+            with tempfile.TemporaryDirectory() as temp:
+                old42=prepare_fpsimd_compat(OUT,Path(temp)/'v42-fixture')
+                run([sys.executable,str(ROOT/'note10/device_test/test_pmu_control_package_flow.py'),'--artifact',str(old42),'--output',str(OUT/'pmu-control-package-flow-model')],'03-pmu-control-package-flow.log')
             validate_control(OUT,report)
+            run([sys.executable,str(ROOT/'note10/device_test/test_fpsimd_reference_binding.py'),'--artifact',str(OUT),'--output',str(OUT/'fpsimd-reference-binding-model')],'03-fpsimd-reference-binding.log')
+            from fpsimd_reference_binding import validate as validate_fpsimd
+            validate_fpsimd(OUT,report,require_package_flow=False)
+            run([sys.executable,str(ROOT/'note10/device_test/test_fpsimd_reference_package_flow.py'),'--artifact',str(OUT),'--output',str(OUT/'fpsimd-reference-package-flow-model')],'03-fpsimd-reference-package-flow.log')
+            validate_fpsimd(OUT,report)
             from pm_irq_binding import validate_model as validate_irq
             validate_irq(OUT,report)
         if auto_return:

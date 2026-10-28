@@ -166,6 +166,10 @@ def check(packages,kernel_build,backup,core_model,gate_model,init_model,adb):
         control_scope=validate_control(kernel_build,build)
         if any(control_scope!=bool(m.get('pmu_control_audit')) or (control_scope and m.get('pmu_control_audit_version')!=1) for m in (paired,diagnostic)):raise ValueError('PMU control package scope differs')
         report['pmu_control_audit_scope_verified']=control_scope
+        from fpsimd_reference_binding import validate as validate_fpsimd
+        fpsimd_scope=validate_fpsimd(kernel_build,build)
+        if any(fpsimd_scope!=bool(m.get('fpsimd_reference_audit')) or (fpsimd_scope and m.get('fpsimd_reference_audit_version')!=1) for m in (paired,diagnostic)):raise ValueError('FPSIMD reference package scope differs')
+        report['fpsimd_reference_audit_scope_verified']=fpsimd_scope
         from pm_irq_binding import assert_scope as assert_irq_scope,validate_model as validate_irq
         irq_scope=assert_irq_scope(kernel_build,build)
         if any(irq_scope!=bool(m.get('pm_irq_diagnostic')) for m in (paired,diagnostic)):raise ValueError('CPU0 IRQ package scope differs')

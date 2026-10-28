@@ -359,6 +359,20 @@ jobs:
             note10/private/handoff-kernel/pmu-control-collector-model/result.json
             note10/private/handoff-kernel/pmu-control-binding-model/result.json
             note10/private/handoff-kernel/pmu-control-package-flow-model/result.json
+            note10/private/handoff-kernel/fpsimd-reference-prepared/**
+            note10/private/handoff-kernel/fpsimd-reference-native-model/*.c
+            note10/private/handoff-kernel/fpsimd-reference-native-model/*.log
+            note10/private/handoff-kernel/fpsimd-reference-native-model/result.json
+            note10/private/handoff-kernel/fpsimd-reference-final-lifecycle-model/*.c
+            note10/private/handoff-kernel/fpsimd-reference-final-lifecycle-model/*.log
+            note10/private/handoff-kernel/fpsimd-reference-final-lifecycle-model/result.json
+            note10/private/handoff-kernel/fpsimd-reference-worker-model/*.c
+            note10/private/handoff-kernel/fpsimd-reference-worker-model/*.log
+            note10/private/handoff-kernel/fpsimd-reference-worker-model/result.json
+            note10/private/handoff-kernel/fpsimd-reference-decoder-model/result.json
+            note10/private/handoff-kernel/fpsimd-reference-collector-model/result.json
+            note10/private/handoff-kernel/fpsimd-reference-binding-model/result.json
+            note10/private/handoff-kernel/fpsimd-reference-package-flow-model/result.json
             note10/private/handoff-kernel/pmu-failure-binding-model/result.json
             note10/private/handoff-kernel/pmu-failure-package-flow-model/result.json
             note10/private/handoff-kernel/pmu-failure-prepared/**
