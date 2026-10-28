@@ -3,7 +3,8 @@
 ## 2026-10-28: late/noirq 왕복과 PMU 관측 통합 준비
 
 - v29는 기존 16개 평가에 late/noirq 진입·복원과 해당 시점의 16개 PMU 도메인 관측을 묶는다. 소유 진단만 TEST_PLATFORM까지 진행하고 CPU 비활성화·syscore·실제 절전 진입 전에 복귀한다.
-- 전체 회귀 254개, 실제 suspend 호출자·진입 C 경로 45개, noirq PMU 63개, 기존 PMU 88개와 FSYS 콜백 24개를 통과했다. 빌드와 새 단일 실기기 시험은 대기 중이다. 자세한 범위는 [PM-NOIRQ-AUDIT.md](device_test/PM-NOIRQ-AUDIT.md)에 기록했다.
+- 전체 회귀 254개, 실제 suspend 호출자·진입 C 경로 45개, noirq PMU 63개, 기존 PMU 88개와 FSYS 콜백 24개를 통과했다. v29 `9ccbc05`, CI `40611852128`의 단일 실기기 시험도 18개 평가, 자동복귀와 5개 파티션 무결성을 통과했다.
+- noirq 시점의 16개 도메인 제어·상태·재확인 값은 모두 0이었다. FSYS0A 원본 전원 끄기 콜백·USB 조건 허용·제어 호출이 각 1회, 오류는 0이었다. 복원 직후에는 16개 모두 1로 관측돼 이후 안정 시점의 읽기 전용 관측을 다음으로 검토한다. 전체 DMA 정지·XNU 실행은 증명하지 않는다. 자세한 범위는 [PM-NOIRQ-AUDIT.md](device_test/PM-NOIRQ-AUDIT.md)에 기록했다.
 
 ## 2026-10-28: FSYS0A 원본 전원 끄기 정책 통합 추적 준비
 
