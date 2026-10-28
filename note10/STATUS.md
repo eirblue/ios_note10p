@@ -1,5 +1,11 @@
 # 작업 상태 (2026-10-20, Asia/Seoul)
 
+## 2026-10-29: v37 CPU0 PM 사전조건 관측과 실기기 회귀 통과
+
+- 기본 비활성 CPU0 PM 소프트웨어 상태와 GIC 복원 입력 관측을 기존 진단에 추가했다. 새 PM 또는 CPU hotplug 주기를 추가하지 않으며 기존 33개 평가에 2개를 더한다.
+- 소스 `b7cf1afb8eb0b33d87805239cb3bf48b25e54e95`의 [CI 40716543231](https://github.com/eirblue/ios_note10p/actions/runs/40716543231)이 통과했다. 27개 준비 소스의 결합 검증과 합성 모델을 통과했으며, 실기기 단일 시험에서 35개 평가 전부, 자동 TWRP 복귀 및 사후 5개 파티션 해시가 통과했다. 설치 직전 배터리는 90%였다.
+- GIC 복원 기본값 비교의 불일치는 관찰 결과이며 CPU-PM 실행 허가를 의미하지 않는다. 실제 CPU-PM 호출, XNU 실행, iOS 부팅과 전체 DMA 정지는 검증하지 않았다. 상세 범위는 [PM-PRECONDITIONS.md](device_test/PM-PRECONDITIONS.md)에 기록했다.
+
 ## 2026-10-28: noirq CPU 정지·복원과 PMU·타이머 통합 준비
 
 - v31은 기존 19개 평가에 noirq CPU 정지·복원, CPU 정지 시점의 PMU 관측, 8개 CPU 복원 후 타이머 읽기를 함께 추가해 22개 평가를 준비한다. 기존 TEST_PLATFORM 가드 안에서 원본 CPU API를 반드시 짝지어 호출하고 0xff→0x01→0xff 마스크를 검사한다.
