@@ -327,6 +327,11 @@ jobs:
             note10/private/handoff-kernel/pm-branch-prepared/
             note10/private/handoff-kernel/pm-branch-binding-model/result.json
             note10/private/handoff-kernel/pm-branch-scope-model/result.json
+            note10/private/handoff-kernel/pmu-failure-binding-model/result.json
+            note10/private/handoff-kernel/pmu-failure-prepared/**
+            note10/private/handoff-kernel/pmu-failure-model/*.c
+            note10/private/handoff-kernel/pmu-failure-model/*.log
+            note10/private/handoff-kernel/pmu-failure-model/result.json
             note10/private/handoff-kernel/pm-branch-native-model/*.c
             note10/private/handoff-kernel/pm-branch-native-model/*.log
             note10/private/handoff-kernel/pm-branch-native-model/result.json

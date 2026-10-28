@@ -37,6 +37,10 @@ def verify_packages(directory):
                 raise ValueError('Branch package record differs')
             if record.get('mode')=='diagnostic' and (bool(meta.get('pm_branch_diagnostic'))!=bool(result.get('pm_branch_diagnostic')) or meta.get('pm_branch_version')!=result.get('pm_branch_version')):
                 raise ValueError('Branch package pair differs')
+            if bool(meta.get('pmu_failure_restore'))!=bool(record.get('pmu_failure_restore')) or meta.get('pmu_failure_restore_version')!=record.get('pmu_failure_restore_version'):
+                raise ValueError('Failure guard package record differs')
+            if record.get('mode')=='diagnostic' and (bool(meta.get('pmu_failure_restore'))!=bool(result.get('pmu_failure_restore')) or meta.get('pmu_failure_restore_version')!=result.get('pmu_failure_restore_version')):
+                raise ValueError('Failure guard package pair differs')
             if bool(meta.get('abox_failed_fw_resume_guard'))!=bool(record.get('abox_failed_fw_resume_guard')) or (record.get('mode')=='diagnostic' and bool(meta.get('abox_failed_fw_resume_guard'))!=bool(result.get('abox_failed_fw_resume_guard'))):raise ValueError('Failed-firmware guard package scope differs')
             if meta['writes']!=['boot'] or meta['automatic_reboot'] is not False:raise ValueError('Unexpected installer scope')
             if meta.get('xnu_payload_stage_diagnostic') is True and (

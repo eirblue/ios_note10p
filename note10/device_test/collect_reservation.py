@@ -117,6 +117,8 @@ def collect(packages,kernel_build,adb):
     from pm_branch_binding import assert_scope as assert_branch_scope,validate_model as validate_branch
     pm_branch=assert_branch_scope(kernel_build,result)
     if pm_branch:validate_branch(kernel_build,result)
+    from pmu_failure_binding import validate as validate_failure
+    pmu_failure=validate_failure(kernel_build,result)
     from pm_irq_binding import assert_scope as assert_irq_scope,validate_model as validate_irq
     pm_irq=assert_irq_scope(kernel_build,result)
     if pm_irq:validate_irq(kernel_build,result)
@@ -169,6 +171,7 @@ def collect(packages,kernel_build,adb):
     if bool(paired.get('pm_callbacks_diagnostic'))!=pm_callbacks or (pm_callbacks and paired.get('pm_callbacks_evidence_version')!=1):raise ValueError('Callback package/kernel scope differs')
     if bool(paired.get('pm_preconditions_diagnostic'))!=pm_preconditions or (pm_preconditions and paired.get('pm_preconditions_version')!=1):raise ValueError('Preconditions package/kernel scope differs')
     if bool(paired.get('pm_branch_diagnostic'))!=pm_branch or (pm_branch and paired.get('pm_branch_version')!=1):raise ValueError('Branch package/kernel scope differs')
+    if bool(paired.get('pmu_failure_restore'))!=pmu_failure or (pmu_failure and paired.get('pmu_failure_restore_version')!=1):raise ValueError('Failure guard package/kernel scope differs')
     if bool(paired.get('pm_irq_diagnostic'))!=pm_irq or (pm_irq and paired.get('pm_irq_evidence_version')!=1):raise ValueError('CPU0 IRQ package/kernel scope differs')
     if bool(paired.get('abox_pmu_audit_diagnostic'))!=abox_pmu_audit or (abox_pmu_audit and paired.get('abox_pmu_audit_evidence_version')!=3):raise ValueError('PMU package/kernel scope differs')
     if xnu_stage and (paired.get('xnu_payload_sha256')!=result.get('xnu_payload_sha256') or

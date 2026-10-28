@@ -151,6 +151,9 @@ def check(packages,kernel_build,backup,core_model,gate_model,init_model,adb):
         if branch_scope:
             if any(m.get('pm_branch_version')!=1 for m in (paired,diagnostic)):raise ValueError('Branch package version differs')
             validate_branch(kernel_build,build)
+        from pmu_failure_binding import validate as validate_failure
+        failure_scope=validate_failure(kernel_build,build)
+        if any(failure_scope!=bool(m.get('pmu_failure_restore')) or (failure_scope and m.get('pmu_failure_restore_version')!=1) for m in (paired,diagnostic)):raise ValueError('Failure guard package scope differs')
         from pm_irq_binding import assert_scope as assert_irq_scope,validate_model as validate_irq
         irq_scope=assert_irq_scope(kernel_build,build)
         if any(irq_scope!=bool(m.get('pm_irq_diagnostic')) for m in (paired,diagnostic)):raise ValueError('CPU0 IRQ package scope differs')
