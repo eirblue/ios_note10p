@@ -20,6 +20,19 @@ REPOSITORY = 'corsicanu/android_kernel_samsung_universal9820'
 OUT = ROOT / 'note10/private/handoff-kernel'
 
 
+def branch_source_path(out, model):
+    """Use the immutable snapshot that actually owns each branch source."""
+    paths = {'pmu-source': ('pm-branch-prepared', 'drivers/perf/arm_pmu.c'),
+             'gic-source': ('pm-preconditions-prepared', 'drivers/irqchip/irq-gic.c')}
+    if model not in paths:
+        raise ValueError('Unknown PM branch source model')
+    snapshot, name = paths[model]
+    source = Path(out) / snapshot / name
+    if not source.is_file() or source.is_symlink():
+        raise ValueError('PM branch source snapshot missing or unsafe: ' + model)
+    return source
+
+
 def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manifest=None,cpu_cache=False,pm_timer=False,auto_return=False,screen_log=False,gic_roundtrip=False,dma_pm_audit=False,ufs_pm_audit=False):
     if not sys.platform.startswith('linux'): raise RuntimeError('Linux CI host required')
     if os.environ.get('PLATFORM_VERSION')!='11' or os.environ.get('ANDROID_MAJOR_VERSION')!='r':
@@ -310,8 +323,8 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
                 run([sys.executable,str(ROOT/'note10/device_test/test_pm_preconditions_prepared_binding.py'),'--artifact',str(OUT),'--output',str(OUT/'pm-preconditions-binding-model')],'03-pm-preconditions-binding.log')
                 for script,model in (('test_pm_branch_native.py','native'),('test_pm_branch_producer.py','producer')):
                     run([sys.executable,str(ROOT/'note10/device_test'/script),'--output',str(OUT/('pm-branch-'+model+'-model'))],'03-pm-branch-'+model+'.log')
-                for script,model,path in (('test_pm_branch_source_native.py','pmu-source','drivers/perf/arm_pmu.c'),('test_pm_branch_gic_source_native.py','gic-source','drivers/irqchip/irq-gic.c')):
-                    run([sys.executable,str(ROOT/'note10/device_test'/script),'--source',str((OUT/'pm-branch-prepared')/path),'--output',str(OUT/('pm-branch-'+model+'-model'))],'03-pm-branch-'+model+'.log')
+                for script,model in (('test_pm_branch_source_native.py','pmu-source'),('test_pm_branch_gic_source_native.py','gic-source')):
+                    run([sys.executable,str(ROOT/'note10/device_test'/script),'--source',str(branch_source_path(OUT,model)),'--output',str(OUT/('pm-branch-'+model+'-model'))],'03-pm-branch-'+model+'.log')
                 for script,model in (('test_pm_branch_lifecycle.py','lifecycle'),('test_pm_branch_worker.py','worker'),('test_pm_preconditions_caller.py','caller')):
                     run([sys.executable,str(ROOT/'note10/device_test'/script),'--source-root',str(source),'--output',str(OUT/('pm-branch-'+model+'-model'))],'03-pm-branch-'+model+'.log')
                 run([sys.executable,str(ROOT/'note10/device_test/test_pmu_failure_restore.py'),'--source',str(source/'drivers/perf/arm_pmu.c'),'--helper',str(source/'drivers/perf/note10_pmu_failure_restore.c'),'--cpu-source',str(source/'kernel/cpu_pm.c'),'--notifier-source',str(source/'kernel/notifier.c'),'--output',str(OUT/'pmu-failure-model')],'03-pmu-failure-model.log')
