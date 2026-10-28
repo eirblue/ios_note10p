@@ -122,7 +122,7 @@ The next diagnostic should trace the existing predicate result and skip/control
 path without forcing power-off or calling the predicate an extra time.
 
 
-## v28 passive FSYS0A policy trace (physical result pending)
+## v28 passive FSYS0A policy trace
 
 Evidence version 3 retains all preceding observations and adds `N10FSP1` as
 an independently required sixteenth evaluation. The pinned complete original
@@ -163,7 +163,7 @@ maximum policy payload is 313 bytes inside its 384-byte buffer. The retained
 ABOX 105, UFS/HCI 42 and IOMMU 25 implementations and DMA hook are unchanged.
 
 
-The first v28 CI stopped before kernel compilation and before any device write:
+The first v28 CI stopped before integrated kernel compilation and before any device write:
 the FSYS preparer initially compared the already-instrumented OTG file with its
 upstream hash. The corrected binding requires the exact preceding USB observer
 output (SHA256 dff1dfda801d201c2c395a39b6919e76e6f9a8aa34be27dd9546c978b009d321)
@@ -171,3 +171,24 @@ and separately verifies that the original `otg_is_connect` function body is
 unchanged. A regression reconstructs the complete preceding USB preparation
 from its three pinned upstream inputs, accepts the actual prepared composition
 and rejects an unprepared file. No USB runtime behavior was changed by this fix.
+
+
+The corrected v28 source `a310eee44b935cbb40e80a94b7122679d1d031cf`, CI
+`40602830413`, passed one fresh physical cycle: all 16 evaluations, automatic
+TWRP recovery and five expected partition hashes at preinstall battery 44%.
+All phases recorded one valid initialized FSYS0A owner, zero power-off entries,
+zero predicate calls, zero skips and zero control calls. The domain's sampled
+configuration/status/configuration fields stayed 1/1/1. Therefore this run does
+not show a USB predicate rejection: the original power-off callback was not
+entered at all. The callback history is not a read of generic-domain state.
+`was_skip` reflects the last skip-flag assignment observed in a power-off
+callback; later power-on callbacks are outside this shadow trace.
+
+The present TEST_DEVICES path returns before `suspend_enter`, which contains
+late/noirq device callbacks. The next source review targets that call boundary
+and the generic power-domain noirq path before extending any test depth.
+A separate PC-only source probe of both original USB stop variants also
+reproduces successful zero returns without a final observed HALT bit in
+simulated timeout cases. It makes no physical USB failure claim; the indirect
+soft-reset body is not modeled. Future evidence must distinguish return values,
+actual original-read HALT observations, timeout and runtime-suspended skips.
