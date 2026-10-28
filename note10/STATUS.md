@@ -1,5 +1,12 @@
 # 작업 상태 (2026-10-20, Asia/Seoul)
 
+## 2026-10-29: v43 FPSIMD 참조 관측과 실기기 회귀 통과
+
+- 기존 단일 CPU0 관측 경로에 기본 비활성 FPSIMD 참조 감사를 추가했다. 소프트웨어 참조의 의미와 관측 범위는 [FPSIMD-REFERENCE-AUDIT.md](device_test/FPSIMD-REFERENCE-AUDIT.md)에 기록했다.
+- 소스 `cb568978e3fcb173593e8f3f705688ca32f36a30`의 [CI 40769141674](https://github.com/eirblue/ios_note10p/actions/runs/40769141674)가 통과했다. 실제 준비 소스와 PC 합성 모델을 포함한 21개 결속을 확인했다.
+- 실기기 단일 시험에서 40개 평가 전부, 자동 TWRP 복귀와 사후 5개 파티션 해시가 통과했다. 설치 직전 배터리는 47%였고 복귀 후 TWRP와 패널 밝기 설정값은 각각 raw 10으로 확인했다.
+- 관측은 소프트웨어 참조 분류이며 FP 레지스터의 소유나 완전한 보존을 증명하지 않는다. 직접 CPU-PM 호출, 전체 DMA 정지, XNU 실행과 iOS 부팅은 검증하지 않았다.
+
 ## 2026-10-29: v42 PMU 제어 상태 관측과 실기기 회귀 통과
 
 - 기존 단일 CPU0 관측 경로에 기본 비활성 PMU 제어 상태 감사를 추가했다. 관측 범위와 접근 조건은 [PMU-CONTROL-AUDIT.md](device_test/PMU-CONTROL-AUDIT.md)에 기록했다.
