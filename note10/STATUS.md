@@ -620,3 +620,10 @@ Exynos SoC MASTER 및 플랫폼 archive 입력 분리:
 - PM 목록 1,388개 중 DMA 가능 장치는 277개였다. late/noirq 경계에서 각각 276개는 해당 PM 플래그가 설정됐고 1개는 syscore 예외였으며 미포함 범주는 0개였다. 이 값은 프레임워크 경유 여부이며 하드웨어 DMA 정지를 뜻하지 않는다.
 - 등록 IOMMU 18개 중 17개에서 해당 late/noirq 플래그를 관측했고 1개는 syscore 예외였다. 드라이버 소프트웨어 조건상 active 12개, runtime-active 0개였다. syscore callback 등록 11개는 시험 전후 순서와 이름이 동일했다. [PM-EDGE-INVENTORY.md](device_test/PM-EDGE-INVENTORY.md)에 관측 범위와 한계를 기록했다.
 - 실제 syscore 호출, 전체 DMA 정지, GIC/MMU/cache 인계, XNU 실행과 iOS 부팅은 확인하지 않았다.
+
+
+## 2026-10-28: v34 CPU0 IRQ 관측 실기기 통과
+
+- 공개 소스 `4cec79508c0bfaf09f12435b8ca6d981c0833f75`의 [통합 커널 CI 40636741343](https://github.com/eirblue/ios_note10p/actions/runs/40636741343)가 통과했고 실기기 1회에서 29개 평가가 모두 통과했다. 설치 직전 배터리는 11%였다.
+- CPU0 IRQ 켜짐·꺼짐·복원 세 단계에서 아키텍처 및 타이머와 읽기 전용 GIC 비교가 통과했고 원래 IRQ 및 CPU 상태가 복원됐다. 자동 TWRP 복귀 및 사후 5개 파티션 해시 검사도 통과했다. PC 회귀 275개가 통과했다. 상세 [CPU0 IRQ 관측](device_test/PM-IRQ-AUDIT.md).
+- 전체 DMA 정지, 실제 syscore 실행, MMU/cache 인계, XNU 실행과 iOS 부팅은 검증되지 않았다.
