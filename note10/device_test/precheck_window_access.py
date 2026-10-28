@@ -154,6 +154,10 @@ def check(packages,kernel_build,backup,core_model,gate_model,init_model,adb):
         from pmu_failure_binding import validate as validate_failure
         failure_scope=validate_failure(kernel_build,build)
         if any(failure_scope!=bool(m.get('pmu_failure_restore')) or (failure_scope and m.get('pmu_failure_restore_version')!=1) for m in (paired,diagnostic)):raise ValueError('Failure guard package scope differs')
+        from gic_priority_binding import validate as validate_priority
+        priority_scope=validate_priority(kernel_build,build)
+        if any(priority_scope!=bool(m.get('gic_priority_restore')) or (priority_scope and m.get('gic_priority_restore_version')!=1) for m in (paired,diagnostic)):raise ValueError('GIC priority package scope differs')
+        report['gic_priority_restore_scope_verified']=priority_scope
         from pm_irq_binding import assert_scope as assert_irq_scope,validate_model as validate_irq
         irq_scope=assert_irq_scope(kernel_build,build)
         if any(irq_scope!=bool(m.get('pm_irq_diagnostic')) for m in (paired,diagnostic)):raise ValueError('CPU0 IRQ package scope differs')
