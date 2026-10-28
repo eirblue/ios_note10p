@@ -6,7 +6,7 @@ from unittest.mock import patch
 import prepare_linux_boot as prep
 import build_boot_test_packages as packages
 from stage_phase2 import verify_packages
-from pmu_failure_binding import MARKER, validate as validate_failure
+from pmu_failure_binding import MARKER, PACKAGE_SOURCES, validate as validate_failure
 from pm_callbacks_binding import MARKERS as CALLBACKS
 from pm_preconditions_binding import MARKERS as PRECONDITIONS
 from pm_branch_binding import MARKERS as BRANCH
@@ -14,7 +14,12 @@ from pm_branch_binding import MARKERS as BRANCH
 def sha(x): return hashlib.sha256(x).hexdigest()
 def main():
     ap=argparse.ArgumentParser();ap.add_argument('--artifact',required=True);ap.add_argument('--output',required=True);args=ap.parse_args()
-    src=Path(args.artifact);out=Path(args.output);out.mkdir(parents=True,exist_ok=False)
+    src=Path(args.artifact);out=Path(args.output)
+    build_at_start=json.loads((src/'build-result.json').read_text(encoding='utf8'))
+    source_dir=Path(__file__).resolve().parent
+    measured={n:sha((source_dir/n).read_bytes()) for n in PACKAGE_SOURCES}
+    if build_at_start.get('pmu_failure_package_sources_sha256')!=measured:raise ValueError('Package sources changed since build report')
+    out.mkdir(parents=True,exist_ok=False)
     names=('pm-preconditions-prepared','pm-branch-prepared','pmu-failure-prepared','pmu-failure-model','pmu-failure-binding-model')
     with tempfile.TemporaryDirectory(dir=prep.ROOT/'note10/private') as t:
         root=Path(t);art=root/'artifact';art.mkdir()
@@ -64,6 +69,6 @@ def main():
                         assert result['pmu_failure_restore'] is True and diag['pmu_failure_restore'] is True and diag['pmu_failure_restore_version']==1
                 finally:
                     if not proof.exists():proof.write_bytes(saved)
-    result={'passed':True,'hardware_verified':False,'cases':['synthetic-prototype-to-packages','missing-flag','missing-version','missing-binding-proof'],'harness_sha256':sha(Path(__file__).read_bytes()),'package_sources_sha256':b['pmu_failure_package_sources_sha256']}
+    result={'passed':True,'hardware_verified':False,'cases':['synthetic-prototype-to-packages','missing-flag','missing-version','missing-binding-proof'],'harness_sha256':sha(Path(__file__).read_bytes()),'package_sources_sha256':measured}
     (out/'result.json').write_text(json.dumps(result,indent=2)+'\n',encoding='utf8')
 if __name__=='__main__':main()
