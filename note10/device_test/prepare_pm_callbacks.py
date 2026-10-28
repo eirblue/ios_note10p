@@ -28,6 +28,12 @@ def replace(raw, old, new):
     if raw.count(old)!=1: raise ValueError('Callback composition anchor differs')
     return raw.replace(old,new)
 def sha(raw): return hashlib.sha256(raw).hexdigest()
+EDGE_SYSCORE_SUFFIX = b'\n#ifdef CONFIG_NOTE10_PM_EDGE_INVENTORY\n#include "note10_pm_edge_syscore.c"\n#endif\n'
+def verify_edge_syscore(raw):
+    if not raw.endswith(EDGE_SYSCORE_SUFFIX) or sha(raw[:-len(EDGE_SYSCORE_SUFFIX)]) != PINS['drivers/base/syscore.c']:
+        raise ValueError('PM edge syscore composition differs')
+    return raw[:-len(EDGE_SYSCORE_SUFFIX)]
+
 GUARD_NR_OLD = b'\tint nr_calls;'
 GUARD_NR_NEW = b'#ifdef CONFIG_NOTE10_CPU_PM_FAILURE_GUARD\n\tint nr_calls = 0;\n#else\n\tint nr_calls;\n#endif'
 GUARD_EXIT_OLD = b'\tret = cpu_cluster_pm_enter();\n\treturn ret;'
@@ -45,7 +51,9 @@ def reverse_guard(raw):
 def prepare(source):
     source=Path(source)
     for name,digest in PINS.items():
-        if sha((source/name).read_bytes()) != digest: raise ValueError('Callback pinned source differs: '+name)
+        raw=(source/name).read_bytes()
+        if name=='drivers/base/syscore.c':verify_edge_syscore(raw)
+        elif sha(raw) != digest: raise ValueError('Callback pinned source differs: '+name)
     suspend=source/'kernel/power/suspend.c'
     if sha(suspend.read_bytes())!=FINAL_SHA: raise ValueError('Guarded suspend differs')
     cpu=source/'kernel/power/note10_pm_cpus.c'; raw=cpu.read_bytes()

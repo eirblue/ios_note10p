@@ -2,7 +2,7 @@
 import argparse, hashlib, json, subprocess, sys
 from pathlib import Path
 from test_fsys_pm_native import function
-from prepare_pm_callbacks import PINS, reverse_guard, GUARD_MARKER
+from prepare_pm_callbacks import PINS, reverse_guard, GUARD_MARKER, verify_edge_syscore
 
 def sha(b): return hashlib.sha256(b).hexdigest()
 def main():
@@ -10,7 +10,8 @@ def main():
  files={n:(root/n).read_bytes() for n in ('kernel/cpu_pm.c','kernel/notifier.c','drivers/base/syscore.c','include/linux/notifier.h','include/linux/cpu_pm.h')}
  cpu=files['kernel/cpu_pm.c']; suffix=b'\n#ifdef CONFIG_NOTE10_PM_CALLBACK_INVENTORY\n#include "note10_pm_callbacks_cpu_pm.c"\n#endif\n'
  if not cpu.endswith(suffix) or not cpu[:-len(suffix)].endswith(GUARD_MARKER) or sha(reverse_guard(cpu[:-len(suffix)-len(GUARD_MARKER)]))!=PINS['kernel/cpu_pm.c']:raise ValueError('guard composition differs')
- for n in ('kernel/notifier.c','drivers/base/syscore.c','include/linux/notifier.h','include/linux/cpu_pm.h'):
+ original_syscore=verify_edge_syscore(files['drivers/base/syscore.c']).decode()
+ for n in ('kernel/notifier.c','include/linux/notifier.h','include/linux/cpu_pm.h'):
   if sha(files[n])!=PINS[n]:raise ValueError('source pin differs '+n)
  c=cpu.decode();n=files['kernel/notifier.c'].decode();sc=files['drivers/base/syscore.c'].decode()
  stub=r"""
@@ -55,7 +56,9 @@ struct syscore_ops *nodes[2]; int nodecount;
  header=files['include/linux/cpu_pm.h'].decode(); start=header.index('enum cpu_pm_event {'); end=header.index('};',start)+2
  code=stub+header[start:end]+'\n'+function(files['include/linux/notifier.h'].decode(),'static inline int notifier_to_errno(')+function(n,'static int notifier_call_chain(')+function(n,'int __atomic_notifier_call_chain(')+function(c,'static int cpu_pm_notify(')
  for name in ('int cpu_pm_enter(', 'int cpu_pm_exit(', 'int cpu_cluster_pm_enter(', 'int cpu_cluster_pm_exit(', 'static int cpu_pm_suspend(', 'static void cpu_pm_resume('):code+=function(c,name)
- code+=function(sc,'int syscore_suspend(')+function(sc,'void syscore_resume(')
+ for name in ('int syscore_suspend(', 'void syscore_resume('):
+  if function(sc,name)!=function(original_syscore,name):raise ValueError('syscore function differs from original: '+name)
+  code+=function(sc,name)
  code+=r"""
 static int ev[8][6], fail_event=-1, fail_index=-1, exit_fail, stop_index=-1;
 static int client(struct notifier_block*b,unsigned long e,void*v){(void)v;ev[e][b->id]++;if(fail_event==99 && e==CPU_PM_ENTER && b->id==5)return 2;if((int)e==fail_event && b->id==fail_index)return 0x8006;if(e==CPU_PM_EXIT && exit_fail && b->id==0)return 0x8007;if((int)e==fail_event && b->id==stop_index)return NOTIFY_STOP;return NOTIFY_DONE;}

@@ -73,7 +73,7 @@ def _validate_core(root,build):
  verify_composition(root,intermediate)
  if b'CONFIG_NOTE10_CPU_PM_FAILURE_GUARD=y' in (root/'handoff.config').read_bytes().splitlines():
   directory=root/'cpu-pm-failure-guard-model'; model=json.loads((directory/'result.json').read_text(encoding='utf-8'))
-  expected={'kernel/cpu_pm.c':final['kernel/cpu_pm.c'],'kernel/notifier.c':PINS['kernel/notifier.c'],'drivers/base/syscore.c':PINS['drivers/base/syscore.c'],'include/linux/notifier.h':PINS['include/linux/notifier.h'],'include/linux/cpu_pm.h':PINS['include/linux/cpu_pm.h']}
+  expected={'kernel/cpu_pm.c':final['kernel/cpu_pm.c'],'kernel/notifier.c':PINS['kernel/notifier.c'],'drivers/base/syscore.c':prior_edge.get('drivers/base/syscore.c'),'include/linux/notifier.h':PINS['include/linux/notifier.h'],'include/linux/cpu_pm.h':PINS['include/linux/cpu_pm.h']}
   logs={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in directory.glob('*.log')}
   cases=[0,1,*range(10,16),*range(20,26),30,31,32,33,34]
   lifecycle=json.loads((root/'pm-build-concurrency-model/result.json').read_text(encoding='utf-8'))
