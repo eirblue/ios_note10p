@@ -24,3 +24,21 @@ The native model executes the actual observer with injected per-CPU faults,
 including an ASID-only change, and exercises the prepared PM worker's error
 branches. These are PC models, not evidence of physical operation. Results
 do not establish global DMA shutdown, GIC/MMU/cache handoff or XNU execution.
+
+## v32 physical result, 2026-10-28
+
+Source `85f82519c2d04d17a00de12e8a2d80b73a3fe1e2` and
+[CI 40624098218](https://github.com/eirblue/ios_note10p/actions/runs/40624098218)
+passed. PC verification passed 275 regression tests, 37 actual observer C
+fault cases, and eight prepared-worker cases. One fresh physical diagnostic
+passed all 24 individually reported evaluations.
+
+All eight CPUs passed the post-PM architecture comparison and the separate
+full-payload readback check. The original payload SHA256 check also passed.
+Automatic TWRP return and all five post-test partition integrity checks passed.
+Battery was 21% immediately before installation. Device logs, register values,
+identifiers, backups and device images remain private.
+
+These observations are limited to this single diagnostic roundtrip. They do
+not establish complete DMA shutdown, hardware GIC/MMU/cache handoff, XNU
+execution or iOS boot.
