@@ -633,3 +633,9 @@ Exynos SoC MASTER 및 플랫폼 archive 입력 분리:
 - 공개 소스 `591174d428082dec154ee3a078be30b923ccd8c2`의 [통합 커널 CI 40695605629](https://github.com/eirblue/ios_note10p/actions/runs/40695605629) 두 번째 시도가 통과했다. 새 실기기 시험 1회에서 기존 평가를 포함한 33개 평가 모두 통과했고 설치 직전 배터리는 91%였다.
 - CPU-PM notifier, generic IRQ, clocksource, clockevent의 세 시점 메타데이터 검사가 통과했다. 원래 CPU 상태 복원, 자동 TWRP 복귀와 사후 5개 파티션 해시 검사도 통과했다. 등록된 callback은 가능한 경로이며 호출 실행을 뜻하지 않는다. [관측 범위와 한계](device_test/PM-CALLBACK-INVENTORY.md).
 - XNU 입력 재빌드의 기존 결과와 차이는 UUID 및 빌드 시각 메타데이터에 한정됐고 실행 코드·나머지 데이터는 같았다. 실제 XNU 실행, iOS 부팅, 전체 DMA 정지, syscore 실행과 MMU/cache 인계는 검증되지 않았다.
+
+## 2026-10-28: v36 CPU PM 실패 경로 보호와 실기기 회귀 통과
+
+- 공개 소스 `0f1584873b667a88ed2f0e37e43f1ea6d1c62ad0`의 [통합 커널 CI 40705922907](https://github.com/eirblue/ios_note10p/actions/runs/40705922907)이 통과했다. CPU 및 클러스터 PM 진입의 notifier 호출 횟수를 초기화하고, 클러스터 진입 실패 시 원래 오류를 유지하면서 앞선 CPU 진입을 한 번 정리한다.
+- 실제 Image 컴파일과 최종 소스 검증을 병행했다. PC guard 모형 19개, 프로세스 수명 검사 6개와 deadline 경계, 결합 변이 검사 12개가 통과했다. 기존 33개 평가의 실기기 회귀를 한 번 수행해 모두 통과했고, 설치 직전 배터리 97%, 자동 TWRP 복귀와 5개 파티션 해시를 확인했다. [관측 범위와 한계](device_test/PM-CALLBACK-INVENTORY.md).
+- 하드웨어 CPU PM 실패 주입이나 직접 syscore 호출은 검증하지 않았다. 전체 DMA 정지, MMU/cache 인계, XNU 실행과 iOS 부팅도 확인하지 않았다.
