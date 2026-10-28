@@ -166,6 +166,10 @@ def build(backup,prototype,output,current_packages=None):
     from gic_priority_binding import MARKER as priority_marker
     if (priority_marker in raw)!=gic_priority:raise ValueError('Prototype GIC priority Image scope differs')
     if gic_priority and (not pmu_failure or metadata.get('gic_priority_restore_version')!=1):raise ValueError('Incomplete GIC priority package contract')
+    pmu_state=metadata.get('pmu_state_audit') is True
+    from pmu_state_binding import MARKERS as state_markers
+    if any((marker in raw)!=pmu_state for marker in state_markers):raise ValueError('Prototype PMU state Image scope differs')
+    if pmu_state and (not gic_priority or metadata.get('pmu_state_audit_version')!=1):raise ValueError('Incomplete PMU state package contract')
     pm_irq=metadata.get('pm_irq_diagnostic') is True
     if pm_irq and (not pm_edge or not pm_post_arch or not pm_cpus or metadata.get('pm_irq_evidence_version')!=1):raise ValueError('Incomplete CPU0 IRQ package contract')
     if dma_pm_audit and (not gic_roundtrip or metadata.get('dma_pm_audit_evidence_version')!=1):
@@ -217,6 +221,7 @@ def build(backup,prototype,output,current_packages=None):
             'pm_branch_diagnostic':pm_branch,'pm_branch_version':1 if pm_branch else None,
             'pmu_failure_restore':pmu_failure,'pmu_failure_restore_version':1 if pmu_failure else None,
             'gic_priority_restore':gic_priority,'gic_priority_restore_version':1 if gic_priority else None,
+            'pmu_state_audit':pmu_state,'pmu_state_audit_version':1 if pmu_state else None,
             'pm_irq_diagnostic':pm_irq,'pm_irq_evidence_version':1 if pm_irq else None,
             'abox_pmu_audit_diagnostic':abox_pmu_audit,'abox_pmu_audit_evidence_version':3 if abox_pmu_audit else None,
             'abox_pm_audit_diagnostic':abox_pm_audit,'abox_pm_audit_evidence_version':8 if abox_pm_audit else None,
@@ -270,6 +275,8 @@ def build(backup,prototype,output,current_packages=None):
         metadata['pmu_failure_restore_version']=1 if pmu_failure and mode=='diagnostic' else None
         metadata['gic_priority_restore']=gic_priority and mode=='diagnostic'
         metadata['gic_priority_restore_version']=1 if gic_priority and mode=='diagnostic' else None
+        metadata['pmu_state_audit']=pmu_state and mode=='diagnostic'
+        metadata['pmu_state_audit_version']=1 if pmu_state and mode=='diagnostic' else None
         metadata['pm_irq_diagnostic']=pm_irq and mode=='diagnostic'
         metadata['pm_irq_evidence_version']=1 if pm_irq and mode=='diagnostic' else None
         metadata['abox_pmu_audit_diagnostic']=abox_pmu_audit and mode=='diagnostic'

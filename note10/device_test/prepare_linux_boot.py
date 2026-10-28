@@ -116,6 +116,8 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output,auto_cycle_token=None):
     validate_failure(kernel_build,build)
     from gic_priority_binding import validate as validate_priority
     validate_priority(kernel_build,build)
+    from pmu_state_binding import validate as validate_state
+    validate_state(kernel_build,build)
     from pm_irq_binding import validate_model as validate_irq
     validate_irq(kernel_build,build)
     if hashlib.sha256(config).hexdigest()!=build['effective_config_sha256']:
@@ -239,6 +241,8 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output,auto_cycle_token=None):
             'pmu_failure_restore_version':build.get('pmu_failure_restore_version'),
             'gic_priority_restore':build.get('gic_priority_restore') is True,
             'gic_priority_restore_version':build.get('gic_priority_restore_version'),
+            'pmu_state_audit':build.get('pmu_state_audit') is True,
+            'pmu_state_audit_version':build.get('pmu_state_audit_version'),
             'pm_irq_diagnostic':build.get('pm_irq_diagnostic') is True,
             'pm_irq_evidence_version':build.get('pm_irq_evidence_version'),
             'abox_pmu_audit_diagnostic':build.get('abox_pmu_audit_diagnostic') is True,

@@ -333,6 +333,19 @@ jobs:
             note10/private/handoff-kernel/gic-priority-model/result.json
             note10/private/handoff-kernel/gic-priority-binding-model/result.json
             note10/private/handoff-kernel/gic-priority-package-flow-model/result.json
+            note10/private/handoff-kernel/pmu-state-prepared/**
+            note10/private/handoff-kernel/pmu-state-native-model/*.c
+            note10/private/handoff-kernel/pmu-state-native-model/*.log
+            note10/private/handoff-kernel/pmu-state-native-model/result.json
+            note10/private/handoff-kernel/pmu-state-final-lifecycle-model/*.c
+            note10/private/handoff-kernel/pmu-state-final-lifecycle-model/*.log
+            note10/private/handoff-kernel/pmu-state-final-lifecycle-model/result.json
+            note10/private/handoff-kernel/pmu-state-worker-model/*.c
+            note10/private/handoff-kernel/pmu-state-worker-model/*.log
+            note10/private/handoff-kernel/pmu-state-worker-model/result.json
+            note10/private/handoff-kernel/pmu-state-collector-model/result.json
+            note10/private/handoff-kernel/pmu-state-binding-model/result.json
+            note10/private/handoff-kernel/pmu-state-package-flow-model/result.json
             note10/private/handoff-kernel/pmu-failure-binding-model/result.json
             note10/private/handoff-kernel/pmu-failure-package-flow-model/result.json
             note10/private/handoff-kernel/pmu-failure-prepared/**

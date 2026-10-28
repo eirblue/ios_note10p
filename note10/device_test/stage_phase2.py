@@ -45,6 +45,10 @@ def verify_packages(directory):
                 raise ValueError('GIC priority package record differs')
             if record.get('mode')=='diagnostic' and (bool(meta.get('gic_priority_restore'))!=bool(result.get('gic_priority_restore')) or meta.get('gic_priority_restore_version')!=result.get('gic_priority_restore_version')):
                 raise ValueError('GIC priority package pair differs')
+            if bool(meta.get('pmu_state_audit'))!=bool(record.get('pmu_state_audit')) or meta.get('pmu_state_audit_version')!=record.get('pmu_state_audit_version'):
+                raise ValueError('PMU state package record differs')
+            if record.get('mode')=='diagnostic' and (bool(meta.get('pmu_state_audit'))!=bool(result.get('pmu_state_audit')) or meta.get('pmu_state_audit_version')!=result.get('pmu_state_audit_version')):
+                raise ValueError('PMU state package pair differs')
             if bool(meta.get('abox_failed_fw_resume_guard'))!=bool(record.get('abox_failed_fw_resume_guard')) or (record.get('mode')=='diagnostic' and bool(meta.get('abox_failed_fw_resume_guard'))!=bool(result.get('abox_failed_fw_resume_guard'))):raise ValueError('Failed-firmware guard package scope differs')
             if meta['writes']!=['boot'] or meta['automatic_reboot'] is not False:raise ValueError('Unexpected installer scope')
             if meta.get('xnu_payload_stage_diagnostic') is True and (

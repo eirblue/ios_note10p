@@ -158,6 +158,10 @@ def check(packages,kernel_build,backup,core_model,gate_model,init_model,adb):
         priority_scope=validate_priority(kernel_build,build)
         if any(priority_scope!=bool(m.get('gic_priority_restore')) or (priority_scope and m.get('gic_priority_restore_version')!=1) for m in (paired,diagnostic)):raise ValueError('GIC priority package scope differs')
         report['gic_priority_restore_scope_verified']=priority_scope
+        from pmu_state_binding import validate as validate_state
+        state_scope=validate_state(kernel_build,build)
+        if any(state_scope!=bool(m.get('pmu_state_audit')) or (state_scope and m.get('pmu_state_audit_version')!=1) for m in (paired,diagnostic)):raise ValueError('PMU state package scope differs')
+        report['pmu_state_audit_scope_verified']=state_scope
         from pm_irq_binding import assert_scope as assert_irq_scope,validate_model as validate_irq
         irq_scope=assert_irq_scope(kernel_build,build)
         if any(irq_scope!=bool(m.get('pm_irq_diagnostic')) for m in (paired,diagnostic)):raise ValueError('CPU0 IRQ package scope differs')
