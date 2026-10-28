@@ -627,3 +627,9 @@ Exynos SoC MASTER 및 플랫폼 archive 입력 분리:
 - 공개 소스 `4cec79508c0bfaf09f12435b8ca6d981c0833f75`의 [통합 커널 CI 40636741343](https://github.com/eirblue/ios_note10p/actions/runs/40636741343)가 통과했고 실기기 1회에서 29개 평가가 모두 통과했다. 설치 직전 배터리는 11%였다.
 - CPU0 IRQ 켜짐·꺼짐·복원 세 단계에서 아키텍처 및 타이머와 읽기 전용 GIC 비교가 통과했고 원래 IRQ 및 CPU 상태가 복원됐다. 자동 TWRP 복귀 및 사후 5개 파티션 해시 검사도 통과했다. PC 회귀 275개가 통과했다. 상세 [CPU0 IRQ 관측](device_test/PM-IRQ-AUDIT.md).
 - 전체 DMA 정지, 실제 syscore 실행, MMU/cache 인계, XNU 실행과 iOS 부팅은 검증되지 않았다.
+
+## 2026-10-28: v35 PM callback 메타데이터 실기기 통과
+
+- 공개 소스 `591174d428082dec154ee3a078be30b923ccd8c2`의 [통합 커널 CI 40695605629](https://github.com/eirblue/ios_note10p/actions/runs/40695605629) 두 번째 시도가 통과했다. 새 실기기 시험 1회에서 기존 평가를 포함한 33개 평가 모두 통과했고 설치 직전 배터리는 91%였다.
+- CPU-PM notifier, generic IRQ, clocksource, clockevent의 세 시점 메타데이터 검사가 통과했다. 원래 CPU 상태 복원, 자동 TWRP 복귀와 사후 5개 파티션 해시 검사도 통과했다. 등록된 callback은 가능한 경로이며 호출 실행을 뜻하지 않는다. [관측 범위와 한계](device_test/PM-CALLBACK-INVENTORY.md).
+- XNU 입력 재빌드의 기존 결과와 차이는 UUID 및 빌드 시각 메타데이터에 한정됐고 실행 코드·나머지 데이터는 같았다. 실제 XNU 실행, iOS 부팅, 전체 DMA 정지, syscore 실행과 MMU/cache 인계는 검증되지 않았다.
