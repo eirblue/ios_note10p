@@ -227,9 +227,10 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             report['pm_branch_sources_sha256']={n:hashlib.sha256((ROOT/'note10/device_test'/n).read_bytes()).hexdigest() for n in branch_sources}
             snapshot_branch(source,OUT/'pm-branch-prepared',report['pm_branch_prepared_sha256'])
             from prepare_pmu_failure_restore import prepare as prepare_failure, snapshot as snapshot_failure
-            from pmu_failure_binding import SOURCES as failure_sources
+            from pmu_failure_binding import SOURCES as failure_sources, PACKAGE_SOURCES as failure_package_sources
             report.update(prepare_failure(source,report))
             report['pmu_failure_sources_sha256']={n:hashlib.sha256((ROOT/'note10/device_test'/n).read_bytes()).hexdigest() for n in failure_sources}
+            report['pmu_failure_package_sources_sha256']={n:hashlib.sha256((ROOT/'note10/device_test'/n).read_bytes()).hexdigest() for n in failure_package_sources}
             report['pmu_failure_snapshot_sha256']=snapshot_failure(source,OUT/'pmu-failure-prepared',report)
             report['pm_quiesce_patched_sha256']['kernel/power/Kconfig']=report['pm_callbacks_prepared_sha256']['kernel/power/Kconfig']
             report['scope']='Bundled PM, CPU architecture and payload observations; no global DMA shutdown or XNU execution claim'
@@ -390,6 +391,8 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             (OUT/'build-result.json').write_text(json.dumps(report,indent=2)+'\n',encoding='utf-8')
             run([sys.executable,str(ROOT/'note10/device_test/test_pmu_failure_binding.py'),'--artifact',str(OUT),'--output',str(OUT/'pmu-failure-binding-model')],'03-pmu-failure-binding.log')
             from pmu_failure_binding import validate as validate_failure
+            validate_failure(OUT,report,require_package_flow=False)
+            run([sys.executable,str(ROOT/'note10/device_test/test_pmu_failure_package_flow.py'),'--artifact',str(OUT),'--output',str(OUT/'pmu-failure-package-flow-model')],'03-pmu-failure-package-flow.log')
             validate_failure(OUT,report)
             from pm_irq_binding import validate_model as validate_irq
             validate_irq(OUT,report)

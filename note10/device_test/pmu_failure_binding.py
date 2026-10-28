@@ -1,9 +1,10 @@
 """Bind the final scoped PMU failure guard to source, models and Image."""
-import hashlib, json, shutil, tempfile
+import hashlib, json, shutil, tempfile, re
 from pathlib import Path
 from prepare_pmu_failure_restore import prepare
 HERE = Path(__file__).resolve().parent
-SOURCES = ("prepare_pmu_failure_restore.py", "pmu_failure_restore.c", "test_pmu_failure_restore.py", "pmu_failure_binding.py", "test_pmu_failure_binding.py")
+SOURCES = ("prepare_pmu_failure_restore.py", "pmu_failure_restore.c", "test_pmu_failure_restore.py", "pmu_failure_binding.py", "test_pmu_failure_binding.py", "test_pmu_failure_package_flow.py")
+PACKAGE_SOURCES = ("prepare_linux_boot.py", "build_boot_test_packages.py", "precheck_window_access.py", "stage_phase2.py", "collect_reservation.py")
 MARKER = b"N10PMUFR1: missing PMU failed-entry snapshot"
 def sha(raw): return hashlib.sha256(raw).hexdigest()
 def validate_core(root, build):
@@ -20,6 +21,8 @@ def validate_core(root, build):
         raise ValueError("PMU failure guard prerequisites differ")
     sourcehash = {n:sha((HERE/n).read_bytes()) for n in SOURCES}
     if build.get("pmu_failure_sources_sha256") != sourcehash: raise ValueError("failure sources differ")
+    package_sources=build.get("pmu_failure_package_sources_sha256")
+    if not isinstance(package_sources,dict) or set(package_sources)!=set(PACKAGE_SOURCES) or any(not isinstance(v,str) or re.fullmatch(r"[0-9a-f]{64}",v) is None for v in package_sources.values()): raise ValueError("failure package source map differs")
     with tempfile.TemporaryDirectory() as tmp:
         expected=Path(tmp)/"source"; shutil.copytree(root/"pm-preconditions-prepared",expected)
         branch=root/"pm-branch-prepared"
@@ -53,10 +56,15 @@ def validate_core(root, build):
     return True
 
 
-def validate(root,build):
+def validate(root,build,require_package_flow=True):
     if not validate_core(root,build): return False
     from test_pmu_failure_binding import CASES
     proof=json.loads((Path(root)/"pmu-failure-binding-model/result.json").read_text(encoding="utf8"))
     if proof.get("passed") is not True or proof.get("cases")!=list(CASES) or proof.get("harness_sha256")!=build["pmu_failure_sources_sha256"]["test_pmu_failure_binding.py"]:
         raise ValueError("failure binding mutation proof differs")
+    if require_package_flow:
+        flow=json.loads((Path(root)/"pmu-failure-package-flow-model/result.json").read_text(encoding="utf8"))
+        cases=["synthetic-prototype-to-packages","missing-flag","missing-version","missing-binding-proof"]
+        if flow.get("passed") is not True or flow.get("hardware_verified") is not False or flow.get("cases")!=cases or flow.get("harness_sha256")!=build["pmu_failure_sources_sha256"]["test_pmu_failure_package_flow.py"] or flow.get("package_sources_sha256")!=build["pmu_failure_package_sources_sha256"]:
+            raise ValueError("failure package flow proof differs")
     return True
