@@ -303,6 +303,27 @@ jobs:
             note10/private/handoff-kernel/cpu-pm-failure-guard-model/*.log
             note10/private/handoff-kernel/pm-build-concurrency-model/result.json
             note10/private/handoff-kernel/pm-build-concurrency-model/*.log
+            note10/private/handoff-kernel/pm-preconditions-prepared/
+            note10/private/handoff-kernel/pm-preconditions-binding-model/result.json
+            note10/private/handoff-kernel/pm-preconditions-scope-model/result.json
+            note10/private/handoff-kernel/pm-preconditions-getters-model/*.c
+            note10/private/handoff-kernel/pm-preconditions-getters-model/*.log
+            note10/private/handoff-kernel/pm-preconditions-getters-model/result.json
+            note10/private/handoff-kernel/pm-preconditions-gic-model/*.c
+            note10/private/handoff-kernel/pm-preconditions-gic-model/*.log
+            note10/private/handoff-kernel/pm-preconditions-gic-model/result.json
+            note10/private/handoff-kernel/pm-preconditions-lifecycle-model/*.c
+            note10/private/handoff-kernel/pm-preconditions-lifecycle-model/*.log
+            note10/private/handoff-kernel/pm-preconditions-lifecycle-model/result.json
+            note10/private/handoff-kernel/pm-preconditions-producer-model/*.c
+            note10/private/handoff-kernel/pm-preconditions-producer-model/*.log
+            note10/private/handoff-kernel/pm-preconditions-producer-model/result.json
+            note10/private/handoff-kernel/pm-preconditions-caller-model/*.c
+            note10/private/handoff-kernel/pm-preconditions-caller-model/*.log
+            note10/private/handoff-kernel/pm-preconditions-caller-model/result.json
+            note10/private/handoff-kernel/pm-preconditions-worker-model/*.c
+            note10/private/handoff-kernel/pm-preconditions-worker-model/*.log
+            note10/private/handoff-kernel/pm-preconditions-worker-model/result.json
             note10/private/handoff-kernel/pm-irq-native-model/mode-0.log
             note10/private/handoff-kernel/pm-irq-native-model/mode-19.log
             note10/private/handoff-kernel/pm-irq-native-model/mode-11.log

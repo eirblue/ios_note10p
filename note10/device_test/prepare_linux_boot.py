@@ -108,6 +108,8 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output,auto_cycle_token=None):
     validate_edge(kernel_build,build)
     from pm_callbacks_binding import validate_model as validate_callbacks
     validate_callbacks(kernel_build,build)
+    from pm_preconditions_binding import validate_model as validate_preconditions
+    validate_preconditions(kernel_build,build)
     from pm_irq_binding import validate_model as validate_irq
     validate_irq(kernel_build,build)
     if hashlib.sha256(config).hexdigest()!=build['effective_config_sha256']:
@@ -223,6 +225,8 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output,auto_cycle_token=None):
             'pm_edge_inventory_evidence_version':build.get('pm_edge_inventory_evidence_version'),
             'pm_callbacks_diagnostic':build.get('pm_callbacks_diagnostic') is True,
             'pm_callbacks_evidence_version':build.get('pm_callbacks_evidence_version'),
+            'pm_preconditions_diagnostic':build.get('pm_preconditions_diagnostic') is True,
+            'pm_preconditions_version':build.get('pm_preconditions_version'),
             'pm_irq_diagnostic':build.get('pm_irq_diagnostic') is True,
             'pm_irq_evidence_version':build.get('pm_irq_evidence_version'),
             'abox_pmu_audit_diagnostic':build.get('abox_pmu_audit_diagnostic') is True,

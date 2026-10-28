@@ -139,6 +139,12 @@ def check(packages,kernel_build,backup,core_model,gate_model,init_model,adb):
         if callbacks_scope:
             if any(m.get('pm_callbacks_evidence_version')!=1 for m in (paired,diagnostic)):raise ValueError('Callback package version differs')
             validate_callbacks(kernel_build,build)
+        from pm_preconditions_binding import assert_scope as assert_preconditions_scope,validate_model as validate_preconditions
+        preconditions_scope=assert_preconditions_scope(kernel_build,build)
+        if any(preconditions_scope!=bool(m.get('pm_preconditions_diagnostic')) for m in (paired,diagnostic)):raise ValueError('Preconditions package scope differs')
+        if preconditions_scope:
+            if any(m.get('pm_preconditions_version')!=1 for m in (paired,diagnostic)):raise ValueError('Preconditions package version differs')
+            validate_preconditions(kernel_build,build)
         from pm_irq_binding import assert_scope as assert_irq_scope,validate_model as validate_irq
         irq_scope=assert_irq_scope(kernel_build,build)
         if any(irq_scope!=bool(m.get('pm_irq_diagnostic')) for m in (paired,diagnostic)):raise ValueError('CPU0 IRQ package scope differs')
