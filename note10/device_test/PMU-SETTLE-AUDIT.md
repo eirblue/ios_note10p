@@ -32,9 +32,30 @@ fault positions, and 13 actual delayed-worker scenarios covering early/late
 execution, scheduling errors, failed reads, duplicate arming, jiffies wrap,
 PM mutex contention and a last read finishing beyond the deadline.
 Missing real PMU configuration must fail without reads. Full regression is
-262 tests. CI and the single v30 physical cycle are pending.
+262 tests. CI and the single v30 physical cycle passed.
 
 The new required evaluation is pmu_settle, alongside the prior 18. Acceptance
 requires complete observation rather than any particular power-state bitmap.
 These samples do not prove global DMA shutdown, secure-world quiescence,
 hardware GIC/MMU/cache handoff or execution of XNU/iOS. Screen logging stays off.
+
+## v30 physical result, 2026-10-28
+
+Source `3f166c7afd4d8a255b019822a50cacb45051eb6a`, CI
+[`40616077040`](https://github.com/eirblue/ios_note10p/actions/runs/40616077040)
+passed one physical cycle with all 19 evaluations, automatic TWRP return and
+five post-test partition hashes. Preinstall battery was 31%. Device logs,
+identifiers and images remain private.
+
+The pre-suspend masks were 0x4000; the noirq configuration/status/recheck masks
+were all 0x0000. Immediately after resume they were all 0xffff. Timed reads
+completed at 1,024, 5,120 and 15,104 milliseconds; all three masks were 0x4088
+at every timed sample. DPU, EMBEDDED_G3D and FSYS0A were on in those samples,
+and the other 13 domains were off. Configuration recheck differences and read
+errors were zero. The observed immediate all-on state did not persist into
+these timed samples. This does not establish why each remaining domain was on.
+
+The existing FSYS trace again recorded one successful original power-off
+callback, allowed USB predicate, original control call and completion with
+no denial, skip or error. Guarded late/noirq and restoration checks passed.
+No complete DMA shutdown or XNU execution claim follows from these observations.
