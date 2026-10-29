@@ -160,7 +160,7 @@ def _prepare_packages(root,source,mode,identity,scope_expected):
   metadata=json.loads((packages_out/'package-result.json').read_text(encoding='utf8'))
   if report.get('ehld_running_lock_audit') is not scope_expected or built.get('ehld_running_lock_audit') is not scope_expected or running_package_scope(metadata) is not scope_expected:
    raise AssertionError('production prep/package running-lock scope differs')
-  if diag.get('ehld_running_lock_audit') is not scope_expected or diag.get('ehld_running_lock_audit_version')!=(1 if scope_expected else None):
+  if diag.get('ehld_running_lock_audit') is not scope_expected or diag.get('ehld_running_lock_audit_version')!=(2 if scope_expected else None):
    raise AssertionError('diagnostic package running-lock scope differs')
   if rollback.get('ehld_running_lock_audit') is not False or rollback.get('ehld_running_lock_audit_version') is not None:
    raise AssertionError('rollback package unexpectedly carries running-lock scope')
@@ -192,7 +192,7 @@ def _invalid_prepare(root,source,identity):
 def _mismatched_pair(root,off):
  bad_prototype=root/'mismatched.img';shutil.copyfile(off['prototype'],bad_prototype)
  shutil.copyfile(off['prototype'].with_suffix('.json'),bad_prototype.with_suffix('.json'))
- meta_path=bad_prototype.with_suffix('.json');meta=json.loads(meta_path.read_text(encoding='utf8'));meta['ehld_running_lock_audit']=True;meta['ehld_running_lock_audit_version']=1
+ meta_path=bad_prototype.with_suffix('.json');meta=json.loads(meta_path.read_text(encoding='utf8'));meta['ehld_running_lock_audit']=True;meta['ehld_running_lock_audit_version']=2
  meta_path.write_text(json.dumps(meta,indent=2)+'\n',encoding='utf8',newline='\n')
  out=root/'mismatched-packages'
  with patch.object(packages,'read_verified_backup',return_value=off['parts']):packages.build(off['backup'],bad_prototype,out)

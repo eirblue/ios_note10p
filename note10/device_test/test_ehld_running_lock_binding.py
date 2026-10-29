@@ -1,4 +1,4 @@
-"""Exercise v47 source/config binding and its fail-closed mutations."""
+"""Exercise v48 source/config binding and its fail-closed mutations."""
 import argparse
 import hashlib
 import json
@@ -13,7 +13,7 @@ from ehld_running_lock_binding import (
 
 CASES = (
     'enabled-valid', 'missing-running-flag', 'null-running-flag', 'flag-string', 'version-bool',
-    'version-string', 'missing-version', 'wrong-version', 'missing-old-lock',
+    'version-string', 'missing-version', 'wrong-version', 'legacy-v1-rejected', 'missing-old-lock',
     'old-lock-version-bool', 'missing-irqsave', 'irqsave-version-bool',
     'missing-config-hash', 'null-config-hash', 'wrong-config-hash',
     'wrong-config-option', 'duplicate-config-option', 'changed-snapshot-file',
@@ -27,6 +27,7 @@ PACKAGE_SCOPE_CASES = (
     'null-flag', 'flag-string', 'flag-integer', 'version-bool', 'version-string',
     'missing-old-lock', 'old-lock-version-bool', 'missing-irqsave',
     'irqsave-version-bool', 'stray-off-version', 'old-version-stray', 'off-stray-proof',
+    'legacy-v1-rejected',
 )
 
 
@@ -55,7 +56,7 @@ def _copy_fixture(source, destination, off=False):
 
 
 def _package_cases():
-    valid = {'ehld_running_lock_audit': True, 'ehld_running_lock_audit_version': 1,
+    valid = {'ehld_running_lock_audit': True, 'ehld_running_lock_audit_version': 2,
              'ehld_lock_audit': True, 'ehld_lock_audit_version': 1,
              'ehld_irqsave_audit': True, 'ehld_irqsave_audit_version': 1}
     off_on = {'ehld_running_lock_audit': False, 'ehld_lock_audit': True,
@@ -67,15 +68,16 @@ def _package_cases():
         {'ehld_running_lock_audit': None}, {'ehld_running_lock_audit': 'true'}, {'ehld_running_lock_audit': 1},
         {**valid, 'ehld_running_lock_audit_version': True},
         {**valid, 'ehld_running_lock_audit_version': '1'},
-        {'ehld_running_lock_audit': True, 'ehld_running_lock_audit_version': 1,
+        {'ehld_running_lock_audit': True, 'ehld_running_lock_audit_version': 2,
          'ehld_irqsave_audit': True, 'ehld_irqsave_audit_version': 1},
         {**valid, 'ehld_lock_audit_version': True},
-        {'ehld_running_lock_audit': True, 'ehld_running_lock_audit_version': 1,
+        {'ehld_running_lock_audit': True, 'ehld_running_lock_audit_version': 2,
          'ehld_lock_audit': True, 'ehld_lock_audit_version': 1},
         {**valid, 'ehld_irqsave_audit_version': True},
         {'ehld_running_lock_audit': False, 'ehld_running_lock_audit_version': 1},
         {**off_on, 'ehld_lock_audit_version': 2},
         {'ehld_running_lock_audit': False, 'ehld_running_lock_model_sha256': '0' * 64},
+        {**valid, 'ehld_running_lock_audit_version': 1},
     )
     items = [(PACKAGE_SCOPE_CASES[0], valid, True),
              (PACKAGE_SCOPE_CASES[1], {}, False),
@@ -117,7 +119,8 @@ def run(artifact, output):
             elif name == 'version-bool': build['ehld_running_lock_audit_version'] = True
             elif name == 'version-string': build['ehld_running_lock_audit_version'] = '1'
             elif name == 'missing-version': build.pop('ehld_running_lock_audit_version')
-            elif name == 'wrong-version': build['ehld_running_lock_audit_version'] = 2
+            elif name == 'wrong-version': build['ehld_running_lock_audit_version'] = 3
+            elif name == 'legacy-v1-rejected': build['ehld_running_lock_audit_version'] = 1
             elif name == 'missing-old-lock': build['ehld_lock_audit'] = False
             elif name == 'old-lock-version-bool': build['ehld_lock_audit_version'] = True
             elif name == 'missing-irqsave': build['ehld_irqsave_audit'] = False

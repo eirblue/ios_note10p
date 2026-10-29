@@ -1,4 +1,4 @@
-"""Strict v47 EHLD running-scalar lock scope and proof binding."""
+"""Strict v48 EHLD running-lock scope and proof binding."""
 import hashlib
 import json
 import re
@@ -6,7 +6,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from prepare_ehld_running_lock_audit import KCONFIG, OPTION, TARGET, prepare, snapshot, validate_transform
+from prepare_ehld_running_lock_audit import KCONFIG, OPTION, SCHEMA_VERSION, TARGET, prepare, snapshot, validate_transform
 
 HERE = Path(__file__).resolve().parent
 SOURCES = (
@@ -25,6 +25,7 @@ PACKAGE_SOURCES = (
     'collect_reservation.py',
 )
 NATIVE_MODEL = 'ehld-running-lock-model'
+OBSERVER_MODEL = 'observer-model'
 PREPARED = 'ehld-running-lock-prepared'
 NATIVE_BINDING_MODEL = 'ehld-running-lock-binding-model'
 PACKAGE_FLOW_MODEL = 'ehld-running-lock-package-flow-model'
@@ -87,7 +88,7 @@ def package_scope(metadata):
         elif version_value is not None:
             raise ValueError(name + ' package version is stray')
     if flag is True:
-        if type(version) is not int or version != 1 or prior_scope is not True:
+        if type(version) is not int or version != SCHEMA_VERSION or prior_scope is not True:
             raise ValueError('EHLD running-lock dependency/version invalid')
         return True
     if version is not None:
@@ -136,7 +137,7 @@ def assert_scope(root, build):
             raise ValueError('disabled EHLD running-lock evidence downgrade')
         # New config may be absent or the single explicit n/not-set representation.
         return False
-    if type(build.get('ehld_running_lock_audit_version')) is not int or build['ehld_running_lock_audit_version'] != 1:
+    if type(build.get('ehld_running_lock_audit_version')) is not int or build['ehld_running_lock_audit_version'] != SCHEMA_VERSION:
         raise ValueError('EHLD running-lock schema version invalid')
     if build.get('ehld_lock_audit') is not True or build.get('ehld_irqsave_audit') is not True:
         raise ValueError('EHLD running-lock opt-in dependencies are disabled')
@@ -161,27 +162,27 @@ def assert_scope(root, build):
         raise ValueError('v46 snapshot hash mismatch')
     current = build.get('ehld_running_lock_snapshot_sha256')
     if not _hash_map(current, baseline):
-        raise ValueError('v47 snapshot map invalid')
+        raise ValueError('v48 snapshot map invalid')
     actual = {name: sha((prepared_dir / name).read_bytes()) for name in baseline}
     if actual != current:
-        raise ValueError('v47 snapshot file hash mismatch')
+        raise ValueError('v48 snapshot file hash mismatch')
     changed = {name for name in baseline if current[name] != baseline[name]}
     if changed != {TARGET, KCONFIG}:
-        raise ValueError('v47 snapshot must change exactly EHLD source and Kconfig')
+        raise ValueError('v48 snapshot must change exactly EHLD source and Kconfig from v46')
     if build.get('ehld_running_lock_baseline_sha256') != {name: baseline[name] for name in (TARGET, KCONFIG)}:
-        raise ValueError('v47 baseline pair differs')
+        raise ValueError('v48 baseline pair differs')
     if build.get('ehld_running_lock_prepared_sha256') != {name: current[name] for name in (TARGET, KCONFIG)}:
-        raise ValueError('v47 prepared pair differs')
+        raise ValueError('v48 prepared pair differs')
     validate_transform((baseline_dir / TARGET).read_bytes(), (prepared_dir / TARGET).read_bytes())
     for key, names in (
         ('ehld_running_lock_sources_sha256', SOURCES),
         ('ehld_running_lock_package_sources_sha256', PACKAGE_SOURCES),
     ):
         if not _hash_map(build.get(key), names):
-            raise ValueError('v47 source map invalid: ' + key)
+            raise ValueError('v48 source map invalid: ' + key)
         live = {name: sha((HERE / name).read_bytes()) for name in names}
         if build[key] != live:
-            raise ValueError('v47 current source map stale: ' + key)
+            raise ValueError('v48 current source map stale: ' + key)
     with tempfile.TemporaryDirectory(dir=root) as temp:
         tmp = Path(temp)
         reconstructed = tmp / 'prepared'
@@ -197,69 +198,70 @@ def assert_scope(root, build):
         raise ValueError('v47 native model proof missing')
     raw = (model / 'result.json').read_bytes()
     if sha(raw) != build.get('ehld_running_lock_model_sha256'):
-        raise ValueError('v47 native proof digest differs')
+        raise ValueError('v48 native proof digest differs')
     proof = json.loads(raw)
     from test_ehld_running_lock_audit import (
-        CASES, RUNTIME_CASES, PRE_GETTER, LOCK_GETTER, extract_functions,
-        c_harness, _mutation_rejections,
+        CASES, RUNTIME_CASES, OBSERVER_CASES, PRE_GETTER, LOCK_GETTER,
+        extract_functions, c_harness, observer_c_harness, _mutation_rejections,
     )
-    if type(proof.get('schema_version')) is not int or proof['schema_version'] != 1:
-        raise ValueError('v47 native proof schema invalid')
+    if type(proof.get('schema_version')) is not int or proof['schema_version'] != 2:
+        raise ValueError('v48 native proof schema invalid')
     if proof.get('passed') is not True or proof.get('hardware_verified') is not False:
-        raise ValueError('v47 native proof truth fields invalid')
+        raise ValueError('v48 native proof truth fields invalid')
     if proof.get('cases') != list(CASES) or proof.get('runtime_cases') != list(RUNTIME_CASES) or proof.get('harness_sha256') != sha((HERE / 'test_ehld_running_lock_audit.py').read_bytes()):
-        raise ValueError('v47 native proof source/cases stale')
+        raise ValueError('v48 native proof source/cases stale')
     if proof.get('legacy_path_inventory') != {
         'cpu_pm_online_locked': True, 'cpu_pm_predown_locked': True,
         'prior_getter_unlocked_read_once': True, 'trylock_getter_busy_sentinel_no_event_access': True,
-        'updater_main_then_ctrl_locked_running_read': True,
+        'updater_main_then_ctrl_trylocked_running_read': True,
+        'dumper_main_trylocked': True,
         'cpu_pm_callbacks_invoked': False, 'updater_invoked': False,
         'event_pointer_dereferenced': False,
     }:
-        raise ValueError('v47 legacy source inventory differs')
+        raise ValueError('v48 legacy source inventory differs')
     source_inputs = (TARGET, PRE_GETTER, LOCK_GETTER)
     expected_inputs = {name: sha((prepared_dir / name).read_bytes()) for name in source_inputs}
     if proof.get('source_inputs_sha256') != expected_inputs:
-        raise ValueError('v47 native source input hashes differ')
+        raise ValueError('v48 native source input hashes differ')
     actual_functions = extract_functions(prepared_dir)
     baseline_functions = extract_functions(baseline_dir)
     expected_function_hashes = {name: sha(value.encode()) for name, value in actual_functions.items()}
-    unchanged = ('cpu_online', 'cpu_predown', 'updater', 'prior_getter', 'trylock_getter')
+    unchanged = ('cpu_online', 'cpu_predown', 'prior_getter', 'trylock_getter')
     expected_unchanged_hashes = {name: sha(baseline_functions[name].encode()) for name in unchanged}
     if proof.get('source_function_sha256') != expected_function_hashes or proof.get('baseline_unchanged_function_sha256') != expected_unchanged_hashes:
-        raise ValueError('v47 extracted function identity differs')
+        raise ValueError('v48 extracted function identity differs')
     expected_code = c_harness(actual_functions).encode('utf8')
     code_path = model / 'running_lock_model.c'
     compile_path = model / 'compile.log'
     if code_path.is_symlink() or not code_path.is_file() or code_path.read_bytes() != expected_code:
-        raise ValueError('v47 generated native C differs from actual extracted functions')
+        raise ValueError('v48 generated native C differs from actual extracted functions')
     generated_sha = sha(expected_code)
     if proof.get('generated_sha256') != {name: generated_sha for name in RUNTIME_CASES}:
-        raise ValueError('v47 generated C hash map differs')
+        raise ValueError('v48 generated C hash map differs')
     if compile_path.is_symlink() or not compile_path.is_file() or proof.get('compile_log_sha256') != sha(compile_path.read_bytes()):
-        raise ValueError('v47 native compile log hash differs')
+        raise ValueError('v48 native compile log hash differs')
     if proof.get('logs_sha256') is None or set(proof['logs_sha256']) != set(CASES):
-        raise ValueError('v47 native case log map differs')
+        raise ValueError('v48 native case log map differs')
     expected_mutations = _mutation_rejections((baseline_dir / TARGET).read_bytes(), (prepared_dir / TARGET).read_bytes())
     mutation_log_sha = sha(b'REJECT\nproduction reconstruction mismatch\n')
     for item in expected_mutations:
         item['log_sha256'] = mutation_log_sha
     expected_mutation_hashes = {item['case']: item['mutated_source_sha256'] for item in expected_mutations}
     if proof.get('mutation_results') != expected_mutations:
-        raise ValueError('v47 production-transform mutation results differ')
+        raise ValueError('v48 production-transform mutation results differ')
     case_rows = proof.get('case_results')
     if not isinstance(case_rows, list) or len(case_rows) != len(CASES) or {row.get('case') for row in case_rows} != set(CASES):
-        raise ValueError('v47 native result case rows differ')
+        raise ValueError('v48 native result case rows differ')
     runtime_rows = {row['case']: row for row in case_rows if row['case'] in RUNTIME_CASES}
     all_case_rows = {row['case']: row for row in case_rows}
     for name in RUNTIME_CASES:
         row = runtime_rows[name]
         if row.get('accepted') is not True or type(row.get('compile_returncode')) is not int or row['compile_returncode'] != 0 or type(row.get('returncode')) is not int or row['returncode'] != 0 or row.get('generated_sha256') != generated_sha:
-            raise ValueError('v47 native runtime status differs: ' + name)
+            raise ValueError('v48 native runtime status differs: ' + name)
         if name.startswith('repeat-transition-daif-'):
             match = re.fullmatch(r'repeat-transition-daif-([0-9a-f]{3})-irq([01])-pc([03])', name)
             if not match:
-                raise ValueError('invalid v47 runtime case name')
+                raise ValueError('invalid v48 runtime case name')
             daif = int(match.group(1), 16) | (0x80 if match.group(2) == '1' else 0)
             expected_stdout = f'PASS mode=0 daif={daif:x} pc={match.group(3)} stores=4 locks=4/4 reads=0/0\n'
         elif name == 'start-create-error':
@@ -269,14 +271,71 @@ def assert_scope(root, build):
         log_path = model / (name + '.log')
         expected_log = 'COMPILE\nreturncode=0\nRUN\n' + expected_stdout
         if log_path.is_symlink() or not log_path.is_file() or log_path.read_text(encoding='utf8') != expected_log or proof['logs_sha256'][name] != sha(log_path.read_bytes()) or row.get('expected_stdout') != expected_stdout:
-            raise ValueError('v47 native runtime transcript differs: ' + name)
+            raise ValueError('v48 native runtime transcript differs: ' + name)
     for name in set(CASES) - set(RUNTIME_CASES):
         log_path = model / (name + '.log')
         expected_log = 'REJECT\nproduction reconstruction mismatch\n'
         if log_path.is_symlink() or not log_path.is_file() or log_path.read_text(encoding='utf8') != expected_log or proof['logs_sha256'][name] != sha(log_path.read_bytes()):
-            raise ValueError('v47 native mutation transcript differs: ' + name)
+            raise ValueError('v48 native mutation transcript differs: ' + name)
         if name in expected_mutation_hashes and all_case_rows[name].get('mutated_source_sha256') != expected_mutation_hashes[name]:
-            raise ValueError('v47 native mutation source hash differs: ' + name)
+            raise ValueError('v48 native mutation source hash differs: ' + name)
+    observer = proof.get('observer')
+    observer_dir = model / OBSERVER_MODEL
+    if not isinstance(observer, dict) or observer_dir.is_symlink() or not observer_dir.is_dir():
+        raise ValueError('v48 actual updater/dumper observer proof missing')
+    observer_raw = (observer_dir / 'result.json').read_bytes()
+    if observer_raw != (json.dumps(observer, indent=2) + '\n').encode('utf8'):
+        raise ValueError('v48 observer proof file differs from bound summary')
+    if (type(observer.get('schema_version')) is not int or observer.get('schema_version') != 1 or observer.get('passed') is not True or
+            observer.get('hardware_verified') is not False or observer.get('cases') != list(OBSERVER_CASES) or
+            observer.get('harness_sha256') != sha((HERE / 'test_ehld_running_lock_audit.py').read_bytes())):
+        raise ValueError('v48 observer proof schema/truth/cases/harness differ')
+    observer_code = observer_c_harness(actual_functions).encode('utf8')
+    observer_source = observer_dir / 'observer_harness.c'
+    observer_compile = observer_dir / 'compile.log'
+    if observer_source.is_symlink() or not observer_source.is_file() or observer_source.read_bytes() != observer_code:
+        raise ValueError('v48 observer harness is not generated from actual updater/dumper')
+    observer_generated_sha = sha(observer_code)
+    if (observer.get('generated_sha256') != observer_generated_sha or
+            observer.get('binary_sha256') != sha((observer_dir / 'observer_harness.exe').read_bytes()) or
+            observer.get('source_sha256') != sha((prepared_dir / TARGET).read_bytes()) or
+            observer.get('source_function_sha256') != {
+                name: sha(actual_functions[name].encode('utf8')) for name in ('updater', 'dumper')
+            }):
+        raise ValueError('v48 observer source/harness identity differs')
+    expected_observer_files = {
+        'observer_harness.c', 'observer_harness.exe', 'compile.log', 'result.json',
+        *(name + '.log' for name in OBSERVER_CASES),
+    }
+    observer_paths = list(observer_dir.rglob('*'))
+    if any(path.is_symlink() for path in observer_paths) or {path.relative_to(observer_dir).as_posix() for path in observer_paths if path.is_file()} != expected_observer_files:
+        raise ValueError('v48 observer model file set differs')
+    if observer_compile.is_symlink() or not observer_compile.is_file() or observer.get('compile_log_sha256') != sha(observer_compile.read_bytes()):
+        raise ValueError('v48 observer compile transcript hash differs')
+    observer_logs = observer.get('logs_sha256')
+    observer_rows = observer.get('case_results')
+    if not isinstance(observer_logs, dict) or set(observer_logs) != set(OBSERVER_CASES) or not isinstance(observer_rows, list) or len(observer_rows) != len(OBSERVER_CASES):
+        raise ValueError('v48 observer case evidence map differs')
+    observer_expected = {
+        'observer-update-main-busy': 'PASS mode=0 irq=3c0 pc=2 logs=0 mmio=0/0\n',
+        'observer-dump-main-busy': 'PASS mode=1 irq=240 pc=2 logs=0 mmio=0/0\n',
+        'observer-update-ctrl-busy-continues-later-cpu': 'PASS mode=2 irq=3c0 pc=2 logs=2 mmio=1/1\n',
+        'observer-update-free-online-offline': 'PASS mode=3 irq=200 pc=2 logs=4 mmio=1/1\n',
+        'observer-dump-free': 'PASS mode=4 irq=3c0 pc=2 logs=11 mmio=0/0\n',
+    }
+    observer_by_name = {row.get('case'): row for row in observer_rows if isinstance(row, dict)}
+    if set(observer_by_name) != set(OBSERVER_CASES):
+        raise ValueError('v48 observer case rows differ')
+    for name, expected_stdout in observer_expected.items():
+        row = observer_by_name[name]
+        log_path = observer_dir / (name + '.log')
+        expected_log = 'COMPILE\nreturncode=0\nRUN\n' + expected_stdout
+        if (row.get('accepted') is not True or type(row.get('compile_returncode')) is not int or
+                row['compile_returncode'] != 0 or type(row.get('returncode')) is not int or row['returncode'] != 0 or
+                row.get('generated_sha256') != observer_generated_sha or row.get('expected_stdout') != expected_stdout or
+                log_path.is_symlink() or not log_path.is_file() or log_path.read_text(encoding='utf8') != expected_log or
+                observer_logs[name] != sha(log_path.read_bytes())):
+            raise ValueError('v48 observer runtime evidence differs: ' + name)
     return True
 
 

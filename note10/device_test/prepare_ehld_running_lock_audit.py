@@ -1,4 +1,4 @@
-"""Prepare the opt-in EHLD running-scalar ctrl-lock audit."""
+"""Prepare the opt-in EHLD running-lock audit, schema version 2."""
 import hashlib
 import re
 import shutil
@@ -7,6 +7,7 @@ from pathlib import Path
 TARGET = 'drivers/soc/samsung/debug/exynos-ehld.c'
 KCONFIG = 'kernel/power/Kconfig'
 OPTION = 'CONFIG_NOTE10_EHLD_RUNNING_LOCK_AUDIT'
+SCHEMA_VERSION = 2
 BLOCK = (b'\nconfig NOTE10_EHLD_RUNNING_LOCK_AUDIT\n'
          b'\tbool "EHLD running scalar lock audit"\n'
          b'\tdepends on NOTE10_EHLD_LOCK_AUDIT\n'
@@ -61,7 +62,42 @@ def transform(raw):
         raise ValueError('running setter already exists')
     start_fn = _replace_unique(start_fn, b'ctrl->ehld_running = 1;', b'exynos_ehld_set_running(ctrl, 1);', 'start store')
     stop_fn = _replace_unique(stop_fn, b'ctrl->ehld_running = 0;', b'exynos_ehld_set_running(ctrl, 0);', 'stop store')
-    return raw[:start_at] + HELPER + start_fn + raw[start_end:stop_at] + stop_fn + raw[stop_end:]
+    prepared = raw[:start_at] + HELPER + start_fn + raw[start_end:stop_at] + stop_fn + raw[stop_end:]
+    prepared = _replace_function(
+        prepared,
+        b'void exynos_ehld_event_raw_update_allcpu(void)',
+        (
+            (b'raw_spin_lock_irqsave(&ehld_main.lock, main_flags);',
+             b'if (!raw_spin_trylock_irqsave(&ehld_main.lock, main_flags))\n\t\treturn;'),
+            (b'raw_spin_lock_irqsave(&ctrl->lock, ctrl_flags);',
+             b'if (!raw_spin_trylock_irqsave(&ctrl->lock, ctrl_flags))\n\t\t\t\tcontinue;'),
+        ),
+        'all-CPU updater',
+    )
+    prepared = _replace_function(
+        prepared,
+        b'void exynos_ehld_event_raw_dump_allcpu(void)',
+        ((b'raw_spin_lock_irqsave(&ehld_main.lock, flags);',
+          b'if (!raw_spin_trylock_irqsave(&ehld_main.lock, flags))\n\t\treturn;'),),
+        'all-CPU dumper',
+    )
+    return prepared
+
+
+def _replace_function(raw, signature, replacements, label):
+    start, end, function = _function(raw, signature)
+    for old, new in replacements:
+        function = _replace_unique(function, old, new, label + ' lock anchor')
+    return raw[:start] + function + raw[end:]
+
+
+def validate_observer_transform(baseline, prepared):
+    """Validate the exact three best-effort lock changes in the transformed source."""
+    if not isinstance(baseline, bytes) or not isinstance(prepared, bytes):
+        raise ValueError('EHLD observer transform inputs must be bytes')
+    if transform(baseline) != prepared:
+        raise ValueError('prepared EHLD observer source differs from exact production transform')
+    return True
 
 
 def validate_transform(baseline, prepared):
@@ -112,7 +148,7 @@ def prepare(source, enabled, baseline_map):
     kconfig.write_bytes(new_kconfig)
     return {
         'ehld_running_lock_audit': True,
-        'ehld_running_lock_audit_version': 1,
+        'ehld_running_lock_audit_version': SCHEMA_VERSION,
         'ehld_running_lock_baseline_sha256': {name: baseline_map[name] for name in (TARGET, KCONFIG)},
         'ehld_running_lock_prepared_sha256': {TARGET: sha(new_target), KCONFIG: sha(new_kconfig)},
     }

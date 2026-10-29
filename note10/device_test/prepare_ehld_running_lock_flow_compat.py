@@ -1,4 +1,4 @@
-"""Create a bounded, synthetic v46 view for immutable legacy flow tests."""
+"""Create a bounded, synthetic v46 view from a v48-only model input."""
 import hashlib
 import json
 import shutil
@@ -163,8 +163,8 @@ def prepare(source, destination):
     report = json.loads(report_path.read_text(encoding='utf8'))
     if report.get('build_passed') is not False:
         raise ValueError('legacy compatibility requires an explicitly synthetic outer build result')
-    if report.get('ehld_running_lock_audit') not in (True, False, None):
-        raise ValueError('malformed v47 running-lock scope')
+    if report.get('ehld_running_lock_audit') is not True or type(report.get('ehld_running_lock_audit_version')) is not int or report['ehld_running_lock_audit_version'] != 2:
+        raise ValueError('v48 running-lock compatibility input must be explicitly enabled at schema version 2')
     report = {key: value for key, value in report.items() if not key.startswith('ehld_running_lock_')}
     if not isinstance(report.get('ehld_lock_profile_result'), dict):
         raise ValueError('v46 EHLD profile evidence missing')
