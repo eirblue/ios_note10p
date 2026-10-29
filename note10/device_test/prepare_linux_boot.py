@@ -129,6 +129,9 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output,auto_cycle_token=None):
     from ehld_irqsave_binding import validate as validate_ehld_irqsave,package_scope as irqsave_package_scope
     irqsave_scope=validate_ehld_irqsave(kernel_build,build)
     if type(irqsave_scope) is not bool or irqsave_scope is not irqsave_package_scope(build):raise ValueError('EHLD irqsave build validation scope differs')
+    from ehld_running_lock_binding import validate as validate_running_lock,package_scope as running_lock_package_scope
+    running_lock_scope=validate_running_lock(kernel_build,build)
+    if type(running_lock_scope) is not bool or running_lock_scope is not running_lock_package_scope(build):raise ValueError('EHLD running-lock build validation scope differs')
     from pm_irq_binding import validate_model as validate_irq
     validate_irq(kernel_build,build)
     if hashlib.sha256(config).hexdigest()!=build['effective_config_sha256']:
@@ -264,6 +267,8 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output,auto_cycle_token=None):
             'ehld_lock_audit_version':build.get('ehld_lock_audit_version'),
             'ehld_irqsave_audit':build.get('ehld_irqsave_audit') is True,
             'ehld_irqsave_audit_version':build.get('ehld_irqsave_audit_version'),
+            'ehld_running_lock_audit':build.get('ehld_running_lock_audit') is True,
+            'ehld_running_lock_audit_version':build.get('ehld_running_lock_audit_version'),
             'pm_irq_diagnostic':build.get('pm_irq_diagnostic') is True,
             'pm_irq_evidence_version':build.get('pm_irq_evidence_version'),
             'abox_pmu_audit_diagnostic':build.get('abox_pmu_audit_diagnostic') is True,

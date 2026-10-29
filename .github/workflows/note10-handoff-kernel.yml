@@ -59,6 +59,10 @@ on:
         description: Audit the paired EHLD irqsave token fix; requires ehld_lock_audit
         type: boolean
         default: false
+      ehld_running_lock_audit:
+        description: Synchronize EHLD start/stop scalar stores; requires ehld_irqsave_audit
+        type: boolean
+        default: false
 
       auto_return:
         description: Opt-in one-shot recovery request; cycle token required at BOOT packaging
@@ -122,6 +126,7 @@ jobs:
           NOTE10_UFS_PM_AUDIT: ${{ inputs.ufs_pm_audit }}
           NOTE10_EHLD_LOCK_AUDIT: ${{ inputs.ehld_lock_audit }}
           NOTE10_EHLD_IRQSAVE_AUDIT: ${{ inputs.ehld_irqsave_audit }}
+          NOTE10_EHLD_RUNNING_LOCK_AUDIT: ${{ inputs.ehld_running_lock_audit }}
         run: |
           if [ "$NOTE10_EHLD_LOCK_AUDIT" = true ] && { [ "$NOTE10_XNU_STAGE" != true ] || [ "$NOTE10_UFS_PM_AUDIT" != true ]; }; then
             echo "ehld_lock_audit requires xnu_stage=true and ufs_pm_audit=true" >&2
@@ -129,6 +134,10 @@ jobs:
           fi
           if [ "$NOTE10_EHLD_IRQSAVE_AUDIT" = true ] && [ "$NOTE10_EHLD_LOCK_AUDIT" != true ]; then
             echo "ehld_irqsave_audit requires ehld_lock_audit=true" >&2
+            exit 2
+          fi
+          if [ "$NOTE10_EHLD_RUNNING_LOCK_AUDIT" = true ] && { [ "$NOTE10_EHLD_IRQSAVE_AUDIT" != true ] || [ "$NOTE10_EHLD_LOCK_AUDIT" != true ]; }; then
+            echo "ehld_running_lock_audit requires ehld_irqsave_audit=true and ehld_lock_audit=true" >&2
             exit 2
           fi
           if [ "$NOTE10_AUTO_RETURN" = true ] && [ "$NOTE10_PM_TIMER" != true ]; then
@@ -221,6 +230,7 @@ jobs:
           NOTE10_UFS_PM_AUDIT: ${{ inputs.ufs_pm_audit }}
           NOTE10_EHLD_LOCK_AUDIT: ${{ inputs.ehld_lock_audit }}
           NOTE10_EHLD_IRQSAVE_AUDIT: ${{ inputs.ehld_irqsave_audit }}
+          NOTE10_EHLD_RUNNING_LOCK_AUDIT: ${{ inputs.ehld_running_lock_audit }}
         run: |
           count="$(find note10/private/xnu-input -name note10-experimental.macho -type f | wc -l)"
           [ "$count" -eq 1 ]
@@ -262,6 +272,10 @@ jobs:
           if [ "$NOTE10_EHLD_IRQSAVE_AUDIT" = true ]; then
             if [ "$NOTE10_EHLD_LOCK_AUDIT" != true ]; then exit 2; fi
             EXTRA+=(--ehld-irqsave-audit)
+          fi
+          if [ "$NOTE10_EHLD_RUNNING_LOCK_AUDIT" = true ]; then
+            if [ "$NOTE10_EHLD_IRQSAVE_AUDIT" != true ] || [ "$NOTE10_EHLD_LOCK_AUDIT" != true ]; then exit 2; fi
+            EXTRA+=(--ehld-running-lock-audit)
           fi
           python note10/device_test/build_handoff_kernel.py --caps --reserve --window-access \
             --xnu-payload note10/private/xnu-stage-payload/kernel.mem \
@@ -431,6 +445,10 @@ jobs:
             note10/private/handoff-kernel/ehld-irqsave-model/**
             note10/private/handoff-kernel/ehld-irqsave-binding-model/**
             note10/private/handoff-kernel/ehld-irqsave-package-flow-model/**
+            note10/private/handoff-kernel/ehld-running-lock-prepared/**
+            note10/private/handoff-kernel/ehld-running-lock-model/**
+            note10/private/handoff-kernel/ehld-running-lock-binding-model/**
+            note10/private/handoff-kernel/ehld-running-lock-package-flow-model/**
             note10/private/handoff-kernel/pmu-failure-binding-model/result.json
             note10/private/handoff-kernel/pmu-failure-package-flow-model/result.json
             note10/private/handoff-kernel/pmu-failure-prepared/**
