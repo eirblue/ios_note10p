@@ -328,11 +328,10 @@ def collect(packages,kernel_build,adb):
                 report['pm_quiesce_observation']=decode_quiescence(text,evidence_id,require_success=False)
             if evidence_id is None and banner not in text:
                 raise ValueError('Exact source build banner not observed')
-            observation=decode_frames(text,evidence_id) if evidence_id else decode(text)
-            report['previous_boot_reservation_observed']=True
+            observation={}
             if cpu_pm_roundtrip and 'N10CPT' in text:
-                # Terminal failure evidence belongs to the selected boot/cycle and
-                # checksummed PM generation, even when later strict PM decoders fail.
+                # Parse only failure-terminal evidence before reservation can fail.
+                # Strict CPR success remains on the original downstream path.
                 from decode_pm_timer import decode_quiescence
                 quiesce=report.get('pm_quiesce_observation')
                 if quiesce is None:
@@ -346,6 +345,8 @@ def collect(packages,kernel_build,adb):
                 observation['cpu_pm_roundtrip_terminal_failure']=cpu_pm_roundtrip_observation['observation']['terminal_failure']
                 report['previous_boot_cpu0_cpu_pm_terminal_failure_observed']=True
                 cpu_pm_terminal_preserved=True
+            observation.update(decode_frames(text,evidence_id) if evidence_id else decode(text))
+            report['previous_boot_reservation_observed']=True
             (out/'reservation-observation.json').write_text(json.dumps(observation,indent=2),encoding='utf-8')
             if access:
                 observation.update(decode_access(text,evidence_id))
@@ -464,7 +465,7 @@ def collect(packages,kernel_build,adb):
             report['decode_failures'][name]=str(error)
             if cpu_pm_terminal_preserved:
                 (out/'reservation-observation.json').write_text(json.dumps(observation,indent=2),encoding='utf-8')
-                report.update(previous_boot_reservation_observed=True,evidence_file=name,
+                report.update(evidence_file=name,
                               idle_init_marker_observed='N10INIT1 IDLE ' in text,
                               android_root_mount_message_observed='VFS: Mounted root' in text,
                               kernel_panic_observed='Kernel panic' in text,

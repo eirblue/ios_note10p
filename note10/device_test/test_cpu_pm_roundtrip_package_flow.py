@@ -226,7 +226,7 @@ def _frame(tag,values):
  body=' '.join(k+'='+str(v) for k,v in values.items())
  return f'{tag} {body} checksum={checksum(body.encode("ascii")):08x}\n'
 
-def terminal_pm_failure_log(kernel_build,package_dir):
+def terminal_pm_failure_log(kernel_build,package_dir,reservation_failure=False):
  build=json.loads((kernel_build/'build-result.json').read_text(encoding='utf8'))
  paired=json.loads((package_dir/'package-result.json').read_text(encoding='utf8'))
  identity=build['reservation_evidence_id'];cycle=paired['auto_cycle_token'];generation=7
@@ -234,7 +234,8 @@ def terminal_pm_failure_log(kernel_build,package_dir):
  lines=[]
  for seq in (0,1):lines.append(_frame('N10RET1',dict(id=identity,cycle=cycle,phase=0,seq=seq,delay_ms=90000,status=0)))
  lines.append('Linux version 4.14.113-note10-reserve-pc fixture-v49\n')
- for seq in (0,1):lines.append(_frame('N10RAM2',dict(id=identity,seq=seq,base='a00000000',size='10000000',align='2000000',pages=65536,reserved=65536,invalid=0,shift=12)))
+ reserved=65535 if reservation_failure else 65536
+ for seq in (0,1):lines.append(_frame('N10RAM2',dict(id=identity,seq=seq,base='a00000000',size='10000000',align='2000000',pages=65536,reserved=reserved,invalid=0,shift=12)))
  for seq in (0,1):lines.append(_frame('N10QSC1',dict(id=identity,seq=seq,attempt=1,version=1,generation=generation,epoch=0,phase=10,called=1,restored=1,screen=0,display=0,usb=0,wake=0,r_usb=0,r_display=0,r_screen=0)))
  for seq in (0,1):lines.append(_frame('N10PMS1',dict(id=identity,seq=seq,attempt=1,stage=21,error=1)))
  from decode_window_access import COUNTS
@@ -268,6 +269,23 @@ def terminal_collect_entry_case(on,case_root):
  return {'case':'collect-entry-pmt-error-prq-failure-valid-terminal','accepted':True,
          'terminal_preserved':True,'pair_passed':False,'strict_pm_preconditions_rejected':strict_preconditions_rejected,
          'pm_timer_failure':report['decode_failures']['last_kmsg.txt']}
+
+def terminal_reservation_entry_case(on,case_root):
+ log=terminal_pm_failure_log(on['art'],on['packages'],reservation_failure=True)
+ report=run_collector_flow(on['art'],on['backup'],on['packages'],case_root,log.encode('ascii'))
+ observation=json.loads((Path(report['directory'])/'reservation-observation.json').read_text(encoding='utf8'))
+ if (report.get('previous_boot_cpu0_cpu_pm_terminal_failure_observed') is not True or
+     report.get('previous_boot_reservation_observed') is not False or
+     report.get('previous_boot_cpu0_cpu_pm_enter_exit_pair_observed') is not False or
+     report.get('evaluation_items',{}).get('reservation')!={'required':True,'status':'failed'} or
+     report.get('evaluation_items',{}).get('cpu0_cpu_pm_enter_exit_pair')!={'required':True,'status':'failed'} or
+     report.get('diagnostic_passed') is not False or
+     report.get('decode_failures',{}).get('last_kmsg.txt')!='Linux did not retain all reserved pages' or
+     'cpu_pm_roundtrip_terminal_failure' not in observation):
+  raise AssertionError('production collect() lost terminal before strict reservation failure: '+repr({k:report.get(k) for k in ('previous_boot_cpu0_cpu_pm_terminal_failure_observed','previous_boot_reservation_observed','previous_boot_cpu0_cpu_pm_enter_exit_pair_observed','diagnostic_passed','decode_failures')})+' observation='+repr(observation))
+ return {'case':'collect-entry-reservation-failure-valid-terminal','accepted':True,
+         'terminal_preserved':True,'reservation_passed':False,'pair_passed':False,
+         'reservation_failure':report['decode_failures']['last_kmsg.txt']}
 
 def terminal_collector_cases():
  from test_cpu_pm_roundtrip_decoder import input_vector,terminal_input_vector
@@ -314,10 +332,12 @@ def main():
                    {'case':'invalid-pair','accepted':False}]
   terminal_cases,terminal_results=terminal_collector_cases()
   collector_entry_result=terminal_collect_entry_case(on,root/'collector-terminal-entry')
+  collector_reservation_result=terminal_reservation_entry_case(on,root/'collector-reservation-terminal-entry')
   items=on['collector']['evaluation_items'];items_off=off['collector']['evaluation_items']
   result={'schema_version':1,'passed':True,'hardware_verified':False,'synthetic_fixture':True,'legacy_gate_stubs':['ehld_lock','ehld_irqsave','ehld_running_lock'],'cases':list(CASES),'case_results':package_results,
           'precheck_cases':['on','off','invalid-pair'],'precheck_cases_result':precheck_cases,'collector_cases':['on','off','invalid-pair'],'collector_cases_result':collector_cases,'collector_evaluation_items':items,'collector_evaluation_items_off':items_off,
           'terminal_collector_cases':terminal_cases,'terminal_collector_results':terminal_results,'collector_entry_failure_case':collector_entry_result,
+          'collector_reservation_failure_case':collector_reservation_result,
           'collector_evaluation_items_sha256':sha(json.dumps(items,sort_keys=True,separators=(',',':')).encode()),
           'harness_sha256':sha(Path(__file__).read_bytes()),'package_sources_sha256':measured}
   (a.output/'result.json').write_text(json.dumps(result,indent=2)+'\n',encoding='utf8',newline='\n')
