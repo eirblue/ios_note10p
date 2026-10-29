@@ -102,7 +102,9 @@ def run(artifact, output):
                 observed['helper-reentry-unattempted'] = 'PASS|8|-999|-999|2|0|1|0|0|0|-999|-999|-999'
                 wanted = None
             value = _select_cpu_pm_terminal_profile(observed)
-            accepted = (value == wanted) if wanted is not None else value is None
+            if wanted is not None and value != wanted:
+                raise AssertionError('unexpected terminal ABI profile: ' + name)
+            accepted = value is not None
             terminal_profile_outcomes.append({'case': name, 'accepted': accepted,
                                               'selected_profile': value})
         elif name == 'enabled-valid':
