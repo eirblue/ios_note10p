@@ -566,10 +566,16 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             from prepare_ehld_lock_flow_compat import prepare as prepare_ehld_compat
             from prepare_ehld_irqsave_flow_compat import prepare as prepare_irqsave_compat
             from prepare_ehld_running_lock_flow_compat import prepare as prepare_running_lock_compat
-            def prepare_v46_flow_base(temp_root):
-                if ehld_running_lock_audit:
-                    return prepare_running_lock_compat(OUT,Path(temp_root)/'v46-fixture')
+            from prepare_cpu_pm_roundtrip_flow_compat import prepare as prepare_roundtrip_compat
+            def prepare_v48_flow_base(temp_root):
+                if cpu_pm_roundtrip:
+                    return prepare_roundtrip_compat(OUT,Path(temp_root)/'v48-fixture')
                 return OUT
+            def prepare_v46_flow_base(temp_root):
+                v48_base=prepare_v48_flow_base(temp_root)
+                if ehld_running_lock_audit:
+                    return prepare_running_lock_compat(v48_base,Path(temp_root)/'v46-fixture')
+                return v48_base
             import tempfile
             with tempfile.TemporaryDirectory() as temp:
                 v46_base=prepare_v46_flow_base(temp)
@@ -667,7 +673,9 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             from ehld_running_lock_binding import validate as validate_running_lock
             validate_running_lock(OUT,report,require_package_flow=False)
             (OUT/'build-result.json').write_text(json.dumps(report,indent=2)+'\n',encoding='utf-8',newline='\n')
-            run([sys.executable,str(ROOT/'note10/device_test/test_ehld_running_lock_package_flow.py'),'--artifact',str(OUT),'--output',str(OUT/'ehld-running-lock-package-flow-model')],'03-ehld-running-lock-package-flow.log')
+            with tempfile.TemporaryDirectory() as temp:
+                v48_base=prepare_v48_flow_base(temp)
+                run([sys.executable,str(ROOT/'note10/device_test/test_ehld_running_lock_package_flow.py'),'--artifact',str(v48_base),'--output',str(OUT/'ehld-running-lock-package-flow-model')],'03-ehld-running-lock-package-flow.log')
             report['ehld_running_lock_package_flow_sha256']=hashlib.sha256((OUT/'ehld-running-lock-package-flow-model/result.json').read_bytes()).hexdigest()
             validate_running_lock(OUT,report)
         if cpu_pm_roundtrip:
