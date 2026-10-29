@@ -1,6 +1,13 @@
 # 작업 상태 (2026-10-20, Asia/Seoul)
 
 
+## 2026-10-29: v45 EHLD lock 관측과 실기기 회귀 통과
+
+- 기본 비활성 EHLD lock 관측을 기존 CPU0 notifier 경로에 추가했다. [관측 범위와 한계](device_test/EHLD-LOCK-AUDIT.md).
+- v45 커널 빌드와 단일 실기기 시험 1회가 완료됐다. 42개 평가에서 필수 41개를 통과했고, 자동 TWRP 복귀와 복귀 후 다섯 파티션 무결성 검사를 확인했다.
+- 무결성 확인 뒤 TWRP와 패널 raw 밝기를 시험 전후 모두 10으로 확인했다. 직접 CPU-PM 호출이나 시험 중 instrumentation profile 동적 변경은 없었다.
+- 이 관측은 readiness, 완전한 하드웨어 복원, XNU 실행 또는 iOS 부팅을 증명하지 않는다.
+
 ## 2026-10-29: v44 RCU 실행 문맥 관측과 단일 실기기 회귀 통과
 
 - 기본 비활성 RCU 문맥 감사를 추가해 기존 CPU0 notifier 관측 경로에서 RAM 전용 소프트웨어 상태를 제한적으로 읽는다. [관측 범위와 한계](device_test/RCU-CONTEXT-AUDIT.md).

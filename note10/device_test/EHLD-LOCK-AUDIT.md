@@ -8,4 +8,10 @@ These separate observations are not an atomic snapshot or a promise of future lo
 
 The bundled diagnostic profile requests dynamic probe and function-tracing options off, including the derived BPF-events option, while preserving EHLD, perf, preemption, RCU, static tracepoints, tracing, and debug snapshot support. Effective kernel configuration must be checked after configuration resolution; this is not a claim that all instrumentation is absent.
 
-Source composition, synthetic native models, and decoder tests do not establish kernel ABI compatibility or device success. Actual kernel compilation and a separately reviewed physical cycle are required. No v45 physical result is recorded here yet. XNU execution, iOS boot, global DMA quiescence, and complete hardware restoration remain unestablished.
+Source composition, synthetic native models, and decoder tests do not establish kernel ABI compatibility or device success. The v45 kernel build and one separately reviewed physical cycle completed, but they do not establish XNU execution, iOS boot, global DMA quiescence, or complete hardware restoration.
+
+## v45 single-device result
+
+One physical cycle completed with 42 evaluations. All 41 required checks passed. Automatic return to normal TWRP and post-return verification of all five partition-integrity checks passed. TWRP and panel raw brightness were verified at 10 before and after the cycle, after integrity checks.
+
+This was a RAM-only EHLD lock-availability observation. It did not invoke CPU-PM or change the instrumentation profile at runtime. The observation does not establish readiness, complete hardware restoration, XNU execution, or iOS boot.
