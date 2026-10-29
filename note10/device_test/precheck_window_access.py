@@ -178,6 +178,10 @@ def check(packages,kernel_build,backup,core_model,gate_model,init_model,adb):
         ehld_scope=validate_ehld(kernel_build,build)
         if any(ehld_scope!=bool(m.get('ehld_lock_audit')) or (ehld_scope and m.get('ehld_lock_audit_version')!=1) for m in (paired,diagnostic)):raise ValueError('EHLD lock package scope differs')
         report['ehld_lock_audit_scope_verified']=ehld_scope
+        from ehld_irqsave_binding import validate as validate_ehld_irqsave,package_scope as irqsave_package_scope
+        ehld_irqsave_scope=validate_ehld_irqsave(kernel_build,build)
+        if type(ehld_irqsave_scope) is not bool or any(irqsave_package_scope(m) is not ehld_irqsave_scope for m in (build,paired,diagnostic)):raise ValueError('EHLD irqsave package scope differs')
+        report['ehld_irqsave_audit_scope_verified']=ehld_irqsave_scope
         from pm_irq_binding import assert_scope as assert_irq_scope,validate_model as validate_irq
         irq_scope=assert_irq_scope(kernel_build,build)
         if any(irq_scope!=bool(m.get('pm_irq_diagnostic')) for m in (paired,diagnostic)):raise ValueError('CPU0 IRQ package scope differs')

@@ -11,6 +11,8 @@ from run_probe import Adb,ROOT,preflight
 
 def verify_packages(directory):
     result=json.loads((directory/'package-result.json').read_text())
+    from ehld_irqsave_binding import package_scope as irqsave_package_scope
+    irqsave_pair_scope=irqsave_package_scope(result)
     expected=({'note10-phase2-diagnostic.zip','note10-phase2-rollback.zip'},
               {'note10-reservation-diagnostic.zip','note10-reservation-rollback.zip'})
     records=result.get('packages',[])
@@ -65,6 +67,11 @@ def verify_packages(directory):
                 raise ValueError('EHLD lock package metadata differs')
             if record.get('mode')=='diagnostic' and (bool(meta.get('ehld_lock_audit'))!=bool(result.get('ehld_lock_audit')) or meta.get('ehld_lock_audit_version')!=result.get('ehld_lock_audit_version')):
                 raise ValueError('EHLD lock package pair differs')
+            mode=record.get('mode')
+            if mode not in ('diagnostic','rollback') or meta.get('mode')!=mode:raise ValueError('EHLD irqsave package role differs')
+            irqsave_expected=irqsave_pair_scope if mode=='diagnostic' else False
+            if irqsave_package_scope(record) is not irqsave_expected or irqsave_package_scope(meta) is not irqsave_expected:
+                raise ValueError('EHLD irqsave package metadata, pair or rollback scope differs')
             if bool(meta.get('abox_failed_fw_resume_guard'))!=bool(record.get('abox_failed_fw_resume_guard')) or (record.get('mode')=='diagnostic' and bool(meta.get('abox_failed_fw_resume_guard'))!=bool(result.get('abox_failed_fw_resume_guard'))):raise ValueError('Failed-firmware guard package scope differs')
             if meta['writes']!=['boot'] or meta['automatic_reboot'] is not False:raise ValueError('Unexpected installer scope')
             if meta.get('xnu_payload_stage_diagnostic') is True and (

@@ -186,6 +186,8 @@ def build(backup,prototype,output,current_packages=None):
     from ehld_lock_binding import MARKERS as ehld_lock_markers
     if any((marker in raw)!=ehld_lock for marker in ehld_lock_markers):raise ValueError('Prototype EHLD lock Image scope differs')
     if ehld_lock and (not rcu_context or metadata.get('ehld_lock_audit_version')!=1):raise ValueError('Incomplete EHLD lock package contract')
+    from ehld_irqsave_binding import package_scope as irqsave_package_scope
+    ehld_irqsave=irqsave_package_scope(metadata)
     pm_irq=metadata.get('pm_irq_diagnostic') is True
     if pm_irq and (not pm_edge or not pm_post_arch or not pm_cpus or metadata.get('pm_irq_evidence_version')!=1):raise ValueError('Incomplete CPU0 IRQ package contract')
     if dma_pm_audit and (not gic_roundtrip or metadata.get('dma_pm_audit_evidence_version')!=1):
@@ -242,6 +244,7 @@ def build(backup,prototype,output,current_packages=None):
             'fpsimd_reference_audit':fpsimd_reference,'fpsimd_reference_audit_version':1 if fpsimd_reference else None,
             'rcu_context_audit':rcu_context,'rcu_context_audit_version':1 if rcu_context else None,
             'ehld_lock_audit':ehld_lock,'ehld_lock_audit_version':1 if ehld_lock else None,
+            'ehld_irqsave_audit':ehld_irqsave,'ehld_irqsave_audit_version':1 if ehld_irqsave else None,
             'pm_irq_diagnostic':pm_irq,'pm_irq_evidence_version':1 if pm_irq else None,
             'abox_pmu_audit_diagnostic':abox_pmu_audit,'abox_pmu_audit_evidence_version':3 if abox_pmu_audit else None,
             'abox_pm_audit_diagnostic':abox_pm_audit,'abox_pm_audit_evidence_version':8 if abox_pm_audit else None,
@@ -305,6 +308,8 @@ def build(backup,prototype,output,current_packages=None):
         metadata['rcu_context_audit_version']=1 if rcu_context and mode=='diagnostic' else None
         metadata['ehld_lock_audit']=ehld_lock and mode=='diagnostic'
         metadata['ehld_lock_audit_version']=1 if ehld_lock and mode=='diagnostic' else None
+        metadata['ehld_irqsave_audit']=ehld_irqsave and mode=='diagnostic'
+        metadata['ehld_irqsave_audit_version']=1 if ehld_irqsave and mode=='diagnostic' else None
         metadata['pm_irq_diagnostic']=pm_irq and mode=='diagnostic'
         metadata['pm_irq_evidence_version']=1 if pm_irq and mode=='diagnostic' else None
         metadata['abox_pmu_audit_diagnostic']=abox_pmu_audit and mode=='diagnostic'

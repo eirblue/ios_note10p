@@ -33,7 +33,7 @@ def branch_source_path(out, model):
     return source
 
 
-def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manifest=None,cpu_cache=False,pm_timer=False,auto_return=False,screen_log=False,gic_roundtrip=False,dma_pm_audit=False,ufs_pm_audit=False,ehld_lock_audit=False):
+def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manifest=None,cpu_cache=False,pm_timer=False,auto_return=False,screen_log=False,gic_roundtrip=False,dma_pm_audit=False,ufs_pm_audit=False,ehld_lock_audit=False,ehld_irqsave_audit=False):
     if not sys.platform.startswith('linux'): raise RuntimeError('Linux CI host required')
     if os.environ.get('PLATFORM_VERSION')!='11' or os.environ.get('ANDROID_MAJOR_VERSION')!='r':
         raise ValueError('Pinned Samsung build requires PLATFORM_VERSION=11 and ANDROID_MAJOR_VERSION=r')
@@ -49,6 +49,7 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
     if dma_pm_audit and not gic_roundtrip:raise ValueError('DMA PM audit requires the restored GIC/PM diagnostic')
     if ufs_pm_audit and not dma_pm_audit:raise ValueError('UFS PM audit requires the DMA PM framework audit')
     if ehld_lock_audit and not ufs_pm_audit:raise ValueError('EHLD lock audit requires the full preserved v44 diagnostic bundle')
+    if ehld_irqsave_audit and not ehld_lock_audit:raise ValueError('EHLD irqsave audit requires ehld_lock_audit=true')
     OUT.mkdir(parents=True,exist_ok=True)
     report = {'source_repository':REPOSITORY,'source_commit':COMMIT,
               'platform_version':os.environ['PLATFORM_VERSION'],
@@ -58,6 +59,7 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
               'scope':'Linux shutdown-host build feasibility; not XNU or an installable image',
               'builtin_cpu_diagnostic':caps,
               'ehld_lock_audit':False,
+              'ehld_irqsave_audit':False,
               'commands':[]}
     def run(arguments, log_name, timeout=120):
         report['commands'].append(arguments)
@@ -295,6 +297,16 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
                 prior=OUT/'ehld-lock-v44-composition-input.json'
                 prior.write_text(json.dumps({'snapshot_sha256':report['rcu_context_snapshot_sha256']},indent=2)+'\n',encoding='utf-8',newline='\n')
                 run([sys.executable,str(ROOT/'note10/device_test/test_ehld_lock_composition.py'),'--v44-source',str(OUT/'rcu-context-prepared'),'--v44-composition',str(prior),'--output',str(OUT/'ehld-lock-composition-model')],'03-ehld-lock-composition.log')
+            if ehld_irqsave_audit:
+                from prepare_ehld_irqsave_audit import prepare as prepare_irqsave,snapshot as snapshot_irqsave
+                from ehld_irqsave_binding import SOURCES as irqsave_sources,PACKAGE_SOURCES as irqsave_packages
+                report.update(prepare_irqsave(source,True,report['ehld_lock_snapshot_sha256']))
+                report['ehld_irqsave_audit']=True
+                report['ehld_irqsave_sources_sha256']={n:hashlib.sha256((ROOT/'note10/device_test'/n).read_bytes()).hexdigest() for n in irqsave_sources}
+                report['ehld_irqsave_package_sources_sha256']={n:hashlib.sha256((ROOT/'note10/device_test'/n).read_bytes()).hexdigest() for n in irqsave_packages}
+                report['ehld_irqsave_snapshot_sha256']=snapshot_irqsave(source,OUT/'ehld-irqsave-prepared',report['ehld_lock_snapshot_sha256'])
+                run([sys.executable,str(ROOT/'note10/device_test/test_ehld_irqsave_audit.py'),'--source-root',str(OUT/'ehld-irqsave-prepared'),'--baseline-source',str(OUT/'ehld-lock-prepared'),'--output',str(OUT/'ehld-irqsave-model'),'--cc','clang-14'],'03-ehld-irqsave-model.log')
+                report['ehld_irqsave_model_sha256']=hashlib.sha256((OUT/'ehld-irqsave-model/result.json').read_bytes()).hexdigest()
             report['pm_quiesce_patched_sha256']['kernel/power/Kconfig']=report['pm_callbacks_prepared_sha256']['kernel/power/Kconfig']
             report['scope']='Bundled PM, CPU architecture and payload observations; no global DMA shutdown or XNU execution claim'
         make=['make','-C',str(source),'O='+str(objects),'ARCH=arm64',
@@ -328,6 +340,8 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_EHLD_LOCK_AUDIT'],'02-ehld-lock-audit.log')
             from ehld_lock_profile import apply_profile
             report['ehld_lock_profile_source_sha256']=apply_profile(source,config,run)
+        if ehld_irqsave_audit:
+            run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_EHLD_IRQSAVE_AUDIT'],'02-ehld-irqsave-audit.log')
         run([*make,'olddefconfig'],'03-olddefconfig.log')
         configured=config.read_text()
         required=('CONFIG_KEXEC=y','CONFIG_KEXEC_CORE=y','CONFIG_PM_SLEEP_SMP=y','CONFIG_ARM64_4K_PAGES=y')
@@ -337,6 +351,7 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
         if ufs_pm_audit:required+=('CONFIG_NOTE10_UFS_PM_AUDIT=y','CONFIG_SCSI_UFSHCD=y','CONFIG_SCSI_UFS_EXYNOS=y','CONFIG_NOTE10_IOMMU_PM_AUDIT=y','CONFIG_EXYNOS_IOMMU=y','CONFIG_NOTE10_ABOX_PM_AUDIT=y','CONFIG_NOTE10_ABOX_FW_FAILURE_GUARD=y','CONFIG_SND_SOC_SAMSUNG_ABOX=y','CONFIG_NOTE10_ABOX_PMU_AUDIT=y','CONFIG_EXYNOS_PMU=y','CONFIG_SOC_EXYNOS9820=y','CONFIG_EXYNOS_PM_DOMAINS=y','CONFIG_USB_DWC3_EXYNOS=y','CONFIG_NOTE10_PM_NOIRQ_TEST=y','CONFIG_NOTE10_PMU_SETTLE=y','CONFIG_NOTE10_PM_CPUS_TEST=y')
         if ufs_pm_audit:required+=('CONFIG_NOTE10_PM_POST_ARCH=y','CONFIG_NOTE10_PM_EDGE_INVENTORY=y','CONFIG_NOTE10_PM_IRQ_TEST=y','CONFIG_NOTE10_PM_CALLBACK_INVENTORY=y','CONFIG_NOTE10_CPU_PM_FAILURE_GUARD=y','CONFIG_NOTE10_CPU_PM_PRECONDITIONS=y','CONFIG_NOTE10_CPU_PM_BRANCH_AUDIT=y','CONFIG_NOTE10_PMU_FAILURE_RESTORE=y','CONFIG_NOTE10_GIC_PRIORITY_RESTORE=y','CONFIG_NOTE10_PMU_STATE_AUDIT=y','CONFIG_NOTE10_PMU_CONTROL_AUDIT=y','CONFIG_NOTE10_FPSIMD_REFERENCE_AUDIT=y','CONFIG_NOTE10_RCU_CONTEXT_AUDIT=y','CONFIG_PREEMPT_RCU=y','CONFIG_ARM_GIC_MAX_NR=1','CONFIG_LOG_BUF_SHIFT=21','CONFIG_PREEMPT_COUNT=y','CONFIG_KALLSYMS=y')
         if ehld_lock_audit:required+=('CONFIG_NOTE10_EHLD_LOCK_AUDIT=y','CONFIG_EXYNOS_EHLD=y','CONFIG_PREEMPT_COUNT=y')
+        if ehld_irqsave_audit:required+=('CONFIG_NOTE10_EHLD_IRQSAVE_AUDIT=y','CONFIG_NOTE10_EHLD_LOCK_AUDIT=y')
         if reserve:required+=('CONFIG_INITRAMFS_FORCE=y','CONFIG_CMDLINE_EXTEND=y','CONFIG_CMDLINE="rdinit=/init"')
         if xnu_payload is not None:required+=('CONFIG_CRYPTO=y','CONFIG_CRYPTO_HASH=y','CONFIG_CRYPTO_SHA256=y')
         if cpu_cache:required+=('CONFIG_HOTPLUG_CPU=y','CONFIG_SMP=y','CONFIG_PM_SLEEP_SMP=y')
@@ -440,9 +455,12 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
         if ufs_pm_audit and not ehld_lock_audit:
             for name,digest in report['rcu_context_snapshot_sha256'].items():
                 if hashlib.sha256((source/name).read_bytes()).hexdigest()!=digest:raise ValueError('Final Image source changed after RCU context snapshot: '+name)
-        if ehld_lock_audit:
+        if ehld_lock_audit and not ehld_irqsave_audit:
             for name,digest in report['ehld_lock_snapshot_sha256'].items():
                 if hashlib.sha256((source/name).read_bytes()).hexdigest()!=digest:raise ValueError('Final Image source changed after EHLD lock snapshot: '+name)
+        if ehld_irqsave_audit:
+            for name,digest in report['ehld_irqsave_snapshot_sha256'].items():
+                if hashlib.sha256((source/name).read_bytes()).hexdigest()!=digest:raise ValueError('Final Image source changed after EHLD irqsave snapshot: '+name)
         if reserve and target.read_bytes().count(report['reservation_evidence_id'].encode())!=1:
             raise ValueError('Unique reservation evidence ID not embedded in Image')
         if xnu_payload is not None:
@@ -507,9 +525,11 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             from prepare_fpsimd_reference_flow_compat import prepare as prepare_fpsimd_compat
             from prepare_rcu_context_flow_compat import prepare as prepare_rcu_compat
             from prepare_ehld_lock_flow_compat import prepare as prepare_ehld_compat
+            from prepare_ehld_irqsave_flow_compat import prepare as prepare_irqsave_compat
             import tempfile
             with tempfile.TemporaryDirectory() as temp:
-                ehld_base=prepare_ehld_compat(OUT,Path(temp)/'v44-fixture') if ehld_lock_audit else OUT
+                irqsave_base=prepare_irqsave_compat(OUT,Path(temp)/'v45-fixture') if ehld_irqsave_audit else OUT
+                ehld_base=prepare_ehld_compat(irqsave_base,Path(temp)/'v44-fixture') if ehld_lock_audit else OUT
                 old41=prepare_control_compat(prepare_fpsimd_compat(prepare_rcu_compat(ehld_base,Path(temp)/'v43-fixture'),Path(temp)/'v42-fixture'),Path(temp)/'v41-fixture')
                 old40=prepare_state_compat(old41,Path(temp)/'v40-fixture')
                 prior_flow=prepare_prior_flow(old40,Path(temp)/'v39-fixture')
@@ -519,7 +539,8 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             from gic_priority_binding import validate as validate_priority
             validate_priority(OUT,report,require_package_flow=False)
             with tempfile.TemporaryDirectory() as temp:
-                ehld_base=prepare_ehld_compat(OUT,Path(temp)/'v44-fixture') if ehld_lock_audit else OUT
+                irqsave_base=prepare_irqsave_compat(OUT,Path(temp)/'v45-fixture') if ehld_irqsave_audit else OUT
+                ehld_base=prepare_ehld_compat(irqsave_base,Path(temp)/'v44-fixture') if ehld_lock_audit else OUT
                 old41=prepare_control_compat(prepare_fpsimd_compat(prepare_rcu_compat(ehld_base,Path(temp)/'v43-fixture'),Path(temp)/'v42-fixture'),Path(temp)/'v41-fixture')
                 old40=prepare_state_compat(old41,Path(temp)/'v40-fixture')
                 run([sys.executable,str(ROOT/'note10/device_test/test_gic_priority_package_flow.py'),'--artifact',str(old40),'--output',str(OUT/'gic-priority-package-flow-model')],'03-gic-priority-package-flow.log')
@@ -528,7 +549,8 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             from pmu_state_binding import validate as validate_state
             validate_state(OUT,report,require_package_flow=False)
             with tempfile.TemporaryDirectory() as temp:
-                ehld_base=prepare_ehld_compat(OUT,Path(temp)/'v44-fixture') if ehld_lock_audit else OUT
+                irqsave_base=prepare_irqsave_compat(OUT,Path(temp)/'v45-fixture') if ehld_irqsave_audit else OUT
+                ehld_base=prepare_ehld_compat(irqsave_base,Path(temp)/'v44-fixture') if ehld_lock_audit else OUT
                 old41=prepare_control_compat(prepare_fpsimd_compat(prepare_rcu_compat(ehld_base,Path(temp)/'v43-fixture'),Path(temp)/'v42-fixture'),Path(temp)/'v41-fixture')
                 run([sys.executable,str(ROOT/'note10/device_test/test_pmu_state_package_flow.py'),'--artifact',str(old41),'--output',str(OUT/'pmu-state-package-flow-model')],'03-pmu-state-package-flow.log')
             validate_state(OUT,report)
@@ -536,7 +558,8 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             from pmu_control_binding import validate as validate_control
             validate_control(OUT,report,require_package_flow=False)
             with tempfile.TemporaryDirectory() as temp:
-                ehld_base=prepare_ehld_compat(OUT,Path(temp)/'v44-fixture') if ehld_lock_audit else OUT
+                irqsave_base=prepare_irqsave_compat(OUT,Path(temp)/'v45-fixture') if ehld_irqsave_audit else OUT
+                ehld_base=prepare_ehld_compat(irqsave_base,Path(temp)/'v44-fixture') if ehld_lock_audit else OUT
                 old42=prepare_fpsimd_compat(prepare_rcu_compat(ehld_base,Path(temp)/'v43-fixture'),Path(temp)/'v42-fixture')
                 run([sys.executable,str(ROOT/'note10/device_test/test_pmu_control_package_flow.py'),'--artifact',str(old42),'--output',str(OUT/'pmu-control-package-flow-model')],'03-pmu-control-package-flow.log')
             validate_control(OUT,report)
@@ -544,7 +567,8 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             from fpsimd_reference_binding import validate as validate_fpsimd
             validate_fpsimd(OUT,report,require_package_flow=False)
             with tempfile.TemporaryDirectory() as temp:
-                ehld_base=prepare_ehld_compat(OUT,Path(temp)/'v44-fixture') if ehld_lock_audit else OUT
+                irqsave_base=prepare_irqsave_compat(OUT,Path(temp)/'v45-fixture') if ehld_irqsave_audit else OUT
+                ehld_base=prepare_ehld_compat(irqsave_base,Path(temp)/'v44-fixture') if ehld_lock_audit else OUT
                 old43=prepare_rcu_compat(ehld_base,Path(temp)/'v43-fixture')
                 run([sys.executable,str(ROOT/'note10/device_test/test_fpsimd_reference_package_flow.py'),'--artifact',str(old43),'--output',str(OUT/'fpsimd-reference-package-flow-model')],'03-fpsimd-reference-package-flow.log')
             validate_fpsimd(OUT,report)
@@ -552,7 +576,8 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             from rcu_context_binding import validate as validate_rcu
             validate_rcu(OUT,report,require_package_flow=False)
             with tempfile.TemporaryDirectory() as temp:
-                rcu_flow_input=prepare_ehld_compat(OUT,Path(temp)/'v44-fixture') if ehld_lock_audit else OUT
+                irqsave_base=prepare_irqsave_compat(OUT,Path(temp)/'v45-fixture') if ehld_irqsave_audit else OUT
+                rcu_flow_input=prepare_ehld_compat(irqsave_base,Path(temp)/'v44-fixture') if ehld_lock_audit else OUT
                 run([sys.executable,str(ROOT/'note10/device_test/test_rcu_context_package_flow.py'),'--artifact',str(rcu_flow_input),'--output',str(OUT/'rcu-context-package-flow-model')],'03-rcu-context-package-flow.log')
             validate_rcu(OUT,report)
         if ehld_lock_audit:
@@ -562,10 +587,24 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             run([sys.executable,str(ROOT/'note10/device_test/test_ehld_lock_binding.py'),'--artifact',str(OUT),'--output',str(OUT/'ehld-lock-binding-model')],'03-ehld-lock-binding.log')
             from ehld_lock_binding import validate as validate_ehld
             validate_ehld(OUT,report,require_package_flow=False)
-            run([sys.executable,str(ROOT/'note10/device_test/test_ehld_lock_package_flow.py'),'--artifact',str(OUT),'--output',str(OUT/'ehld-lock-package-flow-model')],'03-ehld-lock-package-flow.log')
+            with tempfile.TemporaryDirectory() as temp:
+                ehld_flow_input=prepare_irqsave_compat(OUT,Path(temp)/'v45-fixture') if ehld_irqsave_audit else OUT
+                run([sys.executable,str(ROOT/'note10/device_test/test_ehld_lock_package_flow.py'),'--artifact',str(ehld_flow_input),'--output',str(OUT/'ehld-lock-package-flow-model')],'03-ehld-lock-package-flow.log')
             validate_ehld(OUT,report)
             from pm_irq_binding import validate_model as validate_irq
             validate_irq(OUT,report)
+        if ehld_irqsave_audit:
+            (OUT/'Image').write_bytes(target.read_bytes())
+            (OUT/'handoff.config').write_bytes((OUT/'objects/.config').read_bytes())
+            (OUT/'build-result.json').write_text(json.dumps(report,indent=2)+'\n',encoding='utf-8',newline='\n')
+            run([sys.executable,str(ROOT/'note10/device_test/test_ehld_irqsave_binding.py'),'--artifact',str(OUT),'--output',str(OUT/'ehld-irqsave-binding-model')],'03-ehld-irqsave-binding.log')
+            report['ehld_irqsave_binding_sha256']=hashlib.sha256((OUT/'ehld-irqsave-binding-model/result.json').read_bytes()).hexdigest()
+            from ehld_irqsave_binding import validate as validate_irqsave
+            validate_irqsave(OUT,report,require_package_flow=False)
+            (OUT/'build-result.json').write_text(json.dumps(report,indent=2)+'\n',encoding='utf-8',newline='\n')
+            run([sys.executable,str(ROOT/'note10/device_test/test_ehld_irqsave_package_flow.py'),'--artifact',str(OUT),'--output',str(OUT/'ehld-irqsave-package-flow-model')],'03-ehld-irqsave-package-flow.log')
+            report['ehld_irqsave_package_flow_sha256']=hashlib.sha256((OUT/'ehld-irqsave-package-flow-model/result.json').read_bytes()).hexdigest()
+            validate_irqsave(OUT,report)
         if auto_return:
             from materialize_auto_cycle import SLOT
             if b'N10RET1' not in target.read_bytes() or target.read_bytes().count(SLOT+b'\0')!=1:raise ValueError('Auto-return marker/unique data slot missing')
@@ -597,5 +636,6 @@ if __name__=='__main__':
     parser.add_argument('--dma-pm-audit',action='store_true',help='Read-only DMA-capable device PM framework coverage snapshots')
     parser.add_argument('--ufs-pm-audit',action='store_true',help='Read-only Exynos UFS driver queue/link/clock/IRQ snapshots')
     parser.add_argument('--ehld-lock-audit',action='store_true',help='Experimental CPU0 EHLD ctrl lock-availability observation with a pinned no-dynamic-probes profile')
+    parser.add_argument('--ehld-irqsave-audit',action='store_true',help='Opt in to the EHLD paired irqsave token source audit; requires --ehld-lock-audit')
     args=parser.parse_args();main(caps=args.caps,reserve=args.reserve,window_access=args.window_access,
-                                  xnu_payload=args.xnu_payload,xnu_manifest=args.xnu_payload_manifest,cpu_cache=args.cpu_cache,pm_timer=args.pm_timer,auto_return=args.auto_return,screen_log=args.screen_log,gic_roundtrip=args.gic_roundtrip,dma_pm_audit=args.dma_pm_audit,ufs_pm_audit=args.ufs_pm_audit,ehld_lock_audit=args.ehld_lock_audit)
+                                  xnu_payload=args.xnu_payload,xnu_manifest=args.xnu_payload_manifest,cpu_cache=args.cpu_cache,pm_timer=args.pm_timer,auto_return=args.auto_return,screen_log=args.screen_log,gic_roundtrip=args.gic_roundtrip,dma_pm_audit=args.dma_pm_audit,ufs_pm_audit=args.ufs_pm_audit,ehld_lock_audit=args.ehld_lock_audit,ehld_irqsave_audit=args.ehld_irqsave_audit)

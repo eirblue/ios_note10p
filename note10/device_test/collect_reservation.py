@@ -131,6 +131,9 @@ def collect(packages,kernel_build,adb):
     rcu_context=validate_rcu(kernel_build,result)
     from ehld_lock_binding import validate as validate_ehld_lock
     ehld_lock=validate_ehld_lock(kernel_build,result)
+    from ehld_irqsave_binding import validate as validate_ehld_irqsave,package_scope as irqsave_package_scope
+    ehld_irqsave=validate_ehld_irqsave(kernel_build,result)
+    if type(ehld_irqsave) is not bool or irqsave_package_scope(result) is not ehld_irqsave:raise ValueError('EHLD irqsave build validation scope differs')
     from pm_irq_binding import assert_scope as assert_irq_scope,validate_model as validate_irq
     pm_irq=assert_irq_scope(kernel_build,result)
     if pm_irq:validate_irq(kernel_build,result)
@@ -190,6 +193,7 @@ def collect(packages,kernel_build,adb):
     if bool(paired.get('fpsimd_reference_audit'))!=fpsimd_reference or (fpsimd_reference and paired.get('fpsimd_reference_audit_version')!=1):raise ValueError('FPSIMD reference package/kernel scope differs')
     if bool(paired.get('rcu_context_audit'))!=rcu_context or (rcu_context and paired.get('rcu_context_audit_version')!=1):raise ValueError('RCU context package/kernel scope differs')
     if bool(paired.get('ehld_lock_audit'))!=ehld_lock or (ehld_lock and paired.get('ehld_lock_audit_version')!=1):raise ValueError('EHLD lock package/kernel scope differs')
+    if irqsave_package_scope(paired) is not ehld_irqsave:raise ValueError('EHLD irqsave package/kernel scope differs')
     if bool(paired.get('pm_irq_diagnostic'))!=pm_irq or (pm_irq and paired.get('pm_irq_evidence_version')!=1):raise ValueError('CPU0 IRQ package/kernel scope differs')
     if bool(paired.get('abox_pmu_audit_diagnostic'))!=abox_pmu_audit or (abox_pmu_audit and paired.get('abox_pmu_audit_evidence_version')!=3):raise ValueError('PMU package/kernel scope differs')
     if xnu_stage and (paired.get('xnu_payload_sha256')!=result.get('xnu_payload_sha256') or
@@ -229,6 +233,7 @@ def collect(packages,kernel_build,adb):
             'fpsimd_reference_audit_scope_verified':fpsimd_reference,
             'rcu_context_audit_scope_verified':rcu_context,
             'ehld_lock_audit_scope_verified':ehld_lock,
+            'ehld_irqsave_audit_scope_verified':ehld_irqsave,
             'previous_boot_reservation_observed':False,
             'window_access_required':access,'previous_boot_window_access_observed':False,
             'xnu_payload_stage_required':xnu_stage,'previous_boot_xnu_payload_stage_observed':False,
