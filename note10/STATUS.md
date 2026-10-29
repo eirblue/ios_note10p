@@ -1,5 +1,12 @@
 # 작업 상태 (2026-10-30, Asia/Seoul)
 
+## 2026-10-30: v48 EHLD 관측 잠금 경합 생략과 실기기 회귀 통과
+
+- 기본 비활성 옵션 v2에서 EHLD updater의 main/ctrl 및 dumper의 main lock을 한 번만 trylock한다. 경합 시 관측을 생략하며 이전 ring 값이 남을 수 있다. [수정 범위와 한계](device_test/EHLD-RUNNING-LOCK-AUDIT.md).
+- 소스 `dd7dc575c4f871ddfc309ddeb51b6118325db5fa`의 [CI 40916389727](https://github.com/eirblue/ios_note10p/actions/runs/40916389727)가 통과했다. 25개 결속 검증의 CI 성공을 확인하고, 로컬에서는 수정·직접 영향 범위만 확인했다.
+- 단일 실기기 시험 1회에서 기존 42개 평가의 필수 41개가 통과했다. 자동 TWRP 복귀·복귀 후 다섯 파티션 무결성을 확인했고, 확인 뒤 TWRP와 패널 raw 밝기를 시험 전후 모두 10으로 설정·확인했다. 설치 직전 배터리는 90%였다.
+- 새 하드웨어 관측 행이나 직접 CPU-PM 호출은 추가하지 않았다. 경합 분기는 PC 모델로 확인했으며 실기기에서 panic·hardlockup·경합을 유발하지 않았다. 이 결과는 NMI 안전성, 전체 하드웨어 복원, XNU 실행 또는 iOS 부팅을 증명하지 않는다.
+
 ## 2026-10-30: v47 EHLD start/stop 상태 동기화와 실기기 회귀 통과
 
 - 기본 비활성 옵션으로 EHLD start/stop의 두 상태 저장을 ctrl lock으로 보호했다. 이벤트 수명·준비 상태나 기존 비잠금 샘플의 원자성을 보장하지 않는다. [수정 범위와 한계](device_test/EHLD-RUNNING-LOCK-AUDIT.md).
