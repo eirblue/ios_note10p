@@ -339,7 +339,7 @@ def transform(files):
               b' unsigned int daif_stable, timer_stable, gic_stable, ehld_before, ehld_after, context_stable, passed;\n'
               b' unsigned int terminal_attempted, terminal_recorded, terminal_completed;\n'
               b' unsigned int caller_invoked, terminal_stage;\n'
-              b' int terminal_outer_error, terminal_helper_error;\n'
+              b' int terminal_outer_error, terminal_helper_error, terminal_probe_error;\n'
               b' int enter_error, exit_error, error;\n'
               b'};\n')
     struct_anchor = b'struct n10_precond_sample { unsigned int generation, seen, bad, completed, count; int error; struct n10_precond_row row[N10_PRECOND_CAP]; };'
@@ -415,9 +415,9 @@ def transform(files):
 #endif
     }
 #ifdef CONFIG_NOTE10_CPU_PM_ROUNDTRIP
-    if (s->error && s->roundtrip.terminal_attempted) {
+    if (s->roundtrip.terminal_attempted) {
         if (!s->roundtrip.terminal_stage)
-            s->roundtrip.terminal_stage=s->roundtrip.caller_invoked ? 5 : 0;
+            s->roundtrip.terminal_stage=s->error ? (s->roundtrip.caller_invoked ? 5 : 0) : 0;
         s->roundtrip.terminal_recorded=1;
         s->roundtrip.terminal_completed=1;
     }
@@ -444,8 +444,11 @@ int n10_pre_roundtrip_terminal_read(struct n10_cpu_pm_roundtrip_sample *out,
     }
     memcpy(out,&n10_pre_last.roundtrip,sizeof(*out));
     mutex_unlock(&pm_mutex);
-    if (out->terminal_stage>5 ||
-        ((out->terminal_stage<=1) && out->caller_invoked) ||
+    if (out->terminal_stage>5) return -EIO;
+    if (!out->terminal_stage && out->attempted && out->caller_invoked && out->passed &&
+        !out->error && out->enter_calls==1 && out->exit_calls==1)
+        return 0;
+    if (((out->terminal_stage<=1) && (out->attempted || out->caller_invoked)) ||
         ((out->terminal_stage>=2) && !out->caller_invoked)) return -EIO;
     return 0;
 }
@@ -463,7 +466,7 @@ int n10_pre_roundtrip_terminal_read(struct n10_cpu_pm_roundtrip_sample *out,
 static const char n10_cpu_pm_terminal_marker[] __used = "N10CPT1";
 static struct n10_cpu_pm_roundtrip_sample n10_pre_terminal_report;
 static int n10_pre_emit(const char *, const char *, int, unsigned int *, int);
-static int n10_pre_emit_terminal(unsigned int completed, unsigned int generation)
+static int n10_pre_emit_terminal(unsigned int completed, unsigned int generation, int probe_error)
 {
     char frame[512]; unsigned int copy,budget=0; int n,ret;
     memset(&n10_pre_terminal_report,0,sizeof(n10_pre_terminal_report));
@@ -471,8 +474,12 @@ static int n10_pre_emit_terminal(unsigned int completed, unsigned int generation
     if (ret || !n10_pre_terminal_report.terminal_recorded ||
         !n10_pre_terminal_report.terminal_completed ||
         n10_pre_terminal_report.generation!=generation) return ret ? ret : -EIO;
+    n10_pre_terminal_report.terminal_probe_error=probe_error;
+    if (probe_error && !n10_pre_terminal_report.terminal_stage &&
+        n10_pre_terminal_report.attempted && n10_pre_terminal_report.caller_invoked)
+        n10_pre_terminal_report.terminal_stage=5;
     for (copy=0;copy<2;copy++) {
-        n=snprintf(frame,sizeof(frame),"id=%s copy=%u generation=%u attempted=%u recorded=%u completed=%u caller_invoked=%u stage=%u outer_error=%d helper_error=%d enter_calls=%u exit_calls=%u enter_error=%d exit_error=%d",N10_RESERVE_BUILD_ID,copy,generation,n10_pre_terminal_report.terminal_attempted,n10_pre_terminal_report.terminal_recorded,n10_pre_terminal_report.terminal_completed,n10_pre_terminal_report.caller_invoked,n10_pre_terminal_report.terminal_stage,n10_pre_terminal_report.terminal_outer_error,n10_pre_terminal_report.terminal_helper_error,n10_pre_terminal_report.enter_calls,n10_pre_terminal_report.exit_calls,n10_pre_terminal_report.enter_error,n10_pre_terminal_report.exit_error);
+        n=snprintf(frame,sizeof(frame),"id=%s copy=%u generation=%u attempted=%u recorded=%u completed=%u caller_invoked=%u stage=%u outer_error=%d helper_error=%d probe_error=%d enter_calls=%u exit_calls=%u enter_error=%d exit_error=%d",N10_RESERVE_BUILD_ID,copy,generation,n10_pre_terminal_report.attempted,n10_pre_terminal_report.terminal_recorded,n10_pre_terminal_report.terminal_completed,n10_pre_terminal_report.caller_invoked,n10_pre_terminal_report.terminal_stage,n10_pre_terminal_report.terminal_outer_error,n10_pre_terminal_report.terminal_helper_error,n10_pre_terminal_report.terminal_probe_error,n10_pre_terminal_report.enter_calls,n10_pre_terminal_report.exit_calls,n10_pre_terminal_report.enter_error,n10_pre_terminal_report.exit_error);
         ret=n10_pre_emit("N10CPT1",frame,n,&budget,1); if(ret)return ret;
     }
     return 0;
@@ -503,7 +510,7 @@ static int n10_pre_emit_terminal(unsigned int completed, unsigned int generation
     if (!ret)ret=n10_pre_emit_all(0,0,generation);
     if (ret) {
 #ifdef CONFIG_NOTE10_CPU_PM_ROUNDTRIP
-        (void)n10_pre_emit_terminal(completed,generation);
+            (void)n10_pre_emit_terminal(completed,generation,ret);
 #endif
         (void)n10_pre_emit_all(1,ret,generation);return ret;
     }

@@ -22,7 +22,9 @@ TRANSFORM_CASES = [
     'CPU_PM-exit-removed', 'capture-restore-removed', 'Kconfig-symbol-removed',
 ]
 TERMINAL_CASES = ['caller-context-refusal','prior-chain-refusal','helper-admission-refusal',
-                  'enter-failure','exit-failure','postcondition-failure','strict-success-no-terminal']
+                  'enter-failure','exit-failure','postcondition-failure','strict-success-no-terminal',
+                  'outer-only-postcondition','helper-reentry-unattempted',
+                  'probe-read-failure-after-pair']
 ERR_EALREADY = -103 if sys.platform == 'win32' else -114
 TRANSCRIPTS = {
     'success': (0, 0, 1, 1, 1, 1, 2, 2),
@@ -127,7 +129,7 @@ def extract_terminal_functions(capture,probe):
     signatures=(
         (capture,b'int n10_pre_capture(unsigned int generation)'),
         (capture,b'int n10_pre_roundtrip_terminal_read(struct n10_cpu_pm_roundtrip_sample *out,'),
-        (probe,b'static int n10_pre_emit_terminal(unsigned int completed, unsigned int generation)'),
+        (probe,b'static int n10_pre_emit_terminal(unsigned int completed, unsigned int generation, int probe_error)'),
         (probe,b'static int n10_report_pm_preconditions(unsigned int completed,int outer_error)'),
     )
     return [function(raw,signature)[2] for raw,signature in signatures]
@@ -145,7 +147,7 @@ typedef uint64_t u64;
 #define N10_RESERVE_BUILD_ID "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 #define PSR_I_BIT 0x80ULL
 #define daif 1
-struct n10_cpu_pm_roundtrip_sample { unsigned int generation,attempted,chain_lock_acquired,chain_lock_released,roster_count,roster_valid,pre_snapshot_valid,post_snapshot_valid,cpu_before,online_before,online_count_before,enter_calls,exit_calls,enter_succeeded,exit_succeeded,daif_stable,timer_stable,gic_stable,ehld_before,ehld_after,context_stable,passed,terminal_attempted,terminal_recorded,terminal_completed,caller_invoked,terminal_stage; int terminal_outer_error,terminal_helper_error,enter_error,exit_error,error; };
+struct n10_cpu_pm_roundtrip_sample { unsigned int generation,attempted,chain_lock_acquired,chain_lock_released,roster_count,roster_valid,pre_snapshot_valid,post_snapshot_valid,cpu_before,online_before,online_count_before,enter_calls,exit_calls,enter_succeeded,exit_succeeded,daif_stable,timer_stable,gic_stable,ehld_before,ehld_after,context_stable,passed,terminal_attempted,terminal_recorded,terminal_completed,caller_invoked,terminal_stage; int terminal_outer_error,terminal_helper_error,terminal_probe_error,enter_error,exit_error,error; };
 struct n10_precond_row { int priority; unsigned int kind,valid; long long value[8]; };
 struct n10_precond_sample { unsigned int generation,seen,bad,completed,count; int error; struct n10_cpu_pm_roundtrip_sample roundtrip; struct n10_precond_row row[N10_PRECOND_CAP]; };
 struct n10_precond_gic_sample { unsigned int completed; };
@@ -161,16 +163,17 @@ static unsigned int preempt_count(void){return pc;}
 static int preemptible(void){return pc==0&&!irq_off;}
 static int n10_pre_context(unsigned int g,int irq,unsigned int preempt){return g==current_generation&&irq==irq_off&&preempt==pc;}
 static int n10_pre_read(struct n10_precond_sample *s,unsigned int completed){(void)s;(void)completed;return 0;}
-static int n10_pre_gic_read(struct n10_precond_gic_sample *s,unsigned int completed){(void)s;(void)completed;return 0;}
+static int n10_pre_gic_read(struct n10_precond_gic_sample *s,unsigned int completed){(void)s;(void)completed;return mode==9?-5:0;}
 static int n10_pre_emit_all(int emit,int status,unsigned int generation){(void)emit;(void)generation;emit_all_count++;emit_all_status=status;return 0;}
 static int mutex_lock(void *m){(void)m;return 0;} static void mutex_unlock(void *m){(void)m;}
 static int pm_mutex;
 #define local_irq_save(f) do{(f)=irq_off;irq_off=1;}while(0)
-#define local_irq_restore(f) do{irq_off=(unsigned int)(f);}while(0)
+#define local_irq_restore(f) do{irq_off=(unsigned int)(f);if(mode==7)daif_state^=0x20;}while(0)
 #define read_sysreg(r) ((r)==daif?daif_state:0)
 static int n10_pre_chain(struct n10_precond_sample *s,unsigned int g){(void)s;(void)g;return mode==1?-5:0;}
-static int n10_cpu_pm_roundtrip(unsigned int g,const struct n10_precond_sample *prior,struct n10_cpu_pm_roundtrip_sample *out){unsigned int attempted=out->terminal_attempted,called=out->caller_invoked;int outer=out->terminal_outer_error;(void)prior;memset(out,0,sizeof(*out));out->generation=g;out->terminal_attempted=attempted;out->caller_invoked=called;out->terminal_outer_error=outer;out->attempted=1;if(mode==2){out->error=-16;return -16;}if(mode==3){out->enter_calls=1;out->enter_error=-5;out->error=-5;return -5;}if(mode==4){out->enter_calls=1;out->exit_calls=1;out->enter_succeeded=1;out->exit_error=-5;out->error=-5;return -5;}if(mode==5){out->enter_calls=1;out->exit_calls=1;out->enter_succeeded=out->exit_succeeded=1;out->error=-5;return -5;}out->enter_calls=out->exit_calls=out->enter_succeeded=out->exit_succeeded=1;out->passed=1;return 0;}
-static int n10_pre_emit(const char *tag,const char *frame,int n,unsigned int *budget,int emit){unsigned int i;(void)budget;(void)emit;if(n<0||n>=512||emitted>=2)return -1;i=emitted++;strncpy(emitted_tag[i],tag,sizeof(emitted_tag[i])-1);memcpy(emitted_frame[i],frame,(size_t)n);emitted_frame[i][n]=0;return 0;}
+static int n10_cpu_pm_roundtrip(unsigned int g,const struct n10_precond_sample *prior,struct n10_cpu_pm_roundtrip_sample *out){unsigned int attempted=out->terminal_attempted,called=out->caller_invoked;int outer=out->terminal_outer_error;(void)prior;memset(out,0,sizeof(*out));out->generation=g;out->terminal_attempted=attempted;out->caller_invoked=called;out->terminal_outer_error=outer;if(mode==8){out->error=-EALREADY;return -EALREADY;}out->attempted=1;if(mode==2){out->error=-16;return -16;}if(mode==3){out->enter_calls=1;out->enter_error=-5;out->error=-5;return -5;}if(mode==4){out->enter_calls=1;out->exit_calls=1;out->enter_succeeded=1;out->exit_error=-5;out->error=-5;return -5;}if(mode==5){out->enter_calls=1;out->exit_calls=1;out->enter_succeeded=out->exit_succeeded=1;out->error=-5;return -5;}out->enter_calls=out->exit_calls=out->enter_succeeded=out->exit_succeeded=1;out->passed=1;return 0;}
+static unsigned int n10_frame_checksum(const char *s,int n){unsigned int h=2166136261U;while(n--)h=(h^(unsigned char)*s++)*16777619U;return h;}
+static int n10_pre_emit(const char *tag,const char *frame,int n,unsigned int *budget,int emit){unsigned int i;(void)budget;(void)emit;if(n<0||n>=512||emitted>=2)return -1;i=emitted++;strncpy(emitted_tag[i],tag,sizeof(emitted_tag[i])-1);snprintf(emitted_frame[i],sizeof(emitted_frame[i]),"%s %.*s checksum=%08x",tag,n,frame,n10_frame_checksum(frame,n));return 0;}
 '''
 
 
@@ -181,20 +184,34 @@ def run_terminal_lifecycle(source,output,cc):
     cap=(source/'kernel/power/note10_pm_pre_capture.c').read_bytes()
     probe=(source/'arch/arm64/mm/note10_pm_pre_probe.c').read_bytes()
     capture_fn,reader_fn,emitter_fn,report_fn=extract_terminal_functions(cap,probe)
-    main_c=r'''int main(int argc,char **argv){int m,ret,report_ret;unsigned int gen=42;struct n10_cpu_pm_roundtrip_sample out={0};unsigned int stages[]={0,1,2,3,4,5};int outer[]={-1,-5,0,0,0,0};int helper[]={0,0,-16,-5,-5,-5};unsigned int called[]={0,0,1,1,1,1},enters[]={0,0,0,1,1,1},exits[]={0,0,0,0,1,1};char expected[512];if(argc!=2)return 90;m=atoi(argv[1]);mode=(unsigned int)m;irq_off=pc=0;daif_state=(m==0?PSR_I_BIT:0);current_generation=gen;memset(&n10_pre_last,0,sizeof(n10_pre_last));n10_pre_bad=0;emitted=emit_all_count=0;emit_all_status=0;ret=n10_pre_capture(gen);report_ret=n10_report_pm_preconditions(gen+1,ret);if(m==6){if(ret||report_ret||n10_pre_last.roundtrip.terminal_recorded||n10_pre_roundtrip_terminal_read(&out,gen+1)==0||emitted||emit_all_count!=2||emit_all_status)return 1;printf("PASS|%d|%d|0|0|0|0|0\n",m,ret);return 0;}if(!ret||report_ret!=ret||n10_pre_last.roundtrip.terminal_recorded!=1||n10_pre_last.roundtrip.terminal_completed!=1)return 2;if(n10_pre_roundtrip_terminal_read(&out,gen+1))return 3;if(n10_pre_roundtrip_terminal_read(&out,gen+2)==0)return 4;if(emitted!=2||emit_all_count!=1||emit_all_status!=ret)return 5;if(strcmp(emitted_tag[0],"N10CPT1")||strcmp(emitted_tag[1],"N10CPT1"))return 6;if(strcmp(emitted_frame[0],emitted_frame[1])==0)return 7;if(out.generation!=gen||out.terminal_attempted!=1||out.terminal_recorded!=1||out.terminal_completed!=1)return 8;if(out.terminal_stage!=stages[m]||out.caller_invoked!=called[m]||out.terminal_outer_error!=outer[m]||out.terminal_helper_error!=helper[m]||out.enter_calls!=enters[m]||out.exit_calls!=exits[m])return 9;for(unsigned int copy=0;copy<2;copy++){snprintf(expected,sizeof(expected),"id=%s copy=%u generation=%u attempted=1 recorded=1 completed=1 caller_invoked=%u stage=%u outer_error=%d helper_error=%d enter_calls=%u exit_calls=%u enter_error=%d exit_error=%d","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",copy,gen,called[m],stages[m],outer[m],helper[m],enters[m],exits[m],m==3?-5:0,m==4?-5:0);if(strcmp(emitted_frame[copy],expected))return 10;}printf("PASS|%d|%d|%u|%u|%u|%u|%d\n",m,ret,out.terminal_stage,out.caller_invoked,out.enter_calls,out.exit_calls,out.terminal_helper_error);return 0;}'''
+    main_c=r'''int main(int argc,char **argv){int m,ret,report_ret;unsigned int gen=42;struct n10_cpu_pm_roundtrip_sample out={0};unsigned int stages[]={0,1,2,3,4,5,0,5,2,5},stored_stages[]={0,1,2,3,4,5,0,5,2,0};int outer[]={-1,-5,0,0,0,0,0,-5,0,0};int helper[]={0,0,-16,-5,-5,-5,0,0,-EALREADY,0};int probe[]={-1,-5,-16,-5,-5,-5,0,-5,-EALREADY,-5};unsigned int attempted[]={0,0,1,1,1,1,0,1,0,1},called[]={0,0,1,1,1,1,0,1,1,1},enters[]={0,0,0,1,1,1,0,1,0,1},exits[]={0,0,0,0,1,1,0,1,0,1};char expected[512];if(argc!=2)return 90;m=atoi(argv[1]);mode=(unsigned int)m;irq_off=pc=0;daif_state=(m==0?PSR_I_BIT:0);current_generation=gen;memset(&n10_pre_last,0,sizeof(n10_pre_last));n10_pre_bad=0;emitted=emit_all_count=0;emit_all_status=0;ret=n10_pre_capture(gen);report_ret=n10_report_pm_preconditions(gen+1,ret);if(m==6){if(ret||report_ret||n10_pre_last.roundtrip.terminal_recorded!=1||n10_pre_roundtrip_terminal_read(&out,gen+1)||emitted||emit_all_count!=2||emit_all_status)return 1;printf("PASS|6|0|0|0|0|0|0|0|0|0|0\n");return 0;}if((m==9&&ret)|| (m!=9&&!ret))return 2;if((m==9&&report_ret!=-5)||(m!=9&&report_ret!=ret)||n10_pre_last.roundtrip.terminal_recorded!=1||n10_pre_last.roundtrip.terminal_completed!=1)return 3;if(n10_pre_roundtrip_terminal_read(&out,gen+1))return 4;if(n10_pre_roundtrip_terminal_read(&out,gen+2)==0)return 5;if(emitted!=2||emit_all_count!=1||emit_all_status!=report_ret)return 6;if(strcmp(emitted_tag[0],"N10CPT1")||strcmp(emitted_tag[1],"N10CPT1")||strcmp(emitted_frame[0],emitted_frame[1])==0){fprintf(stderr,"DBG tags=%s,%s frames=<%s>/<%s> emitted=%u\n",emitted_tag[0],emitted_tag[1],emitted_frame[0],emitted_frame[1],emitted);return 7;}if(out.generation!=gen||out.terminal_attempted!=1||out.terminal_recorded!=1||out.terminal_completed!=1)return 8;if(out.terminal_stage!=stored_stages[m]||out.attempted!=attempted[m]||out.caller_invoked!=called[m]||out.terminal_outer_error!=outer[m]||out.terminal_helper_error!=helper[m]||out.terminal_probe_error||out.enter_calls!=enters[m]||out.exit_calls!=exits[m])return 9;for(unsigned int copy=0;copy<2;copy++){snprintf(expected,sizeof(expected),"id=%s copy=%u generation=%u attempted=%u recorded=1 completed=1 caller_invoked=%u stage=%u outer_error=%d helper_error=%d probe_error=%d enter_calls=%u exit_calls=%u enter_error=%d exit_error=%d","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",copy,gen,attempted[m],called[m],stages[m],outer[m],helper[m],probe[m],enters[m],exits[m],m==3?-5:0,m==4?-5:0);char *body=strchr(emitted_frame[copy],' ');char *sum;if(!body)return 10;body++;sum=strstr(body," checksum=");if(!sum)return 10;*sum=0;if(strcmp(body,expected)){fprintf(stderr,"DBG expected=<%s> actual=<%s>\n",expected,body);*sum=' ';return 10;}*sum=' ';}printf("PASS|%d|%d|%d|%u|%u|%u|%u|%u|%d|%d|%d|%d\n",m,ret,report_ret,stages[m],out.attempted,out.caller_invoked,out.enter_calls,out.exit_calls,out.terminal_outer_error,out.terminal_helper_error,probe[m],out.error);for(unsigned int i=0;i<emitted;i++)printf("FRAME|%s\n",emitted_frame[i]);return 0;}'''
     generated=target/'terminal.c'
     generated.write_text(TERMINAL_PREFIX+capture_fn.decode('ascii')+'\n'+reader_fn.decode('ascii')+'\n'+emitter_fn.decode('ascii')+'\n'+report_fn.decode('ascii')+'\n'+main_c+'\n',encoding='ascii',newline='\n')
     exe=target/('terminal.exe' if sys.platform=='win32' else 'terminal')
     comp=subprocess.run([cc,'-std=gnu11','-Wall','-Werror',str(generated),'-o',str(exe)],capture_output=True,timeout=120)
     (target/'compile.log').write_bytes(comp.stdout+comp.stderr)
     if comp.returncode:raise RuntimeError('terminal caller/reader/probe native compile failed')
-    transcripts={};logs={}
+    transcripts={};logs={};frame_hashes={};decoded_cases=[]
+    from decode_cpu_pm_roundtrip import decode_terminal
     for mode,name in enumerate(TERMINAL_CASES):
         run=subprocess.run([str(exe),str(mode)],capture_output=True,timeout=20)
         raw=run.stdout+run.stderr;(target/(f'case-{mode:02d}.log')).write_bytes(raw)
-        text=raw.decode('ascii',errors='replace').strip()
-        if run.returncode or not text.startswith('PASS|'):raise RuntimeError('terminal native case failed: '+name)
-        transcripts[name]=text;logs[name]=sha(raw)
+        lines=raw.decode('ascii',errors='replace').strip().splitlines()
+        if run.returncode or not lines or not lines[0].startswith('PASS|'):raise RuntimeError('terminal native case failed: '+name)
+        transcripts[name]=lines[0];logs[name]=sha(raw)
+        frames=[line[6:] for line in lines[1:] if line.startswith('FRAME|')]
+        if name=='strict-success-no-terminal':
+            if frames:raise RuntimeError('strict success unexpectedly emitted a failure terminal')
+            frame_hashes[name]=None
+        else:
+            if len(frames)!=2:raise RuntimeError('terminal producer frame count differs: '+name)
+            parsed=decode_terminal('\n'.join(frames),'a'*32,42)
+            fields=lines[0].split('|')
+            if (parsed.get('pair_passed') is not False or parsed.get('stage')!=int(fields[4]) or
+                parsed.get('attempted')!=int(fields[5]) or parsed.get('caller_invoked') is not bool(int(fields[6]))):
+                raise RuntimeError('production terminal frame decoder result differs: '+name)
+            frame_hashes[name]=sha(('\n'.join(frames)+'\n').encode('ascii'))
+        decoded_cases.append(name)
     proof={'passed':True,'hardware_verified':False,'cases':TERMINAL_CASES,
            'source_capture_sha256':sha((source/'kernel/power/note10_pm_pre_capture.c').read_bytes()),
            'source_probe_sha256':sha((source/'arch/arm64/mm/note10_pm_pre_probe.c').read_bytes()),
@@ -202,7 +219,8 @@ def run_terminal_lifecycle(source,output,cc):
            'extracted_emitter_sha256':sha(emitter_fn),'extracted_report_sha256':sha(report_fn),
            'harness_sha256':sha(Path(__file__).read_bytes()),
            'generated_sha256':sha(generated.read_bytes()),'compile_log_sha256':sha((target/'compile.log').read_bytes()),
-           'case_log_sha256':logs,'case_transcripts':transcripts}
+           'case_log_sha256':logs,'case_transcripts':transcripts,
+           'decoded_terminal_cases':decoded_cases,'emitted_frame_sha256':frame_hashes}
     (target/'result.json').write_text(json.dumps(proof,indent=2)+'\n',encoding='utf8',newline='\n')
     return proof
 

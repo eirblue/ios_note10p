@@ -15,8 +15,11 @@ CASES = ('valid-pair', 'missing-copy', 'duplicate-copy', 'copy-mismatch',
          'extra-frame', 'malformed-frame')
 TERMINAL_CASES = ('stage0-context', 'stage1-prior-chain', 'stage2-admission',
                   'stage3-enter-failure', 'stage4-exit-failure', 'stage5-postcondition',
+                  'helper-reentry-unattempted', 'outer-only-postcondition',
+                  'probe-only-postcondition', 'probe-only-stage0',
                   'stale-generation', 'partial-record', 'caller-stage-mismatch',
-                  'attempted-zero', 'stage-count-mismatch', 'outer-error-zero',
+                  'attempted-zero', 'attempted-one-before-helper','stage2-unattempted-other-error',
+                  'stage5-no-error','stage-count-mismatch', 'outer-error-zero',
                   'success-claims', 'unknown-stage', 'terminal-copy-mismatch',
                   'terminal-bad-checksum', 'terminal-extra-frame')
 IDENTITY = 'a' * 32
@@ -76,20 +79,28 @@ def input_vector(case):
 def terminal_rows(case):
     stage={'stage0-context':0,'stage1-prior-chain':1,'stage2-admission':2,
            'stage3-enter-failure':3,'stage4-exit-failure':4,'stage5-postcondition':5,
+           'outer-only-postcondition':5,'probe-only-postcondition':5,
            'stage-count-mismatch':4}.get(case,2)
-    first={'id':IDENTITY,'copy':0,'generation':GENERATION,'attempted':1,'recorded':1,
+    first={'id':IDENTITY,'copy':0,'generation':GENERATION,'attempted':int(stage>=2),'recorded':1,
            'completed':1,'caller_invoked':int(stage>=2),'stage':stage,'outer_error':0,
-           'helper_error':0,'enter_calls':0,'exit_calls':0,'enter_error':0,'exit_error':0}
+           'helper_error':0,'probe_error':0,'enter_calls':0,'exit_calls':0,'enter_error':0,'exit_error':0}
     if stage in (0,1): first['outer_error']=-1
     elif stage==2:first['helper_error']=-16
     elif stage==3:first.update(helper_error=-5,enter_calls=1,enter_error=-5)
     elif stage==4:first.update(helper_error=-5,enter_calls=1,exit_calls=1,exit_error=-5)
     elif stage==5:first.update(helper_error=-5,enter_calls=1,exit_calls=1)
+    if case=='helper-reentry-unattempted':first.update(attempted=0,helper_error=-114)
+    if case=='outer-only-postcondition':first.update(outer_error=-5,helper_error=0,enter_calls=1,exit_calls=1)
+    if case=='probe-only-postcondition':first.update(outer_error=0,helper_error=0,probe_error=-5,enter_calls=1,exit_calls=1)
+    if case=='probe-only-stage0':first.update(stage=0,attempted=0,caller_invoked=0,outer_error=0,helper_error=0,probe_error=-5)
     second=dict(first);second['copy']=1
     if case=='stale-generation':first['generation']+=1;second['generation']+=1
     if case=='partial-record':first['completed']=0;second['completed']=0
     if case=='caller-stage-mismatch':first['caller_invoked']=0;second['caller_invoked']=0
-    if case=='attempted-zero':first['attempted']=0;second['attempted']=0
+    if case=='attempted-zero':first.update(stage=3,attempted=0,caller_invoked=1,helper_error=-5,enter_calls=1,enter_error=-5);second=dict(first);second['copy']=1
+    if case=='attempted-one-before-helper':first.update(stage=0,attempted=1,caller_invoked=0,outer_error=-1,helper_error=0,enter_calls=0,exit_calls=0);second=dict(first);second['copy']=1
+    if case=='stage2-unattempted-other-error':first.update(stage=2,attempted=0,caller_invoked=1,helper_error=-16);second=dict(first);second['copy']=1
+    if case=='stage5-no-error':first.update(stage=5,attempted=1,caller_invoked=1,outer_error=0,helper_error=0,probe_error=0,enter_calls=1,exit_calls=1);second=dict(first);second['copy']=1
     if case=='stage-count-mismatch':first['exit_calls']=0;second['exit_calls']=0
     if case=='outer-error-zero':
         first.update(stage=0,caller_invoked=0,outer_error=0,helper_error=0)
@@ -118,7 +129,7 @@ def terminal_input_vector(case):
 
 
 def TERMINAL_EXPECTED():
-    valid={'stage0-context','stage1-prior-chain','stage2-admission','stage3-enter-failure','stage4-exit-failure','stage5-postcondition'}
+    valid={'stage0-context','stage1-prior-chain','stage2-admission','stage3-enter-failure','stage4-exit-failure','stage5-postcondition','helper-reentry-unattempted','outer-only-postcondition','probe-only-postcondition','probe-only-stage0'}
     return [{'case':case,'accepted':case in valid,'pair_passed':False if case in valid else None} for case in TERMINAL_CASES]
 
 

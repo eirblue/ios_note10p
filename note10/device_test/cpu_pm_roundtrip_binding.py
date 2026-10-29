@@ -151,20 +151,28 @@ def assert_scope(root,build):
  capture=(prepared/'kernel/power/note10_pm_pre_capture.c').read_bytes()
  probe=(prepared/'arch/arm64/mm/note10_pm_pre_probe.c').read_bytes()
  capture_fn,reader_fn,emitter_fn,report_fn=extract_terminal_functions(capture,probe)
+ from test_cpu_pm_roundtrip import ERR_EALREADY
  expected_terminal={
-  'caller-context-refusal':'PASS|0|-1|0|0|0|0|0',
-  'prior-chain-refusal':'PASS|1|-5|1|0|0|0|0',
-  'helper-admission-refusal':'PASS|2|-16|2|1|0|0|-16',
-  'enter-failure':'PASS|3|-5|3|1|1|0|-5',
-  'exit-failure':'PASS|4|-5|4|1|1|1|-5',
-  'postcondition-failure':'PASS|5|-5|5|1|1|1|-5',
-  'strict-success-no-terminal':'PASS|6|0|0|0|0|0|0'}
+  'caller-context-refusal':'PASS|0|-1|-1|0|0|0|0|0|-1|0|-1|0',
+  'prior-chain-refusal':'PASS|1|-5|-5|1|0|0|0|0|-5|0|-5|0',
+  'helper-admission-refusal':f'PASS|2|-16|-16|2|1|1|0|0|0|-16|-16|-16',
+  'enter-failure':'PASS|3|-5|-5|3|1|1|1|0|0|-5|-5|-5',
+  'exit-failure':'PASS|4|-5|-5|4|1|1|1|1|0|-5|-5|-5',
+  'postcondition-failure':'PASS|5|-5|-5|5|1|1|1|1|0|-5|-5|-5',
+  'strict-success-no-terminal':'PASS|6|0|0|0|0|0|0|0|0|0|0',
+  'outer-only-postcondition':'PASS|7|-5|-5|5|1|1|1|1|-5|0|-5|0',
+  'helper-reentry-unattempted':f'PASS|8|-{abs(ERR_EALREADY)}|-{abs(ERR_EALREADY)}|2|0|1|0|0|0|-{abs(ERR_EALREADY)}|-{abs(ERR_EALREADY)}|-{abs(ERR_EALREADY)}',
+  'probe-read-failure-after-pair':'PASS|9|0|-5|5|1|1|1|1|0|0|-5|0'}
  if (not isinstance(tl,dict) or tl.get('passed') is not True or tl.get('hardware_verified') is not False or
      tl.get('cases')!=TERMINAL_CASES or tl.get('harness_sha256')!=sha((HERE/'test_cpu_pm_roundtrip.py').read_bytes()) or
      tl.get('source_capture_sha256')!=sha(capture) or tl.get('source_probe_sha256')!=sha(probe) or
      tl.get('extracted_capture_sha256')!=sha(capture_fn) or tl.get('extracted_reader_sha256')!=sha(reader_fn) or
      tl.get('extracted_emitter_sha256')!=sha(emitter_fn) or tl.get('extracted_report_sha256')!=sha(report_fn) or
      tl.get('case_transcripts')!=expected_terminal or
+     tl.get('decoded_terminal_cases')!=TERMINAL_CASES or
+     not isinstance(tl.get('emitted_frame_sha256'),dict) or set(tl['emitted_frame_sha256'])!=set(TERMINAL_CASES) or
+     tl['emitted_frame_sha256'].get('strict-success-no-terminal') is not None or
+     any(not _hash(tl['emitted_frame_sha256'].get(case)) for case in TERMINAL_CASES if case!='strict-success-no-terminal') or
      not _map(tl.get('case_log_sha256'),TERMINAL_CASES) or not _hash(tl.get('generated_sha256')) or
      not _hash(tl.get('compile_log_sha256'))):
   raise ValueError('v50 terminal caller/reader/probe proof contract differs')
@@ -174,8 +182,22 @@ def assert_scope(root,build):
   raise ValueError('v50 terminal generated C/compile evidence differs')
  for index,case in enumerate(TERMINAL_CASES):
   log=tlroot/(f'case-{index:02d}.log')
-  if log.is_symlink() or not log.is_file() or sha(log.read_bytes())!=tl['case_log_sha256'][case] or log.read_text(encoding='ascii')!=expected_terminal[case]+'\n':
+  if log.is_symlink() or not log.is_file() or sha(log.read_bytes())!=tl['case_log_sha256'][case]:
    raise ValueError('v50 terminal case evidence differs: '+case)
+  lines=log.read_text(encoding='ascii').splitlines()
+  if not lines or lines[0]!=expected_terminal[case]:raise ValueError('v50 terminal transcript differs: '+case)
+  frames=[line[6:] for line in lines[1:] if line.startswith('FRAME|')]
+  if case=='strict-success-no-terminal':
+   if frames:raise ValueError('v50 successful capture emitted failure terminal')
+  else:
+   if len(frames)!=2:raise ValueError('v50 terminal frame copies missing: '+case)
+   from decode_cpu_pm_roundtrip import decode_terminal
+   parsed=decode_terminal('\n'.join(frames),'a'*32,42)
+   frame_digest=sha(('\n'.join(frames)+'\n').encode('ascii'))
+   fields=lines[0].split('|')
+   if (frame_digest!=tl['emitted_frame_sha256'][case] or parsed.get('pair_passed') is not False or
+       parsed.get('stage')!=int(fields[4]) or parsed.get('attempted')!=int(fields[5]) or
+       parsed.get('caller_invoked') is not bool(int(fields[6]))):raise ValueError('v50 terminal output decode differs: '+case)
  decoder=root/DECODER
  if decoder.is_symlink() or not decoder.is_dir():raise ValueError('v49 decoder proof missing')
  draw=(decoder/'result.json').read_bytes()
@@ -254,6 +276,11 @@ def validate(root,build,require_package_flow=True):
       {'case':'terminal-failure','accepted':True,'pair_observed':False,'terminal_failure_observed':True,'required':True,'status':'failed'},
       {'case':'success-failure-conflict','accepted':False}]:
    raise ValueError('v50 terminal collector outcomes differ')
+  if proof.get('collector_entry_failure_case')!={
+      'case':'collect-entry-pmt-error-prq-failure-valid-terminal','accepted':True,
+      'terminal_preserved':True,'pair_passed':False,'strict_pm_preconditions_rejected':True,
+      'pm_timer_failure':'PM devices or timer roundtrip failed'}:
+   raise ValueError('v50 actual collect-entry terminal preservation differs')
   expected_flow=[
    {'case':'production-flow-on','accepted':True,'scope':True,'diagnostic':True,'rollback':False},
    {'case':'production-flow-off','accepted':True,'scope':False,'diagnostic':False,'rollback':False},

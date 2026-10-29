@@ -13,9 +13,9 @@ SUCCESS = ('attempted', 'roster_valid', 'pre', 'post', 'enter_calls',
            'ehld_before', 'ehld_after', 'context', 'passed')
 TERMINAL_TAG = 'N10CPT1'
 TERMINAL_SCHEMA = ('id','copy','generation','attempted','recorded','completed',
-                   'caller_invoked','stage','outer_error','helper_error',
+                   'caller_invoked','stage','outer_error','helper_error','probe_error',
                    'enter_calls','exit_calls','enter_error','exit_error')
-SIGNED_TERMINAL = {'outer_error','helper_error','enter_error','exit_error'}
+SIGNED_TERMINAL = {'outer_error','helper_error','probe_error','enter_error','exit_error'}
 
 
 def decode(text, identity, generation):
@@ -104,27 +104,34 @@ def decode_terminal(text, identity, generation):
     if {k:v for k,v in first.items() if k!='copy'}!={k:v for k,v in second.items() if k!='copy'}:
         raise ValueError('CPU_PM terminal copies differ')
     if first['generation']!=generation: raise ValueError('CPU_PM terminal generation differs')
-    if any(first[k]!=1 for k in ('attempted','recorded','completed')):
+    if any(first[k]!=1 for k in ('recorded','completed')):
         raise ValueError('CPU_PM terminal record is incomplete')
     stage=first['stage']; called=first['caller_invoked']
     if stage not in range(6) or called not in (0,1): raise ValueError('CPU_PM terminal stage/caller invalid')
     if stage in (0,1):
-        if called or first['helper_error'] or first['enter_calls'] or first['exit_calls'] or first['enter_error'] or first['exit_error'] or not first['outer_error']:
+        if (first['attempted'] or called or first['helper_error'] or first['enter_calls'] or
+            first['exit_calls'] or first['enter_error'] or first['exit_error'] or
+            not (first['outer_error'] or first['probe_error'])):
             raise ValueError('CPU_PM pre-helper terminal state differs')
     elif stage==2:
-        if not called or first['enter_calls'] or first['exit_calls'] or first['enter_error'] or first['exit_error'] or not first['helper_error']:
+        if (first['attempted'] not in (0,1) or not called or first['enter_calls'] or first['exit_calls'] or
+            first['enter_error'] or first['exit_error'] or not first['helper_error'] or
+            (first['attempted']==0 and first['helper_error'] not in (-103,-114))):
             raise ValueError('CPU_PM admission terminal state differs')
     elif stage==3:
-        if not called or first['enter_calls']!=1 or first['exit_calls'] or not first['enter_error'] or first['exit_error'] or not first['helper_error']:
+        if first['attempted']!=1 or not called or first['enter_calls']!=1 or first['exit_calls'] or not first['enter_error'] or first['exit_error'] or not first['helper_error']:
             raise ValueError('CPU_PM enter-failure terminal state differs')
     elif stage==4:
-        if not called or first['enter_calls']!=1 or first['exit_calls']!=1 or first['enter_error'] or not first['exit_error'] or not first['helper_error']:
+        if first['attempted']!=1 or not called or first['enter_calls']!=1 or first['exit_calls']!=1 or first['enter_error'] or not first['exit_error'] or not first['helper_error']:
             raise ValueError('CPU_PM exit-failure terminal state differs')
     else:
-        if not called or first['enter_calls']!=1 or first['exit_calls']!=1 or first['enter_error'] or first['exit_error'] or not first['helper_error']:
+        if (first['attempted']!=1 or not called or first['enter_calls']!=1 or first['exit_calls']!=1 or
+            first['enter_error'] or first['exit_error'] or
+            not (first['helper_error'] or first['outer_error'] or first['probe_error'])):
             raise ValueError('CPU_PM postcondition terminal state differs')
-    return {'generation':generation,'attempted':1,'recorded':True,'completed':True,
+    return {'generation':generation,'attempted':first['attempted'],'recorded':True,'completed':True,
             'caller_invoked':bool(called),'stage':stage,'pair_passed':False,
             'outer_error':first['outer_error'],'helper_error':first['helper_error'],
+            'probe_error':first['probe_error'],
             'enter_calls':first['enter_calls'],'exit_calls':first['exit_calls'],
             'enter_error':first['enter_error'],'exit_error':first['exit_error']}

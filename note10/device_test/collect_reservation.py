@@ -239,6 +239,7 @@ def collect(packages,kernel_build,adb):
     out=ROOT/'note10/private/device-observations'/('reservation-test-'+uuid.uuid4().hex[:12]);out.mkdir(parents=True)
     logs={}
     cpu_pm_roundtrip_observation=None
+    cpu_pm_terminal_preserved=False
     for name,remote in (('last_kmsg.txt','/proc/last_kmsg'),('console-ramoops-0','/sys/fs/pstore/console-ramoops-0'),
                         ('dmesg-ramoops-0','/sys/fs/pstore/dmesg-ramoops-0')):
         try:
@@ -329,9 +330,25 @@ def collect(packages,kernel_build,adb):
                 raise ValueError('Exact source build banner not observed')
             observation=decode_frames(text,evidence_id) if evidence_id else decode(text)
             report['previous_boot_reservation_observed']=True
+            if cpu_pm_roundtrip and 'N10CPT' in text:
+                # Terminal failure evidence belongs to the selected boot/cycle and
+                # checksummed PM generation, even when later strict PM decoders fail.
+                from decode_pm_timer import decode_quiescence
+                quiesce=report.get('pm_quiesce_observation')
+                if quiesce is None:
+                    quiesce=decode_quiescence(text,evidence_id,require_success=False)
+                    report['pm_quiesce_observation']=quiesce
+                terminal_generation=pm_completed_generation({'quiescence':quiesce})
+                cpu_pm_roundtrip_observation=decode_cpu_pm_roundtrip_observation(
+                    text,evidence_id,terminal_generation)
+                if cpu_pm_roundtrip_observation['terminal_failure_observed'] is not True:
+                    raise ValueError('CPU_PM terminal frame was not preserved as failure')
+                observation['cpu_pm_roundtrip_terminal_failure']=cpu_pm_roundtrip_observation['observation']['terminal_failure']
+                report['previous_boot_cpu0_cpu_pm_terminal_failure_observed']=True
+                cpu_pm_terminal_preserved=True
             (out/'reservation-observation.json').write_text(json.dumps(observation,indent=2),encoding='utf-8')
             if access:
-                observation=decode_access(text,evidence_id)
+                observation.update(decode_access(text,evidence_id))
                 report['previous_boot_window_access_observed']=True
             if xnu_stage:
                 stage_observation=decode_xnu_stage(text,evidence_id,result['xnu_payload_sha256'],
@@ -437,16 +454,23 @@ def collect(packages,kernel_build,adb):
                 observation['ehld_lock']=decode_ehld_lock(text,evidence_id,pm_completed_generation(observation['pm_timer']),observation['pm_preconditions'])
                 report['previous_boot_cpu0_ehld_lock_audit_observed']=True
             if cpu_pm_roundtrip:
-                generation=pm_completed_generation(observation['pm_timer'])
-                cpu_pm_roundtrip_observation=decode_cpu_pm_roundtrip_observation(text,evidence_id,generation)
-                if cpu_pm_roundtrip_observation['terminal_failure_observed']:
-                    observation['cpu_pm_roundtrip_terminal_failure']=cpu_pm_roundtrip_observation['observation']['terminal_failure']
-                    report['previous_boot_cpu0_cpu_pm_terminal_failure_observed']=True
-                else:
+                if not cpu_pm_terminal_preserved:
+                    generation=pm_completed_generation(observation['pm_timer'])
+                    cpu_pm_roundtrip_observation=decode_cpu_pm_roundtrip_observation(text,evidence_id,generation)
+                if not cpu_pm_roundtrip_observation['terminal_failure_observed']:
                     observation['cpu_pm_roundtrip']=cpu_pm_roundtrip_observation['observation']['pair']
                     report['previous_boot_cpu0_cpu_pm_enter_exit_pair_observed']=True
         except ValueError as error:
-            report['decode_failures'][name]=str(error);continue
+            report['decode_failures'][name]=str(error)
+            if cpu_pm_terminal_preserved:
+                (out/'reservation-observation.json').write_text(json.dumps(observation,indent=2),encoding='utf-8')
+                report.update(previous_boot_reservation_observed=True,evidence_file=name,
+                              idle_init_marker_observed='N10INIT1 IDLE ' in text,
+                              android_root_mount_message_observed='VFS: Mounted root' in text,
+                              kernel_panic_observed='Kernel panic' in text,
+                              init_execution_failure_observed='Failed to execute /init' in text or 'No working init found' in text)
+                break
+            continue
         (out/'reservation-observation.json').write_text(json.dumps(observation,indent=2),encoding='utf-8')
         report.update(previous_boot_reservation_observed=True,evidence_file=name,
                       idle_init_marker_observed='N10INIT1 IDLE ' in text,

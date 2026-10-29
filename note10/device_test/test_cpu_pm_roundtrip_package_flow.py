@@ -32,7 +32,7 @@ def sha(raw):return hashlib.sha256(raw).hexdigest()
 def model_image(identity,roundtrip=False):
  if not isinstance(identity,str) or len(identity)!=32 or any(c not in '0123456789abcdef' for c in identity):raise ValueError('invalid fixture reservation identity')
  image=bytearray(4096);image[56:60]=b'ARM\x64'
- markers=(b'N10CPMRT1N10CPT1' if roundtrip else b'')+b''.join(CALLBACKS+PRECONDITIONS+BRANCH)+PMU_FAILURE+GIC_PRIORITY+b''.join(PMU_STATE+PMU_CONTROL+FPSIMD+RCU_MARKERS+LOCK_MARKERS)+b'N10RET1N10MEM1N10XNU1N10QUI1N10CPU2N10PMS1N10PMT1N10TMR1N10BND1N10TRY1'+identity.encode()
+ markers=(b'N10CPMRT1' if roundtrip else b'')+b''.join(CALLBACKS+PRECONDITIONS+BRANCH)+PMU_FAILURE+GIC_PRIORITY+b''.join(PMU_STATE+PMU_CONTROL+FPSIMD+RCU_MARKERS+LOCK_MARKERS)+b'N10RET1N10MEM1N10XNU1N10QUI1N10CPU2N10PMS1N10PMT1N10TMR1N10BND1N10TRY1'+identity.encode()
  image[128:128+len(markers)]=markers
  banner=b'Linux version 4.14.113-note10-reserve-pc fixture-v49'
  image[1024:1024+len(banner)]=banner
@@ -75,11 +75,13 @@ def make_fixture(root,artifact,mode,scope_expected):
  twrp=root/'twrp.img';twrp.write_bytes(parts['recovery']);mk=root/'mkbootimg.py';mk.write_bytes(b'mkboot-fixture')
  return art,backup,twrp,mk,parts
 
-def run_collector_flow(kernel_build,backup,package_dir,private_root):
- adb=FakeAdb(backup,package_dir)
+def run_collector_flow(kernel_build,backup,package_dir,private_root,log=None):
+ adb=LogFakeAdb(backup,package_dir,log) if log is not None else FakeAdb(backup,package_dir)
  with ExitStack() as stack:
+  _patch_legacy_gates(stack)
   stack.enter_context(patch.object(collector_module,'preflight',return_value={'twrp_version':'fixture'}))
   stack.enter_context(patch.object(collector_module,'ROOT',private_root))
+  stack.enter_context(patch('cpu_pm_roundtrip_binding.validate',side_effect=lambda r,b,require_package_flow=True:running_package_scope(b)))
   return collect_reservation(package_dir,kernel_build,adb)
 
 class FakeAdb:
@@ -99,6 +101,15 @@ class FakeAdb:
   raise AssertionError(args)
  def call(self,*args,**kwargs):
   if len(args)==4 and args[:3]==('shell','test','-r'):raise RuntimeError('fixture: no prior-boot logs')
+  raise AssertionError(args)
+
+class LogFakeAdb(FakeAdb):
+ def __init__(self,backup,package_dir,log):super().__init__(backup,package_dir);self.log=log
+ def call(self,*args,**kwargs):
+  if len(args)==4 and args[:3]==('shell','test','-r'):
+   if args[3]=='/proc/last_kmsg':return b''
+   raise RuntimeError('fixture: absent optional pstore')
+  if args==('exec-out','cat','/proc/last_kmsg'):return self.log
   raise AssertionError(args)
 
 def run_precheck_flow(kernel_build,backup,package_dir,header,parts):
@@ -137,7 +148,7 @@ def _patch_legacy_gates(stack):
  stack.enter_context(patch('ehld_lock_binding.validate',return_value=True))
  stack.enter_context(patch('ehld_irqsave_binding.validate',side_effect=lambda r,b,require_package_flow=True:b.get('ehld_irqsave_audit') is True))
  stack.enter_context(patch('ehld_running_lock_binding.validate',return_value=True))
- stack.enter_context(patch('cpu_pm_roundtrip_binding.validate',side_effect=lambda r,b,require_package_flow=True:validate_running_lock(r,b,require_package_flow=False)))
+ stack.enter_context(patch('cpu_pm_roundtrip_binding.validate',side_effect=lambda r,b,require_package_flow=True:running_package_scope(b)))
 
 def _header(kernel_sha):
  return {'header_version':1,'page_size':2048,'recovery_dtbo_size':0,'second_size':0,'kernel_addr':0,'tags_addr':0,'arm64_text_offset':0,'ramdisk_addr':0,'ramdisk_file_offset':2048,'ramdisk_size':0,'second_file_offset':32,'cmdline':'fixture','name':'fixture','os_version':'1.0.0','security_patch_month':'2026-01','kernel_sha256':kernel_sha}
@@ -194,7 +205,7 @@ def _mismatched_pair(root,off):
  bad_prototype=root/'mismatched.img';shutil.copyfile(off['prototype'],bad_prototype)
  shutil.copyfile(off['prototype'].with_suffix('.json'),bad_prototype.with_suffix('.json'))
  meta_path=bad_prototype.with_suffix('.json');meta=json.loads(meta_path.read_text(encoding='utf8'));meta['cpu_pm_roundtrip']=True;meta['cpu_pm_roundtrip_version']=1
- raw=bytearray(bad_prototype.read_bytes());raw[512:521]=b'N10CPMRT1';raw[521:528]=b'N10CPT1';bad_prototype.write_bytes(raw);meta['sha256']=sha(raw);meta['size']=len(raw)
+ raw=bytearray(bad_prototype.read_bytes());raw[512:521]=b'N10CPMRT1';bad_prototype.write_bytes(raw);meta['sha256']=sha(raw);meta['size']=len(raw)
  meta_path.write_text(json.dumps(meta,indent=2)+'\n',encoding='utf8',newline='\n')
  out=root/'mismatched-packages'
  with patch.object(packages,'read_verified_backup',return_value=off['parts']):packages.build(off['backup'],bad_prototype,out)
@@ -210,6 +221,54 @@ def _mismatched_pair(root,off):
   else:raise AssertionError('production collector accepted package/kernel scope mismatch')
  return pre_rejected,collector_rejected
 
+def _frame(tag,values):
+ from decode_reservation import checksum
+ body=' '.join(k+'='+str(v) for k,v in values.items())
+ return f'{tag} {body} checksum={checksum(body.encode("ascii")):08x}\n'
+
+def terminal_pm_failure_log(kernel_build,package_dir):
+ build=json.loads((kernel_build/'build-result.json').read_text(encoding='utf8'))
+ paired=json.loads((package_dir/'package-result.json').read_text(encoding='utf8'))
+ identity=build['reservation_evidence_id'];cycle=paired['auto_cycle_token'];generation=7
+ digest=build['xnu_payload_sha256'];size=build['xnu_payload_size'];words=size//8
+ lines=[]
+ for seq in (0,1):lines.append(_frame('N10RET1',dict(id=identity,cycle=cycle,phase=0,seq=seq,delay_ms=90000,status=0)))
+ lines.append('Linux version 4.14.113-note10-reserve-pc fixture-v49\n')
+ for seq in (0,1):lines.append(_frame('N10RAM2',dict(id=identity,seq=seq,base='a00000000',size='10000000',align='2000000',pages=65536,reserved=65536,invalid=0,shift=12)))
+ for seq in (0,1):lines.append(_frame('N10QSC1',dict(id=identity,seq=seq,attempt=1,version=1,generation=generation,epoch=0,phase=10,called=1,restored=1,screen=0,display=0,usb=0,wake=0,r_usb=0,r_display=0,r_screen=0)))
+ for seq in (0,1):lines.append(_frame('N10PMS1',dict(id=identity,seq=seq,attempt=1,stage=21,error=1)))
+ from decode_window_access import COUNTS
+ for seq in (0,1):lines.append(_frame('N10MEM1',dict(id=identity,seq=seq,base='a00000000',size='10000000',**COUNTS)))
+ for seq in (0,1):lines.append(_frame('N10XNU1',dict(id=identity,seq=seq,base='a00000000',size='10000000',bytes=size,sha256=digest,status=0)))
+ for seq in (0,1):lines.append(_frame('N10QUI1',dict(id=identity,seq=seq,before='ff',stopped=1,restored='ff',cpus=8,words=words,fnv='123',sha256=digest,clean=1,status=0)))
+ for cpu in range(8):
+  for seq in (0,1):lines.append(_frame('N10CPU2',dict(id=identity,seq=seq,cpu=cpu,el='4',mpidr=format(cpu,'x'),sctlr='1005',tcr='123',ttbr1='456',mair='ff',cntkctl='0',cntfrq='18cba80',words=words,fnv='123')))
+ for seq in (0,1):lines.append(_frame('N10PMT1',dict(id=identity,seq=seq,before='ff',after='ff',devices=1,resume=1,blocked=0,oldlevel=0,newlevel=0,resume_errors=0,timers=8,error=1,sha256=digest,status=0)))
+ for copy in (0,1):lines.append(_frame('N10PRQ1',dict(id=identity,copy=copy,generation=generation,status=-5,count=0,complete=0,gic_complete=0)))
+ terminal=dict(id=identity,copy=0,generation=generation,attempted=1,recorded=1,completed=1,caller_invoked=1,stage=2,outer_error=0,helper_error=-16,probe_error=-16,enter_calls=0,exit_calls=0,enter_error=0,exit_error=0)
+ for copy in (0,1):terminal['copy']=copy;lines.append(_frame('N10CPT1',terminal.copy()))
+ return ''.join(lines)
+
+def terminal_collect_entry_case(on,case_root):
+ log=terminal_pm_failure_log(on['art'],on['packages'])
+ identity=json.loads((on['art']/'build-result.json').read_text(encoding='utf8'))['reservation_evidence_id']
+ from decode_pm_preconditions import decode as decode_preconditions
+ try:decode_preconditions(log,identity,8)
+ except ValueError:strict_preconditions_rejected=True
+ else:raise AssertionError('strict PM preconditions accepted status=-5 fixture')
+ report=run_collector_flow(on['art'],on['backup'],on['packages'],case_root,log.encode('ascii'))
+ observation=json.loads((Path(report['directory'])/'reservation-observation.json').read_text(encoding='utf8'))
+ if (report.get('previous_boot_cpu0_cpu_pm_terminal_failure_observed') is not True or
+     report.get('previous_boot_cpu0_cpu_pm_enter_exit_pair_observed') is not False or
+     report.get('evaluation_items',{}).get('cpu0_cpu_pm_enter_exit_pair')!={'required':True,'status':'failed'} or
+     report.get('diagnostic_passed') is not False or
+     report.get('decode_failures',{}).get('last_kmsg.txt')!='PM devices or timer roundtrip failed' or
+     'cpu_pm_roundtrip_terminal_failure' not in observation):
+  raise AssertionError('production collect() did not preserve failure terminal before strict PM decode: '+repr({k:report.get(k) for k in ('previous_boot_cpu0_cpu_pm_terminal_failure_observed','previous_boot_cpu0_cpu_pm_enter_exit_pair_observed','evaluation_items','diagnostic_passed','decode_failures')})+' observation='+repr(observation))
+ return {'case':'collect-entry-pmt-error-prq-failure-valid-terminal','accepted':True,
+         'terminal_preserved':True,'pair_passed':False,'strict_pm_preconditions_rejected':strict_preconditions_rejected,
+         'pm_timer_failure':report['decode_failures']['last_kmsg.txt']}
+
 def terminal_collector_cases():
  from test_cpu_pm_roundtrip_decoder import input_vector,terminal_input_vector
  identity='a'*32;generation=9
@@ -223,7 +282,7 @@ def terminal_collector_cases():
      failure.get('pair_passed') is not False or failure.get('evaluation_item')!={'required':True,'status':'failed'}):
   raise AssertionError('collector terminal failure was promoted')
  try:collector_module.decode_cpu_pm_roundtrip_observation(success_text+'\n'+failure_text,identity,generation)
- except ValueError:conflict_rejected=True
+ except ValueError:pass
  else:raise AssertionError('collector accepted conflicting strict-success and terminal-failure frames')
  return ['strict-success','terminal-failure','success-failure-conflict'],[
   {'case':'strict-success','accepted':True,'pair_observed':True,'required':True,'status':'passed'},
@@ -245,7 +304,6 @@ def main():
    raise AssertionError('the original collector evaluation rows changed with v49 scope')
   invalid=_invalid_prepare(root,a.artifact,'e'*32)
   pre_rejected,collector_rejected=_mismatched_pair(root,off)
-  terminal_cases,terminal_results=terminal_collector_cases()
   package_results=[{'case':CASES[0],'accepted':True,'scope':True,'diagnostic':True,'rollback':False},
                    {'case':CASES[1],'accepted':True,'scope':False,'diagnostic':False,'rollback':False},invalid]
   precheck_cases=[{'case':'on','accepted':True,'scope':True,'ready':True,'partition_writes':False},
@@ -254,10 +312,12 @@ def main():
   collector_cases=[{'case':'on','accepted':True,'evaluation_items':40,'scope':True},
                    {'case':'off','accepted':True,'evaluation_items':39,'scope':False},
                    {'case':'invalid-pair','accepted':False}]
+  terminal_cases,terminal_results=terminal_collector_cases()
+  collector_entry_result=terminal_collect_entry_case(on,root/'collector-terminal-entry')
   items=on['collector']['evaluation_items'];items_off=off['collector']['evaluation_items']
   result={'schema_version':1,'passed':True,'hardware_verified':False,'synthetic_fixture':True,'legacy_gate_stubs':['ehld_lock','ehld_irqsave','ehld_running_lock'],'cases':list(CASES),'case_results':package_results,
-          'terminal_collector_cases':terminal_cases,'terminal_collector_results':terminal_results,
           'precheck_cases':['on','off','invalid-pair'],'precheck_cases_result':precheck_cases,'collector_cases':['on','off','invalid-pair'],'collector_cases_result':collector_cases,'collector_evaluation_items':items,'collector_evaluation_items_off':items_off,
+          'terminal_collector_cases':terminal_cases,'terminal_collector_results':terminal_results,'collector_entry_failure_case':collector_entry_result,
           'collector_evaluation_items_sha256':sha(json.dumps(items,sort_keys=True,separators=(',',':')).encode()),
           'harness_sha256':sha(Path(__file__).read_bytes()),'package_sources_sha256':measured}
   (a.output/'result.json').write_text(json.dumps(result,indent=2)+'\n',encoding='utf8',newline='\n')
