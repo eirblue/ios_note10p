@@ -45,6 +45,38 @@ def _native_transcript_profiles(cases,transcripts):
  return {'linux-ealready-114':(linux,b'\n'),
          'windows-ealready-103':(windows,b'\r\n')}
 
+def _cpu_pm_terminal_transcript_profiles(cases):
+ expected_cases=(
+  'caller-context-refusal','prior-chain-refusal','helper-admission-refusal',
+  'enter-failure','exit-failure','postcondition-failure','strict-success-no-terminal',
+  'outer-only-postcondition','helper-reentry-unattempted','probe-read-failure-after-pair')
+ if tuple(cases)!=expected_cases: raise ValueError('CPU_PM terminal case set differs')
+ common={
+  'caller-context-refusal':'PASS|0|-1|-1|0|0|0|0|0|-1|0|-1|0',
+  'prior-chain-refusal':'PASS|1|-5|-5|1|0|0|0|0|-5|0|-5|0',
+  'helper-admission-refusal':'PASS|2|-16|-16|2|1|1|0|0|0|-16|-16|-16',
+  'enter-failure':'PASS|3|-5|-5|3|1|1|1|0|0|-5|-5|-5',
+  'exit-failure':'PASS|4|-5|-5|4|1|1|1|1|0|-5|-5|-5',
+  'postcondition-failure':'PASS|5|-5|-5|5|1|1|1|1|0|-5|-5|-5',
+  'strict-success-no-terminal':'PASS|6|0|0|0|0|0|0|0|0|0|0',
+  'outer-only-postcondition':'PASS|7|-5|-5|5|1|1|1|1|-5|0|-5|0',
+  'probe-read-failure-after-pair':'PASS|9|0|-5|5|1|1|1|1|0|0|-5|0'}
+ profiles={}
+ for profile,errno in (('linux-ealready-114',-114),('windows-ealready-103',-103)):
+  expected=dict(common)
+  expected['helper-reentry-unattempted']=(
+   f'PASS|8|{errno}|{errno}|2|0|1|0|0|0|{errno}|{errno}|{errno}')
+  profiles[profile]=expected
+ return profiles
+
+def _select_cpu_pm_terminal_profile(transcripts):
+ from test_cpu_pm_roundtrip import TERMINAL_CASES
+ if not isinstance(transcripts,dict): return None
+ profiles=_cpu_pm_terminal_transcript_profiles(TERMINAL_CASES)
+ if set(transcripts)!=set(TERMINAL_CASES): return None
+ matches=[name for name,expected in profiles.items() if transcripts==expected]
+ return matches[0] if len(matches)==1 else None
+
 def _validate_native_transcript_proof(proof,native):
  from test_cpu_pm_roundtrip import CASES,TRANSCRIPTS
  profiles=_native_transcript_profiles(CASES,TRANSCRIPTS)
@@ -151,18 +183,10 @@ def assert_scope(root,build):
  capture=(prepared/'kernel/power/note10_pm_pre_capture.c').read_bytes()
  probe=(prepared/'arch/arm64/mm/note10_pm_pre_probe.c').read_bytes()
  capture_fn,reader_fn,emitter_fn,report_fn=extract_terminal_functions(capture,probe)
- from test_cpu_pm_roundtrip import ERR_EALREADY
- expected_terminal={
-  'caller-context-refusal':'PASS|0|-1|-1|0|0|0|0|0|-1|0|-1|0',
-  'prior-chain-refusal':'PASS|1|-5|-5|1|0|0|0|0|-5|0|-5|0',
-  'helper-admission-refusal':f'PASS|2|-16|-16|2|1|1|0|0|0|-16|-16|-16',
-  'enter-failure':'PASS|3|-5|-5|3|1|1|1|0|0|-5|-5|-5',
-  'exit-failure':'PASS|4|-5|-5|4|1|1|1|1|0|-5|-5|-5',
-  'postcondition-failure':'PASS|5|-5|-5|5|1|1|1|1|0|-5|-5|-5',
-  'strict-success-no-terminal':'PASS|6|0|0|0|0|0|0|0|0|0|0',
-  'outer-only-postcondition':'PASS|7|-5|-5|5|1|1|1|1|-5|0|-5|0',
-  'helper-reentry-unattempted':f'PASS|8|-{abs(ERR_EALREADY)}|-{abs(ERR_EALREADY)}|2|0|1|0|0|0|-{abs(ERR_EALREADY)}|-{abs(ERR_EALREADY)}|-{abs(ERR_EALREADY)}',
-  'probe-read-failure-after-pair':'PASS|9|0|-5|5|1|1|1|1|0|0|-5|0'}
+ terminal_profile=_select_cpu_pm_terminal_profile(tl.get('case_transcripts') if isinstance(tl,dict) else None)
+ if terminal_profile is None: raise ValueError('v50 terminal transcript is not one exact Linux/Windows ABI profile')
+ expected_terminal=_cpu_pm_terminal_transcript_profiles(TERMINAL_CASES)[terminal_profile]
+ terminal_errno=-114 if terminal_profile=='linux-ealready-114' else -103
  if (not isinstance(tl,dict) or tl.get('passed') is not True or tl.get('hardware_verified') is not False or
      tl.get('cases')!=TERMINAL_CASES or tl.get('harness_sha256')!=sha((HERE/'test_cpu_pm_roundtrip.py').read_bytes()) or
      tl.get('source_capture_sha256')!=sha(capture) or tl.get('source_probe_sha256')!=sha(probe) or
@@ -198,6 +222,10 @@ def assert_scope(root,build):
    if (frame_digest!=tl['emitted_frame_sha256'][case] or parsed.get('pair_passed') is not False or
        parsed.get('stage')!=int(fields[4]) or parsed.get('attempted')!=int(fields[5]) or
        parsed.get('caller_invoked') is not bool(int(fields[6]))):raise ValueError('v50 terminal output decode differs: '+case)
+   if case=='helper-reentry-unattempted' and (
+       parsed.get('outer_error')!=0 or parsed.get('helper_error')!=terminal_errno or
+       parsed.get('probe_error')!=terminal_errno):
+    raise ValueError('v50 helper-reentry frame is mixed/unknown ABI')
  decoder=root/DECODER
  if decoder.is_symlink() or not decoder.is_dir():raise ValueError('v49 decoder proof missing')
  draw=(decoder/'result.json').read_bytes()
@@ -248,9 +276,16 @@ def validate(root,build,require_package_flow=True):
  braw=(binding/'result.json').read_bytes()
  if sha(braw)!=build.get('cpu_pm_roundtrip_binding_sha256'):raise ValueError('v49 binding proof hash mismatch')
  bp=json.loads(braw)
- from test_cpu_pm_roundtrip_binding import CASES as BC,PACKAGE_SCOPE_CASES
+ from test_cpu_pm_roundtrip_binding import CASES as BC,PACKAGE_SCOPE_CASES,TERMINAL_PROFILE_CASES
+ expected_terminal_profiles=[
+  {'case':'terminal-profile-linux','accepted':True,'selected_profile':'linux-ealready-114'},
+  {'case':'terminal-profile-windows','accepted':True,'selected_profile':'windows-ealready-103'},
+  {'case':'terminal-profile-mixed-rejected','accepted':False,'selected_profile':None},
+  {'case':'terminal-profile-unknown-rejected','accepted':False,'selected_profile':None}]
  if (bp.get('passed') is not True or bp.get('hardware_verified') is not False or
      bp.get('immutable_v49_prior_validator_stubbed') is not True or bp.get('cases')!=list(BC) or
+     bp.get('terminal_profile_cases')!=list(TERMINAL_PROFILE_CASES) or
+     bp.get('terminal_profile_results')!=expected_terminal_profiles or
      bp.get('package_scope_cases')!=list(PACKAGE_SCOPE_CASES) or
      bp.get('harness_sha256')!=sha((HERE/'test_cpu_pm_roundtrip_binding.py').read_bytes()) or
      bp.get('binding_sha256')!=sha((HERE/'cpu_pm_roundtrip_binding.py').read_bytes())):raise ValueError('v49 binding proof contract differs')

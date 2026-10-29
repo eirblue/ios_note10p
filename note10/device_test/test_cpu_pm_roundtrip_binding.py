@@ -6,7 +6,9 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-from cpu_pm_roundtrip_binding import PREFIX, assert_scope, package_scope
+from cpu_pm_roundtrip_binding import (PREFIX, assert_scope, package_scope,
+    _cpu_pm_terminal_transcript_profiles, _select_cpu_pm_terminal_profile)
+from test_cpu_pm_roundtrip import TERMINAL_CASES
 
 CASES = (
     'enabled-valid', 'missing-flag', 'null-flag', 'flag-string', 'version-bool',
@@ -15,7 +17,10 @@ CASES = (
     'duplicate-config-option', 'snapshot-map-mutation', 'missing-source-map',
     'mutated-source-map', 'off-minimal', 'off-stray-version',
     'off-stray-proof', 'off-stray-output', 'terminal-marker-missing',
+    'terminal-profile-linux', 'terminal-profile-windows',
+    'terminal-profile-mixed-rejected', 'terminal-profile-unknown-rejected',
 )
+TERMINAL_PROFILE_CASES = CASES[-4:]
 PACKAGE_SCOPE_CASES = (
     'on-valid', 'off-absent-prior-on', 'off-absent-prior-off', 'off-false-prior-on',
     'off-false-prior-off', 'off-null-version', 'null-flag', 'flag-string',
@@ -73,11 +78,34 @@ def run(artifact, output):
             return assert_scope(root, metadata)
     scope_results = package_cases()
     outcomes = []
+    terminal_profile_outcomes = []
     generated, logs = {}, {}
     for name in CASES:
-        expected = name in ('enabled-valid', 'off-minimal')
+        expected = name in ('enabled-valid', 'off-minimal', 'terminal-profile-linux', 'terminal-profile-windows')
         value = None
-        if name == 'enabled-valid':
+        if name in TERMINAL_PROFILE_CASES:
+            profiles = _cpu_pm_terminal_transcript_profiles(TERMINAL_CASES)
+            if name == 'terminal-profile-linux':
+                observed = dict(profiles['linux-ealready-114'])
+                wanted = 'linux-ealready-114'
+            elif name == 'terminal-profile-windows':
+                observed = dict(profiles['windows-ealready-103'])
+                wanted = 'windows-ealready-103'
+            elif name == 'terminal-profile-mixed-rejected':
+                observed = dict(profiles['linux-ealready-114'])
+                fields = observed['helper-reentry-unattempted'].split('|')
+                fields[10] = '-103'
+                observed['helper-reentry-unattempted'] = '|'.join(fields)
+                wanted = None
+            else:
+                observed = dict(profiles['linux-ealready-114'])
+                observed['helper-reentry-unattempted'] = 'PASS|8|-999|-999|2|0|1|0|0|0|-999|-999|-999'
+                wanted = None
+            value = _select_cpu_pm_terminal_profile(observed)
+            accepted = (value == wanted) if wanted is not None else value is None
+            terminal_profile_outcomes.append({'case': name, 'accepted': accepted,
+                                              'selected_profile': value})
+        elif name == 'enabled-valid':
             value = assert_new_scope(artifact, dict(build))
             accepted = True
         elif name.startswith('off-'):
@@ -146,7 +174,9 @@ def run(artifact, output):
                 except (ValueError, TypeError, KeyError, FileNotFoundError): accepted = False
         if accepted is not expected:
             raise AssertionError('assert_scope outcome differs: ' + name)
-        outcomes.append({'case': name, 'accepted': accepted, 'scope': value if name in ('enabled-valid', 'off-minimal') else None})
+        outcomes.append({'case': name, 'accepted': accepted,
+                         'scope': value if name in ('enabled-valid', 'off-minimal') else None,
+                         'terminal_profile': value if name in TERMINAL_PROFILE_CASES else None})
         code = output / (name + '.py'); log = output / (name + '.log')
         code.write_text(json.dumps({'case': name, 'expected_accept': expected}, sort_keys=True) + '\n', encoding='utf8', newline='\n')
         log.write_text(('PASS ' if accepted else 'REJECT ') + name + '\n', encoding='utf8', newline='\n')
@@ -154,6 +184,8 @@ def run(artifact, output):
     proof = {'schema_version': 1, 'passed': True, 'hardware_verified': False,
              'immutable_v49_prior_validator_stubbed': True,
              'cases': list(CASES), 'case_results': outcomes,
+             'terminal_profile_cases': list(TERMINAL_PROFILE_CASES),
+             'terminal_profile_results': terminal_profile_outcomes,
              'package_scope_cases': list(PACKAGE_SCOPE_CASES), 'package_scope_results': scope_results,
              'generated_sha256': generated, 'logs_sha256': logs,
              'binding_sha256': sha((Path(__file__).resolve().parent / 'cpu_pm_roundtrip_binding.py').read_bytes()),
