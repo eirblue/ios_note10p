@@ -45,7 +45,8 @@ def assert_scope(root,build):
  if enabled:
   if mentions!=[OPTION+b'=y']:raise ValueError('irqsave config must contain exactly one enabled option')
  elif mentions not in ([],[b'# '+OPTION+b' is not set'],[OPTION+b'=n']):raise ValueError('unsupported or duplicate disabled irqsave config')
- if build.get('effective_config_sha256')!=sha((root/'handoff.config').read_bytes()):raise ValueError('irqsave measured config hash differs')
+ measured_config=build.get('effective_config_sha256')
+ if (enabled or 'effective_config_sha256' in build) and measured_config!=sha((root/'handoff.config').read_bytes()):raise ValueError('irqsave measured config hash differs')
  keys=FIELDS
  outputs=(PREPARED,MODEL,'ehld-irqsave-binding-model','ehld-irqsave-package-flow-model')
  if not enabled:
@@ -125,7 +126,7 @@ def validate(root,build,require_package_flow=True):
   if any(type(x.get('accepted')) is not bool or x.get('accepted') is not expected_scope[x['case']][0] or x.get('scope') is not expected_scope[x['case']][1] for x in scope_results):raise ValueError('irqsave package-scope result values differ')
   if proof.get('off_scope_cases')!=list(OFF_SCOPE_CASES):raise ValueError('irqsave default-off mutation set differs')
   off_results=proof.get('off_scope_results')
-  if not isinstance(off_results,list) or [x.get('case') for x in off_results]!=list(OFF_SCOPE_CASES) or any(type(x.get('accepted')) is not bool or x.get('accepted')!=(x['case'] in ('missing-flags','explicit-false')) for x in off_results):raise ValueError('irqsave default-off results differ')
+  if not isinstance(off_results,list) or [x.get('case') for x in off_results]!=list(OFF_SCOPE_CASES) or any(type(x.get('accepted')) is not bool or x.get('accepted')!=(x['case'] in ('missing-flags','explicit-false','missing-config-hash')) for x in off_results):raise ValueError('irqsave default-off results differ')
   if proof.get('passed') is not True or proof.get('hardware_verified') is not False or proof.get('harness_sha256')!=sha((HERE/'test_ehld_irqsave_binding.py').read_bytes()) or proof.get('source_map_sha256')!=sha((HERE/'ehld_irqsave_binding.py').read_bytes()):raise ValueError('irqsave binding proof identity differs')
  if require_package_flow:
   p=Path(root)/'ehld-irqsave-package-flow-model'

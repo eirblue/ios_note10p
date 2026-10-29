@@ -5,7 +5,7 @@ from ehld_irqsave_binding import assert_scope,package_scope
 from prepare_ehld_irqsave_audit import TARGET,KCONFIG,BLOCK,prepare
 CASES=('baseline','source-map-omitted','snapshot-third-mutated','coherent-target-mutated','config-off','config-m','config-garbage','config-duplicate','model-case-omitted','stale-harness-updated','model-log-mutated','coherent-log-mutated','generated-coherent-mutated','disabled-binding-hash-stray','schema-bool','disabled-artifact-downgrade','helper-short-map-no-write','helper-duplicate-kconfig-no-write')
 PACKAGE_SCOPE_CASES=('off-missing','off-false','on-valid','flag-string','flag-integer','version-bool','version-string','missing-old-lock','old-lock-version-bool','stray-off-version')
-OFF_SCOPE_CASES=('missing-flags','explicit-false','config-m','config-garbage','config-duplicate','stray-version','stray-binding-proof','stray-artifact')
+OFF_SCOPE_CASES=('missing-flags','explicit-false','missing-config-hash','null-config-hash','wrong-config-hash','config-m','config-garbage','config-duplicate','stray-version','stray-binding-proof','stray-artifact')
 def sha(b):return hashlib.sha256(b).hexdigest()
 def clone(src,dst):
  dst.mkdir()
@@ -26,12 +26,16 @@ def check_off_scope(case):
   elif case=='stray-version':build['ehld_irqsave_audit_version']=1
   elif case=='stray-binding-proof':build['ehld_irqsave_binding_sha256']='0'*64
   elif case=='stray-artifact':(root/'ehld-irqsave-model').mkdir()
-  (root/'handoff.config').write_bytes(cfg);build['effective_config_sha256']=sha(cfg)
+  (root/'handoff.config').write_bytes(cfg)
+  if case=='missing-config-hash':build.pop('effective_config_sha256',None)
+  elif case=='null-config-hash':build['effective_config_sha256']=None
+  elif case=='wrong-config-hash':build['effective_config_sha256']='0'*64
+  else:build['effective_config_sha256']=sha(cfg)
   try:result=validate(root,build,require_package_flow=False)
   except (ValueError,KeyError,TypeError,FileNotFoundError):
    if case in ('missing-flags','explicit-false'):raise
    return False
-  if case not in ('missing-flags','explicit-false') or result is not False:raise AssertionError('wrong default-off validation: '+case)
+  if case not in ('missing-flags','explicit-false','missing-config-hash') or result is not False:raise AssertionError('wrong default-off validation: '+case)
   return True
 def main():
  p=argparse.ArgumentParser();p.add_argument('--artifact',required=True,type=Path);p.add_argument('--output',required=True,type=Path);a=p.parse_args();src,out=a.artifact,a.output;out.mkdir(parents=True,exist_ok=False)
