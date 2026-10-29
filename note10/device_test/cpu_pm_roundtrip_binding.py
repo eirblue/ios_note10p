@@ -27,6 +27,43 @@ def _filemap(root,keys):
  return out
 def _files(root): return {p.relative_to(root).as_posix() for p in Path(root).rglob('*') if p.is_file() and not p.is_symlink()}
 
+def _native_transcript_profiles(cases,transcripts):
+ cases=tuple(cases)
+ if len(cases)!=22 or len(set(cases))!=22 or set(transcripts)!=set(cases):
+  raise ValueError('CPU_PM native transcript case set differs')
+ windows={name:'PASS|'+'|'.join(str(x) for x in transcripts[name]) for name in cases}
+ linux=dict(windows)
+ for name in ('nested-active','repeat-generation'):
+  fields=windows.get(name,'').split('|')
+  if len(fields)!=9 or fields[2] not in ('-103','-114'):
+   raise ValueError('CPU_PM known errno ABI anchors differ')
+  windows_fields=list(fields); windows_fields[2]='-103'
+  linux_fields=list(fields); linux_fields[2]='-114'
+  windows[name]='|'.join(windows_fields)
+  linux[name]='|'.join(linux_fields)
+ return {'linux-ealready-114':(linux,b'\n'),
+         'windows-ealready-103':(windows,b'\r\n')}
+
+def _validate_native_transcript_proof(proof,native):
+ from test_cpu_pm_roundtrip import CASES,TRANSCRIPTS
+ profiles=_native_transcript_profiles(CASES,TRANSCRIPTS)
+ observed=proof.get('case_transcripts')
+ profile=next((name for name,(expected,_ending) in profiles.items() if observed==expected),None)
+ if profile is None:
+  raise ValueError('v49 native transcript map is not an exact Linux/Windows ABI profile')
+ log_hashes=proof.get('case_log_sha256')
+ if not _map(log_hashes,CASES):
+  raise ValueError('v49 native case log hash map differs')
+ expected,ending=profiles[profile]
+ for index,case in enumerate(CASES):
+  path=Path(native)/(f'case-{index:02d}.log')
+  if path.is_symlink() or not path.is_file():
+   raise ValueError('v49 native case log missing/unsafe: '+case)
+  raw=path.read_bytes()
+  if sha(raw)!=log_hashes[case] or raw!=(expected[case].encode('ascii')+ending):
+   raise ValueError('v49 native transcript/log content differs: '+case)
+ return profile
+
 def package_scope(metadata):
  if not isinstance(metadata,dict): raise ValueError('CPU_PM metadata must be an object')
  from ehld_running_lock_binding import package_scope as prior_scope
@@ -99,16 +136,12 @@ def assert_scope(root,build):
  if proof.get('schema_version') != 1 or proof.get('passed') is not True or proof.get('hardware_verified') is not False or proof.get('cases')!=list(CASES) or proof.get('transform_cases')!=list(TRANSFORM_CASES): raise ValueError('v49 native proof contract differs')
  if proof.get('harness_sha256')!=sha((HERE/'test_cpu_pm_roundtrip.py').read_bytes()): raise ValueError('v49 native harness hash differs')
  if proof.get('production_source_sha256')!=_filemap(prepared,TARGETS) or proof.get('baseline_source_sha256')!=_filemap(base,TARGETS): raise ValueError('v49 native source hashes differ')
- from test_cpu_pm_roundtrip import TRANSCRIPTS
  if (not _map(proof.get('case_log_sha256'),CASES) or not _hash(proof.get('generated_sha256')) or
-     proof.get('compile_log_sha256')!=sha((native/'compile.log').read_bytes()) or
-     proof.get('case_transcripts')!={name:'PASS|'+'|'.join(str(x) for x in TRANSCRIPTS[name]) for name in CASES}):
+     proof.get('compile_log_sha256')!=sha((native/'compile.log').read_bytes())):
   raise ValueError('v49 native outputs not bound')
+ _validate_native_transcript_proof(proof,native)
  if sha((native/'roundtrip.c').read_bytes())!=proof['generated_sha256']:
   raise ValueError('v49 generated native source hash differs')
- for index,case in enumerate(CASES):
-  lp=native/(f'case-{index:02d}.log')
-  if lp.is_symlink() or not lp.is_file() or sha(lp.read_bytes())!=proof['case_log_sha256'][case]: raise ValueError('v49 native case log differs: '+case)
  if proof.get('transform_mutations_rejected') != {name:True for name in TRANSFORM_CASES}: raise ValueError('v49 transform mutation results differ')
  decoder=root/DECODER
  if decoder.is_symlink() or not decoder.is_dir():raise ValueError('v49 decoder proof missing')
