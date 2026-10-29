@@ -186,6 +186,10 @@ def check(packages,kernel_build,backup,core_model,gate_model,init_model,adb):
         running_lock_scope=validate_running_lock(kernel_build,build)
         if type(running_lock_scope) is not bool or any(running_lock_package_scope(m) is not running_lock_scope for m in (build,paired,diagnostic)):raise ValueError('EHLD running-lock package scope differs')
         report['ehld_running_lock_audit_scope_verified']=running_lock_scope
+        from cpu_pm_roundtrip_binding import validate as validate_roundtrip,package_scope as roundtrip_package_scope
+        roundtrip_scope=validate_roundtrip(kernel_build,build,require_package_flow=False)
+        if type(roundtrip_scope) is not bool or any(roundtrip_package_scope(m) is not roundtrip_scope for m in (build,paired,diagnostic)):raise ValueError('CPU PM roundtrip package scope differs')
+        report['cpu_pm_roundtrip_scope_verified']=roundtrip_scope
         from pm_irq_binding import assert_scope as assert_irq_scope,validate_model as validate_irq
         irq_scope=assert_irq_scope(kernel_build,build)
         if any(irq_scope!=bool(m.get('pm_irq_diagnostic')) for m in (paired,diagnostic)):raise ValueError('CPU0 IRQ package scope differs')

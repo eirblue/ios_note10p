@@ -132,6 +132,12 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output,auto_cycle_token=None):
     from ehld_running_lock_binding import validate as validate_running_lock,package_scope as running_lock_package_scope
     running_lock_scope=validate_running_lock(kernel_build,build)
     if type(running_lock_scope) is not bool or running_lock_scope is not running_lock_package_scope(build):raise ValueError('EHLD running-lock build validation scope differs')
+    from cpu_pm_roundtrip_binding import validate as validate_roundtrip,package_scope as roundtrip_package_scope
+    roundtrip_scope=validate_roundtrip(kernel_build,build,require_package_flow=False)
+    if type(roundtrip_scope) is not bool or roundtrip_scope is not roundtrip_package_scope(build):raise ValueError('CPU PM roundtrip build validation scope differs')
+    if roundtrip_scope and not auto_return:raise ValueError('CPU PM roundtrip requires automatic recovery')
+    from cpu_pm_roundtrip_binding import MARKER as roundtrip_marker
+    if (roundtrip_marker in data) is not roundtrip_scope:raise ValueError('CPU PM roundtrip Image scope differs')
     from pm_irq_binding import validate_model as validate_irq
     validate_irq(kernel_build,build)
     if hashlib.sha256(config).hexdigest()!=build['effective_config_sha256']:
@@ -269,6 +275,8 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output,auto_cycle_token=None):
             'ehld_irqsave_audit_version':build.get('ehld_irqsave_audit_version'),
             'ehld_running_lock_audit':build.get('ehld_running_lock_audit') is True,
             'ehld_running_lock_audit_version':build.get('ehld_running_lock_audit_version'),
+            'cpu_pm_roundtrip':roundtrip_scope,
+            'cpu_pm_roundtrip_version':build.get('cpu_pm_roundtrip_version') if roundtrip_scope else None,
             'pm_irq_diagnostic':build.get('pm_irq_diagnostic') is True,
             'pm_irq_evidence_version':build.get('pm_irq_evidence_version'),
             'abox_pmu_audit_diagnostic':build.get('abox_pmu_audit_diagnostic') is True,

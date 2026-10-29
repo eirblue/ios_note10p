@@ -33,7 +33,7 @@ def branch_source_path(out, model):
     return source
 
 
-def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manifest=None,cpu_cache=False,pm_timer=False,auto_return=False,screen_log=False,gic_roundtrip=False,dma_pm_audit=False,ufs_pm_audit=False,ehld_lock_audit=False,ehld_irqsave_audit=False,ehld_running_lock_audit=False):
+def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manifest=None,cpu_cache=False,pm_timer=False,auto_return=False,screen_log=False,gic_roundtrip=False,dma_pm_audit=False,ufs_pm_audit=False,ehld_lock_audit=False,ehld_irqsave_audit=False,ehld_running_lock_audit=False,cpu_pm_roundtrip=False):
     if not sys.platform.startswith('linux'): raise RuntimeError('Linux CI host required')
     if os.environ.get('PLATFORM_VERSION')!='11' or os.environ.get('ANDROID_MAJOR_VERSION')!='r':
         raise ValueError('Pinned Samsung build requires PLATFORM_VERSION=11 and ANDROID_MAJOR_VERSION=r')
@@ -51,6 +51,7 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
     if ehld_lock_audit and not ufs_pm_audit:raise ValueError('EHLD lock audit requires the full preserved v44 diagnostic bundle')
     if ehld_irqsave_audit and not ehld_lock_audit:raise ValueError('EHLD irqsave audit requires ehld_lock_audit=true')
     if ehld_running_lock_audit and not ehld_irqsave_audit:raise ValueError('EHLD running-lock audit requires ehld_irqsave_audit=true')
+    if cpu_pm_roundtrip and (not ehld_running_lock_audit or not auto_return):raise ValueError('CPU_PM roundtrip requires EHLD running-lock audit and auto_return=true')
     OUT.mkdir(parents=True,exist_ok=True)
     report = {'source_repository':REPOSITORY,'source_commit':COMMIT,
               'platform_version':os.environ['PLATFORM_VERSION'],
@@ -62,6 +63,8 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
               'ehld_lock_audit':False,
               'ehld_irqsave_audit':False,
               'ehld_running_lock_audit':False,
+              'cpu_pm_roundtrip':False,
+              'auto_return_diagnostic':auto_return,
               'commands':[]}
     def run(arguments, log_name, timeout=120):
         report['commands'].append(arguments)
@@ -320,6 +323,17 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
                 report['ehld_running_lock_snapshot_sha256']=snapshot_running_lock(source,OUT/'ehld-running-lock-prepared',running_baseline)
                 run([sys.executable,str(ROOT/'note10/device_test/test_ehld_running_lock_audit.py'),'--source-root',str(OUT/'ehld-running-lock-prepared'),'--baseline-source',str(OUT/'ehld-irqsave-prepared'),'--output',str(OUT/'ehld-running-lock-model'),'--cc','clang-14'],'03-ehld-running-lock-model.log')
                 report['ehld_running_lock_model_sha256']=hashlib.sha256((OUT/'ehld-running-lock-model/result.json').read_bytes()).hexdigest()
+            if cpu_pm_roundtrip:
+                from prepare_cpu_pm_roundtrip import prepare as prepare_roundtrip,snapshot as snapshot_roundtrip
+                from cpu_pm_roundtrip_binding import SOURCES as roundtrip_sources,PACKAGE_SOURCES as roundtrip_packages
+                roundtrip_baseline=report['ehld_running_lock_snapshot_sha256']
+                report.update(prepare_roundtrip(source,True,roundtrip_baseline))
+                report['cpu_pm_roundtrip']=True
+                report['cpu_pm_roundtrip_sources_sha256']={n:hashlib.sha256((ROOT/'note10/device_test'/n).read_bytes()).hexdigest() for n in roundtrip_sources}
+                report['cpu_pm_roundtrip_package_sources_sha256']={n:hashlib.sha256((ROOT/'note10/device_test'/n).read_bytes()).hexdigest() for n in roundtrip_packages}
+                report['cpu_pm_roundtrip_snapshot_sha256']=snapshot_roundtrip(source,OUT/'cpu-pm-roundtrip-prepared',roundtrip_baseline)
+                run([sys.executable,str(ROOT/'note10/device_test/test_cpu_pm_roundtrip.py'),'--source-root',str(OUT/'cpu-pm-roundtrip-prepared'),'--baseline-source',str(OUT/'ehld-running-lock-prepared'),'--output',str(OUT/'cpu-pm-roundtrip-model'),'--cc','clang-14'],'03-cpu-pm-roundtrip-model.log')
+                report['cpu_pm_roundtrip_model_sha256']=hashlib.sha256((OUT/'cpu-pm-roundtrip-model/result.json').read_bytes()).hexdigest()
             report['pm_quiesce_patched_sha256']['kernel/power/Kconfig']=report['pm_callbacks_prepared_sha256']['kernel/power/Kconfig']
             report['scope']='Bundled PM, CPU architecture and payload observations; no global DMA shutdown or XNU execution claim'
         make=['make','-C',str(source),'O='+str(objects),'ARCH=arm64',
@@ -357,6 +371,7 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_EHLD_IRQSAVE_AUDIT'],'02-ehld-irqsave-audit.log')
         if ehld_running_lock_audit:
             run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_EHLD_RUNNING_LOCK_AUDIT'],'02-ehld-running-lock-audit.log')
+        if cpu_pm_roundtrip:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_CPU_PM_ROUNDTRIP'],'02-cpu-pm-roundtrip.log')
         run([*make,'olddefconfig'],'03-olddefconfig.log')
         configured=config.read_text()
         required=('CONFIG_KEXEC=y','CONFIG_KEXEC_CORE=y','CONFIG_PM_SLEEP_SMP=y','CONFIG_ARM64_4K_PAGES=y')
@@ -368,6 +383,7 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
         if ehld_lock_audit:required+=('CONFIG_NOTE10_EHLD_LOCK_AUDIT=y','CONFIG_EXYNOS_EHLD=y','CONFIG_PREEMPT_COUNT=y')
         if ehld_irqsave_audit:required+=('CONFIG_NOTE10_EHLD_IRQSAVE_AUDIT=y','CONFIG_NOTE10_EHLD_LOCK_AUDIT=y')
         if ehld_running_lock_audit:required+=('CONFIG_NOTE10_EHLD_RUNNING_LOCK_AUDIT=y','CONFIG_NOTE10_EHLD_IRQSAVE_AUDIT=y','CONFIG_NOTE10_EHLD_LOCK_AUDIT=y')
+        if cpu_pm_roundtrip:required+=('CONFIG_NOTE10_CPU_PM_ROUNDTRIP=y','CONFIG_NOTE10_EHLD_RUNNING_LOCK_AUDIT=y','CONFIG_NOTE10_PM_IRQ_TEST=y','CONFIG_NOTE10_CPU_PM_PRECONDITIONS=y')
         if reserve:required+=('CONFIG_INITRAMFS_FORCE=y','CONFIG_CMDLINE_EXTEND=y','CONFIG_CMDLINE="rdinit=/init"')
         if xnu_payload is not None:required+=('CONFIG_CRYPTO=y','CONFIG_CRYPTO_HASH=y','CONFIG_CRYPTO_SHA256=y')
         if cpu_cache:required+=('CONFIG_HOTPLUG_CPU=y','CONFIG_SMP=y','CONFIG_PM_SLEEP_SMP=y')
@@ -477,9 +493,12 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
         if ehld_irqsave_audit and not ehld_running_lock_audit:
             for name,digest in report['ehld_irqsave_snapshot_sha256'].items():
                 if hashlib.sha256((source/name).read_bytes()).hexdigest()!=digest:raise ValueError('Final Image source changed after EHLD irqsave snapshot: '+name)
-        if ehld_running_lock_audit:
+        if ehld_running_lock_audit and not cpu_pm_roundtrip:
             for name,digest in report['ehld_running_lock_snapshot_sha256'].items():
                 if hashlib.sha256((source/name).read_bytes()).hexdigest()!=digest:raise ValueError('Final Image source changed after EHLD running-lock snapshot: '+name)
+        if cpu_pm_roundtrip:
+            for name,digest in report['cpu_pm_roundtrip_snapshot_sha256'].items():
+                if hashlib.sha256((source/name).read_bytes()).hexdigest()!=digest:raise ValueError('Final Image source changed after CPU PM roundtrip snapshot: '+name)
         if reserve and target.read_bytes().count(report['reservation_evidence_id'].encode())!=1:
             raise ValueError('Unique reservation evidence ID not embedded in Image')
         if xnu_payload is not None:
@@ -494,6 +513,7 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
         if pm_timer and b'N10PMS1' not in target.read_bytes():raise ValueError('PM failure stage marker missing')
         if pm_timer and b'N10QSC1' not in target.read_bytes():raise ValueError('PM quiesce marker missing')
         if ehld_lock_audit and any(marker not in target.read_bytes() for marker in (b'N10ELM1',b'N10ELQ1')):raise ValueError('EHLD lock audit Image markers missing')
+        if cpu_pm_roundtrip and b'N10CPMRT1' not in target.read_bytes():raise ValueError('CPU PM roundtrip Image marker missing')
         if pm_timer:
             from pm_quiesce_binding import validate_model as validate_quiesce
             validate_quiesce(OUT,report)
@@ -650,6 +670,21 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             run([sys.executable,str(ROOT/'note10/device_test/test_ehld_running_lock_package_flow.py'),'--artifact',str(OUT),'--output',str(OUT/'ehld-running-lock-package-flow-model')],'03-ehld-running-lock-package-flow.log')
             report['ehld_running_lock_package_flow_sha256']=hashlib.sha256((OUT/'ehld-running-lock-package-flow-model/result.json').read_bytes()).hexdigest()
             validate_running_lock(OUT,report)
+        if cpu_pm_roundtrip:
+            (OUT/'Image').write_bytes(target.read_bytes())
+            (OUT/'handoff.config').write_bytes((OUT/'objects/.config').read_bytes())
+            (OUT/'build-result.json').write_text(json.dumps(report,indent=2)+'\n',encoding='utf-8',newline='\n')
+            run([sys.executable,str(ROOT/'note10/device_test/test_cpu_pm_roundtrip_decoder.py'),'--output',str(OUT/'cpu-pm-roundtrip-decoder-model')],'03-cpu-pm-roundtrip-decoder.log')
+            report['cpu_pm_roundtrip_decoder_sha256']=hashlib.sha256((OUT/'cpu-pm-roundtrip-decoder-model/result.json').read_bytes()).hexdigest()
+            (OUT/'build-result.json').write_text(json.dumps(report,indent=2)+'\n',encoding='utf-8',newline='\n')
+            run([sys.executable,str(ROOT/'note10/device_test/test_cpu_pm_roundtrip_binding.py'),'--artifact',str(OUT),'--output',str(OUT/'cpu-pm-roundtrip-binding-model')],'03-cpu-pm-roundtrip-binding.log')
+            report['cpu_pm_roundtrip_binding_sha256']=hashlib.sha256((OUT/'cpu-pm-roundtrip-binding-model/result.json').read_bytes()).hexdigest()
+            from cpu_pm_roundtrip_binding import validate as validate_roundtrip
+            validate_roundtrip(OUT,report,require_package_flow=False)
+            (OUT/'build-result.json').write_text(json.dumps(report,indent=2)+'\n',encoding='utf-8',newline='\n')
+            run([sys.executable,str(ROOT/'note10/device_test/test_cpu_pm_roundtrip_package_flow.py'),'--artifact',str(OUT),'--output',str(OUT/'cpu-pm-roundtrip-package-flow-model')],'03-cpu-pm-roundtrip-package-flow.log')
+            report['cpu_pm_roundtrip_package_flow_sha256']=hashlib.sha256((OUT/'cpu-pm-roundtrip-package-flow-model/result.json').read_bytes()).hexdigest()
+            validate_roundtrip(OUT,report)
         if auto_return:
             from materialize_auto_cycle import SLOT
             if b'N10RET1' not in target.read_bytes() or target.read_bytes().count(SLOT+b'\0')!=1:raise ValueError('Auto-return marker/unique data slot missing')
@@ -683,5 +718,6 @@ if __name__=='__main__':
     parser.add_argument('--ehld-lock-audit',action='store_true',help='Experimental CPU0 EHLD ctrl lock-availability observation with a pinned no-dynamic-probes profile')
     parser.add_argument('--ehld-irqsave-audit',action='store_true',help='Opt in to the EHLD paired irqsave token source audit; requires --ehld-lock-audit')
     parser.add_argument('--ehld-running-lock-audit',action='store_true',help='Opt in to EHLD start/stop running-scalar ctrl-lock synchronization; requires both EHLD audit flags')
+    parser.add_argument('--cpu-pm-roundtrip',action='store_true',help='Opt in to one bounded original CPU_PM enter/exit pair; requires EHLD running-lock audit and automatic recovery')
     args=parser.parse_args();main(caps=args.caps,reserve=args.reserve,window_access=args.window_access,
-                                   xnu_payload=args.xnu_payload,xnu_manifest=args.xnu_payload_manifest,cpu_cache=args.cpu_cache,pm_timer=args.pm_timer,auto_return=args.auto_return,screen_log=args.screen_log,gic_roundtrip=args.gic_roundtrip,dma_pm_audit=args.dma_pm_audit,ufs_pm_audit=args.ufs_pm_audit,ehld_lock_audit=args.ehld_lock_audit,ehld_irqsave_audit=args.ehld_irqsave_audit,ehld_running_lock_audit=args.ehld_running_lock_audit)
+                                   xnu_payload=args.xnu_payload,xnu_manifest=args.xnu_payload_manifest,cpu_cache=args.cpu_cache,pm_timer=args.pm_timer,auto_return=args.auto_return,screen_log=args.screen_log,gic_roundtrip=args.gic_roundtrip,dma_pm_audit=args.dma_pm_audit,ufs_pm_audit=args.ufs_pm_audit,ehld_lock_audit=args.ehld_lock_audit,ehld_irqsave_audit=args.ehld_irqsave_audit,ehld_running_lock_audit=args.ehld_running_lock_audit,cpu_pm_roundtrip=args.cpu_pm_roundtrip)
