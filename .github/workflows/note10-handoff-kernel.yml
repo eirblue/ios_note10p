@@ -463,6 +463,11 @@ jobs:
             note10/private/handoff-kernel/ehld-running-lock-model/**
             note10/private/handoff-kernel/ehld-running-lock-binding-model/**
             note10/private/handoff-kernel/ehld-running-lock-package-flow-model/**
+            note10/private/handoff-kernel/cpu-pm-roundtrip-prepared/**
+            note10/private/handoff-kernel/cpu-pm-roundtrip-model/**
+            note10/private/handoff-kernel/cpu-pm-roundtrip-decoder-model/**
+            note10/private/handoff-kernel/cpu-pm-roundtrip-binding-model/**
+            note10/private/handoff-kernel/cpu-pm-roundtrip-package-flow-model/**
             note10/private/handoff-kernel/pmu-failure-binding-model/result.json
             note10/private/handoff-kernel/pmu-failure-package-flow-model/result.json
             note10/private/handoff-kernel/pmu-failure-prepared/**
