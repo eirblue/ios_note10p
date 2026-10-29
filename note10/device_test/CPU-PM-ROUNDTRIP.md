@@ -1,5 +1,12 @@
 # Guarded CPU0 CPU_PM notifier pair
 
+
+The v50 source bundle corrects the v49 helper admission predicate: Linux `preemptible()` requires IRQs enabled, while the helper is intentionally called with local IRQs disabled. The caller retains its IRQ-enabled PC0 checks before saving IRQ state; the helper retains the owned-generation, CPU0-only, IRQ-disabled PC0 contract. The native provider must use the pinned Linux IRQ predicate rather than checking the preemption count alone. Build and physical validation of v50 are pending.
+
+A separate, versioned `N10CPT1` failure diagnostic preserves already stored terminal state when the enclosing sample reader fails. It records whether the helper was invoked, its stored attempt flag, the stage and outer error, and the saved enter/exit counts and return codes. Publication is bound to a completed current generation. Reporting adds no hardware reads, callback/API invocation, retry or cleanup call.
+
+`N10CPR1` and its strict success predicate remain unchanged. Failure diagnostics are parsed independently and cannot mark a required pair evaluation passed. A failed or absent terminal record remains insufficient to establish a successful pair. One fresh v50 cycle requires new artifact and plan gates; the stopped v49 journal remains preserved and cannot be replayed.
+
 The experimental v49 `--cpu-pm-roundtrip` option is off by default. It requires the current EHLD running-lock audit and automatic recovery. Its marker is `CONFIG_NOTE10_CPU_PM_ROUNDTRIP`; its proof version is 1. A compiled option and successful input observations do not establish that a device has executed the pair.
 
 The experiment uses the existing owned `TEST_PLATFORM` path after nonboot CPUs have been disabled. It keeps the original CPU-freeze cleanup. The worker must start and finish on CPU0 with only CPU0 online, IRQs enabled and preemption count zero. An outer local IRQ save covers admission and the pair. The notifier registration lock is used only for inspection; it is released before either CPU_PM API call, while local IRQs remain disabled and preemption count returns to zero.

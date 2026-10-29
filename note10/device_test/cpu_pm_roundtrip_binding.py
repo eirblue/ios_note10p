@@ -8,6 +8,7 @@ SOURCES=('prepare_cpu_pm_roundtrip.py','prepare_cpu_pm_roundtrip_flow_compat.py'
 PACKAGE_SOURCES=('prepare_linux_boot.py','build_boot_test_packages.py','precheck_window_access.py','stage_phase2.py','collect_reservation.py','decode_cpu_pm_roundtrip.py')
 PREFIX='cpu_pm_roundtrip_'
 MARKER=b'N10CPMRT1'
+TERMINAL_MARKER=b'N10CPT1'
 PREPARED='cpu-pm-roundtrip-prepared'
 NATIVE='cpu-pm-roundtrip-model'
 BINDING='cpu-pm-roundtrip-binding-model'
@@ -98,7 +99,9 @@ def assert_scope(root,build):
  if 'effective_config_sha256' in build and build['effective_config_sha256']!=sha(cfg): raise ValueError('effective config hash differs')
  if enabled and 'effective_config_sha256' not in build: raise ValueError('effective config hash missing')
  image_path=root/'Image'
- if image_path.is_symlink() or not image_path.is_file() or (MARKER in image_path.read_bytes()) is not enabled: raise ValueError('CPU_PM Image marker/scope differs')
+ if image_path.is_symlink() or not image_path.is_file():raise ValueError('CPU_PM Image missing/unsafe')
+ image=image_path.read_bytes()
+ if (MARKER in image) is not enabled or (TERMINAL_MARKER in image) is not enabled: raise ValueError('CPU_PM Image marker/scope differs')
  dirs=(PREPARED,NATIVE,DECODER,BINDING,PACKAGE)
  straydirs=[p.name for p in root.iterdir() if p.name.startswith('cpu-pm-roundtrip-') and p.name not in dirs]
  if not enabled:
@@ -143,17 +146,49 @@ def assert_scope(root,build):
  if sha((native/'roundtrip.c').read_bytes())!=proof['generated_sha256']:
   raise ValueError('v49 generated native source hash differs')
  if proof.get('transform_mutations_rejected') != {name:True for name in TRANSFORM_CASES}: raise ValueError('v49 transform mutation results differ')
+ tl=proof.get('terminal_lifecycle')
+ from test_cpu_pm_roundtrip import TERMINAL_CASES,extract_terminal_functions
+ capture=(prepared/'kernel/power/note10_pm_pre_capture.c').read_bytes()
+ probe=(prepared/'arch/arm64/mm/note10_pm_pre_probe.c').read_bytes()
+ capture_fn,reader_fn,emitter_fn,report_fn=extract_terminal_functions(capture,probe)
+ expected_terminal={
+  'caller-context-refusal':'PASS|0|-1|0|0|0|0|0',
+  'prior-chain-refusal':'PASS|1|-5|1|0|0|0|0',
+  'helper-admission-refusal':'PASS|2|-16|2|1|0|0|-16',
+  'enter-failure':'PASS|3|-5|3|1|1|0|-5',
+  'exit-failure':'PASS|4|-5|4|1|1|1|-5',
+  'postcondition-failure':'PASS|5|-5|5|1|1|1|-5',
+  'strict-success-no-terminal':'PASS|6|0|0|0|0|0|0'}
+ if (not isinstance(tl,dict) or tl.get('passed') is not True or tl.get('hardware_verified') is not False or
+     tl.get('cases')!=TERMINAL_CASES or tl.get('harness_sha256')!=sha((HERE/'test_cpu_pm_roundtrip.py').read_bytes()) or
+     tl.get('source_capture_sha256')!=sha(capture) or tl.get('source_probe_sha256')!=sha(probe) or
+     tl.get('extracted_capture_sha256')!=sha(capture_fn) or tl.get('extracted_reader_sha256')!=sha(reader_fn) or
+     tl.get('extracted_emitter_sha256')!=sha(emitter_fn) or tl.get('extracted_report_sha256')!=sha(report_fn) or
+     tl.get('case_transcripts')!=expected_terminal or
+     not _map(tl.get('case_log_sha256'),TERMINAL_CASES) or not _hash(tl.get('generated_sha256')) or
+     not _hash(tl.get('compile_log_sha256'))):
+  raise ValueError('v50 terminal caller/reader/probe proof contract differs')
+ tlroot=native/'terminal-lifecycle'
+ if tlroot.is_symlink() or not tlroot.is_dir():raise ValueError('v50 terminal native output missing/unsafe')
+ if sha((tlroot/'terminal.c').read_bytes())!=tl['generated_sha256'] or sha((tlroot/'compile.log').read_bytes())!=tl['compile_log_sha256']:
+  raise ValueError('v50 terminal generated C/compile evidence differs')
+ for index,case in enumerate(TERMINAL_CASES):
+  log=tlroot/(f'case-{index:02d}.log')
+  if log.is_symlink() or not log.is_file() or sha(log.read_bytes())!=tl['case_log_sha256'][case] or log.read_text(encoding='ascii')!=expected_terminal[case]+'\n':
+   raise ValueError('v50 terminal case evidence differs: '+case)
  decoder=root/DECODER
  if decoder.is_symlink() or not decoder.is_dir():raise ValueError('v49 decoder proof missing')
  draw=(decoder/'result.json').read_bytes()
  if sha(draw)!=build.get('cpu_pm_roundtrip_decoder_sha256'):raise ValueError('v49 decoder proof hash differs')
  dp=json.loads(draw)
- from test_cpu_pm_roundtrip_decoder import CASES as DC
+ from test_cpu_pm_roundtrip_decoder import CASES as DC,TERMINAL_CASES as TC
  if (dp.get('schema_version')!=1 or dp.get('passed') is not True or dp.get('hardware_verified') is not False or
      dp.get('cases')!=list(DC) or dp.get('decoder_sha256')!=sha((HERE/'decode_cpu_pm_roundtrip.py').read_bytes()) or
-     dp.get('harness_sha256')!=sha((HERE/'test_cpu_pm_roundtrip_decoder.py').read_bytes())):raise ValueError('v49 decoder proof contract differs')
- from test_cpu_pm_roundtrip_decoder import EXPECTED as decoder_expected,input_vector
+     dp.get('harness_sha256')!=sha((HERE/'test_cpu_pm_roundtrip_decoder.py').read_bytes()) or
+     dp.get('terminal_cases')!=list(TC)):raise ValueError('v50 decoder proof contract differs')
+ from test_cpu_pm_roundtrip_decoder import EXPECTED as decoder_expected,input_vector,TERMINAL_EXPECTED,terminal_input_vector
  if dp.get('case_results')!=decoder_expected():raise ValueError('v49 decoder mutation outcomes differ')
+ if dp.get('terminal_case_results')!=TERMINAL_EXPECTED():raise ValueError('v50 terminal decoder outcomes differ')
  expected_transcripts={case:('PASS|' if case=='valid-pair' else 'REJECT|')+case for case in DC}
  expected_generated={case:sha(input_vector(case)) for case in DC}
  if dp.get('case_transcripts')!=expected_transcripts or dp.get('generated_sha256')!=expected_generated:raise ValueError('v49 decoder vectors/transcripts differ')
@@ -164,6 +199,20 @@ def assert_scope(root,build):
   if (code.is_symlink() or log.is_symlink() or not code.is_file() or not log.is_file() or
       sha(code.read_bytes())!=dp['generated_sha256'][case] or sha(log.read_bytes())!=dp['logs_sha256'][case] or
       log.read_text(encoding='utf8')!=expected_log):raise ValueError('v49 decoder case evidence differs: '+case)
+ terminal_expected={item['case']:('FAILURE-OBSERVED|' if item['accepted'] else 'REJECT|')+item['case'] for item in TERMINAL_EXPECTED()}
+ terminal_vectors={case:sha(terminal_input_vector(case)) for case in TC}
+ if (dp.get('terminal_case_transcripts')!=terminal_expected or
+     dp.get('terminal_generated_sha256')!=terminal_vectors or
+     not _map(dp.get('terminal_generated_sha256'),TC) or not _map(dp.get('terminal_logs_sha256'),TC)):
+  raise ValueError('v50 terminal decoder vectors/transcripts differ')
+ for index,case in enumerate(TC):
+  code=decoder/('terminal-'+case+'.json');log=decoder/('terminal-'+case+'.log')
+  expected_log=terminal_expected[case]+'\n'
+  if (code.is_symlink() or log.is_symlink() or not code.is_file() or not log.is_file() or
+      sha(code.read_bytes())!=dp['terminal_generated_sha256'][case] or
+      sha(log.read_bytes())!=dp['terminal_logs_sha256'][case] or
+      log.read_text(encoding='utf8')!=expected_log):
+   raise ValueError('v50 terminal decoder case evidence differs: '+case)
  return True
 
 
@@ -178,7 +227,8 @@ def validate(root,build,require_package_flow=True):
  if sha(braw)!=build.get('cpu_pm_roundtrip_binding_sha256'):raise ValueError('v49 binding proof hash mismatch')
  bp=json.loads(braw)
  from test_cpu_pm_roundtrip_binding import CASES as BC,PACKAGE_SCOPE_CASES
- if (bp.get('passed') is not True or bp.get('hardware_verified') is not False or bp.get('cases')!=list(BC) or
+ if (bp.get('passed') is not True or bp.get('hardware_verified') is not False or
+     bp.get('immutable_v49_prior_validator_stubbed') is not True or bp.get('cases')!=list(BC) or
      bp.get('package_scope_cases')!=list(PACKAGE_SCOPE_CASES) or
      bp.get('harness_sha256')!=sha((HERE/'test_cpu_pm_roundtrip_binding.py').read_bytes()) or
      bp.get('binding_sha256')!=sha((HERE/'cpu_pm_roundtrip_binding.py').read_bytes())):raise ValueError('v49 binding proof contract differs')
@@ -199,6 +249,11 @@ def validate(root,build,require_package_flow=True):
    raise ValueError('v49 package-flow proof contract differs')
   if proof.get('cases')!=['production-flow-on','production-flow-off','invalid-scope-rejected'] or proof.get('precheck_cases')!=['on','off','invalid-pair'] or proof.get('collector_cases')!=['on','off','invalid-pair']:
    raise ValueError('v49 production flow inventory differs')
+  if proof.get('terminal_collector_cases')!=['strict-success','terminal-failure','success-failure-conflict'] or proof.get('terminal_collector_results')!=[
+      {'case':'strict-success','accepted':True,'pair_observed':True,'required':True,'status':'passed'},
+      {'case':'terminal-failure','accepted':True,'pair_observed':False,'terminal_failure_observed':True,'required':True,'status':'failed'},
+      {'case':'success-failure-conflict','accepted':False}]:
+   raise ValueError('v50 terminal collector outcomes differ')
   expected_flow=[
    {'case':'production-flow-on','accepted':True,'scope':True,'diagnostic':True,'rollback':False},
    {'case':'production-flow-off','accepted':True,'scope':False,'diagnostic':False,'rollback':False},

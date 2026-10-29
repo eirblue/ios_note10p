@@ -11,6 +11,11 @@ SCHEMA = ('id', 'copy', 'generation', 'attempted', 'roster', 'roster_valid',
 SUCCESS = ('attempted', 'roster_valid', 'pre', 'post', 'enter_calls',
            'exit_calls', 'enter_ok', 'exit_ok', 'daif', 'timer', 'gic',
            'ehld_before', 'ehld_after', 'context', 'passed')
+TERMINAL_TAG = 'N10CPT1'
+TERMINAL_SCHEMA = ('id','copy','generation','attempted','recorded','completed',
+                   'caller_invoked','stage','outer_error','helper_error',
+                   'enter_calls','exit_calls','enter_error','exit_error')
+SIGNED_TERMINAL = {'outer_error','helper_error','enter_error','exit_error'}
 
 
 def decode(text, identity, generation):
@@ -60,3 +65,66 @@ def decode(text, identity, generation):
         raise ValueError('CPU_PM roundtrip postconditions failed')
     return {'generation': generation, 'attempted': 1, 'roster_count': 6,
             'enter_calls': 1, 'exit_calls': 1, 'postconditions_passed': True}
+
+
+def decode_terminal(text, identity, generation):
+    """Decode failure-only terminal state; never satisfy the paired-call pass row."""
+    if not isinstance(identity,str) or not re.fullmatch(r'[0-9a-f]{32}',identity):
+        raise ValueError('invalid CPU_PM terminal identity')
+    if type(generation) is not int or not 0<generation<=0xffffffff:
+        raise ValueError('invalid CPU_PM terminal generation')
+    for line in text.splitlines():
+        for match in re.finditer(TERMINAL_TAG,line):
+            if not re.match(TERMINAL_TAG+r' ',line[match.start():]):
+                raise ValueError('malformed CPU_PM terminal prefix')
+    rows=[]
+    for match in re.finditer(TERMINAL_TAG+r' ([^\r\n]*)',text):
+        framed=re.fullmatch(r'(.*?) checksum=([0-9a-f]{8})',match.group(1))
+        if not framed: raise ValueError('malformed CPU_PM terminal frame')
+        body,digest=framed.groups()
+        pairs=[part.split('=',1) for part in body.split(' ')]
+        if any(len(pair)!=2 for pair in pairs) or tuple(pair[0] for pair in pairs)!=TERMINAL_SCHEMA:
+            raise ValueError('CPU_PM terminal schema differs')
+        if pairs[0][1]!=identity or checksum(body.encode('ascii'))!=int(digest,16):
+            raise ValueError('CPU_PM terminal identity/checksum differs')
+        row={'id':identity}
+        for key,value in pairs[1:]:
+            pattern=r'-?(?:0|[1-9][0-9]*)' if key in SIGNED_TERMINAL else r'(?:0|[1-9][0-9]*)'
+            if not re.fullmatch(pattern,value): raise ValueError('CPU_PM terminal numeric syntax')
+            number=int(value)
+            if key in SIGNED_TERMINAL:
+                if not -(1<<31)<=number<(1<<31): raise ValueError('CPU_PM terminal signed width')
+            elif number>0xffffffff: raise ValueError('CPU_PM terminal integer width')
+            row[key]=number
+        if row['copy'] not in (0,1): raise ValueError('CPU_PM terminal copy index')
+        rows.append(row)
+    if len(rows)!=2 or [row['copy'] for row in rows]!=[0,1]:
+        raise ValueError('CPU_PM terminal frame cardinality')
+    first,second=rows
+    if {k:v for k,v in first.items() if k!='copy'}!={k:v for k,v in second.items() if k!='copy'}:
+        raise ValueError('CPU_PM terminal copies differ')
+    if first['generation']!=generation: raise ValueError('CPU_PM terminal generation differs')
+    if any(first[k]!=1 for k in ('attempted','recorded','completed')):
+        raise ValueError('CPU_PM terminal record is incomplete')
+    stage=first['stage']; called=first['caller_invoked']
+    if stage not in range(6) or called not in (0,1): raise ValueError('CPU_PM terminal stage/caller invalid')
+    if stage in (0,1):
+        if called or first['helper_error'] or first['enter_calls'] or first['exit_calls'] or first['enter_error'] or first['exit_error'] or not first['outer_error']:
+            raise ValueError('CPU_PM pre-helper terminal state differs')
+    elif stage==2:
+        if not called or first['enter_calls'] or first['exit_calls'] or first['enter_error'] or first['exit_error'] or not first['helper_error']:
+            raise ValueError('CPU_PM admission terminal state differs')
+    elif stage==3:
+        if not called or first['enter_calls']!=1 or first['exit_calls'] or not first['enter_error'] or first['exit_error'] or not first['helper_error']:
+            raise ValueError('CPU_PM enter-failure terminal state differs')
+    elif stage==4:
+        if not called or first['enter_calls']!=1 or first['exit_calls']!=1 or first['enter_error'] or not first['exit_error'] or not first['helper_error']:
+            raise ValueError('CPU_PM exit-failure terminal state differs')
+    else:
+        if not called or first['enter_calls']!=1 or first['exit_calls']!=1 or first['enter_error'] or first['exit_error'] or not first['helper_error']:
+            raise ValueError('CPU_PM postcondition terminal state differs')
+    return {'generation':generation,'attempted':1,'recorded':True,'completed':True,
+            'caller_invoked':bool(called),'stage':stage,'pair_passed':False,
+            'outer_error':first['outer_error'],'helper_error':first['helper_error'],
+            'enter_calls':first['enter_calls'],'exit_calls':first['exit_calls'],
+            'enter_error':first['enter_error'],'exit_error':first['exit_error']}

@@ -513,7 +513,7 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
         if pm_timer and b'N10PMS1' not in target.read_bytes():raise ValueError('PM failure stage marker missing')
         if pm_timer and b'N10QSC1' not in target.read_bytes():raise ValueError('PM quiesce marker missing')
         if ehld_lock_audit and any(marker not in target.read_bytes() for marker in (b'N10ELM1',b'N10ELQ1')):raise ValueError('EHLD lock audit Image markers missing')
-        if cpu_pm_roundtrip and b'N10CPMRT1' not in target.read_bytes():raise ValueError('CPU PM roundtrip Image marker missing')
+        if cpu_pm_roundtrip and (b'N10CPMRT1' not in target.read_bytes() or b'N10CPT1' not in target.read_bytes()):raise ValueError('CPU PM roundtrip Image marker missing')
         if pm_timer:
             from pm_quiesce_binding import validate_model as validate_quiesce
             validate_quiesce(OUT,report)

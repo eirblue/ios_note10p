@@ -37,6 +37,21 @@ def decode_abox_pm_observation(text,identity,pm_observation):
     return decode_abox(text,identity,pm_completed_generation(pm_observation))
 
 
+def decode_cpu_pm_roundtrip_observation(text,identity,generation):
+    from decode_cpu_pm_roundtrip import decode as decode_roundtrip,decode_terminal as decode_roundtrip_terminal
+    if 'N10CPT' in text:
+        if 'N10CPR' in text:raise ValueError('CPU_PM success and terminal failure frames conflict')
+        terminal=decode_roundtrip_terminal(text,identity,generation)
+        if terminal.get('pair_passed') is not False:raise ValueError('CPU_PM terminal cannot satisfy strict pair')
+        observed=False;value={'terminal_failure':terminal}
+    else:
+        value={'pair':decode_roundtrip(text,identity,generation)}
+        observed=True
+    return {'pair_observed':observed,'terminal_failure_observed':not observed,
+            'pair_passed':observed,'evaluation_item':{'required':True,'status':'passed' if observed else 'failed'},
+            'observation':value}
+
+
 def select_latest_boot(data,expected_banner,allow_panic_corroboration=False,boot_binding_id=None):
     """Select one contiguous boot using an intact zero-time Linux banner.
 
@@ -223,6 +238,7 @@ def collect(packages,kernel_build,adb):
     if not adb.text('shell','getprop','ro.bootloader').startswith('N976N'):raise ValueError('N976N required')
     out=ROOT/'note10/private/device-observations'/('reservation-test-'+uuid.uuid4().hex[:12]);out.mkdir(parents=True)
     logs={}
+    cpu_pm_roundtrip_observation=None
     for name,remote in (('last_kmsg.txt','/proc/last_kmsg'),('console-ramoops-0','/sys/fs/pstore/console-ramoops-0'),
                         ('dmesg-ramoops-0','/sys/fs/pstore/dmesg-ramoops-0')):
         try:
@@ -246,6 +262,7 @@ def collect(packages,kernel_build,adb):
             'cpu_pm_roundtrip_scope_verified':cpu_pm_roundtrip,
             'cpu_pm_roundtrip_required':cpu_pm_roundtrip,
             'previous_boot_cpu0_cpu_pm_enter_exit_pair_observed':False,
+            'previous_boot_cpu0_cpu_pm_terminal_failure_observed':False,
             'previous_boot_reservation_observed':False,
             'window_access_required':access,'previous_boot_window_access_observed':False,
             'xnu_payload_stage_required':xnu_stage,'previous_boot_xnu_payload_stage_observed':False,
@@ -420,10 +437,14 @@ def collect(packages,kernel_build,adb):
                 observation['ehld_lock']=decode_ehld_lock(text,evidence_id,pm_completed_generation(observation['pm_timer']),observation['pm_preconditions'])
                 report['previous_boot_cpu0_ehld_lock_audit_observed']=True
             if cpu_pm_roundtrip:
-                from decode_cpu_pm_roundtrip import decode as decode_roundtrip
                 generation=pm_completed_generation(observation['pm_timer'])
-                observation['cpu_pm_roundtrip']=decode_roundtrip(text,evidence_id,generation)
-                report['previous_boot_cpu0_cpu_pm_enter_exit_pair_observed']=True
+                cpu_pm_roundtrip_observation=decode_cpu_pm_roundtrip_observation(text,evidence_id,generation)
+                if cpu_pm_roundtrip_observation['terminal_failure_observed']:
+                    observation['cpu_pm_roundtrip_terminal_failure']=cpu_pm_roundtrip_observation['observation']['terminal_failure']
+                    report['previous_boot_cpu0_cpu_pm_terminal_failure_observed']=True
+                else:
+                    observation['cpu_pm_roundtrip']=cpu_pm_roundtrip_observation['observation']['pair']
+                    report['previous_boot_cpu0_cpu_pm_enter_exit_pair_observed']=True
         except ValueError as error:
             report['decode_failures'][name]=str(error);continue
         (out/'reservation-observation.json').write_text(json.dumps(observation,indent=2),encoding='utf-8')
@@ -495,7 +516,10 @@ def collect(packages,kernel_build,adb):
     if ehld_lock:
         report['evaluation_items']['cpu0_ehld_lock_audit']={'required':True,'status':'passed' if report['previous_boot_cpu0_ehld_lock_audit_observed'] else 'failed'}
     if cpu_pm_roundtrip:
-        report['evaluation_items']['cpu0_cpu_pm_enter_exit_pair']={'required':True,'status':'passed' if report['previous_boot_cpu0_cpu_pm_enter_exit_pair_observed'] else 'failed'}
+        if cpu_pm_roundtrip_observation and cpu_pm_roundtrip_observation['evaluation_item']:
+            report['evaluation_items']['cpu0_cpu_pm_enter_exit_pair']=cpu_pm_roundtrip_observation['evaluation_item']
+        else:
+            report['evaluation_items']['cpu0_cpu_pm_enter_exit_pair']={'required':True,'status':'failed'}
     (out/'capture-result.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
     return report
 

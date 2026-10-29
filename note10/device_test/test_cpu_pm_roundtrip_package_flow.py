@@ -32,7 +32,7 @@ def sha(raw):return hashlib.sha256(raw).hexdigest()
 def model_image(identity,roundtrip=False):
  if not isinstance(identity,str) or len(identity)!=32 or any(c not in '0123456789abcdef' for c in identity):raise ValueError('invalid fixture reservation identity')
  image=bytearray(4096);image[56:60]=b'ARM\x64'
- markers=(b'N10CPMRT1' if roundtrip else b'')+b''.join(CALLBACKS+PRECONDITIONS+BRANCH)+PMU_FAILURE+GIC_PRIORITY+b''.join(PMU_STATE+PMU_CONTROL+FPSIMD+RCU_MARKERS+LOCK_MARKERS)+b'N10RET1N10MEM1N10XNU1N10QUI1N10CPU2N10PMS1N10PMT1N10TMR1N10BND1N10TRY1'+identity.encode()
+ markers=(b'N10CPMRT1N10CPT1' if roundtrip else b'')+b''.join(CALLBACKS+PRECONDITIONS+BRANCH)+PMU_FAILURE+GIC_PRIORITY+b''.join(PMU_STATE+PMU_CONTROL+FPSIMD+RCU_MARKERS+LOCK_MARKERS)+b'N10RET1N10MEM1N10XNU1N10QUI1N10CPU2N10PMS1N10PMT1N10TMR1N10BND1N10TRY1'+identity.encode()
  image[128:128+len(markers)]=markers
  banner=b'Linux version 4.14.113-note10-reserve-pc fixture-v49'
  image[1024:1024+len(banner)]=banner
@@ -194,7 +194,7 @@ def _mismatched_pair(root,off):
  bad_prototype=root/'mismatched.img';shutil.copyfile(off['prototype'],bad_prototype)
  shutil.copyfile(off['prototype'].with_suffix('.json'),bad_prototype.with_suffix('.json'))
  meta_path=bad_prototype.with_suffix('.json');meta=json.loads(meta_path.read_text(encoding='utf8'));meta['cpu_pm_roundtrip']=True;meta['cpu_pm_roundtrip_version']=1
- raw=bytearray(bad_prototype.read_bytes());raw[512:521]=b'N10CPMRT1';bad_prototype.write_bytes(raw);meta['sha256']=sha(raw);meta['size']=len(raw)
+ raw=bytearray(bad_prototype.read_bytes());raw[512:521]=b'N10CPMRT1';raw[521:528]=b'N10CPT1';bad_prototype.write_bytes(raw);meta['sha256']=sha(raw);meta['size']=len(raw)
  meta_path.write_text(json.dumps(meta,indent=2)+'\n',encoding='utf8',newline='\n')
  out=root/'mismatched-packages'
  with patch.object(packages,'read_verified_backup',return_value=off['parts']):packages.build(off['backup'],bad_prototype,out)
@@ -209,6 +209,26 @@ def _mismatched_pair(root,off):
   except (ValueError,KeyError,FileNotFoundError):collector_rejected=True
   else:raise AssertionError('production collector accepted package/kernel scope mismatch')
  return pre_rejected,collector_rejected
+
+def terminal_collector_cases():
+ from test_cpu_pm_roundtrip_decoder import input_vector,terminal_input_vector
+ identity='a'*32;generation=9
+ success_text=json.loads(input_vector('valid-pair'))['text']
+ failure_text=json.loads(terminal_input_vector('stage2-admission'))['text']
+ success=collector_module.decode_cpu_pm_roundtrip_observation(success_text,identity,generation)
+ failure=collector_module.decode_cpu_pm_roundtrip_observation(failure_text,identity,generation)
+ if success.get('pair_observed') is not True or success.get('evaluation_item')!={'required':True,'status':'passed'}:
+  raise AssertionError('collector strict success pair was not preserved')
+ if (failure.get('pair_observed') is not False or failure.get('terminal_failure_observed') is not True or
+     failure.get('pair_passed') is not False or failure.get('evaluation_item')!={'required':True,'status':'failed'}):
+  raise AssertionError('collector terminal failure was promoted')
+ try:collector_module.decode_cpu_pm_roundtrip_observation(success_text+'\n'+failure_text,identity,generation)
+ except ValueError:conflict_rejected=True
+ else:raise AssertionError('collector accepted conflicting strict-success and terminal-failure frames')
+ return ['strict-success','terminal-failure','success-failure-conflict'],[
+  {'case':'strict-success','accepted':True,'pair_observed':True,'required':True,'status':'passed'},
+  {'case':'terminal-failure','accepted':True,'pair_observed':False,'terminal_failure_observed':True,'required':True,'status':'failed'},
+  {'case':'success-failure-conflict','accepted':False}]
 
 def main():
  p=argparse.ArgumentParser();p.add_argument('--artifact',required=True,type=Path);p.add_argument('--output',required=True,type=Path);a=p.parse_args();source_dir=Path(__file__).resolve().parent
@@ -225,6 +245,7 @@ def main():
    raise AssertionError('the original collector evaluation rows changed with v49 scope')
   invalid=_invalid_prepare(root,a.artifact,'e'*32)
   pre_rejected,collector_rejected=_mismatched_pair(root,off)
+  terminal_cases,terminal_results=terminal_collector_cases()
   package_results=[{'case':CASES[0],'accepted':True,'scope':True,'diagnostic':True,'rollback':False},
                    {'case':CASES[1],'accepted':True,'scope':False,'diagnostic':False,'rollback':False},invalid]
   precheck_cases=[{'case':'on','accepted':True,'scope':True,'ready':True,'partition_writes':False},
@@ -235,6 +256,7 @@ def main():
                    {'case':'invalid-pair','accepted':False}]
   items=on['collector']['evaluation_items'];items_off=off['collector']['evaluation_items']
   result={'schema_version':1,'passed':True,'hardware_verified':False,'synthetic_fixture':True,'legacy_gate_stubs':['ehld_lock','ehld_irqsave','ehld_running_lock'],'cases':list(CASES),'case_results':package_results,
+          'terminal_collector_cases':terminal_cases,'terminal_collector_results':terminal_results,
           'precheck_cases':['on','off','invalid-pair'],'precheck_cases_result':precheck_cases,'collector_cases':['on','off','invalid-pair'],'collector_cases_result':collector_cases,'collector_evaluation_items':items,'collector_evaluation_items_off':items_off,
           'collector_evaluation_items_sha256':sha(json.dumps(items,sort_keys=True,separators=(',',':')).encode()),
           'harness_sha256':sha(Path(__file__).read_bytes()),'package_sources_sha256':measured}

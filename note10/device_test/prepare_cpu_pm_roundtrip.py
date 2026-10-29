@@ -118,16 +118,25 @@ int n10_cpu_pm_roundtrip(unsigned int generation,
     u64 daif_before, daif_after, cntkctl_before, cntkctl_after;
     int error = 0, enter_error = 0, exit_error = 0;
     int enter_calls = 0, exit_calls = 0;
+    unsigned int terminal_attempted, caller_invoked;
+    int terminal_outer_error;
 
     if (!out) return -EINVAL;
+    terminal_attempted=out->terminal_attempted;
+    caller_invoked=out->caller_invoked;
+    terminal_outer_error=out->terminal_outer_error;
     memset(out, 0, sizeof(*out));
     out->generation = generation;
+    out->terminal_attempted=terminal_attempted;
+    out->caller_invoked=caller_invoked;
+    out->terminal_outer_error=terminal_outer_error;
     if (n10_cpu_pm_roundtrip_active || n10_cpu_pm_roundtrip_seen)
         return out->error = -EALREADY;
     n10_cpu_pm_roundtrip_active = 1;
     n10_cpu_pm_roundtrip_seen = 1;
     out->attempted = 1;
-    if (!prior || !n10_cpu_pm_roundtrip_context(generation, 0) || !preemptible() ||
+    if (!prior || !n10_cpu_pm_roundtrip_context(generation, 0) ||
+        preempt_count() != 0 || !irqs_disabled() ||
         prior->generation != generation || prior->seen != 1 ||
         prior->completed != 0 || prior->bad || prior->error ||
         prior->count != ARRAY_SIZE(n10_cpu_pm_roundtrip_getters))
@@ -328,12 +337,15 @@ def transform(files):
               b' unsigned int cpu_before, online_before, online_count_before;\n'
               b' unsigned int enter_calls, exit_calls, enter_succeeded, exit_succeeded;\n'
               b' unsigned int daif_stable, timer_stable, gic_stable, ehld_before, ehld_after, context_stable, passed;\n'
+              b' unsigned int terminal_attempted, terminal_recorded, terminal_completed;\n'
+              b' unsigned int caller_invoked, terminal_stage;\n'
+              b' int terminal_outer_error, terminal_helper_error;\n'
               b' int enter_error, exit_error, error;\n'
               b'};\n')
     struct_anchor = b'struct n10_precond_sample { unsigned int generation, seen, bad, completed, count; int error; struct n10_precond_row row[N10_PRECOND_CAP]; };'
     header = replace_unique(header, struct_anchor, record + struct_anchor, 'precondition roundtrip record')
     proto_anchor = b'int n10_pre_chain(struct n10_precond_sample *, unsigned int generation);'
-    header = replace_unique(header, proto_anchor, proto_anchor + b'\n#ifdef CONFIG_NOTE10_CPU_PM_ROUNDTRIP\nint n10_cpu_pm_roundtrip(unsigned int, const struct n10_precond_sample *, struct n10_cpu_pm_roundtrip_sample *);\n#endif', 'roundtrip prototype')
+    header = replace_unique(header, proto_anchor, proto_anchor + b'\n#ifdef CONFIG_NOTE10_CPU_PM_ROUNDTRIP\nint n10_cpu_pm_roundtrip(unsigned int, const struct n10_precond_sample *, struct n10_cpu_pm_roundtrip_sample *);\nint n10_pre_roundtrip_terminal_read(struct n10_cpu_pm_roundtrip_sample *, unsigned int completed);\n#endif', 'roundtrip prototype')
     sample_anchor = struct_anchor
     header = _replace_once(header, sample_anchor, sample_anchor[:-2] + b'\n#ifdef CONFIG_NOTE10_CPU_PM_ROUNDTRIP\n    struct n10_cpu_pm_roundtrip_sample roundtrip;\n#endif\n};', 'roundtrip sample field')
     out[header_name] = header
@@ -343,29 +355,133 @@ def transform(files):
     include_anchor = b'#include <linux/note10_pm_preconditions.h>'
     capture = _replace_once(capture, include_anchor, include_anchor + b'\n#ifdef CONFIG_NOTE10_CPU_PM_ROUNDTRIP\n#include <linux/irqflags.h>\n#include <asm/sysreg.h>\n#include <asm/ptrace.h>\n#endif', 'capture includes')
     invoke_anchor = b'    s->error=n10_pre_chain(s,generation);s->completed=1;'
-    invoke = (b'''    s->error=n10_pre_chain(s,generation);
+    invoke = (b'''    s->roundtrip.generation=generation;
+    s->roundtrip.terminal_attempted=1;
+    s->error=n10_pre_chain(s,generation);
 #ifdef CONFIG_NOTE10_CPU_PM_ROUNDTRIP
-    if (!s->error) {
+    if (s->error) {
+        s->roundtrip.terminal_stage=1;
+        s->roundtrip.terminal_outer_error=s->error;
+    } else {
         unsigned long roundtrip_flags;
         u64 roundtrip_daif = read_sysreg(daif);
         int roundtrip_error;
-        if (roundtrip_daif & PSR_I_BIT || preempt_count()) roundtrip_error=-EPERM;
+        if (roundtrip_daif & PSR_I_BIT || preempt_count() || !preemptible()) {
+            roundtrip_error=-EPERM;
+            s->roundtrip.terminal_stage=0;
+            s->roundtrip.terminal_outer_error=roundtrip_error;
+        }
         else {
             local_irq_save(roundtrip_flags);
-            if (!irqs_disabled() || preempt_count()) roundtrip_error=-EPERM;
-            else roundtrip_error=n10_cpu_pm_roundtrip(generation,s,&s->roundtrip);
+            if (!irqs_disabled() || preempt_count()) {
+                roundtrip_error=-EPERM;
+                s->roundtrip.terminal_stage=0;
+                s->roundtrip.terminal_outer_error=roundtrip_error;
+            } else {
+                s->roundtrip.caller_invoked=1;
+                roundtrip_error=n10_cpu_pm_roundtrip(generation,s,&s->roundtrip);
+                s->roundtrip.terminal_helper_error=roundtrip_error;
+                if (roundtrip_error) {
+                    if (!s->roundtrip.enter_calls && !s->roundtrip.exit_calls)
+                        s->roundtrip.terminal_stage=2;
+                    else if (s->roundtrip.enter_calls && s->roundtrip.enter_error)
+                        s->roundtrip.terminal_stage=3;
+                    else if (s->roundtrip.enter_calls && s->roundtrip.exit_calls && s->roundtrip.exit_error)
+                        s->roundtrip.terminal_stage=4;
+                    else s->roundtrip.terminal_stage=5;
+                }
+            }
             local_irq_restore(roundtrip_flags);
-            if (read_sysreg(daif)!=roundtrip_daif) roundtrip_error=-EIO;
+            if (read_sysreg(daif)!=roundtrip_daif) {
+                roundtrip_error=-EIO;
+                s->roundtrip.terminal_outer_error=roundtrip_error;
+                if (!s->roundtrip.terminal_stage) s->roundtrip.terminal_stage=5;
+            }
         }
-        if (roundtrip_error) s->error=roundtrip_error;
+        if (roundtrip_error && !s->error) s->error=roundtrip_error;
     }
 #endif
     s->completed=1;''').replace(b'\n+', b'\n')
     capture = _replace_once(capture, invoke_anchor, invoke, 'roundtrip capture call')
+    final_context_anchor = b'''    if (!n10_pre_context(generation,0,0) || !preemptible()) {
+        if (!s->error)s->error=-EIO;
+    }'''
+    final_context = b'''    if (!n10_pre_context(generation,0,0) || !preemptible()) {
+        if (!s->error)s->error=-EIO;
+#ifdef CONFIG_NOTE10_CPU_PM_ROUNDTRIP
+        if (!s->roundtrip.terminal_outer_error) s->roundtrip.terminal_outer_error=-EIO;
+        if (!s->roundtrip.terminal_stage)
+            s->roundtrip.terminal_stage=s->roundtrip.caller_invoked ? 5 : 0;
+#endif
+    }
+#ifdef CONFIG_NOTE10_CPU_PM_ROUNDTRIP
+    if (s->error && s->roundtrip.terminal_attempted) {
+        if (!s->roundtrip.terminal_stage)
+            s->roundtrip.terminal_stage=s->roundtrip.caller_invoked ? 5 : 0;
+        s->roundtrip.terminal_recorded=1;
+        s->roundtrip.terminal_completed=1;
+    }
+#endif'''
+    capture = replace_unique(capture, final_context_anchor, final_context,
+                             'terminal final context publication')
+    terminal_read_anchor = b'''int n10_pre_gic_step(unsigned int generation, unsigned int phase, u32 ctlr, u32 pmr)'''
+    terminal_reader = b'''#ifdef CONFIG_NOTE10_CPU_PM_ROUNDTRIP
+int n10_pre_roundtrip_terminal_read(struct n10_cpu_pm_roundtrip_sample *out,
+                                    unsigned int completed)
+{
+    unsigned int generation;
+    if (!out || !completed || irqs_disabled()) return -EINVAL;
+    generation=completed-1;
+    if (!generation) generation=0xffffffffU;
+    mutex_lock(&pm_mutex);
+    if (n10_pre_last.generation!=generation || n10_pre_last.seen!=1 ||
+        n10_pre_last.completed!=1 || n10_pre_last.roundtrip.generation!=generation ||
+        n10_pre_last.roundtrip.terminal_attempted!=1 ||
+        n10_pre_last.roundtrip.terminal_recorded!=1 ||
+        n10_pre_last.roundtrip.terminal_completed!=1) {
+        mutex_unlock(&pm_mutex);
+        return -EIO;
+    }
+    memcpy(out,&n10_pre_last.roundtrip,sizeof(*out));
+    mutex_unlock(&pm_mutex);
+    if (out->terminal_stage>5 ||
+        ((out->terminal_stage<=1) && out->caller_invoked) ||
+        ((out->terminal_stage>=2) && !out->caller_invoked)) return -EIO;
+    return 0;
+}
+#endif
+'''
+    capture = replace_unique(capture, terminal_read_anchor,
+                             terminal_reader + terminal_read_anchor,
+                             'roundtrip terminal getter')
     out[capture_name] = capture
 
     probe_name = 'arch/arm64/mm/note10_pm_pre_probe.c'
     probe = out[probe_name]
+    terminal_anchor = b'#define N10_PRE_BUDGET 32768U'
+    terminal_helper = b'''#ifdef CONFIG_NOTE10_CPU_PM_ROUNDTRIP
+static const char n10_cpu_pm_terminal_marker[] __used = "N10CPT1";
+static struct n10_cpu_pm_roundtrip_sample n10_pre_terminal_report;
+static int n10_pre_emit(const char *, const char *, int, unsigned int *, int);
+static int n10_pre_emit_terminal(unsigned int completed, unsigned int generation)
+{
+    char frame[512]; unsigned int copy,budget=0; int n,ret;
+    memset(&n10_pre_terminal_report,0,sizeof(n10_pre_terminal_report));
+    ret=n10_pre_roundtrip_terminal_read(&n10_pre_terminal_report,completed);
+    if (ret || !n10_pre_terminal_report.terminal_recorded ||
+        !n10_pre_terminal_report.terminal_completed ||
+        n10_pre_terminal_report.generation!=generation) return ret ? ret : -EIO;
+    for (copy=0;copy<2;copy++) {
+        n=snprintf(frame,sizeof(frame),"id=%s copy=%u generation=%u attempted=%u recorded=%u completed=%u caller_invoked=%u stage=%u outer_error=%d helper_error=%d enter_calls=%u exit_calls=%u enter_error=%d exit_error=%d",N10_RESERVE_BUILD_ID,copy,generation,n10_pre_terminal_report.terminal_attempted,n10_pre_terminal_report.terminal_recorded,n10_pre_terminal_report.terminal_completed,n10_pre_terminal_report.caller_invoked,n10_pre_terminal_report.terminal_stage,n10_pre_terminal_report.terminal_outer_error,n10_pre_terminal_report.terminal_helper_error,n10_pre_terminal_report.enter_calls,n10_pre_terminal_report.exit_calls,n10_pre_terminal_report.enter_error,n10_pre_terminal_report.exit_error);
+        ret=n10_pre_emit("N10CPT1",frame,n,&budget,1); if(ret)return ret;
+    }
+    return 0;
+}
+#endif
+'''
+    probe = replace_unique(probe, terminal_anchor,
+                           terminal_helper + terminal_anchor,
+                           'roundtrip terminal producer')
     row_anchor = b'            for (i=0;i<3;i++) {'
     # Emit the normalized paired-call result once in each existing bounded copy.
     report_anchor = b'            for (i=0;i<3;i++) {'
@@ -374,6 +490,27 @@ def transform(files):
 #endif
             for (i=0;i<3;i++) {''').replace(b'\n+', b'\n')
     probe = _replace_once(probe, report_anchor, report, 'roundtrip producer row')
+    report_end_anchor=b'''    ret=n10_pre_read(&n10_pre_report,completed);
+    if (!ret)ret=n10_pre_gic_read(&n10_pre_gic_report,completed);
+    if (!ret && outer_error)ret=outer_error;
+    if (!ret)ret=n10_pre_emit_all(0,0,generation);
+    if (ret) { (void)n10_pre_emit_all(1,ret,generation);return ret; }
+    return n10_pre_emit_all(1,0,generation);
+}'''
+    report_end = b'''    ret=n10_pre_read(&n10_pre_report,completed);
+    if (!ret)ret=n10_pre_gic_read(&n10_pre_gic_report,completed);
+    if (!ret && outer_error)ret=outer_error;
+    if (!ret)ret=n10_pre_emit_all(0,0,generation);
+    if (ret) {
+#ifdef CONFIG_NOTE10_CPU_PM_ROUNDTRIP
+        (void)n10_pre_emit_terminal(completed,generation);
+#endif
+        (void)n10_pre_emit_all(1,ret,generation);return ret;
+    }
+    return n10_pre_emit_all(1,0,generation);
+}'''
+    probe = replace_unique(probe, report_end_anchor, report_end,
+                           'roundtrip terminal error reporting')
     out[probe_name] = probe
 
     config = out[KCONFIG]

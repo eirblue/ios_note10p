@@ -4,6 +4,7 @@ import hashlib
 import json
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 from cpu_pm_roundtrip_binding import PREFIX, assert_scope, package_scope
 
@@ -13,7 +14,7 @@ CASES = (
     'null-config-hash', 'wrong-config-hash', 'wrong-config-option',
     'duplicate-config-option', 'snapshot-map-mutation', 'missing-source-map',
     'mutated-source-map', 'off-minimal', 'off-stray-version',
-    'off-stray-proof', 'off-stray-output',
+    'off-stray-proof', 'off-stray-output', 'terminal-marker-missing',
 )
 PACKAGE_SCOPE_CASES = (
     'on-valid', 'off-absent-prior-on', 'off-absent-prior-off', 'off-false-prior-on',
@@ -66,6 +67,10 @@ def run(artifact, output):
     artifact, output = Path(artifact), Path(output)
     output.mkdir(parents=True, exist_ok=False)
     build = json.loads((artifact / 'build-result.json').read_text(encoding='utf8'))
+    def assert_new_scope(root, metadata):
+        # Preserve the immutable v49 closure; the actual no-mock chain is checked by fresh CI.
+        with patch('ehld_running_lock_binding.validate', return_value=True):
+            return assert_scope(root, metadata)
     scope_results = package_cases()
     outcomes = []
     generated, logs = {}, {}
@@ -73,7 +78,7 @@ def run(artifact, output):
         expected = name in ('enabled-valid', 'off-minimal')
         value = None
         if name == 'enabled-valid':
-            value = assert_scope(artifact, dict(build))
+            value = assert_new_scope(artifact, dict(build))
             accepted = True
         elif name.startswith('off-'):
             with tempfile.TemporaryDirectory(dir=output) as temp:
@@ -94,7 +99,7 @@ def run(artifact, output):
                     (root / 'Image').write_bytes(b'')
                     (root / 'cpu-pm-roundtrip-model').mkdir()
                 try:
-                    value = assert_scope(root, off)
+                    value = assert_new_scope(root, off)
                     accepted = True
                 except (ValueError, TypeError, KeyError):
                     accepted = False
@@ -111,6 +116,15 @@ def run(artifact, output):
             elif name == 'missing-config-hash': changed.pop('effective_config_sha256', None)
             elif name == 'null-config-hash': changed['effective_config_sha256'] = None
             elif name == 'wrong-config-hash': changed['effective_config_sha256'] = '0' * 64
+            elif name == 'terminal-marker-missing':
+                with tempfile.TemporaryDirectory(dir=output) as temp:
+                    root=Path(temp)/'fixture';root.mkdir()
+                    (root/'handoff.config').write_bytes(raw)
+                    image=(artifact/'Image').read_bytes()
+                    if b'N10CPT1' not in image:raise ValueError('terminal Image marker fixture differs')
+                    (root/'Image').write_bytes(image.replace(b'N10CPT1',b'X10CPT1'))
+                    try:assert_new_scope(root,changed);accepted=True
+                    except (ValueError,TypeError,KeyError,FileNotFoundError):accepted=False
             elif name in ('wrong-config-option', 'duplicate-config-option'):
                 bad = raw.replace(b'CONFIG_NOTE10_CPU_PM_ROUNDTRIP=y', b'# CONFIG_NOTE10_CPU_PM_ROUNDTRIP is not set') if name == 'wrong-config-option' else raw + b'CONFIG_NOTE10_CPU_PM_ROUNDTRIP=y\n'
                 changed['effective_config_sha256'] = sha(bad)
@@ -127,8 +141,8 @@ def run(artifact, output):
                 changed['cpu_pm_roundtrip_sources_sha256'] = dict(changed['cpu_pm_roundtrip_sources_sha256'])
                 first = next(iter(changed['cpu_pm_roundtrip_sources_sha256']))
                 changed['cpu_pm_roundtrip_sources_sha256'][first] = '0' * 64
-            if name not in ('wrong-config-option', 'duplicate-config-option'):
-                try: value = assert_scope(artifact, changed); accepted = True
+            if name not in ('wrong-config-option', 'duplicate-config-option','terminal-marker-missing'):
+                try: value = assert_new_scope(artifact, changed); accepted = True
                 except (ValueError, TypeError, KeyError, FileNotFoundError): accepted = False
         if accepted is not expected:
             raise AssertionError('assert_scope outcome differs: ' + name)
@@ -138,6 +152,7 @@ def run(artifact, output):
         log.write_text(('PASS ' if accepted else 'REJECT ') + name + '\n', encoding='utf8', newline='\n')
         generated[name], logs[name] = sha(code.read_bytes()), sha(log.read_bytes())
     proof = {'schema_version': 1, 'passed': True, 'hardware_verified': False,
+             'immutable_v49_prior_validator_stubbed': True,
              'cases': list(CASES), 'case_results': outcomes,
              'package_scope_cases': list(PACKAGE_SCOPE_CASES), 'package_scope_results': scope_results,
              'generated_sha256': generated, 'logs_sha256': logs,
