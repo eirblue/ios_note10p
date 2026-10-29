@@ -1,5 +1,13 @@
 # 작업 상태 (2026-10-30, Asia/Seoul)
 
+## 2026-10-30: v49 빌드 성공·실기기 PM 단계 실패
+
+- 소스 `7111e3d2d65675365b6784710c6a9a43c93ea3b3`의 [CI 40947448390](https://github.com/eirblue/ios_note10p/actions/runs/40947448390)가 통과했다. 실제 산출물의 26개 결속을 확인했다. [CPU_PM 시험 범위](device_test/CPU-PM-ROUNDTRIP.md).
+- 새 실기기 시험은 1회만 수행했다. 장치 PM 반환 단계에서 오류 `+1`을 관측해 중단했으며, CPU_PM enter/exit 쌍의 실행 기록은 없었다. 필수 42개 중 6개가 통과했고, PM 이후 관측이 확인되지 않은 36개는 실패로 유지했다.
+- 자동 TWRP 복귀와 동일 기기의 복귀 후 다섯 파티션 무결성을 확인했다. 설치 직전 배터리는 72%였으며, 무결성 확인 뒤 TWRP와 패널 raw 밝기를 10으로 확인했다. 같은 시험 기록은 재실행하지 않는다.
+- 이 결과는 CPU_PM 쌍 실행, 전체 하드웨어 복원, XNU 실행 또는 iOS 부팅을 증명하지 않는다. 다음 수정은 저장된 PM 실패 지점 분석에 한정한다.
+
+
 ## 2026-10-30: v48 EHLD 관측 잠금 경합 생략과 실기기 회귀 통과
 
 - 기본 비활성 옵션 v2에서 EHLD updater의 main/ctrl 및 dumper의 main lock을 한 번만 trylock한다. 경합 시 관측을 생략하며 이전 ring 값이 남을 수 있다. [수정 범위와 한계](device_test/EHLD-RUNNING-LOCK-AUDIT.md).
