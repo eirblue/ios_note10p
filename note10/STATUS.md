@@ -1,5 +1,14 @@
 # 작업 상태 (2026-10-30, Asia/Seoul)
 
+## 2026-10-30: v50 CPU_PM 세대 결속 수정 제안
+
+- 소스 `d37a8677fa4f1187dfd740c56ea9eb951f0df955`의 [CI 40972669928](https://github.com/eirblue/ios_note10p/actions/runs/40972669928)가 통과했고 실제 산출물 26개 결속을 확인했다.
+- 단일 v50 실기기 진단은 실패로 기록됐다. 필수 42개 평가 중 41개 통과, CPU_PM enter/exit 쌍 평가 1개는 collector 세대 결속 오류로 실패 유지.
+- 저장된 pair 기록의 transaction generation은 producer 계약상 완료된 quiescence generation의 선행값이다. v50 collector가 완료값을 strict decoder에 직접 전달해 거부했다.
+- v51에서는 collector만 uint32 완료값을 선행 세대로 변환한다. producer와 strict decoder는 유지한다. 성공/terminal 경로, wraparound, 잘못된 입력, 오래된 세대, ID·checksum 거부를 새 집중 시험으로 확인했고, 저장된 v50 로그는 오프라인에서만 재해석했다.
+- v50 실패 기록은 변경하지 않는다. v51의 실제 결과에는 새 CI 산출물, 새 계획과 단일 새 실기기 시험이 필요하다. 복귀·다섯 파티션 무결성 및 확인 뒤 raw 밝기 10은 통과했으며, XNU 실행과 전체 DMA 정지는 확인되지 않았다.
+- 상세 범위와 한계: [CPU-PM 왕복 진단](device_test/CPU-PM-ROUNDTRIP.md).
+
 ## 2026-10-30: v49 빌드 성공·실기기 PM 단계 실패
 
 - 소스 `7111e3d2d65675365b6784710c6a9a43c93ea3b3`의 [CI 40947448390](https://github.com/eirblue/ios_note10p/actions/runs/40947448390)가 통과했다. 실제 산출물의 26개 결속을 확인했다. [CPU_PM 시험 범위](device_test/CPU-PM-ROUNDTRIP.md).
