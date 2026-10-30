@@ -1,5 +1,13 @@
 # 작업 상태 (2026-10-30, Asia/Seoul)
 
+## 2026-10-30: v53 CPU_PM dispatch 순서 관측과 단일 실기기 진단 통과
+
+- **검증 소스:** `9c8410fac2fcca8cd7aeddb1ef79f5582c0a626f`; [CI 41010158045](https://github.com/eirblue/ios_note10p/actions/runs/41010158045) 통과. 실제 산출물의 manifest에서 26개 고유 결속 검증, 기존 직접 호출 36회와 중첩을 포함한 실제 호출 127회를 확인했다. trace native 22개·parser 24개·package 22개 증거가 결속됐다.
+- **실기기 결과:** 단일 사이클 1회에서 총 45개 평가 중 필수 44개가 모두 통과했다. 기존 원본 CPU_PM enter/exit 쌍 1회에서 ENTER와 명시적 EXIT 모두 승인된 block 1→2→3→4→5→6의 진입·반환 순서와 집계 6+6을 확인했다.
+- **복귀·무결성:** 정상 TWRP 자동 복귀, 다섯 파티션 해시 일치, 무결성 확인 뒤 밝기 raw 10을 확인했다. 설치 직전 배터리는 23%였다. 앞선 배터리 0% 중단 당시 설치·재부팅은 없었고, 해당 기록을 보존한 뒤 새 실기기 사이클은 1회만 수행했다.
+- 실패한 CI 41002376625·41005053470·41008544786과 v49·v50 실패 결과는 보존했으며 이전 journal을 재실행하지 않았다.
+- 관측은 notifier-block 경계의 식별·순서와 별도로 읽은 callback 필드의 승인 snapshot 일치에 한정된다. 해당 필드 읽기가 실제 간접 호출 명령의 target과 같았다는 증거, 전체 DMA 정지, XNU 실행 또는 iOS 부팅으로 확대하지 않는다. [관측 범위와 결과](device_test/CPU-PM-ROUNDTRIP.md).
+
 ## 2026-10-30: v52 CPU_PM notifier 집계와 단일 실기기 진단 통과
 
 - **검증 소스:** `0d7bf9ed8f1d7d51587123b8c8d9bb9817999dc6`; [CI 40996078899](https://github.com/eirblue/ios_note10p/actions/runs/40996078899) 통과. 실제 산출물의 26개 결속과 notifier 집계 기능을 확인했다.
