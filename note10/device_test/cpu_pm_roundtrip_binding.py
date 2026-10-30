@@ -1,5 +1,5 @@
 """Strict v49 CPU_PM roundtrip scope and proof binding."""
-import hashlib, json, os, re, shutil, tempfile
+import hashlib, json, re, shutil, tempfile
 from pathlib import Path
 from prepare_cpu_pm_roundtrip import KCONFIG, OPTION, SCHEMA_VERSION, TARGETS, prepare, snapshot, validate_transform
 
@@ -32,6 +32,14 @@ def _filemap(root,keys):
   out[n]=sha(p.read_bytes())
  return out
 def _files(root): return {p.relative_to(root).as_posix() for p in Path(root).rglob('*') if p.is_file() and not p.is_symlink()}
+
+def _legacy_helper_executable(root):
+ candidates=[Path(root)/name for name in ('legacy-roundtrip-helper','legacy-roundtrip-helper.exe')]
+ if any(p.is_symlink() or (p.exists() and not p.is_file()) for p in candidates):
+  raise ValueError('legacy CPU_PM helper executable missing/unsafe/ambiguous')
+ files=[p for p in candidates if p.is_file()]
+ if len(files)!=1:raise ValueError('legacy CPU_PM helper executable missing/unsafe/ambiguous')
+ return files[0]
 
 def _native_transcript_profiles(cases,transcripts):
  cases=tuple(cases)
@@ -218,7 +226,7 @@ def assert_scope(root,build):
    raise ValueError('CPU_PM notifier-count native outputs differ')
   legacy=counts_proof.get('legacy_helper_extraction_compile_only')
   legacy_root=counts_root/'legacy-helper-compile-only'
-  legacy_executable=legacy_root/('legacy-roundtrip-helper.exe' if os.name=='nt' else 'legacy-roundtrip-helper')
+  legacy_executable=_legacy_helper_executable(legacy_root)
   if (not isinstance(legacy,dict) or legacy.get('passed') is not True or
       legacy.get('compiled_only') is not True or legacy.get('executed') is not False or
       legacy_root.is_symlink() or not legacy_root.is_dir() or
