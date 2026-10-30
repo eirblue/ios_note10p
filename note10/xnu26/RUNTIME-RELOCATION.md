@@ -1,6 +1,6 @@
 # v54 native runtime relocation component (PC only)
 
-This planned component prepares a synthetic relocation using reusable freestanding C. It does not reserve RAM, write physical metadata, change Linux or phone boot images, or authorize an XNU transfer. The v53 physical result and all earlier records remain separate and unchanged. No v54 execution or CI success is claimed here.
+This component prepares a synthetic relocation using reusable freestanding C and has passed the focused PC checks reported below. It does not reserve RAM, write physical metadata, change Linux or phone boot images, or authorize an XNU transfer. The v53 physical result and all earlier records remain separate and unchanged.
 
 `runtime_relocation.c` contains the planner, canonical bounded ADT validation, 1152-byte boot_args v2 serializer and original 64-byte `N10XFER1` serializer. It has no I/O, heap allocation, mutable globals, MMIO or assembly. The host harness supplies its own file I/O. Caller inputs must identify valid readable buffers; output buffers must be writable and disjoint. Rejection preserves all output bytes. Physical range arithmetic, 40-bit limits, alignments, occupied/reserved conflicts and initial mapping coverage are checked before output publication.
 
@@ -25,6 +25,18 @@ C-produced boot_args bytes are padded to a page and used directly. C-produced tr
 
 `runtime_relocation_abi.json` contains only the saved real-header oracle's 13 numeric offsets, structure size, header digest and public source commit. The new proof builder compares fresh ARM64 own-layout object data, all 1152 C serializer bytes and the independent Python codec. When supplied locally, the preserved real-header object and copy-provenance record are read and checked without recompiling that old oracle. A separate fresh AArch64 object checks freestanding code generation, unresolved dependencies, writable globals and privileged instructions; it is not executed.
 
-The targeted workflow authors native boundary/mutation/canary checks and exactly one new actual-XNU/actual-adapter instruction case using the C-produced bundle and explicit C-derived virtual RAM base. The shared entry helper retains its original default and all RAM, fetch, segment, DAIF and pre-MMU checks. Old entry, VM, seed, PM and historical suites are not part of this workflow. Test output stays inside the project's private workspace and disjoint from input artifacts.
+The targeted workflow passed the native boundary/mutation/canary checks and exactly one new actual-XNU/actual-adapter instruction case using the C-produced bundle and explicit C-derived virtual RAM base. The shared entry helper retains its original default and all RAM, fetch, segment, DAIF and pre-MMU checks. Old entry, VM, seed, PM and historical suites were not replayed. Test output stays inside the project's private workspace and disjoint from input artifacts.
 
 Any later phone relocation would overwrite the old kernel-at-base data-only checkpoint. It requires new phase-specific evidence, new hashes, final gap/tail checks and separate authorization. The old `N10XNU1` data-stage result cannot certify a final handoff layout. Full DMA shutdown, physical ownership, phone XNU execution and iOS boot remain unverified by this PC component.
+
+## v54 verified PC result
+
+Source commit `78797cb2e37e97d99463217f5418740a5ed76141` passed [CI run 41050904567](https://github.com/eirblue/ios_note10p/actions/runs/41050904567), attempt 1. Review bound the actual artifact and its 13 source digests to that source. The result passed 48 native cases and six bundle mutation rejections. C-produced arguments and record bytes formed the four-buffer bundle directly, retaining the reviewed actual Mach-O and materialized kernel digests above.
+
+The successful CI result contains exactly one new actual-XNU/actual-adapter instruction-model case. It executed 24,839 instructions, stopped before the MMU-enable write and retained modeled DAIF `0x3c0`. All existing RAM, fetch, segment-endpoint and boundary checks remained active. This is execution inside a synthetic PC instruction model; no phone operations or phone XNU execution occurred.
+
+The ABI comparison covered all 13 offsets and all 1152 serialized bytes against fresh ARM64 own-layout object data and the independent codec. A separate successful local operator proof also compared the preserved real-header oracle object without recompiling it. Fresh freestanding code-generation checks found no unresolved dependencies, writable globals or privileged instructions. The CI object decoded 1,355 instructions; the local object decoded 1,215 with a different compiler. Those counts describe separate compiled objects, not the 24,839-instruction XNU/adapter model case.
+
+Earlier [CI run 41050510506](https://github.com/eirblue/ios_note10p/actions/runs/41050510506) remains failed. Its final dependency gate compared Capstone's module-reported `5.0.7` with the pinned distribution `5.0.9`. The correction checks installed distribution metadata before native or model work and keeps module versions as separate diagnostics. The distribution pins remain Unicorn `2.1.4` and Capstone `5.0.9`.
+
+The result certifies the bounded PC component and its source-bound synthetic bundle. It does not establish physical RAM ownership, GIC handoff, full DMA shutdown, phone XNU execution or iOS boot, and does not authorize device integration.

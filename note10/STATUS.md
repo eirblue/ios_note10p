@@ -1,10 +1,12 @@
 # 작업 상태 (2026-10-30, Asia/Seoul)
 
-## 2026-10-30: v54 네이티브 런타임 재배치 PC 구성요소 준비
+## 2026-10-30: v54 네이티브 런타임 재배치 PC 검증 통과
 
-- 재사용 가능한 freestanding C planner, boot_args v2 1152바이트 serializer와 원본 N10XFER1 64바이트 record를 준비한다. 실제 소스 빌드 XNU의 VA에서 32MiB 정렬 virtual RAM base를 계산하고, 호출자가 준 합성 물리 base에 256MiB 배치를 검증한다.
-- C가 만든 metadata를 직접 사용하는 4-buffer bundle, 저장된 ABI oracle을 재컴파일하지 않는 새 ARM64 object 비교, 실제 XNU·adapter의 MMU 활성화 직전까지 새 PC 모델 1건을 대상으로 한다. 기존 entry·VM·seed·PM 시험 묶음은 반복하지 않는다.
-- v54 시험·CI 성공은 아직 기록하지 않는다. 기기 시험은 0회 범위이며 커널/기기 통합·물리 metadata 쓰기·XNU jump는 포함하지 않는다. v53 성공과 이전 실패 이력은 그대로 보존한다. [구현 범위와 계획](xnu26/RUNTIME-RELOCATION.md).
+- **검증 소스:** `78797cb2e37e97d99463217f5418740a5ed76141`; [CI 41050904567](https://github.com/eirblue/ios_note10p/actions/runs/41050904567) 첫 번째 시도 통과. 결과의 13개 소스 해시를 결속했다. freestanding C planner·1152바이트 boot_args·64바이트 N10XFER1이 만든 metadata를 실제 4-buffer PC bundle에 직접 사용했다.
+- **PC 결과:** 새 native 48개와 bundle 변조 거부 6개가 통과했다. 실제 XNU·adapter의 새 모델 1건은 24,839개 명령을 거쳐 MMU 활성화 직전에 멈췄고 DAIF는 `0x3c0`이었다. 기존 entry·VM·seed·PM 시험 묶음은 반복하지 않았다.
+- **ABI·코드 생성:** 13개 offset과 전체 1152바이트를 비교했다. 로컬에서는 보존한 실제 헤더 oracle object와도 일치했으며 해당 oracle을 재컴파일하지 않았다. 새 ARM64 object에서 미해결 심볼·쓰기 가능한 전역 상태·특권 명령이 없음을 확인했다.
+- 실패한 [CI 41050510506](https://github.com/eirblue/ios_note10p/actions/runs/41050510506)은 보존했다. 모듈의 내부 버전과 배포 패키지 버전을 혼동한 gate를 설치 metadata 기반 조기 검사로 수정했고, 패키지 pin은 유지했다.
+- v54 기기 조작은 0회다. 합성 RAM·ADT의 PC 검증이며 물리 소유권·GIC 인계·전체 DMA 정지·폰 XNU 실행·iOS 부팅을 확인하지 않는다. v53 실기기 성공과 이전 이력은 보존한다. [검증 결과와 범위](xnu26/RUNTIME-RELOCATION.md).
 
 ## 2026-10-30: v53 CPU_PM dispatch 순서 관측과 단일 실기기 진단 통과
 
