@@ -1,12 +1,14 @@
 """Create a bounded, synthetic v46 view from a v49-only model input."""
 import hashlib
 import json
+import re
 import shutil
 from pathlib import Path
 
 DROP_DIRS = {
     'cpu-pm-roundtrip-prepared', 'cpu-pm-roundtrip-model',
     'cpu-pm-roundtrip-binding-model', 'cpu-pm-roundtrip-package-flow-model',
+    'cpu-pm-notifier-counts-model',
 }
 KEEP_DIRS = (
     'abox-pm-model',
@@ -134,6 +136,11 @@ KEEP_FILES = {
     'pm-source-model.json', 'public-baseline.config',
 }
 OPTION = b'CONFIG_NOTE10_CPU_PM_ROUNDTRIP'
+COUNTS_OPTION = b'CONFIG_NOTE10_CPU_PM_NOTIFIER_COUNTS'
+COUNTS_MARKER = b'N10CPNC1'
+COUNTS_FLAG = 'cpu_pm_notifier_counts'
+COUNTS_VERSION = 'cpu_pm_notifier_counts_version'
+COUNTS_PREFIX = 'cpu_pm_notifier_counts_'
 
 
 def sha(raw):
@@ -151,16 +158,6 @@ def prepare(source, destination):
     for item in source.iterdir():
         if item.is_symlink():
             raise ValueError('symlink in v48 compatibility root')
-    raw_config = (source / 'handoff.config').read_bytes()
-    lines = raw_config.splitlines()
-    entries = [line for line in lines if OPTION in line]
-    if entries not in ([], [OPTION + b'=y'], [OPTION + b'=n'], [b'# ' + OPTION + b' is not set']):
-        raise ValueError('v49 option config is duplicated or malformed')
-    if entries == [OPTION + b'=y']:
-        lines.remove(OPTION + b'=y')
-    elif entries in ([OPTION + b'=n'], [b'# ' + OPTION + b' is not set']):
-        lines.remove(entries[0])
-    config = b'\n'.join(lines) + (b'\n' if raw_config.endswith(b'\n') else b'')
     report_path = source / 'build-result.json'
     if report_path.is_symlink() or not report_path.is_file():
         raise ValueError('v47 build result missing or unsafe')
@@ -169,7 +166,79 @@ def prepare(source, destination):
         raise ValueError('legacy compatibility requires an explicitly synthetic outer build result')
     if report.get('cpu_pm_roundtrip') is not True or type(report.get('cpu_pm_roundtrip_version')) is not int or report['cpu_pm_roundtrip_version'] != 1:
         raise ValueError('v49 CPU-PM-roundtrip compatibility input must be explicitly enabled at schema version 1')
-    report = {key: value for key, value in report.items() if key != 'cpu_pm_roundtrip' and not key.startswith('cpu_pm_roundtrip_')}
+    counts_enabled = report.get(COUNTS_FLAG, False)
+    if type(counts_enabled) is not bool:
+        raise ValueError('v52 notifier-count compatibility flag must be bool or absent')
+    counts_version = report.get(COUNTS_VERSION)
+    count_metadata = {key for key in report if key.startswith(COUNTS_PREFIX)}
+    allowed_count_metadata = {COUNTS_VERSION}
+    if counts_enabled:
+        if (type(counts_version) is not int or counts_version != 1 or
+                report.get('cpu_pm_notifier_counts_model_sha256') is None or
+                not isinstance(report.get('cpu_pm_notifier_counts_sources_sha256'), dict)):
+            raise ValueError('enabled v52 notifier-count metadata is incomplete')
+        allowed_count_metadata.update({'cpu_pm_notifier_counts_model_sha256',
+                                       'cpu_pm_notifier_counts_sources_sha256'})
+        source_map = report['cpu_pm_notifier_counts_sources_sha256']
+        if (set(source_map) != {'prepare_cpu_pm_roundtrip.py', 'prepare_cpu_pm_roundtrip_flow_compat.py',
+                                'test_cpu_pm_roundtrip.py', 'decode_cpu_pm_roundtrip.py',
+                                'test_cpu_pm_roundtrip_decoder.py', 'test_cpu_pm_notifier_counts.py',
+                                'cpu_pm_roundtrip_binding.py', 'test_cpu_pm_roundtrip_binding.py',
+                                'test_cpu_pm_roundtrip_package_flow.py'} or
+                any(not isinstance(value, str) or re.fullmatch(r'[0-9a-f]{64}', value) is None
+                    for value in source_map.values()) or
+                not isinstance(report.get('cpu_pm_notifier_counts_model_sha256'), str) or
+                re.fullmatch(r'[0-9a-f]{64}', report['cpu_pm_notifier_counts_model_sha256']) is None):
+            raise ValueError('enabled v52 notifier-count source/model hash map is malformed')
+    elif counts_version is not None or count_metadata - allowed_count_metadata:
+        raise ValueError('disabled v52 notifier-count metadata is stray')
+    if count_metadata - allowed_count_metadata:
+        raise ValueError('v52 notifier-count metadata contains unknown fields')
+
+    raw_config = (source / 'handoff.config').read_bytes()
+    lines = raw_config.splitlines()
+    entries = [line for line in lines if OPTION in line]
+    if entries not in ([], [OPTION + b'=y'], [OPTION + b'=n'], [b'# ' + OPTION + b' is not set']):
+        raise ValueError('v49 option config is duplicated or malformed')
+    counts_entries = [line for line in lines if COUNTS_OPTION in line]
+    if counts_entries not in ([], [COUNTS_OPTION + b'=y'], [COUNTS_OPTION + b'=n'],
+                               [b'# ' + COUNTS_OPTION + b' is not set']):
+        raise ValueError('v52 notifier-count config is duplicated or malformed')
+    if entries != [OPTION + b'=y']:
+        raise ValueError('v49 compatibility requires the pair config to be explicitly enabled')
+    if counts_enabled:
+        if counts_entries != [COUNTS_OPTION + b'=y']:
+            raise ValueError('enabled v52 notifier-count config does not match metadata')
+        image_path = source / 'Image'
+        model_dir = source / 'cpu-pm-notifier-counts-model'
+        model_result = model_dir / 'result.json'
+        if (image_path.is_symlink() or not image_path.is_file() or COUNTS_MARKER not in image_path.read_bytes() or
+                model_dir.is_symlink() or not model_dir.is_dir() or
+                model_result.is_symlink() or not model_result.is_file() or
+                hashlib.sha256(model_result.read_bytes()).hexdigest() != report.get('cpu_pm_notifier_counts_model_sha256')):
+            raise ValueError('enabled v52 notifier-count Image/model proof binding differs')
+    else:
+        image_path = source / 'Image'
+        model_dir = source / 'cpu-pm-notifier-counts-model'
+        if counts_entries == [COUNTS_OPTION + b'=y']:
+            raise ValueError('notifier-count config is enabled without its feature flag')
+        if image_path.is_symlink() or not image_path.is_file() or COUNTS_MARKER in image_path.read_bytes():
+            raise ValueError('disabled v52 notifier-count Image marker is present')
+        if model_dir.exists() or model_dir.is_symlink():
+            raise ValueError('disabled v52 notifier-count model directory is stray')
+    if entries == [OPTION + b'=y']:
+        lines.remove(OPTION + b'=y')
+    elif entries in ([OPTION + b'=n'], [b'# ' + OPTION + b' is not set']):
+        lines.remove(entries[0])
+    if counts_entries in ([COUNTS_OPTION + b'=y'], [COUNTS_OPTION + b'=n'],
+                          [b'# ' + COUNTS_OPTION + b' is not set']):
+        lines.remove(counts_entries[0])
+    config = b'\n'.join(lines) + (b'\n' if raw_config.endswith(b'\n') else b'')
+    if OPTION in config or COUNTS_OPTION in config:
+        raise ValueError('legacy compatibility config retained a CPU-PM feature option')
+    report = {key: value for key, value in report.items()
+              if key != 'cpu_pm_roundtrip' and not key.startswith('cpu_pm_roundtrip_')
+              and key != COUNTS_FLAG and not key.startswith(COUNTS_PREFIX)}
     if not isinstance(report.get('ehld_lock_profile_result'), dict):
         raise ValueError('v46 EHLD profile evidence missing')
     from ehld_lock_profile import verify_config
@@ -226,6 +295,8 @@ def prepare(source, destination):
     image = bytearray(4096)
     image[56:60] = b'ARM\x64'
     markers = b''.join(RCU_MARKERS + EHLD_MARKERS)
+    if COUNTS_MARKER in markers:
+        raise ValueError('legacy compatibility Image unexpectedly contains notifier-count marker')
     image[128:128 + len(markers)] = markers
     image = bytes(image)
     (destination / 'Image').write_bytes(image)
