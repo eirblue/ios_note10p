@@ -16,7 +16,7 @@ def package_scope(metadata,allow_build_proof=False):
     if type(metadata.get(p.FLAG+'_version')) is not int or metadata[p.FLAG+'_version']!=1:raise ValueError('scratch version invalid')
     if metadata.get(p.FLAG+'_geometry_sha256')!=metadata.get('xnu_runtime_observation_geometry_sha256'):raise ValueError('scratch geometry differs')
     allowed={p.FLAG+'_version',p.FLAG+'_geometry_sha256'}
-    if allow_build_proof:allowed.update(p.FLAG+'_'+n for n in ('before_sha256','prepared_sha256','sources_sha256','model_sha256','package_sha256','stack_sha256','link_symbols','link_verified'))
+    if allow_build_proof:allowed.update(p.FLAG+'_'+n for n in ('before_sha256','prepared_sha256','sources_sha256','model_sha256','package_sha256','stack_sha256','stack_preflight_sha256','capture_model_sha256','link_symbols','link_verified'))
     if any(k.startswith(p.FLAG+'_') and k not in allowed for k in metadata):raise ValueError('unknown scratch proof field')
     return True
 

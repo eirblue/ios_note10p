@@ -445,6 +445,14 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
         report['effective_config_sha256']=hashlib.sha256(config.read_bytes()).hexdigest()
         if caps:run([*make,'drivers/misc/note10_handoff_caps.o'],'04-caps-object.log')
         if reserve:run([*make,'arch/arm64/mm/init.o'],'04-reservation-object.log')
+        if xnu_runtime_scratch:
+            from xnu_runtime_scratch_stack import preflight as preflight_stack,CAPTURE_MODEL
+            report['xnu_runtime_scratch_stack_preflight_sha256']=preflight_stack(objects,OUT,source,report,target_make_succeeded=True)
+            run([sys.executable,str(ROOT/'note10/device_test/test_xnu_runtime_scratch_stack.py'),
+                 '--recorded-command',str(objects/'arch/arm64/mm/.init.o.cmd'),
+                 '--provenance-scripts',str(source),
+                 '--output',str(OUT/CAPTURE_MODEL)],'04-xnu-runtime-scratch-capture-model.log')
+            report['xnu_runtime_scratch_capture_model_sha256']=hashlib.sha256((OUT/CAPTURE_MODEL/'result.json').read_bytes()).hexdigest()
         if pm_timer:
             targets=['kernel/power/suspend.o','drivers/usb/notify/usb_notify.o',
                      'drivers/usb/notify/usb_notifier.o','drivers/usb/dwc3/otg.o',
@@ -595,7 +603,7 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             report['xnu_runtime_scratch_link_symbols']=names
             report['xnu_runtime_scratch_link_verified']=True
             from xnu_runtime_scratch_stack import capture as capture_stack
-            report['xnu_runtime_scratch_stack_sha256']=capture_stack(objects,OUT,source,target,report)
+            report['xnu_runtime_scratch_stack_sha256']=capture_stack(objects,OUT,source,target,report,target_make_succeeded=True)
         if pm_timer:
             from pm_quiesce_binding import validate_model as validate_quiesce
             validation.call('pm_quiesce_binding',validate_quiesce,OUT,report)
