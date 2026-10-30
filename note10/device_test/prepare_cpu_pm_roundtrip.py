@@ -14,11 +14,30 @@ TARGETS = (
 KCONFIG = TARGETS[-1]
 OPTION = 'CONFIG_NOTE10_CPU_PM_ROUNDTRIP'
 SCHEMA_VERSION = 1
+COUNTS_OPTION = 'CONFIG_NOTE10_CPU_PM_NOTIFIER_COUNTS'
+COUNTS_SCHEMA_VERSION = 1
 BLOCK = (b'\nconfig NOTE10_CPU_PM_ROUNDTRIP\n'
          b'\tbool "Experimental single-CPU CPU PM roundtrip"\n'
          b'\tdepends on NOTE10_EHLD_RUNNING_LOCK_AUDIT\n'
          b'\tdepends on NOTE10_PM_IRQ_TEST && NOTE10_CPU_PM_PRECONDITIONS\n'
          b'\tdefault n\n')
+COUNTS_BLOCK = (b'\nconfig NOTE10_CPU_PM_NOTIFIER_COUNTS\n'
+                b'\tbool "Observe guarded CPU PM notifier counts"\n'
+                b'\tdepends on NOTE10_CPU_PM_ROUNDTRIP\n'
+                b'\tdefault n\n')
+
+COUNTS_STATE = b'''\n#ifdef CONFIG_NOTE10_CPU_PM_NOTIFIER_COUNTS
+/* Bounded scalar latch: no stored callback or stack pointers. */
+static unsigned int n10_cpu_pm_counts_owned;
+static unsigned int n10_cpu_pm_counts_armed;
+static unsigned int n10_cpu_pm_counts_claimed;
+static unsigned int n10_cpu_pm_counts_conflict;
+static unsigned int n10_cpu_pm_counts_enter_seen;
+static unsigned int n10_cpu_pm_counts_exit_seen;
+static int n10_cpu_pm_counts_enter_nr_calls;
+static int n10_cpu_pm_counts_exit_nr_calls;
+#endif
+'''
 
 
 def sha(raw):
@@ -253,13 +272,38 @@ chain_unlock:
     out->online_before = (unsigned int)cpumask_bits(cpu_online_mask)[0];
     out->online_count_before = num_online_cpus();
 
+#ifdef CONFIG_NOTE10_CPU_PM_NOTIFIER_COUNTS
+    n10_cpu_pm_counts_owned = 1;
+    n10_cpu_pm_counts_armed = 0;
+    n10_cpu_pm_counts_claimed = 0;
+    n10_cpu_pm_counts_conflict = 0;
+    n10_cpu_pm_counts_enter_seen = 0;
+    n10_cpu_pm_counts_exit_seen = 0;
+    n10_cpu_pm_counts_enter_nr_calls = 0;
+    n10_cpu_pm_counts_exit_nr_calls = 0;
+    n10_cpu_pm_counts_armed = CPU_PM_ENTER;
+#endif
     enter_calls++;
     enter_error = cpu_pm_enter();
+#ifdef CONFIG_NOTE10_CPU_PM_NOTIFIER_COUNTS
+    n10_cpu_pm_counts_armed = 0;
+    out->enter_nr_calls = n10_cpu_pm_counts_enter_nr_calls;
+    out->enter_nr_calls_seen = n10_cpu_pm_counts_enter_seen;
+#endif
     if (!enter_error) {
         out->enter_succeeded = 1;
         /* No probe or state check between the successful enter and its exit. */
+#ifdef CONFIG_NOTE10_CPU_PM_NOTIFIER_COUNTS
+        n10_cpu_pm_counts_claimed = 0;
+        n10_cpu_pm_counts_armed = CPU_PM_EXIT;
+#endif
         exit_calls++;
         exit_error = cpu_pm_exit();
+#ifdef CONFIG_NOTE10_CPU_PM_NOTIFIER_COUNTS
+        n10_cpu_pm_counts_armed = 0;
+        out->exit_nr_calls = n10_cpu_pm_counts_exit_nr_calls;
+        out->exit_nr_calls_seen = n10_cpu_pm_counts_exit_seen;
+#endif
         if (!exit_error) out->exit_succeeded = 1;
     }
     out->enter_calls = enter_calls;
@@ -308,10 +352,27 @@ done:
     out->passed = error == 0 && out->attempted == 1 && out->roster_valid == 1 &&
         out->pre_snapshot_valid == 1 && out->post_snapshot_valid == 1 &&
         out->enter_calls == 1 && out->exit_calls == 1;
+#ifdef CONFIG_NOTE10_CPU_PM_NOTIFIER_COUNTS
+    out->notifier_count_conflict = n10_cpu_pm_counts_conflict;
+    out->notifier_count_capture_valid = n10_cpu_pm_counts_enter_seen &&
+        (!out->exit_calls || n10_cpu_pm_counts_exit_seen) &&
+        !n10_cpu_pm_counts_conflict;
+    n10_cpu_pm_counts_armed = 0;
+    n10_cpu_pm_counts_owned = 0;
+    n10_cpu_pm_counts_claimed = 0;
+    n10_cpu_pm_counts_enter_seen = 0;
+    n10_cpu_pm_counts_exit_seen = 0;
+    n10_cpu_pm_counts_enter_nr_calls = 0;
+    n10_cpu_pm_counts_exit_nr_calls = 0;
+    n10_cpu_pm_counts_conflict = 0;
+#endif
     n10_cpu_pm_roundtrip_active = 0;
     return error;
 }
 static const char n10_cpu_pm_roundtrip_marker[] __used = "N10CPMRT1";
+#ifdef CONFIG_NOTE10_CPU_PM_NOTIFIER_COUNTS
+static const char n10_cpu_pm_notifier_counts_marker[] __used = "N10CPNC1";
+#endif
 #endif
 '''
 
@@ -325,6 +386,73 @@ def transform(files):
         raise ValueError('exact v49 source input set required')
     out = dict(files)
     cpu = out['kernel/cpu_pm.c']
+    notifier_anchor = b'static ATOMIC_NOTIFIER_HEAD(cpu_pm_notifier_chain);'
+    cpu = replace_unique(cpu, notifier_anchor,
+                         notifier_anchor + COUNTS_STATE,
+                         'notifier-count scalar latch')
+    notify_start, notify_end, notify_body = function(cpu, b'static int cpu_pm_notify(')
+    notify_body = replace_unique(
+        notify_body,
+        b'''{
+	int ret;
+''',
+        b'''{
+	int ret;
+#ifdef CONFIG_NOTE10_CPU_PM_NOTIFIER_COUNTS
+	int n10_capture_nr_calls = 0;
+	if (raw_smp_processor_id() == 0 && n10_cpu_pm_counts_owned &&
+	    n10_cpu_pm_counts_armed == event &&
+	    (event == CPU_PM_ENTER || event == CPU_PM_EXIT)) {
+		if (n10_cpu_pm_counts_claimed)
+			n10_cpu_pm_counts_conflict = 1;
+		else {
+			n10_cpu_pm_counts_claimed = 1;
+			n10_capture_nr_calls = 1;
+		}
+	}
+#endif
+''',
+        'notifier-count exact event latch')
+    notify_body = replace_unique(
+        notify_body,
+        b'''	rcu_irq_exit_irqson();
+
+	return notifier_to_errno(ret);''',
+        b'''	rcu_irq_exit_irqson();
+#ifdef CONFIG_NOTE10_CPU_PM_NOTIFIER_COUNTS
+	if (n10_capture_nr_calls) {
+		if (raw_smp_processor_id() != 0 || !nr_calls)
+			n10_cpu_pm_counts_conflict = 1;
+		else if (event == CPU_PM_ENTER) {
+			n10_cpu_pm_counts_enter_nr_calls = *nr_calls;
+			n10_cpu_pm_counts_enter_seen = 1;
+		} else {
+			n10_cpu_pm_counts_exit_nr_calls = *nr_calls;
+			n10_cpu_pm_counts_exit_seen = 1;
+		}
+	}
+#endif
+
+	return notifier_to_errno(ret);''',
+        'notifier-count after RCU capture')
+    cpu = cpu[:notify_start] + notify_body + cpu[notify_end:]
+
+    exit_start, exit_end, exit_body = function(cpu, b'int cpu_pm_exit(void)')
+    exit_body = replace_unique(
+        exit_body,
+        b'''	return cpu_pm_notify(CPU_PM_EXIT, -1, NULL);''',
+        b'''
+#ifdef CONFIG_NOTE10_CPU_PM_NOTIFIER_COUNTS
+	if (raw_smp_processor_id() == 0 && n10_cpu_pm_counts_owned &&
+	    n10_cpu_pm_counts_armed == CPU_PM_EXIT) {
+		int nr_calls = 0;
+		return cpu_pm_notify(CPU_PM_EXIT, -1, &nr_calls);
+	}
+#endif
+	return cpu_pm_notify(CPU_PM_EXIT, -1, NULL);''',
+        'armed exit local nr_calls')
+    cpu = cpu[:exit_start] + exit_body + cpu[exit_end:]
+
     anchor = b'#include "note10_pm_pre_chain.c"\n#endif'
     cpu = _replace_once(cpu, anchor, anchor[:-len(b'#endif')] + b'#endif\n' + CPU_PM_HELPER, 'CPU_PM guard include')
     out['kernel/cpu_pm.c'] = cpu
@@ -341,6 +469,11 @@ def transform(files):
               b' unsigned int caller_invoked, terminal_stage;\n'
               b' int terminal_outer_error, terminal_helper_error, terminal_probe_error;\n'
               b' int enter_error, exit_error, error;\n'
+              b'#ifdef CONFIG_NOTE10_CPU_PM_NOTIFIER_COUNTS\n'
+              b' unsigned int notifier_count_capture_valid, notifier_count_conflict;\n'
+              b' unsigned int enter_nr_calls_seen, exit_nr_calls_seen;\n'
+              b' int enter_nr_calls, exit_nr_calls;\n'
+              b'#endif\n'
               b'};\n')
     struct_anchor = b'struct n10_precond_sample { unsigned int generation, seen, bad, completed, count; int error; struct n10_precond_row row[N10_PRECOND_CAP]; };'
     header = replace_unique(header, struct_anchor, record + struct_anchor, 'precondition roundtrip record')
@@ -466,6 +599,24 @@ int n10_pre_roundtrip_terminal_read(struct n10_cpu_pm_roundtrip_sample *out,
 static const char n10_cpu_pm_terminal_marker[] __used = "N10CPT1";
 static struct n10_cpu_pm_roundtrip_sample n10_pre_terminal_report;
 static int n10_pre_emit(const char *, const char *, int, unsigned int *, int);
+#ifdef CONFIG_NOTE10_CPU_PM_NOTIFIER_COUNTS
+static const char n10_cpu_pm_counts_marker[] __used = "N10CPNC1";
+static int n10_pre_emit_counts(unsigned int copy,
+                               const struct n10_cpu_pm_roundtrip_sample *s,
+                               unsigned int generation, unsigned int *budget)
+{
+    char frame[512];
+    int n;
+    n=snprintf(frame,sizeof(frame),
+        "id=%s copy=%u generation=%u attempted=%u roster=%u roster_valid=%u enter_calls=%u exit_calls=%u enter_nr_calls=%d exit_nr_calls=%d enter_seen=%u exit_seen=%u capture_valid=%u conflict=%u enter_error=%d exit_error=%d error=%d caller_invoked=%u terminal_stage=%u terminal_helper_error=%d terminal_probe_error=%d terminal_outer_error=%d",
+        N10_RESERVE_BUILD_ID,copy,generation,s->attempted,s->roster_count,s->roster_valid,
+        s->enter_calls,s->exit_calls,s->enter_nr_calls,s->exit_nr_calls,
+        s->enter_nr_calls_seen,s->exit_nr_calls_seen,s->notifier_count_capture_valid,
+        s->notifier_count_conflict,s->enter_error,s->exit_error,s->error,s->caller_invoked,
+        s->terminal_stage,s->terminal_helper_error,s->terminal_probe_error,s->terminal_outer_error);
+    return n10_pre_emit("N10CPN1",frame,n,budget,1);
+}
+#endif
 static int n10_pre_emit_terminal(unsigned int completed, unsigned int generation, int probe_error)
 {
     char frame[512]; unsigned int copy,budget=0; int n,ret;
@@ -481,6 +632,9 @@ static int n10_pre_emit_terminal(unsigned int completed, unsigned int generation
     for (copy=0;copy<2;copy++) {
         n=snprintf(frame,sizeof(frame),"id=%s copy=%u generation=%u attempted=%u recorded=%u completed=%u caller_invoked=%u stage=%u outer_error=%d helper_error=%d probe_error=%d enter_calls=%u exit_calls=%u enter_error=%d exit_error=%d",N10_RESERVE_BUILD_ID,copy,generation,n10_pre_terminal_report.attempted,n10_pre_terminal_report.terminal_recorded,n10_pre_terminal_report.terminal_completed,n10_pre_terminal_report.caller_invoked,n10_pre_terminal_report.terminal_stage,n10_pre_terminal_report.terminal_outer_error,n10_pre_terminal_report.terminal_helper_error,n10_pre_terminal_report.terminal_probe_error,n10_pre_terminal_report.enter_calls,n10_pre_terminal_report.exit_calls,n10_pre_terminal_report.enter_error,n10_pre_terminal_report.exit_error);
         ret=n10_pre_emit("N10CPT1",frame,n,&budget,1); if(ret)return ret;
+#ifdef CONFIG_NOTE10_CPU_PM_NOTIFIER_COUNTS
+        ret=n10_pre_emit_counts(copy,&n10_pre_terminal_report,generation,&budget); if(ret)return ret;
+#endif
     }
     return 0;
 }
@@ -494,6 +648,9 @@ static int n10_pre_emit_terminal(unsigned int completed, unsigned int generation
     report_anchor = b'            for (i=0;i<3;i++) {'
     report = (b'''#ifdef CONFIG_NOTE10_CPU_PM_ROUNDTRIP
             PRE_ROW("N10CPR1","id=%s copy=%u generation=%u attempted=%u roster=%u roster_valid=%u pre=%u post=%u enter_calls=%u exit_calls=%u enter_ok=%u exit_ok=%u daif=%u timer=%u gic=%u ehld_before=%u ehld_after=%u context=%u passed=%u error=%d enter_error=%d exit_error=%d",N10_RESERVE_BUILD_ID,copy,generation,n10_pre_report.roundtrip.attempted,n10_pre_report.roundtrip.roster_count,n10_pre_report.roundtrip.roster_valid,n10_pre_report.roundtrip.pre_snapshot_valid,n10_pre_report.roundtrip.post_snapshot_valid,n10_pre_report.roundtrip.enter_calls,n10_pre_report.roundtrip.exit_calls,n10_pre_report.roundtrip.enter_succeeded,n10_pre_report.roundtrip.exit_succeeded,n10_pre_report.roundtrip.daif_stable,n10_pre_report.roundtrip.timer_stable,n10_pre_report.roundtrip.gic_stable,n10_pre_report.roundtrip.ehld_before,n10_pre_report.roundtrip.ehld_after,n10_pre_report.roundtrip.context_stable,n10_pre_report.roundtrip.passed,n10_pre_report.roundtrip.error,n10_pre_report.roundtrip.enter_error,n10_pre_report.roundtrip.exit_error);
+#ifdef CONFIG_NOTE10_CPU_PM_NOTIFIER_COUNTS
+            PRE_ROW("N10CPN1","id=%s copy=%u generation=%u attempted=%u roster=%u roster_valid=%u enter_calls=%u exit_calls=%u enter_nr_calls=%d exit_nr_calls=%d enter_seen=%u exit_seen=%u capture_valid=%u conflict=%u enter_error=%d exit_error=%d error=%d caller_invoked=%u terminal_stage=%u terminal_helper_error=%d terminal_probe_error=%d terminal_outer_error=%d",N10_RESERVE_BUILD_ID,copy,generation,n10_pre_report.roundtrip.attempted,n10_pre_report.roundtrip.roster_count,n10_pre_report.roundtrip.roster_valid,n10_pre_report.roundtrip.enter_calls,n10_pre_report.roundtrip.exit_calls,n10_pre_report.roundtrip.enter_nr_calls,n10_pre_report.roundtrip.exit_nr_calls,n10_pre_report.roundtrip.enter_nr_calls_seen,n10_pre_report.roundtrip.exit_nr_calls_seen,n10_pre_report.roundtrip.notifier_count_capture_valid,n10_pre_report.roundtrip.notifier_count_conflict,n10_pre_report.roundtrip.enter_error,n10_pre_report.roundtrip.exit_error,n10_pre_report.roundtrip.error,n10_pre_report.roundtrip.caller_invoked,n10_pre_report.roundtrip.terminal_stage,n10_pre_report.roundtrip.terminal_helper_error,n10_pre_report.roundtrip.terminal_probe_error,n10_pre_report.roundtrip.terminal_outer_error);
+#endif
 #endif
             for (i=0;i<3;i++) {''').replace(b'\n+', b'\n')
     probe = _replace_once(probe, report_anchor, report, 'roundtrip producer row')
@@ -521,9 +678,10 @@ static int n10_pre_emit_terminal(unsigned int completed, unsigned int generation
     out[probe_name] = probe
 
     config = out[KCONFIG]
-    if b'config NOTE10_CPU_PM_ROUNDTRIP' in config or BLOCK.strip() in config:
+    if (b'config NOTE10_CPU_PM_ROUNDTRIP' in config or BLOCK.strip() in config or
+            b'config NOTE10_CPU_PM_NOTIFIER_COUNTS' in config or COUNTS_BLOCK.strip() in config):
         raise ValueError('CPU PM roundtrip Kconfig symbol already exists')
-    out[KCONFIG] = config + BLOCK
+    out[KCONFIG] = config + BLOCK + COUNTS_BLOCK
     return out
 
 

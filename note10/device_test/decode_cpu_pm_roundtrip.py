@@ -17,6 +17,88 @@ TERMINAL_SCHEMA = ('id','copy','generation','attempted','recorded','completed',
                    'enter_calls','exit_calls','enter_error','exit_error')
 SIGNED_TERMINAL = {'outer_error','helper_error','probe_error','enter_error','exit_error'}
 
+COUNTS_TAG = 'N10CPN1'
+COUNTS_SCHEMA = ('id','copy','generation','attempted','roster','roster_valid',
+                 'enter_calls','exit_calls','enter_nr_calls','exit_nr_calls',
+                 'enter_seen','exit_seen','capture_valid','conflict','enter_error',
+                 'exit_error','error','caller_invoked','terminal_stage',
+                 'terminal_helper_error','terminal_probe_error','terminal_outer_error')
+SIGNED_COUNTS = {'enter_error','exit_error','error','terminal_helper_error',
+                 'terminal_probe_error','terminal_outer_error'}
+
+
+def decode_counts(text, identity, generation, pair=None, terminal=None):
+    """Decode the versioned count companion independently from the CPR row."""
+    if not isinstance(identity, str) or not re.fullmatch(r'[0-9a-f]{32}', identity):
+        raise ValueError('invalid CPU_PM count identity')
+    if type(generation) is not int or not 0 < generation <= 0xffffffff:
+        raise ValueError('invalid completed CPU_PM generation')
+    for line in text.splitlines():
+        for match in re.finditer(COUNTS_TAG, line):
+            if not re.match(COUNTS_TAG + r' ', line[match.start():]):
+                raise ValueError('malformed CPU_PM count prefix')
+    rows=[]
+    for match in re.finditer(COUNTS_TAG + r' ([^\r\n]*)', text):
+        framed=re.fullmatch(r'(.*?) checksum=([0-9a-f]{8})',match.group(1))
+        if not framed: raise ValueError('malformed CPU_PM count frame')
+        body,digest=framed.groups()
+        pairs=[part.split('=',1) for part in body.split(' ')]
+        if any(len(item)!=2 for item in pairs) or tuple(item[0] for item in pairs)!=COUNTS_SCHEMA:
+            raise ValueError('CPU_PM count schema differs')
+        if pairs[0][1]!=identity or checksum(body.encode('ascii'))!=int(digest,16):
+            raise ValueError('CPU_PM count identity/checksum differs')
+        row={'id':identity}
+        for key,value in pairs[1:]:
+            pattern=r'(?:0|-?[1-9][0-9]*)' if key in SIGNED_COUNTS else r'(?:0|[1-9][0-9]*)'
+            if not re.fullmatch(pattern,value): raise ValueError('CPU_PM count numeric syntax')
+            number=int(value)
+            if key in SIGNED_COUNTS:
+                if not -(1<<31)<=number<(1<<31): raise ValueError('CPU_PM count signed width')
+            elif number>0xffffffff: raise ValueError('CPU_PM count integer width')
+            row[key]=number
+        if row['copy'] not in (0,1): raise ValueError('CPU_PM count copy index')
+        rows.append(row)
+    if len(rows)!=2 or [row['copy'] for row in rows]!=[0,1]:
+        raise ValueError('CPU_PM count frame cardinality')
+    first,second=rows
+    if {k:v for k,v in first.items() if k!='copy'}!={k:v for k,v in second.items() if k!='copy'}:
+        raise ValueError('CPU_PM count copies differ')
+    if first['generation']!=generation: raise ValueError('CPU_PM count generation differs')
+    bounded={
+        'attempted':(0,1),'roster':(0,6),'roster_valid':(0,1),
+        'enter_calls':(0,1),'exit_calls':(0,1),'enter_nr_calls':(0,6),
+        'exit_nr_calls':(0,6),'enter_seen':(0,1),'exit_seen':(0,1),
+        'capture_valid':(0,1),'conflict':(0,1),'caller_invoked':(0,1),
+        'terminal_stage':(0,5),
+    }
+    if any(not lo<=first[key]<=hi for key,(lo,hi) in bounded.items()):
+        raise ValueError('CPU_PM count value outside field domain')
+    if pair is not None:
+        pair_map={'generation':'generation','attempted':'attempted','roster':'roster_count',
+                  'enter_calls':'enter_calls','exit_calls':'exit_calls'}
+        if any(first[companion]!=pair[pair_key] for companion,pair_key in pair_map.items()):
+            raise ValueError('CPU_PM companion differs from successful CPR frame')
+        if first['roster_valid']!=1:raise ValueError('CPU_PM companion roster validity differs from CPR')
+        if terminal is not None: raise ValueError('CPU_PM pair and terminal state conflict')
+    if terminal is not None:
+        for key in ('generation','attempted','caller_invoked','stage','helper_error',
+                    'probe_error','outer_error','enter_calls','exit_calls','enter_error','exit_error'):
+            companion_key={'stage':'terminal_stage','helper_error':'terminal_helper_error',
+                           'probe_error':'terminal_probe_error','outer_error':'terminal_outer_error'}.get(key,key)
+            if first[companion_key]!=terminal[key]:
+                raise ValueError('CPU_PM companion differs from terminal frame')
+    success=(pair is not None and first['attempted']==1 and first['roster']==6 and
+             first['roster_valid']==1 and first['enter_calls']==1 and first['exit_calls']==1 and
+             first['enter_nr_calls']==6 and first['exit_nr_calls']==6 and
+             first['enter_seen']==1 and first['exit_seen']==1 and first['capture_valid']==1 and
+             first['conflict']==0 and all(first[k]==0 for k in ('enter_error','exit_error','error',
+                 'terminal_helper_error','terminal_probe_error','terminal_outer_error')) and
+             first['caller_invoked']==1 and first['terminal_stage']==0)
+    return {'generation':generation,'companion_valid':True,'counts_passed':bool(success),
+            'enter_nr_calls':first['enter_nr_calls'],'exit_nr_calls':first['exit_nr_calls'],
+            'roster_count':first['roster'],'conflict':bool(first['conflict']),
+            'terminal':terminal is not None}
+
 
 def decode(text, identity, generation):
     if not isinstance(identity, str) or not re.fullmatch(r'[0-9a-f]{32}', identity):

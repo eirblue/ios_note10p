@@ -115,9 +115,24 @@ def sha(raw):
 
 def extract_helper(raw):
     start = raw.find(b'static unsigned int n10_cpu_pm_roundtrip_active;')
-    end = raw.find(b'\n#endif', start)
-    if start < 0 or end < 0:
+    guard = raw.rfind(b'#ifdef CONFIG_NOTE10_CPU_PM_ROUNDTRIP', 0, start)
+    if start < 0 or guard < 0:
         raise ValueError('roundtrip helper block missing')
+    depth = 0
+    end = None
+    cursor = guard
+    for line in raw[guard:].splitlines(keepends=True):
+        directive = line.lstrip()
+        if directive.startswith((b'#if ', b'#ifdef ', b'#ifndef ')):
+            depth += 1
+        elif directive.startswith(b'#endif'):
+            depth -= 1
+            if depth == 0:
+                end = cursor
+                break
+        cursor += len(line)
+    if end is None or end <= start:
+        raise ValueError('roundtrip helper preprocessor guard is unterminated')
     block = raw[start:end]
     # Keep the actual production function bodies, excluding only the feature guard.
     if block.count(b'int n10_cpu_pm_roundtrip(') != 1 or block.count(b'static int n10_cpu_pm_roundtrip_context(') != 1:

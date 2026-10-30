@@ -9,7 +9,7 @@ import precheck_window_access as precheck
 import collect_reservation as collector_module
 from collect_reservation import collect as collect_reservation
 from stage_phase2 import verify_packages
-from cpu_pm_roundtrip_binding import PACKAGE_SOURCES
+from cpu_pm_roundtrip_binding import PACKAGE_SOURCES,counts_package_scope
 from ehld_lock_binding import MARKERS as LOCK_MARKERS,validate as validate_lock
 from cpu_pm_roundtrip_binding import validate as validate_running_lock,package_scope as running_package_scope
 from prepare_cpu_pm_roundtrip_flow_compat import prepare as prepare_running_lock_off
@@ -29,16 +29,16 @@ COLLECTOR_CASES=('on','off','invalid-pair')
 PRECHECK_CASES=('on','off','invalid-pair')
 def sha(raw):return hashlib.sha256(raw).hexdigest()
 
-def model_image(identity,roundtrip=False):
+def model_image(identity,roundtrip=False,counts=False):
  if not isinstance(identity,str) or len(identity)!=32 or any(c not in '0123456789abcdef' for c in identity):raise ValueError('invalid fixture reservation identity')
  image=bytearray(4096);image[56:60]=b'ARM\x64'
- markers=(b'N10CPMRT1' if roundtrip else b'')+b''.join(CALLBACKS+PRECONDITIONS+BRANCH)+PMU_FAILURE+GIC_PRIORITY+b''.join(PMU_STATE+PMU_CONTROL+FPSIMD+RCU_MARKERS+LOCK_MARKERS)+b'N10RET1N10MEM1N10XNU1N10QUI1N10CPU2N10PMS1N10PMT1N10TMR1N10BND1N10TRY1'+identity.encode()
+ markers=(b'N10CPMRT1' if roundtrip else b'')+(b'N10CPNC1' if counts else b'')+b''.join(CALLBACKS+PRECONDITIONS+BRANCH)+PMU_FAILURE+GIC_PRIORITY+b''.join(PMU_STATE+PMU_CONTROL+FPSIMD+RCU_MARKERS+LOCK_MARKERS)+b'N10RET1N10MEM1N10XNU1N10QUI1N10CPU2N10PMS1N10PMT1N10TMR1N10BND1N10TRY1'+identity.encode()
  image[128:128+len(markers)]=markers
  banner=b'Linux version 4.14.113-note10-reserve-pc fixture-v49'
  image[1024:1024+len(banner)]=banner
  return bytes(image)
 
-def make_fixture(root,artifact,mode,scope_expected):
+def make_fixture(root,artifact,mode,scope_expected,counts_expected=False):
  from prepare_ehld_irqsave_flow_compat import KEEP_FILES,MODEL_PREFIXES
  artifact=Path(artifact);art=root/'artifact'
  if artifact.is_symlink() or not artifact.is_dir() or art.exists() or art.is_symlink():raise ValueError('unsafe package-flow fixture paths')
@@ -60,9 +60,19 @@ def make_fixture(root,artifact,mode,scope_expected):
  if not isinstance(identity,str) or len(identity)!=32:raise ValueError('invalid fixture reservation identity')
  build['reservation_evidence_id']=identity
  build.setdefault('reservation_evidence_version',2)
- image=model_image(identity,scope_expected);(art/'Image').write_bytes(image)
+ image=model_image(identity,scope_expected,counts_expected);(art/'Image').write_bytes(image)
  initramfs=b'v47-offline-initramfs-fixture';(art/'initramfs.cpio').write_bytes(initramfs)
  build['image_sha256']=sha(image);build['image_size']=len(image);build['initramfs_cpio_sha256']=sha(initramfs)
+ build['cpu_pm_notifier_counts']=counts_expected
+ build['cpu_pm_notifier_counts_version']=1 if counts_expected else None
+ if counts_expected:
+  from cpu_pm_roundtrip_binding import SOURCES as count_sources
+  build['cpu_pm_notifier_counts_sources_sha256']={n:sha((Path(__file__).resolve().parent/n).read_bytes()) for n in count_sources}
+  build['cpu_pm_notifier_counts_model_sha256']='0'*64
+  config=(art/'handoff.config').read_text(encoding='ascii').splitlines()
+  option='CONFIG_NOTE10_CPU_PM_NOTIFIER_COUNTS'
+  config=[line for line in config if option not in line]+[option+'=y']
+  (art/'handoff.config').write_text('\n'.join(config)+'\n',encoding='ascii',newline='\n')
  build['effective_config_sha256']=sha((art/'handoff.config').read_bytes())
  build['build_passed']=True;build['early_xnu_reservation']=True;build['reservation_evidence_version']=2
  (art/'build-result.json').write_text(json.dumps(build),encoding='utf8')
@@ -153,10 +163,10 @@ def _patch_legacy_gates(stack):
 def _header(kernel_sha):
  return {'header_version':1,'page_size':2048,'recovery_dtbo_size':0,'second_size':0,'kernel_addr':0,'tags_addr':0,'arm64_text_offset':0,'ramdisk_addr':0,'ramdisk_file_offset':2048,'ramdisk_size':0,'second_file_offset':32,'cmdline':'fixture','name':'fixture','os_version':'1.0.0','security_patch_month':'2026-01','kernel_sha256':kernel_sha}
 
-def _prepare_packages(root,source,mode,identity,scope_expected):
- case_root=root/mode;case_root.mkdir();art,backup,twrp,mk,parts=make_fixture(case_root,source,mode,scope_expected)
- image=model_image(identity,scope_expected);(art/'Image').write_bytes(image)
- build=json.loads((art/'build-result.json').read_text(encoding='utf8'));build.update(reservation_evidence_id=identity,reservation_evidence_version=2,image_sha256=sha(image),image_size=len(image),build_passed=True,early_xnu_reservation=True)
+def _prepare_packages(root,source,mode,identity,scope_expected,counts_expected=False):
+ case_root=root/mode;case_root.mkdir();art,backup,twrp,mk,parts=make_fixture(case_root,source,mode,scope_expected,counts_expected)
+ image=model_image(identity,scope_expected,counts_expected);(art/'Image').write_bytes(image)
+ build=json.loads((art/'build-result.json').read_text(encoding='utf8'));build.update(reservation_evidence_id=identity,reservation_evidence_version=2,image_sha256=sha(image),image_size=len(image),build_passed=True,early_xnu_reservation=True,cpu_pm_notifier_counts=counts_expected,cpu_pm_notifier_counts_version=1 if counts_expected else None)
  (art/'build-result.json').write_text(json.dumps(build,indent=2)+'\n',encoding='utf8',newline='\n')
  header=_header(build['image_sha256']);prototype=case_root/(mode+'.img');packages_out=case_root/'packages'
  def fake_mk(cmd,**kwargs):
@@ -170,18 +180,26 @@ def _prepare_packages(root,source,mode,identity,scope_expected):
   built=packages.build(backup,prototype,packages_out);records=verify_packages(packages_out)
   diag=next(record for record in records if record['mode']=='diagnostic');rollback=next(record for record in records if record['mode']=='rollback')
   metadata=json.loads((packages_out/'package-result.json').read_text(encoding='utf8'))
-  if report.get('cpu_pm_roundtrip') is not scope_expected or built.get('cpu_pm_roundtrip') is not scope_expected or running_package_scope(metadata) is not scope_expected:
+  if (report.get('cpu_pm_roundtrip') is not scope_expected or built.get('cpu_pm_roundtrip') is not scope_expected or
+      running_package_scope(metadata) is not scope_expected or counts_package_scope(metadata) is not counts_expected):
    raise AssertionError('production prep/package CPU-PM-roundtrip scope differs')
   if diag.get('cpu_pm_roundtrip') is not scope_expected or diag.get('cpu_pm_roundtrip_version')!=(1 if scope_expected else None):
    raise AssertionError('diagnostic package CPU-PM-roundtrip scope differs')
   if rollback.get('cpu_pm_roundtrip') is not False or rollback.get('cpu_pm_roundtrip_version') is not None:
    raise AssertionError('rollback package unexpectedly carries CPU-PM-roundtrip scope')
+  if diag.get('cpu_pm_notifier_counts') is not counts_expected or diag.get('cpu_pm_notifier_counts_version')!=(1 if counts_expected else None):
+   raise AssertionError('diagnostic package CPU-PM notifier-count scope differs')
+  if rollback.get('cpu_pm_notifier_counts') is not False or rollback.get('cpu_pm_notifier_counts_version') is not None:
+   raise AssertionError('rollback package unexpectedly carries notifier-count scope')
   (packages_out/'ram-stage-fixture.json').write_text(json.dumps({'ram_directory':'/tmp/note10-reserve-deadbeef'}),encoding='utf8',newline='\n')
   precheck_result=run_precheck_flow(art,backup,packages_out,header,parts)
-  if precheck_result.get('ready_for_manual_access_test') is not True or precheck_result.get('partition_writes') is not False or precheck_result.get('cpu_pm_roundtrip_scope_verified') is not scope_expected:
+  if (precheck_result.get('ready_for_manual_access_test') is not True or precheck_result.get('partition_writes') is not False or
+      precheck_result.get('cpu_pm_roundtrip_scope_verified') is not scope_expected or
+      precheck_result.get('cpu_pm_notifier_counts_scope_verified') is not counts_expected):
    raise AssertionError('production precheck scope/result differs')
   collector_result=run_collector_flow(art,backup,packages_out,case_root)
-  if len(collector_result.get('evaluation_items',{}))!=(40 if scope_expected else 39) or collector_result.get('cpu_pm_roundtrip_scope_verified') is not scope_expected:
+  expected_rows=41 if counts_expected else (40 if scope_expected else 39)
+  if len(collector_result.get('evaluation_items',{}))!=expected_rows or collector_result.get('cpu_pm_roundtrip_scope_verified') is not scope_expected or collector_result.get('cpu_pm_notifier_counts_scope_verified') is not counts_expected:
    raise AssertionError('production collector scope/39-row contract differs')
  return {'art':art,'backup':backup,'twrp':twrp,'mkboot':mk,'parts':parts,'prototype':prototype,'packages':packages_out,'header':header,
          'report':report,'built':built,'precheck':precheck_result,'collector':collector_result}
@@ -307,8 +325,88 @@ def terminal_collector_cases():
   {'case':'terminal-failure','accepted':True,'pair_observed':False,'terminal_failure_observed':True,'required':True,'status':'failed'},
   {'case':'success-failure-conflict','accepted':False}]
 
+def notifier_count_collector_cases():
+ from test_cpu_pm_roundtrip_decoder import input_vector,terminal_input_vector
+ from decode_cpu_pm_roundtrip import COUNTS_SCHEMA
+ from decode_reservation import checksum
+ identity='a'*32;completed=10;generation=9
+ success_text=json.loads(input_vector('valid-pair'))['text']
+ def counts(nr=6,include_second=True):
+  frames=[]
+  for copy in (0,1) if include_second else (0,):
+   values={'id':identity,'copy':copy,'generation':generation,'attempted':1,'roster':6,
+    'roster_valid':1,'enter_calls':1,'exit_calls':1,'enter_nr_calls':nr,'exit_nr_calls':6,
+    'enter_seen':1,'exit_seen':1,'capture_valid':1,'conflict':0,'enter_error':0,
+    'exit_error':0,'error':0,'caller_invoked':1,'terminal_stage':0,
+    'terminal_helper_error':0,'terminal_probe_error':0,'terminal_outer_error':0}
+   body=' '.join(k+'='+str(values[k]) for k in COUNTS_SCHEMA)
+   frames.append('N10CPN1 '+body+' checksum=%08x\n'%checksum(body.encode('ascii')))
+  return ''.join(frames)
+ passed=collector_module.decode_cpu_pm_roundtrip_observation(success_text+'\n'+counts(),identity,completed,True)
+ if passed['evaluation_item']['status']!='passed' or passed['counts_evaluation_item']['status']!='passed':
+  raise AssertionError('valid paired CPU PM plus notifier-count companion rejected')
+ partial=collector_module.decode_cpu_pm_roundtrip_observation(success_text+'\n'+counts(include_second=False),identity,completed,True)
+ mismatch=collector_module.decode_cpu_pm_roundtrip_observation(success_text+'\n'+counts(nr=5),identity,completed,True)
+ terminal_text=json.loads(terminal_input_vector('stage2-admission'))['text']
+ terminal=collector_module.decode_cpu_pm_roundtrip_observation(terminal_text,identity,completed,True)
+ if (partial['pair_observed'] is not True or partial['evaluation_item']['status']!='passed' or
+     partial['counts_evaluation_item']['status']!='failed' or mismatch['evaluation_item']['status']!='passed' or
+     mismatch['counts_evaluation_item']['status']!='failed'):
+  raise AssertionError('notifier-count failure changed independent CPR pass result')
+ if terminal['evaluation_item']['status']!='failed' or terminal['counts_evaluation_item']['status']!='failed':
+  raise AssertionError('terminal CPU_PM state satisfied notifier-count row')
+ no_feature=collector_module.decode_cpu_pm_roundtrip_observation(success_text,identity,completed,False)
+ if no_feature.get('counts_evaluation_item') is not None:raise AssertionError('old package gained notifier-count row')
+ return ['counts-on-pass','counts-on-partial-fails-only-count-row','counts-on-mismatch-fails-only-count-row','counts-on-terminal-fails-both','counts-off-retains-old-row-set'],[
+  {'case':'counts-on-pass','pair':'passed','counts':'passed'},
+  {'case':'counts-on-partial-fails-only-count-row','pair':'passed','counts':'failed'},
+  {'case':'counts-on-mismatch-fails-only-count-row','pair':'passed','counts':'failed'},
+  {'case':'counts-on-terminal-fails-both','pair':'failed','counts':'failed'},
+  {'case':'counts-off-retains-old-row-set','counts_row':False}]
+
+def notifier_count_scope_cases():
+ prior={'ehld_lock_audit':True,'ehld_lock_audit_version':1,'ehld_irqsave_audit':True,
+  'ehld_irqsave_audit_version':1,'ehld_running_lock_audit':True,
+  'ehld_running_lock_audit_version':2,'auto_return_diagnostic':True}
+ on={'cpu_pm_roundtrip':True,'cpu_pm_roundtrip_version':1,**prior,
+     'cpu_pm_notifier_counts':True,'cpu_pm_notifier_counts_version':1}
+ off={'cpu_pm_roundtrip':True,'cpu_pm_roundtrip_version':1,**prior,
+      'cpu_pm_notifier_counts':False,'cpu_pm_notifier_counts_version':None}
+ if counts_package_scope(on) is not True or counts_package_scope(off) is not False:
+  raise AssertionError('CPU PM notifier-count package scope ON/OFF differs')
+ try:counts_package_scope({'cpu_pm_notifier_counts':True,'cpu_pm_notifier_counts_version':1})
+ except (ValueError,TypeError,KeyError):pass
+ else:raise AssertionError('CPU PM notifier-count scope accepted without roundtrip')
+ for name,metadata,allow in (
+  ('counts-scope-on-unknown-rejected',{**on,'cpu_pm_notifier_counts_unreviewed':True},False),
+  ('counts-scope-package-build-proof-rejected',{**on,'cpu_pm_notifier_counts_model_sha256':'0'*64},False),
+  ('counts-scope-off-stray-proof-rejected',{**off,'cpu_pm_notifier_counts_model_sha256':'0'*64},False)):
+  try:counts_package_scope(metadata,allow_build_proof=allow)
+  except (ValueError,TypeError,KeyError):continue
+  raise AssertionError('CPU PM notifier-count scope accepted stray metadata: '+name)
+ build={**on,'cpu_pm_notifier_counts_sources_sha256':{'source.py':'0'*64},
+        'cpu_pm_notifier_counts_model_sha256':'0'*64}
+ if counts_package_scope(build,allow_build_proof=True) is not True:
+  raise AssertionError('CPU PM notifier-count build proof metadata rejected')
+ return ['counts-scope-on','counts-scope-off','counts-requires-roundtrip',
+  'counts-scope-on-unknown-rejected','counts-scope-package-build-proof-rejected',
+  'counts-scope-off-stray-proof-rejected','counts-scope-build-proof-allowed'],[
+  {'case':'counts-scope-on','accepted':True,'scope':True},
+  {'case':'counts-scope-off','accepted':True,'scope':False},
+  {'case':'counts-requires-roundtrip','accepted':False},
+  {'case':'counts-scope-on-unknown-rejected','accepted':False},
+  {'case':'counts-scope-package-build-proof-rejected','accepted':False},
+  {'case':'counts-scope-off-stray-proof-rejected','accepted':False},
+  {'case':'counts-scope-build-proof-allowed','accepted':True,'scope':True}]
+
 def main():
- p=argparse.ArgumentParser();p.add_argument('--artifact',required=True,type=Path);p.add_argument('--output',required=True,type=Path);a=p.parse_args();source_dir=Path(__file__).resolve().parent
+ p=argparse.ArgumentParser();p.add_argument('--artifact',type=Path);p.add_argument('--output',type=Path);p.add_argument('--counts-only',action='store_true');a=p.parse_args()
+ if a.counts_only:
+  cases,results=notifier_count_collector_cases();scopes,scope_results=notifier_count_scope_cases()
+  print(json.dumps({'passed':True,'cases':cases,'results':results,'scope_cases':scopes,'scope_results':scope_results}))
+  return
+ if a.artifact is None or a.output is None:raise ValueError('--artifact and --output are required')
+ source_dir=Path(__file__).resolve().parent
  measured={n:sha((source_dir/n).read_bytes()) for n in PACKAGE_SOURCES}
  initial=json.loads((a.artifact/'build-result.json').read_text(encoding='utf8'))
  if initial.get('cpu_pm_roundtrip_package_sources_sha256')!=measured:raise ValueError('v49 package source map differs')
@@ -318,8 +416,16 @@ def main():
   root=Path(td);on=_prepare_packages(root,a.artifact,'on','c'*32,True)
   off_base=root/'v46-compat';prepare_running_lock_off(a.artifact,off_base)
   off=_prepare_packages(root,off_base,'off','d'*32,False)
+  counts_on=_prepare_packages(root,a.artifact,'counts-on','f'*32,True,True)
   if {k:v for k,v in on['collector']['evaluation_items'].items() if k!='cpu0_cpu_pm_enter_exit_pair'}!=off['collector']['evaluation_items']:
    raise AssertionError('the original collector evaluation rows changed with v49 scope')
+  unchanged={k:v for k,v in counts_on['collector']['evaluation_items'].items()
+             if k not in ('cpu0_cpu_pm_enter_exit_pair','cpu0_cpu_pm_notifier_counts')}
+  if unchanged!=off['collector']['evaluation_items']:
+   raise AssertionError('new counts scope changed legacy collector rows')
+  if (counts_on['collector']['evaluation_items'].get('cpu0_cpu_pm_enter_exit_pair',{}).get('required') is not True or
+      counts_on['collector']['evaluation_items'].get('cpu0_cpu_pm_notifier_counts')!={'required':True,'status':'failed'}):
+   raise AssertionError('counts feature rows do not remain independently required')
   invalid=_invalid_prepare(root,a.artifact,'e'*32)
   pre_rejected,collector_rejected=_mismatched_pair(root,off)
   package_results=[{'case':CASES[0],'accepted':True,'scope':True,'diagnostic':True,'rollback':False},
@@ -331,12 +437,23 @@ def main():
                    {'case':'off','accepted':True,'evaluation_items':39,'scope':False},
                    {'case':'invalid-pair','accepted':False}]
   terminal_cases,terminal_results=terminal_collector_cases()
+  counts_cases,counts_results=notifier_count_collector_cases()
+  count_scope_cases,count_scope_results=notifier_count_scope_cases()
+  counts_package_cases=['counts-on-build-prepare-package-precheck-stage-collector']
+  counts_package_results=[{'case':counts_package_cases[0],'build_flag':True,
+      'prototype_marker':True,'diagnostic_scope':True,'rollback_scope':False,
+      'precheck_scope':True,'collector_scope':True,'collector_rows':41,
+      'legacy_rows_equal_off':True,'missing_log_counts_row':'failed'}]
   collector_entry_result=terminal_collect_entry_case(on,root/'collector-terminal-entry')
   collector_reservation_result=terminal_reservation_entry_case(on,root/'collector-reservation-terminal-entry')
   items=on['collector']['evaluation_items'];items_off=off['collector']['evaluation_items']
-  result={'schema_version':1,'passed':True,'hardware_verified':False,'synthetic_fixture':True,'legacy_gate_stubs':['ehld_lock','ehld_irqsave','ehld_running_lock'],'cases':list(CASES),'case_results':package_results,
+  result={'schema_version':1,'passed':True,'hardware_verified':False,'synthetic_fixture':True,'legacy_gate_stubs':['ehld_lock','ehld_irqsave','ehld_running_lock'],'cpu_pm_validator_scope_only_stub':True,'cases':list(CASES),'case_results':package_results,
           'precheck_cases':['on','off','invalid-pair'],'precheck_cases_result':precheck_cases,'collector_cases':['on','off','invalid-pair'],'collector_cases_result':collector_cases,'collector_evaluation_items':items,'collector_evaluation_items_off':items_off,
-          'terminal_collector_cases':terminal_cases,'terminal_collector_results':terminal_results,'collector_entry_failure_case':collector_entry_result,
+          'terminal_collector_cases':terminal_cases,'terminal_collector_results':terminal_results,
+          'notifier_count_collector_cases':counts_cases,'notifier_count_collector_results':counts_results,
+          'notifier_count_scope_cases':count_scope_cases,'notifier_count_scope_results':count_scope_results,
+          'notifier_count_package_flow_cases':counts_package_cases,'notifier_count_package_flow_results':counts_package_results,
+          'collector_entry_failure_case':collector_entry_result,
           'collector_reservation_failure_case':collector_reservation_result,
           'collector_evaluation_items_sha256':sha(json.dumps(items,sort_keys=True,separators=(',',':')).encode()),
           'harness_sha256':sha(Path(__file__).read_bytes()),'package_sources_sha256':measured}

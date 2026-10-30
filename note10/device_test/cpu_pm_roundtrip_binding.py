@@ -1,10 +1,10 @@
 """Strict v49 CPU_PM roundtrip scope and proof binding."""
-import hashlib, json, re, shutil, tempfile
+import hashlib, json, os, re, shutil, tempfile
 from pathlib import Path
 from prepare_cpu_pm_roundtrip import KCONFIG, OPTION, SCHEMA_VERSION, TARGETS, prepare, snapshot, validate_transform
 
 HERE=Path(__file__).resolve().parent
-SOURCES=('prepare_cpu_pm_roundtrip.py','prepare_cpu_pm_roundtrip_flow_compat.py','test_cpu_pm_roundtrip.py','decode_cpu_pm_roundtrip.py','test_cpu_pm_roundtrip_decoder.py','cpu_pm_roundtrip_binding.py','test_cpu_pm_roundtrip_binding.py','test_cpu_pm_roundtrip_package_flow.py')
+SOURCES=('prepare_cpu_pm_roundtrip.py','prepare_cpu_pm_roundtrip_flow_compat.py','test_cpu_pm_roundtrip.py','decode_cpu_pm_roundtrip.py','test_cpu_pm_roundtrip_decoder.py','test_cpu_pm_notifier_counts.py','cpu_pm_roundtrip_binding.py','test_cpu_pm_roundtrip_binding.py','test_cpu_pm_roundtrip_package_flow.py')
 PACKAGE_SOURCES=('prepare_linux_boot.py','build_boot_test_packages.py','precheck_window_access.py','stage_phase2.py','collect_reservation.py','decode_cpu_pm_roundtrip.py')
 PREFIX='cpu_pm_roundtrip_'
 MARKER=b'N10CPMRT1'
@@ -14,7 +14,12 @@ NATIVE='cpu-pm-roundtrip-model'
 BINDING='cpu-pm-roundtrip-binding-model'
 PACKAGE='cpu-pm-roundtrip-package-flow-model'
 DECODER='cpu-pm-roundtrip-decoder-model'
+COUNTS='cpu-pm-notifier-counts-model'
 FIELDS=('cpu_pm_roundtrip_version','cpu_pm_roundtrip_baseline_sha256','cpu_pm_roundtrip_prepared_sha256','cpu_pm_roundtrip_snapshot_sha256','cpu_pm_roundtrip_sources_sha256','cpu_pm_roundtrip_package_sources_sha256','cpu_pm_roundtrip_model_sha256','cpu_pm_roundtrip_decoder_sha256','cpu_pm_roundtrip_binding_sha256','cpu_pm_roundtrip_package_flow_sha256')
+COUNTS_FLAG='cpu_pm_notifier_counts'
+COUNTS_VERSION='cpu_pm_notifier_counts_version'
+COUNTS_PREFIX='cpu_pm_notifier_counts_'
+COUNTS_MARKER=b'N10CPNC1'
 
 def sha(raw): return hashlib.sha256(raw).hexdigest()
 def _hash(v): return isinstance(v,str) and re.fullmatch(r'[0-9a-f]{64}',v) is not None
@@ -113,6 +118,22 @@ def package_scope(metadata):
  if stray: raise ValueError('CPU_PM evidence is stray while disabled')
  return False
 
+def counts_package_scope(metadata,allow_build_proof=False):
+ if not isinstance(metadata,dict):raise ValueError('CPU_PM notifier-count metadata must be an object')
+ if type(allow_build_proof) is not bool:raise ValueError('allow_build_proof must be bool')
+ roundtrip=package_scope(metadata)
+ flag=metadata.get(COUNTS_FLAG,False)
+ if type(flag) is not bool:raise ValueError('CPU_PM notifier-count flag must be bool or absent')
+ version=metadata.get(COUNTS_VERSION)
+ if flag:
+  if not roundtrip or type(version) is not int or version!=1:raise ValueError('CPU_PM notifier counts require versioned roundtrip scope')
+ elif version is not None:raise ValueError('CPU_PM notifier-count version is stray while disabled')
+ allowed={COUNTS_FLAG,COUNTS_VERSION}
+ if flag and allow_build_proof:allowed.update({'cpu_pm_notifier_counts_sources_sha256','cpu_pm_notifier_counts_model_sha256'})
+ stray=[k for k in metadata if k.startswith(COUNTS_PREFIX) and k not in allowed]
+ if stray:raise ValueError('CPU_PM notifier-count proof is stray while disabled')
+ return flag
+
 def assert_scope(root,build):
  root=Path(root)
  if not isinstance(build,dict): raise ValueError('CPU_PM build metadata must be an object')
@@ -128,14 +149,22 @@ def assert_scope(root,build):
   deps=(b'CONFIG_NOTE10_EHLD_RUNNING_LOCK_AUDIT=y',b'CONFIG_NOTE10_EHLD_IRQSAVE_AUDIT=y',b'CONFIG_NOTE10_EHLD_LOCK_AUDIT=y',b'CONFIG_NOTE10_CPU_PM_PRECONDITIONS=y',b'CONFIG_NOTE10_PM_IRQ_TEST=y')
   if any(x not in lines for x in deps): raise ValueError('CPU_PM Kconfig dependencies missing')
  elif entries not in ([],[opt+b'=n'],[b'# '+opt+b' is not set']): raise ValueError('CPU_PM disabled Kconfig malformed')
+ counts_enabled=counts_package_scope(build,allow_build_proof=True)
+ counts_opt=b'CONFIG_NOTE10_CPU_PM_NOTIFIER_COUNTS'
+ counts_entries=[line for line in lines if counts_opt in line]
+ if counts_enabled:
+  if not enabled or counts_entries != [counts_opt+b'=y']:raise ValueError('CPU_PM notifier-count Kconfig scope differs')
+ elif counts_entries not in ([],[counts_opt+b'=n'],[b'# '+counts_opt+b' is not set']):
+  raise ValueError('CPU_PM notifier-count disabled Kconfig malformed')
  if 'effective_config_sha256' in build and build['effective_config_sha256']!=sha(cfg): raise ValueError('effective config hash differs')
  if enabled and 'effective_config_sha256' not in build: raise ValueError('effective config hash missing')
  image_path=root/'Image'
  if image_path.is_symlink() or not image_path.is_file():raise ValueError('CPU_PM Image missing/unsafe')
  image=image_path.read_bytes()
  if (MARKER in image) is not enabled or (TERMINAL_MARKER in image) is not enabled: raise ValueError('CPU_PM Image marker/scope differs')
- dirs=(PREPARED,NATIVE,DECODER,BINDING,PACKAGE)
- straydirs=[p.name for p in root.iterdir() if p.name.startswith('cpu-pm-roundtrip-') and p.name not in dirs]
+ if (COUNTS_MARKER in image) is not counts_enabled:raise ValueError('CPU_PM notifier-count Image marker/scope differs')
+ dirs=(PREPARED,NATIVE,DECODER,BINDING,PACKAGE,COUNTS)
+ straydirs=[p.name for p in root.iterdir() if p.name.startswith(('cpu-pm-roundtrip-','cpu-pm-notifier-counts-')) and p.name not in dirs]
  if not enabled:
   allowed={'cpu_pm_roundtrip','cpu_pm_roundtrip_version'}
   if any(k.startswith(PREFIX) and k not in allowed for k in build): raise ValueError('disabled CPU_PM proof metadata')
@@ -143,6 +172,10 @@ def assert_scope(root,build):
   if any((root/d).exists() for d in dirs) or straydirs: raise ValueError('disabled CPU_PM evidence exists')
   return False
  if type(build.get('cpu_pm_roundtrip_version')) is not int or build['cpu_pm_roundtrip_version']!=SCHEMA_VERSION: raise ValueError('CPU_PM schema version invalid')
+ if counts_enabled and (type(build.get(COUNTS_VERSION)) is not int or build[COUNTS_VERSION]!=1):raise ValueError('CPU_PM notifier-count schema version invalid')
+ if counts_enabled:
+  if not _map(build.get('cpu_pm_notifier_counts_sources_sha256'),SOURCES) or build['cpu_pm_notifier_counts_sources_sha256']!=_filemap(HERE,SOURCES):raise ValueError('CPU_PM notifier-count source map differs')
+  if not _hash(build.get('cpu_pm_notifier_counts_model_sha256')):raise ValueError('CPU_PM notifier-count model hash missing')
  if build.get('ehld_running_lock_audit') is not True or build.get('auto_return_diagnostic') is not True: raise ValueError('CPU_PM requires EHLD running-lock and automatic recovery')
  # Full previous schema and native evidence are chained before accepting the new source.
  from ehld_running_lock_binding import validate as validate_prior
@@ -162,6 +195,39 @@ def assert_scope(root,build):
  validate_transform({n:(base/n).read_bytes() for n in TARGETS},{n:(prepared/n).read_bytes() for n in TARGETS})
  if not _map(build.get('cpu_pm_roundtrip_sources_sha256'),SOURCES) or build['cpu_pm_roundtrip_sources_sha256']!=_filemap(HERE,SOURCES): raise ValueError('v49 source map differs')
  if not _map(build.get('cpu_pm_roundtrip_package_sources_sha256'),PACKAGE_SOURCES) or build['cpu_pm_roundtrip_package_sources_sha256']!=_filemap(HERE,PACKAGE_SOURCES): raise ValueError('v49 package source map differs')
+ counts_root=root/COUNTS
+ if not counts_enabled and counts_root.exists():raise ValueError('disabled CPU_PM notifier-count proof exists')
+ if counts_enabled:
+  if counts_root.is_symlink() or not counts_root.is_dir():raise ValueError('CPU_PM notifier-count proof directory missing/unsafe')
+  counts_raw=(counts_root/'result.json').read_bytes()
+  if sha(counts_raw)!=build.get('cpu_pm_notifier_counts_model_sha256'):raise ValueError('CPU_PM notifier-count proof hash differs')
+  counts_proof=json.loads(counts_raw)
+  from test_cpu_pm_notifier_counts import CASES as COUNTS_CASES
+  if (counts_proof.get('passed') is not True or counts_proof.get('synthetic_only') is not True or
+      counts_proof.get('hardware_verified') is not False or counts_proof.get('cases')!=list(COUNTS_CASES) or
+      counts_proof.get('old_native_and_decoder_models_reexecuted') is not False or
+      counts_proof.get('count_marker_present') is not True or
+      counts_proof.get('existing_pair_and_terminal_markers_preserved') is not True or
+      counts_proof.get('transform_source_sha256')!=_filemap(prepared,TARGETS) or
+      counts_proof.get('baseline_target_sha256')!={n:baseline[n] for n in TARGETS}):
+   raise ValueError('CPU_PM notifier-count proof contract/source binding differs')
+  if (not _hash(counts_proof.get('generated_sha256')) or
+      counts_proof['generated_sha256']!=sha((counts_root/'notifier-counts-native.c').read_bytes()) or
+      counts_proof.get('compile_log_sha256')!=sha((counts_root/'compile.log').read_bytes()) or
+      counts_proof.get('native_log_sha256')!=sha((counts_root/'native.log').read_bytes())):
+   raise ValueError('CPU_PM notifier-count native outputs differ')
+  legacy=counts_proof.get('legacy_helper_extraction_compile_only')
+  legacy_root=counts_root/'legacy-helper-compile-only'
+  legacy_executable=legacy_root/('legacy-roundtrip-helper.exe' if os.name=='nt' else 'legacy-roundtrip-helper')
+  if (not isinstance(legacy,dict) or legacy.get('passed') is not True or
+      legacy.get('compiled_only') is not True or legacy.get('executed') is not False or
+      legacy_root.is_symlink() or not legacy_root.is_dir() or
+      legacy.get('generated_sha256')!=sha((legacy_root/'legacy-roundtrip-helper.c').read_bytes()) or
+      legacy.get('compile_log_sha256')!=sha((legacy_root/'compile.log').read_bytes()) or
+      legacy.get('executable_sha256')!=sha(legacy_executable.read_bytes()) or
+      not _hash(legacy.get('extracted_helper_sha256')) or
+      json.loads((legacy_root/'result.json').read_text(encoding='utf8'))!=legacy):
+   raise ValueError('legacy CPU_PM helper extraction compile-only proof differs')
  native=root/NATIVE
  if native.is_symlink() or not native.is_dir(): raise ValueError('v49 native proof missing')
  nraw=(native/'result.json').read_bytes()
@@ -301,6 +367,7 @@ def validate(root,build,require_package_flow=True):
   proof=json.loads(raw)
   if (proof.get('passed') is not True or proof.get('hardware_verified') is not False or
       proof.get('synthetic_fixture') is not True or proof.get('legacy_gate_stubs')!=['ehld_lock','ehld_irqsave','ehld_running_lock'] or
+      proof.get('cpu_pm_validator_scope_only_stub') is not True or
       proof.get('harness_sha256')!=sha((HERE/'test_cpu_pm_roundtrip_package_flow.py').read_bytes()) or
       proof.get('package_sources_sha256')!=_filemap(HERE,PACKAGE_SOURCES)):
    raise ValueError('v49 package-flow proof contract differs')
@@ -311,6 +378,33 @@ def validate(root,build,require_package_flow=True):
       {'case':'terminal-failure','accepted':True,'pair_observed':False,'terminal_failure_observed':True,'required':True,'status':'failed'},
       {'case':'success-failure-conflict','accepted':False}]:
    raise ValueError('v50 terminal collector outcomes differ')
+  if proof.get('notifier_count_collector_cases')!=[
+      'counts-on-pass','counts-on-partial-fails-only-count-row',
+      'counts-on-mismatch-fails-only-count-row','counts-on-terminal-fails-both',
+      'counts-off-retains-old-row-set'] or proof.get('notifier_count_collector_results')!=[
+      {'case':'counts-on-pass','pair':'passed','counts':'passed'},
+      {'case':'counts-on-partial-fails-only-count-row','pair':'passed','counts':'failed'},
+      {'case':'counts-on-mismatch-fails-only-count-row','pair':'passed','counts':'failed'},
+      {'case':'counts-on-terminal-fails-both','pair':'failed','counts':'failed'},
+      {'case':'counts-off-retains-old-row-set','counts_row':False}]:
+   raise ValueError('CPU_PM notifier-count collector outcomes differ')
+  if proof.get('notifier_count_scope_cases')!=['counts-scope-on','counts-scope-off','counts-requires-roundtrip',
+      'counts-scope-on-unknown-rejected','counts-scope-package-build-proof-rejected',
+      'counts-scope-off-stray-proof-rejected','counts-scope-build-proof-allowed'] or proof.get('notifier_count_scope_results')!=[
+      {'case':'counts-scope-on','accepted':True,'scope':True},
+      {'case':'counts-scope-off','accepted':True,'scope':False},
+      {'case':'counts-requires-roundtrip','accepted':False},
+      {'case':'counts-scope-on-unknown-rejected','accepted':False},
+      {'case':'counts-scope-package-build-proof-rejected','accepted':False},
+      {'case':'counts-scope-off-stray-proof-rejected','accepted':False},
+      {'case':'counts-scope-build-proof-allowed','accepted':True,'scope':True}]:
+   raise ValueError('CPU_PM notifier-count package scopes differ')
+  if proof.get('notifier_count_package_flow_cases')!=['counts-on-build-prepare-package-precheck-stage-collector'] or proof.get('notifier_count_package_flow_results')!=[
+      {'case':'counts-on-build-prepare-package-precheck-stage-collector','build_flag':True,
+       'prototype_marker':True,'diagnostic_scope':True,'rollback_scope':False,
+       'precheck_scope':True,'collector_scope':True,'collector_rows':41,
+       'legacy_rows_equal_off':True,'missing_log_counts_row':'failed'}]:
+   raise ValueError('CPU_PM notifier-count package-flow scopes differ')
   if proof.get('collector_entry_failure_case')!={
       'case':'collect-entry-pmt-error-prq-failure-valid-terminal','accepted':True,
       'terminal_preserved':True,'pair_passed':False,'strict_pm_preconditions_rejected':True,

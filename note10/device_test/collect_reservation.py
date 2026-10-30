@@ -44,19 +44,32 @@ def cpu_pm_transaction_predecessor(completed):
     return completed-1 if completed>1 else 0xffffffff
 
 
-def decode_cpu_pm_roundtrip_observation(text,identity,completed):
-    from decode_cpu_pm_roundtrip import decode as decode_roundtrip,decode_terminal as decode_roundtrip_terminal
+def decode_cpu_pm_roundtrip_observation(text,identity,completed,counts_enabled=False):
+    from decode_cpu_pm_roundtrip import decode as decode_roundtrip,decode_terminal as decode_roundtrip_terminal,decode_counts
     generation=cpu_pm_transaction_predecessor(completed)
+    counts_result=None
     if 'N10CPT' in text:
         if 'N10CPR' in text:raise ValueError('CPU_PM success and terminal failure frames conflict')
         terminal=decode_roundtrip_terminal(text,identity,generation)
         if terminal.get('pair_passed') is not False:raise ValueError('CPU_PM terminal cannot satisfy strict pair')
         observed=False;value={'terminal_failure':terminal}
+        if counts_enabled:
+            try:counts_result=decode_counts(text,identity,generation,terminal=terminal)
+            except ValueError as error:counts_result={'counts_passed':False,'decode_error':str(error)}
     else:
-        value={'pair':decode_roundtrip(text,identity,generation)}
+        pair=decode_roundtrip(text,identity,generation)
+        value={'pair':pair}
         observed=True
+        if counts_enabled:
+            try:counts_result=decode_counts(text,identity,generation,pair=pair)
+            except ValueError as error:counts_result={'counts_passed':False,'decode_error':str(error)}
+    counts_item=None
+    if counts_enabled:
+        counts_item={'required':True,'status':'passed' if counts_result and counts_result.get('counts_passed') is True else 'failed'}
+        value['notifier_counts']=counts_result
     return {'pair_observed':observed,'terminal_failure_observed':not observed,
             'pair_passed':observed,'evaluation_item':{'required':True,'status':'passed' if observed else 'failed'},
+            'counts_evaluation_item':counts_item,
             'observation':value}
 
 
@@ -163,6 +176,8 @@ def collect(packages,kernel_build,adb):
     from cpu_pm_roundtrip_binding import validate as validate_roundtrip,package_scope as roundtrip_package_scope
     cpu_pm_roundtrip=validate_roundtrip(kernel_build,result,require_package_flow=False)
     if type(cpu_pm_roundtrip) is not bool or roundtrip_package_scope(result) is not cpu_pm_roundtrip:raise ValueError('CPU PM roundtrip build validation scope differs')
+    from cpu_pm_roundtrip_binding import counts_package_scope
+    cpu_pm_notifier_counts=counts_package_scope(result,allow_build_proof=True)
     from pm_irq_binding import assert_scope as assert_irq_scope,validate_model as validate_irq
     pm_irq=assert_irq_scope(kernel_build,result)
     if pm_irq:validate_irq(kernel_build,result)
@@ -225,6 +240,7 @@ def collect(packages,kernel_build,adb):
     if irqsave_package_scope(paired) is not ehld_irqsave:raise ValueError('EHLD irqsave package/kernel scope differs')
     if running_lock_package_scope(paired) is not ehld_running_lock:raise ValueError('EHLD running-lock package/kernel scope differs')
     if roundtrip_package_scope(paired) is not cpu_pm_roundtrip:raise ValueError('CPU PM roundtrip package/kernel scope differs')
+    if counts_package_scope(paired) is not cpu_pm_notifier_counts:raise ValueError('CPU PM notifier-count package/kernel scope differs')
     if bool(paired.get('pm_irq_diagnostic'))!=pm_irq or (pm_irq and paired.get('pm_irq_evidence_version')!=1):raise ValueError('CPU0 IRQ package/kernel scope differs')
     if bool(paired.get('abox_pmu_audit_diagnostic'))!=abox_pmu_audit or (abox_pmu_audit and paired.get('abox_pmu_audit_evidence_version')!=3):raise ValueError('PMU package/kernel scope differs')
     if xnu_stage and (paired.get('xnu_payload_sha256')!=result.get('xnu_payload_sha256') or
@@ -270,7 +286,10 @@ def collect(packages,kernel_build,adb):
             'ehld_running_lock_audit_scope_verified':ehld_running_lock,
             'cpu_pm_roundtrip_scope_verified':cpu_pm_roundtrip,
             'cpu_pm_roundtrip_required':cpu_pm_roundtrip,
+            'cpu_pm_notifier_counts_scope_verified':cpu_pm_notifier_counts,
+            'cpu_pm_notifier_counts_required':cpu_pm_notifier_counts,
             'previous_boot_cpu0_cpu_pm_enter_exit_pair_observed':False,
+            'previous_boot_cpu0_cpu_pm_notifier_counts_observed':False,
             'previous_boot_cpu0_cpu_pm_terminal_failure_observed':False,
             'previous_boot_reservation_observed':False,
             'window_access_required':access,'previous_boot_window_access_observed':False,
@@ -347,7 +366,10 @@ def collect(packages,kernel_build,adb):
                     report['pm_quiesce_observation']=quiesce
                 terminal_generation=pm_completed_generation({'quiescence':quiesce})
                 cpu_pm_roundtrip_observation=decode_cpu_pm_roundtrip_observation(
-                    text,evidence_id,terminal_generation)
+                    text,evidence_id,terminal_generation,cpu_pm_notifier_counts)
+                report['previous_boot_cpu0_cpu_pm_notifier_counts_observed']=bool(
+                    cpu_pm_roundtrip_observation.get('counts_evaluation_item') and
+                    cpu_pm_roundtrip_observation['counts_evaluation_item']['status']=='passed')
                 if cpu_pm_roundtrip_observation['terminal_failure_observed'] is not True:
                     raise ValueError('CPU_PM terminal frame was not preserved as failure')
                 observation['cpu_pm_roundtrip_terminal_failure']=cpu_pm_roundtrip_observation['observation']['terminal_failure']
@@ -465,7 +487,11 @@ def collect(packages,kernel_build,adb):
             if cpu_pm_roundtrip:
                 if not cpu_pm_terminal_preserved:
                     generation=pm_completed_generation(observation['pm_timer'])
-                    cpu_pm_roundtrip_observation=decode_cpu_pm_roundtrip_observation(text,evidence_id,generation)
+                    cpu_pm_roundtrip_observation=decode_cpu_pm_roundtrip_observation(
+                        text,evidence_id,generation,cpu_pm_notifier_counts)
+                    report['previous_boot_cpu0_cpu_pm_notifier_counts_observed']=bool(
+                        cpu_pm_roundtrip_observation.get('counts_evaluation_item') and
+                        cpu_pm_roundtrip_observation['counts_evaluation_item']['status']=='passed')
                 if not cpu_pm_roundtrip_observation['terminal_failure_observed']:
                     observation['cpu_pm_roundtrip']=cpu_pm_roundtrip_observation['observation']['pair']
                     report['previous_boot_cpu0_cpu_pm_enter_exit_pair_observed']=True
@@ -512,7 +538,8 @@ def collect(packages,kernel_build,adb):
                                  (not pm_callbacks or all(report['previous_boot_'+key+'_observed'] for key in ('cpu_pm_notifier_inventory', 'generic_irq_callback_inventory', 'clocksource_callback_inventory', 'clockevent_callback_inventory'))) and
                                  (not pm_preconditions or all(report['previous_boot_'+key+'_observed'] for key in ('cpu0_pm_software_context','cpu0_gic_restore_inputs'))) and
                                  (not pm_branch or all(report['previous_boot_'+key+'_observed'] for key in ('cpu0_pmu_branch_audit','cpu0_gic_priority_footprint'))) and
-                                 (not cpu_pm_roundtrip or report['previous_boot_cpu0_cpu_pm_enter_exit_pair_observed']))
+                                 (not cpu_pm_roundtrip or report['previous_boot_cpu0_cpu_pm_enter_exit_pair_observed']) and
+                                 (not cpu_pm_notifier_counts or report['previous_boot_cpu0_cpu_pm_notifier_counts_observed']))
     if pmu_state:
         report['cpu0_pmu_state_audit_required']=True
         report.setdefault('previous_boot_cpu0_pmu_state_audit_observed',False)
@@ -553,6 +580,9 @@ def collect(packages,kernel_build,adb):
             report['evaluation_items']['cpu0_cpu_pm_enter_exit_pair']=cpu_pm_roundtrip_observation['evaluation_item']
         else:
             report['evaluation_items']['cpu0_cpu_pm_enter_exit_pair']={'required':True,'status':'failed'}
+    if cpu_pm_notifier_counts:
+        counts_item=cpu_pm_roundtrip_observation.get('counts_evaluation_item') if cpu_pm_roundtrip_observation else None
+        report['evaluation_items']['cpu0_cpu_pm_notifier_counts']=counts_item or {'required':True,'status':'failed'}
     (out/'capture-result.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
     return report
 

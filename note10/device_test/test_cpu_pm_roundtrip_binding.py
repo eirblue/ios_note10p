@@ -116,10 +116,14 @@ def run(artifact, output):
                 root.mkdir()
                 config = (artifact / 'handoff.config').read_bytes()
                 config = config.replace(b'CONFIG_NOTE10_CPU_PM_ROUNDTRIP=y\n', b'')
+                config = config.replace(b'CONFIG_NOTE10_CPU_PM_NOTIFIER_COUNTS=y\n', b'')
                 (root / 'handoff.config').write_bytes(config)
                 (root / 'Image').write_bytes(b'')
-                off = {k: v for k, v in build.items() if not k.startswith(PREFIX)}
+                off = {k: v for k, v in build.items()
+                       if not k.startswith(PREFIX) and not k.startswith('cpu_pm_notifier_counts_')}
                 off['cpu_pm_roundtrip'] = False
+                off['cpu_pm_notifier_counts'] = False
+                off['cpu_pm_notifier_counts_version'] = None
                 off.pop('effective_config_sha256', None)
                 if name == 'off-stray-version':
                     off['cpu_pm_roundtrip_version'] = 1

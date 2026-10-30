@@ -17,6 +17,8 @@ def verify_packages(directory):
     running_lock_pair_scope=running_lock_package_scope(result)
     from cpu_pm_roundtrip_binding import package_scope as roundtrip_package_scope
     roundtrip_pair_scope=roundtrip_package_scope(result)
+    from cpu_pm_roundtrip_binding import counts_package_scope
+    counts_pair_scope=counts_package_scope(result)
     expected=({'note10-phase2-diagnostic.zip','note10-phase2-rollback.zip'},
               {'note10-reservation-diagnostic.zip','note10-reservation-rollback.zip'})
     records=result.get('packages',[])
@@ -82,6 +84,9 @@ def verify_packages(directory):
             roundtrip_expected=roundtrip_pair_scope if mode=='diagnostic' else False
             if roundtrip_package_scope(record) is not roundtrip_expected or roundtrip_package_scope(meta) is not roundtrip_expected:
                 raise ValueError('CPU PM roundtrip metadata, pair or rollback scope differs')
+            counts_expected=counts_pair_scope if mode=='diagnostic' else False
+            if counts_package_scope(record) is not counts_expected or counts_package_scope(meta) is not counts_expected:
+                raise ValueError('CPU PM notifier-count metadata, pair or rollback scope differs')
             if bool(meta.get('abox_failed_fw_resume_guard'))!=bool(record.get('abox_failed_fw_resume_guard')) or (record.get('mode')=='diagnostic' and bool(meta.get('abox_failed_fw_resume_guard'))!=bool(result.get('abox_failed_fw_resume_guard'))):raise ValueError('Failed-firmware guard package scope differs')
             if meta['writes']!=['boot'] or meta['automatic_reboot'] is not False:raise ValueError('Unexpected installer scope')
             if meta.get('xnu_payload_stage_diagnostic') is True and (
