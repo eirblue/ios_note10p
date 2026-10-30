@@ -138,7 +138,7 @@ def parse_dependencies(text):
 def dependency_closure(source,objects,path,enabled,compiler_include):
     """Hash actual .cmd prerequisites, including generated configuration headers."""
     text=path.read_text()
-    if '-D__KERNEL__' not in text:raise ValueError('actual Kbuild kernel command record missing')
+    primary=source_dependency(text,source)
     ordinary,wildcard=parse_dependencies(text)
     records={};missing=[]
     def resolve(name,optional=False):
@@ -158,6 +158,9 @@ def dependency_closure(source,objects,path,enabled,compiler_include):
         elif selected.is_relative_to(compiler_include):key='compiler-include/'+selected.relative_to(compiler_include).as_posix()
         else:raise ValueError('actual dependency outside isolated source/output or compiler include roots')
         records[key]=digest(selected)
+    # fixdep records the primary TU separately, not inside deps_. Preserve the
+    # required init.c closure check by resolving and hashing that exact source.
+    resolve(primary)
     for name in ordinary:resolve(name)
     for group in wildcard:
         for name in group:resolve(name,True)
@@ -167,7 +170,23 @@ def dependency_closure(source,objects,path,enabled,compiler_include):
     if not required.issubset(records):raise ValueError('real source/Linux-header closure incomplete')
     if enabled and not runtime.issubset(records):raise ValueError('enabled production runtime dependency closure incomplete')
     if not enabled and runtime.intersection(records):raise ValueError('disabled object depends on runtime component')
-    return {'cmd_sha256':digest(path),'files_sha256':records,'optional_config_headers_absent':sorted(missing)}
+    return {'cmd_sha256':digest(path),'target':TARGET,'primary_source':'source/'+prepare.INIT,
+            'files_sha256':records,'optional_config_headers_absent':sorted(missing)}
+
+
+def source_dependency(text,source):
+    """Bind fixdep's unique source_, deps_ and cmd_ assignments to init.o."""
+    logical=text.replace(chr(92)+'\n',' ')
+    fields={prefix:re.findall(r'^'+prefix+r'_([^\s:=]+)[ \t]*:=[ \t]*([^\n]*)$',logical,re.M)
+            for prefix in ('source','deps','cmd')}
+    if any(len(values)!=1 or values[0][0]!=TARGET for values in fields.values()):
+        raise ValueError('unique Kbuild source/deps/cmd object target differs')
+    if '-D__KERNEL__' not in fields['cmd'][0][1].split():raise ValueError('actual Kbuild kernel command record missing')
+    primary=fields['source'][0][1].strip()
+    if (not primary or re.search(r'[\s$()\\;*?\[\]]',primary) or not Path(primary).is_absolute() or
+            Path(primary).resolve()!=(source/prepare.INIT).resolve()):
+        raise ValueError('actual primary TU differs from pinned source/init.c path')
+    return primary
 
 
 def preserve_kbuild(objects,proof):
@@ -242,7 +261,7 @@ def main():
     host=json.loads((output/'host-wrapper/result.json').read_text())
     if host.get('passed') is not True or host.get('production_planner_executed_in_host') is not False:
         raise ValueError('new host-wrapper proof missing or scope invalid')
-    modes={}
+    modes={};compiled_modes={}
     for mode,source in sources.items():
         enabled=mode=='enabled';base=output/mode;objects=base/'objects';objects.mkdir();proof=base/'proof';proof.mkdir()
         canonical=prepare.canonical_reservation(source)
@@ -264,6 +283,13 @@ def main():
         finally:
             # Also retain partial output when make/configuration itself fails.
             preserve_kbuild(objects,proof)
+        compiled_modes[mode]={'canonical':canonical,'prepared':prepared,'configuration':configuration}
+    # Compile and capture both isolated modes before parser/object acceptance.
+    # A proof-format failure must not hide enabled real-header compatibility.
+    for mode,source in sources.items():
+        enabled=mode=='enabled';base=output/mode;objects=base/'objects';proof=base/'proof'
+        canonical=compiled_modes[mode]['canonical'];prepared=compiled_modes[mode]['prepared']
+        configuration=compiled_modes[mode]['configuration']
         dependency=dependency_closure(source,objects,objects/CMD,enabled,compiler_include)
         save(proof/'dependencies.json',dependency)
         roots={'source':source,'objects':objects,'compiler-include':compiler_include}

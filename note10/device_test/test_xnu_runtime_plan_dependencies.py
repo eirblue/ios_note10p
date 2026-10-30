@@ -1,8 +1,8 @@
 """Focused .cmd parser/proof-retention fixtures only; no compiler or old suites.
 
-The first failed CI retained the compile log but not .cmd/object bytes. This
-fixture reproduces Kbuild's continued deps assignment layout, not recovered
-actual .cmd bytes. Later actual CI must supply the separately preserved proof.
+The separately recorded source_ assignment and continued deps_ layout follow
+the preserved actual Kbuild .cmd. These generated fixtures are not actual kernel
+proof; later CI supplies its own separately preserved object/config/.cmd bytes.
 """
 import argparse
 import hashlib
@@ -17,8 +17,9 @@ ROOT=Path(__file__).resolve().parents[2]
 SLASH=chr(92)
 
 
-def continued(lines):
+def continued(lines,source_path=None):
     return ('cmd_arch/arm64/mm/init.o := clang-14 -D__KERNEL__ -c init.c\n\n'
+            +('source_arch/arm64/mm/init.o := '+source_path.as_posix()+'\n\n' if source_path else '')+
             'deps_arch/arm64/mm/init.o := '+SLASH+'\n'+
             ''.join('  '+line+' '+SLASH+'\n' for line in lines)+'\n'
             'arch/arm64/mm/init.o: $(deps_arch/arm64/mm/init.o)\n\n'
@@ -70,18 +71,39 @@ def cases(work):
     for base,name in [(source,name) for name in paths]+[(objects,name) for name in
             ('include/generated/autoconf.h','include/config/auto.conf','.config')]:
         path=base/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(('fixture-only '+name+'\n').encode())
+    # Actual fixdep excludes init.c from deps_; the unique source_ assignment
+    # binds that required primary TU to the same object as cmd_ and deps_.
+    raw=continued([paths[1],'$(wildcard include/config/arm64.h)',
+        '$(wildcard include/config/foo.h include/config/bar.h)',paths[2]],source/paths[0])
+    if paths[0] in component.parse_dependencies(raw)[0]:raise AssertionError('regression fixture accidentally duplicates primary TU in deps')
+    if component.source_dependency(raw,source)!=(source/paths[0]).as_posix():raise AssertionError('actual-format primary TU not bound')
+    results.append('actual-format-separate-primary-source-not-in-deps')
     cmd=objects/component.CMD;cmd.parent.mkdir(parents=True,exist_ok=True);cmd.write_text(raw)
     closure=component.dependency_closure(source,objects,cmd,False,compiler)
     if len(closure['files_sha256'])!=6 or len(closure['optional_config_headers_absent'])!=3:
         raise AssertionError('fixture required/generated/optional header closure differs')
     results.append('strict-fixture-source-generated-optional-closure')
+    source_line='source_'+component.TARGET+' := '+(source/paths[0]).as_posix()+'\n'
+    primary_bad={
+      'missing-source':raw.replace(source_line,''),
+      'duplicate-source':raw+source_line,
+      'wrong-source-object':raw.replace('source_'+component.TARGET,'source_arch/arm64/mm/other.o'),
+      'wrong-deps-object':raw.replace('deps_'+component.TARGET,'deps_arch/arm64/mm/other.o'),
+      'wrong-command-object':raw.replace('cmd_'+component.TARGET,'cmd_arch/arm64/mm/other.o'),
+      'wrong-source':raw.replace(source_line,'source_'+component.TARGET+' := '+(source/'other.c').as_posix()+'\n'),
+      'relative-source':raw.replace(source_line,'source_'+component.TARGET+' := '+paths[0]+'\n'),
+      'malformed-source':raw.replace(source_line,'source_'+component.TARGET+' := $(source)/init.c\n'),
+      'multiple-source-paths':raw.replace(source_line,source_line.rstrip()+' second.c\n'),
+      'missing-kernel-command':raw.replace('-D__KERNEL__','-DNOT_KERNEL')}
+    for label,text in primary_bad.items():
+        rejected(component.source_dependency,text,source);results.append('reject-'+label)
     for label,lines,enabled in (
-      ('missing-required-header',paths[:-1],False),
-      ('missing-enabled-component',paths,True),
-      ('outside-root-path',[*paths,'../outside.h'],False),
-      ('outside-root-optional',[*paths,'$(wildcard ../outside-missing.h)'],False),
-      ('missing-required-file',[*paths,'absent.h'],False)):
-        cmd.write_text(continued(lines));rejected(component.dependency_closure,source,objects,cmd,enabled,compiler)
+      ('missing-required-header',[paths[1]],False),
+      ('missing-enabled-component',paths[1:],True),
+      ('outside-root-path',[*paths[1:],'../outside.h'],False),
+      ('outside-root-optional',[*paths[1:],'$(wildcard ../outside-missing.h)'],False),
+      ('missing-required-file',[*paths[1:],'absent.h'],False)):
+        cmd.write_text(continued(lines,source/paths[0]));rejected(component.dependency_closure,source,objects,cmd,enabled,compiler)
         results.append('reject-'+label)
     # Dummy bytes certify capture behavior only, never an ELF/Kbuild verdict.
     cmd.write_text(raw);object_file=objects/component.TARGET;object_file.write_bytes(b'fixture-object-not-executable')
@@ -89,7 +111,7 @@ def cases(work):
     for name in (component.TARGET,component.CMD,'.config','include/generated/autoconf.h','include/config/auto.conf'):
         if (proof/'kbuild'/name).read_bytes()!=(objects/name).read_bytes():raise AssertionError('early proof capture differs')
     # A subsequent gate rejection must not remove already captured bytes.
-    cmd.write_text(continued([*paths,'../outside.h']))
+    cmd.write_text(continued([*paths[1:],'../outside.h'],source/paths[0]))
     rejected(component.dependency_closure,source,objects,cmd,False,compiler)
     if (proof/'kbuild'/component.CMD).read_text()!=raw:raise AssertionError('failed validation lost original proof bytes')
     results.append('capture-survives-later-gate-rejection')
@@ -110,7 +132,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix='v55-dependencies-',dir=output.parent) as temporary:
         checks=cases(Path(temporary))
     result={'schema':1,'passed':True,'cases':checks,'case_count':len(checks),
-      'fixture_kind':'Kbuild layout regression; first failed actual .cmd was not retained',
+      'fixture_kind':'generated fixture of preserved actual Kbuild source_/deps_/cmd_ layout',
       'fixture_bytes_are_actual_kernel_proof':False,'compiler_or_native_program_executed':False,
       'old_wrapper_preparer_or_v54_suites_replayed':False,
       'source_sha256':{path.name:hashlib.sha256(path.read_bytes()).hexdigest() for path in
