@@ -1,5 +1,12 @@
 # 작업 상태 (2026-10-30, Asia/Seoul)
 
+## 2026-10-30: v52 CPU_PM notifier 집계와 단일 실기기 진단 통과
+
+- **검증 소스:** `0d7bf9ed8f1d7d51587123b8c8d9bb9817999dc6`; [CI 40996078899](https://github.com/eirblue/ios_note10p/actions/runs/40996078899) 통과. 실제 산출물의 26개 결속과 notifier 집계 기능을 확인했다.
+- **실기기 결과:** 새 계획과 journal의 단일 사이클 1회에서 총 44개 평가 중 필수 43개가 모두 통과했다. strict CPU_PM 쌍과 같은 transaction에 결속된 companion에서 ENTER 반환 6개와 명시적 EXIT 반환 6개를 집계했다.
+- **복귀·무결성:** 정상 TWRP 자동 복귀, 다섯 파티션 해시 일치, 무결성 확인 뒤 밝기 raw 10을 확인했다.
+- v49·v50 실패 기록과 v51 통과 기록은 보존하고 이전 journal을 재실행하지 않았다. 집계는 callback별 실행 식별·순서, 전체 DMA 정지, XNU 실행 또는 iOS 부팅을 증명하지 않는다. [관측 범위와 결과](device_test/CPU-PM-ROUNDTRIP.md).
+
 ## 2026-10-30: v51 CPU_PM 세대 결속 수정과 단일 실기기 진단 통과
 
 - **검증 소스:** `bbf3b4bd8167cbbe103266d2da6809de4a9f8d3b`; [CI 40979304539](https://github.com/eirblue/ios_note10p/actions/runs/40979304539) 통과. 실제 산출물의 26개 결속과 새 collector 집중 증거를 확인했다. 기존 native·decoder 증거 바이트는 재사용했으며 이전 모델을 로컬에서 다시 돌리지 않았다.
