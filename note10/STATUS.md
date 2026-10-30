@@ -1,10 +1,12 @@
 # 작업 상태 (2026-10-30, Asia/Seoul)
 
-## 2026-10-30: v55 XNU runtime planner 커널 컴포넌트 PC 검증 계획
+## 2026-10-30: v55 XNU runtime planner 커널 컴포넌트 PC 검증 통과
 
-- 기본 비활성 옵션과 예약 전용 소스 준비 경로를 분리한다. 현재 부팅의 예약 상태·주소·전체 reserved page를 확인한 뒤 로컬 C planner 계산만 수행하며 예약 RAM 접근·metadata 작성은 하지 않는다.
-- 새 host wrapper/preparer 시험과 고정 Linux 소스의 disabled/enabled `arch/arm64/mm/init.o` 실제 Kbuild가 대상이다. 실제 커널 헤더·설정·명령·의존성·object 증거 확인은 아직 대기 중이다. 기존 v54·PM 시험 묶음은 반복하지 않는다.
-- 전체 Image·BOOT·기기 조작·XNU 실행은 범위 밖이다. v54 통과 결과와 기존 이력은 보존한다. [계획과 제한](device_test/XNU-RUNTIME-PLAN.md).
+- **검증 소스:** `9cb92b1d68bf2d80fc3a5f5cbde62193c75715f9`; [CI 41058332903](https://github.com/eirblue/ios_note10p/actions/runs/41058332903) 첫 번째 시도 통과. 실제 고정 Linux 헤더로 분리된 disabled/enabled `arch/arm64/mm/init.o`를 모두 컴파일·보존한 뒤 증거 gate를 적용했다. 11개 소스와 1,506개 proof-file 해시를 결속했다.
+- **결속 결과:** 두 모드의 의존성은 각각 730·735개다. 실제 타입 헤더의 기존 stdint 별칭, enabled wrapper→`n10_rt_plan` CALL26, disabled의 새 심볼·marker·의존성 부재와 canonical 예약 전용 소스의 byte identity를 확인했다.
+- **범위 내 시험:** host wrapper 32개·frame 변조 3개·preparer/manifest 17개·dependency 36개가 통과했으며 대응하는 로컬 저장 증거도 통과했다. host wrapper는 planner stub을 사용하고 실제 커널 object는 실행하지 않았다. 로컬에서 기존 v54·PM 시험 묶음은 반복하지 않았다.
+- 실패한 [CI 41055821209](https://github.com/eirblue/ios_note10p/actions/runs/41055821209)의 마지막 continuation 처리 오류와 [CI 41056966619](https://github.com/eirblue/ios_note10p/actions/runs/41056966619)의 별도 `source_` assignment 누락을 보존했다. 전체 logical line을 먼저 복원하고 동일 object의 primary source를 별도로 결속하도록 수정했으며 proof bytes는 gate 전에 보존한다.
+- 판정은 **actual-kernel object integration plus host-wrapper evidence**다. 전체 Image·BOOT·minimal-init·CPIO·기기 조작·예약 RAM materialization은 없으며 물리 소유권·GIC·전체 DMA 정지·XNU 실행·iOS 부팅의 증거로 확대하지 않는다. v54와 기존 이력을 보존한다. [결과와 제한](device_test/XNU-RUNTIME-PLAN.md).
 
 ## 2026-10-30: v54 네이티브 런타임 재배치 PC 검증 통과
 
