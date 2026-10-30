@@ -3,6 +3,7 @@ import argparse
 import copy
 import hashlib
 import json
+from contextlib import contextmanager
 from pathlib import Path
 import tempfile
 from prepare_cpu_pm_notifier_trace import SOURCES, FLAG, VERSION, PREFIX
@@ -24,6 +25,17 @@ CASES = ('production-trace-on', 'production-trace-off-counts-on',
 
 def sha(raw):
     return hashlib.sha256(raw).hexdigest()
+
+
+@contextmanager
+def fixture_workspace(artifact):
+    """Use active TMP and reject either ancestor relation before fixture copies."""
+    artifact_root = Path(artifact).resolve()
+    with tempfile.TemporaryDirectory(prefix='cpu-pm-trace-fixture-') as temporary:
+        workspace = Path(temporary).resolve()
+        if workspace.is_relative_to(artifact_root) or artifact_root.is_relative_to(workspace):
+            raise ValueError('trace fixture workspace must be disjoint from artifact; configure TMP outside the artifact')
+        yield workspace
 
 
 def reject(function, *args, **kwargs):
@@ -104,8 +116,7 @@ def main():
     results=collector_cases()
     # Use actual production-prepared metadata below for the scope mutation cases.
     from test_cpu_pm_roundtrip_package_flow import _prepare_packages
-    with tempfile.TemporaryDirectory(dir=args.output) as temp:
-        root=Path(temp)
+    with fixture_workspace(args.artifact) as root:
         on=_prepare_packages(root,args.artifact,'trace-on','f'*32,True,True,True)
         off_counts=_prepare_packages(root,args.artifact,'trace-off-counts','e'*32,True,True,False)
         off=_prepare_packages(root,args.artifact,'trace-off','d'*32,True,False,False)
@@ -138,8 +149,8 @@ def main():
             elif name=='scope-package-proof-rejected':bad[PREFIX+'model_sha256']='0'*64
             else:bad[PREFIX+'unknown']=True
             results[name]=reject(trace_package_scope,bad)
-    with tempfile.TemporaryDirectory(dir=args.output) as temp:
-        results.update(binding_cases(args.artifact,Path(temp),build))
+    with fixture_workspace(args.artifact) as root:
+        results.update(binding_cases(args.artifact,root,build))
     if set(results)!=set(CASES) or not all(results.values()):raise AssertionError('trace package case inventory differs')
     proof={'passed':True,'synthetic_fixture':True,'hardware_verified':False,
            'cases':list(CASES),'results':results,'cpu_pm_validator_scope_only_stub':True,
