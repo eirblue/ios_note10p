@@ -37,8 +37,16 @@ def decode_abox_pm_observation(text,identity,pm_observation):
     return decode_abox(text,identity,pm_completed_generation(pm_observation))
 
 
-def decode_cpu_pm_roundtrip_observation(text,identity,generation):
+def cpu_pm_transaction_predecessor(completed):
+    """Map completed quiescence generation to its source CPR/CPT transaction."""
+    if type(completed) is not int or not 1<=completed<=0xffffffff:
+        raise ValueError('invalid completed CPU_PM quiesce generation')
+    return completed-1 if completed>1 else 0xffffffff
+
+
+def decode_cpu_pm_roundtrip_observation(text,identity,completed):
     from decode_cpu_pm_roundtrip import decode as decode_roundtrip,decode_terminal as decode_roundtrip_terminal
+    generation=cpu_pm_transaction_predecessor(completed)
     if 'N10CPT' in text:
         if 'N10CPR' in text:raise ValueError('CPU_PM success and terminal failure frames conflict')
         terminal=decode_roundtrip_terminal(text,identity,generation)

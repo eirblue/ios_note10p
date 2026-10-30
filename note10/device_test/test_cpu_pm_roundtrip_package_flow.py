@@ -229,14 +229,14 @@ def _frame(tag,values):
 def terminal_pm_failure_log(kernel_build,package_dir,reservation_failure=False):
  build=json.loads((kernel_build/'build-result.json').read_text(encoding='utf8'))
  paired=json.loads((package_dir/'package-result.json').read_text(encoding='utf8'))
- identity=build['reservation_evidence_id'];cycle=paired['auto_cycle_token'];generation=7
+ identity=build['reservation_evidence_id'];cycle=paired['auto_cycle_token'];generation=7;completed_generation=generation+1
  digest=build['xnu_payload_sha256'];size=build['xnu_payload_size'];words=size//8
  lines=[]
  for seq in (0,1):lines.append(_frame('N10RET1',dict(id=identity,cycle=cycle,phase=0,seq=seq,delay_ms=90000,status=0)))
  lines.append('Linux version 4.14.113-note10-reserve-pc fixture-v49\n')
  reserved=65535 if reservation_failure else 65536
  for seq in (0,1):lines.append(_frame('N10RAM2',dict(id=identity,seq=seq,base='a00000000',size='10000000',align='2000000',pages=65536,reserved=reserved,invalid=0,shift=12)))
- for seq in (0,1):lines.append(_frame('N10QSC1',dict(id=identity,seq=seq,attempt=1,version=1,generation=generation,epoch=0,phase=10,called=1,restored=1,screen=0,display=0,usb=0,wake=0,r_usb=0,r_display=0,r_screen=0)))
+ for seq in (0,1):lines.append(_frame('N10QSC1',dict(id=identity,seq=seq,attempt=1,version=1,generation=completed_generation,epoch=0,phase=10,called=1,restored=1,screen=0,display=0,usb=0,wake=0,r_usb=0,r_display=0,r_screen=0)))
  for seq in (0,1):lines.append(_frame('N10PMS1',dict(id=identity,seq=seq,attempt=1,stage=21,error=1)))
  from decode_window_access import COUNTS
  for seq in (0,1):lines.append(_frame('N10MEM1',dict(id=identity,seq=seq,base='a00000000',size='10000000',**COUNTS)))
@@ -289,17 +289,17 @@ def terminal_reservation_entry_case(on,case_root):
 
 def terminal_collector_cases():
  from test_cpu_pm_roundtrip_decoder import input_vector,terminal_input_vector
- identity='a'*32;generation=9
+ identity='a'*32;completed=10
  success_text=json.loads(input_vector('valid-pair'))['text']
  failure_text=json.loads(terminal_input_vector('stage2-admission'))['text']
- success=collector_module.decode_cpu_pm_roundtrip_observation(success_text,identity,generation)
- failure=collector_module.decode_cpu_pm_roundtrip_observation(failure_text,identity,generation)
+ success=collector_module.decode_cpu_pm_roundtrip_observation(success_text,identity,completed)
+ failure=collector_module.decode_cpu_pm_roundtrip_observation(failure_text,identity,completed)
  if success.get('pair_observed') is not True or success.get('evaluation_item')!={'required':True,'status':'passed'}:
   raise AssertionError('collector strict success pair was not preserved')
  if (failure.get('pair_observed') is not False or failure.get('terminal_failure_observed') is not True or
      failure.get('pair_passed') is not False or failure.get('evaluation_item')!={'required':True,'status':'failed'}):
   raise AssertionError('collector terminal failure was promoted')
- try:collector_module.decode_cpu_pm_roundtrip_observation(success_text+'\n'+failure_text,identity,generation)
+ try:collector_module.decode_cpu_pm_roundtrip_observation(success_text+'\n'+failure_text,identity,completed)
  except ValueError:pass
  else:raise AssertionError('collector accepted conflicting strict-success and terminal-failure frames')
  return ['strict-success','terminal-failure','success-failure-conflict'],[

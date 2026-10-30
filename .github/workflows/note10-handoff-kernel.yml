@@ -149,6 +149,10 @@ jobs:
             echo "cpu_pm_roundtrip requires ehld_running_lock_audit=true and auto_return=true" >&2
             exit 2
           fi
+          if [ "$NOTE10_CPU_PM_ROUNDTRIP" = true ]; then
+            mkdir -p note10/private/handoff-kernel
+            python note10/device_test/test_collect_cpu_pm_generation_binding.py --proof-output note10/private/handoff-kernel/collector-generation-binding-proof.json
+          fi
           if [ "$NOTE10_AUTO_RETURN" = true ] && [ "$NOTE10_PM_TIMER" != true ]; then
             echo "auto_return requires pm_timer=true" >&2
             exit 2
@@ -468,6 +472,7 @@ jobs:
             note10/private/handoff-kernel/cpu-pm-roundtrip-decoder-model/**
             note10/private/handoff-kernel/cpu-pm-roundtrip-binding-model/**
             note10/private/handoff-kernel/cpu-pm-roundtrip-package-flow-model/**
+            note10/private/handoff-kernel/collector-generation-binding-proof.json
             note10/private/handoff-kernel/pmu-failure-binding-model/result.json
             note10/private/handoff-kernel/pmu-failure-package-flow-model/result.json
             note10/private/handoff-kernel/pmu-failure-prepared/**
