@@ -520,6 +520,15 @@ jobs:
             note10/private/handoff-kernel/cpu-pm-notifier-trace-prepared/**
             note10/private/handoff-kernel/cpu-pm-notifier-trace-model/**
             note10/private/handoff-kernel/cpu-pm-notifier-trace-package-model/**
+            note10/private/handoff-kernel/xnu-runtime-observation-before/**
+            note10/private/handoff-kernel/xnu-runtime-observation-prepared/**
+            note10/private/handoff-kernel/xnu-runtime-observation-model/result.json
+            note10/private/handoff-kernel/xnu-runtime-observation-model/native.c
+            note10/private/handoff-kernel/xnu-runtime-observation-model/native
+            note10/private/handoff-kernel/xnu-runtime-observation-model/native.exe
+            note10/private/handoff-kernel/xnu-runtime-observation-model/compile.log
+            note10/private/handoff-kernel/xnu-runtime-observation-model/native.log
+            note10/private/handoff-kernel/xnu-runtime-observation-package-model/result.json
             note10/private/handoff-kernel/collector-generation-binding-proof.json
             note10/private/handoff-kernel/pmu-failure-binding-model/result.json
             note10/private/handoff-kernel/pmu-failure-package-flow-model/result.json

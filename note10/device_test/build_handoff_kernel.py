@@ -359,12 +359,6 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
                 report['cpu_pm_notifier_trace_model_sha256']=hashlib.sha256((OUT/'cpu-pm-notifier-trace-model/result.json').read_bytes()).hexdigest()
             report['pm_quiesce_patched_sha256']['kernel/power/Kconfig']=report['pm_callbacks_prepared_sha256']['kernel/power/Kconfig']
             report['scope']='Bundled PM, CPU architecture and payload observations; no global DMA shutdown or XNU execution claim'
-        if xnu_runtime_observation:
-            from prepare_xnu_runtime_observation import prepare as prepare_runtime
-            report.update(prepare_runtime(source,OUT,report,xnu_manifest,enabled=True))
-            (OUT/'build-result.json').write_text(json.dumps(report,indent=2)+'\n',encoding='utf8')
-            run([sys.executable,str(ROOT/'note10/device_test/test_xnu_runtime_observation.py'),'--artifact',str(OUT),'--output',str(OUT/'xnu-runtime-observation-model'),'--cc','clang-14'],'03-xnu-runtime-observation.log')
-            report['xnu_runtime_observation_model_sha256']=hashlib.sha256((OUT/'xnu-runtime-observation-model/result.json').read_bytes()).hexdigest()
         make=['make','-C',str(source),'O='+str(objects),'ARCH=arm64',
               'CC=clang-14','CROSS_COMPILE=aarch64-linux-gnu-',
               'CLANG_TRIPLE=aarch64-linux-gnu-','CROSS_COMPILE_ARM32=arm-linux-gnueabi-',
@@ -396,6 +390,7 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_EHLD_LOCK_AUDIT'],'02-ehld-lock-audit.log')
             from ehld_lock_profile import apply_profile
             report['ehld_lock_profile_source_sha256']=apply_profile(source,config,run)
+            run([sys.executable,str(ROOT/'note10/device_test/test_ehld_lock_profile.py'),'--source',str(source),'--output',str(OUT/'ehld-lock-profile-model')],'03-ehld-lock-profile.log')
         if ehld_irqsave_audit:
             run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_EHLD_IRQSAVE_AUDIT'],'02-ehld-irqsave-audit.log')
         if ehld_running_lock_audit:
@@ -403,6 +398,12 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
         if cpu_pm_roundtrip:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_CPU_PM_ROUNDTRIP'],'02-cpu-pm-roundtrip.log')
         if cpu_pm_notifier_counts:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_CPU_PM_NOTIFIER_COUNTS'],'02-cpu-pm-notifier-counts.log')
         if cpu_pm_notifier_trace:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_CPU_PM_NOTIFIER_TRACE'],'02-cpu-pm-notifier-trace.log')
+        if xnu_runtime_observation:
+            from prepare_xnu_runtime_observation import prepare as prepare_runtime
+            report.update(prepare_runtime(source,OUT,report,xnu_manifest,enabled=True))
+            (OUT/'build-result.json').write_text(json.dumps(report,indent=2)+'\n',encoding='utf8')
+            run([sys.executable,str(ROOT/'note10/device_test/test_xnu_runtime_observation.py'),'--artifact',str(OUT),'--output',str(OUT/'xnu-runtime-observation-model'),'--cc','clang-14'],'03-xnu-runtime-observation.log')
+            report['xnu_runtime_observation_model_sha256']=hashlib.sha256((OUT/'xnu-runtime-observation-model/result.json').read_bytes()).hexdigest()
         if xnu_runtime_observation:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_XNU_RUNTIME_OBSERVATION'],'02-xnu-runtime-observation.log')
         run([*make,'olddefconfig'],'03-olddefconfig.log')
         configured=config.read_text()
@@ -431,7 +432,6 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
         if ehld_lock_audit:
             from ehld_lock_profile import verify_config
             report['ehld_lock_profile_result']=verify_config(config.read_bytes())
-            run([sys.executable,str(ROOT/'note10/device_test/test_ehld_lock_profile.py'),'--source',str(source),'--output',str(OUT/'ehld-lock-profile-model')],'03-ehld-lock-profile.log')
         if ufs_pm_audit and 'CONFIG_GIC_NON_BANKED=y' in configured.splitlines():raise ValueError('GIC priority guard requires banked GIC')
         report['effective_config_sha256']=hashlib.sha256(config.read_bytes()).hexdigest()
         if caps:run([*make,'drivers/misc/note10_handoff_caps.o'],'04-caps-object.log')
