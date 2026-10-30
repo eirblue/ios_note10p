@@ -14,7 +14,8 @@ PACKAGE='xnu-runtime-scratch-package-model'
 WRAPPER='arch/arm64/mm/note10_xnu_runtime_scratch.c'
 SOURCES=('prepare_xnu_runtime_scratch.py','xnu_runtime_scratch.c','decode_xnu_runtime_scratch.py',
  'xnu_runtime_scratch_binding.py','xnu_runtime_scratch_stack.py',
- 'test_xnu_runtime_scratch.py','test_xnu_runtime_scratch_package.py','test_xnu_runtime_scratch_stack.py')
+ 'test_xnu_runtime_scratch.py','test_xnu_runtime_scratch_package.py','test_xnu_runtime_scratch_stack.py',
+ 'xnu_runtime_leaf.py','test_xnu_runtime_leaf.py')
 INCLUDE=b'#ifdef CONFIG_NOTE10_XNU_RUNTIME_SCRATCH\n#include "note10_xnu_runtime_scratch.c"\n#endif\n\n'
 CALL=b'#ifdef CONFIG_NOTE10_XNU_RUNTIME_SCRATCH\n    n10_observe_runtime_scratch(reserved,count,invalid);\n#endif\n\n'
 BLOCK=b'\nconfig NOTE10_XNU_RUNTIME_SCRATCH\n\tbool "Caller-owned scratch XNU metadata roundtrip only"\n\tdepends on NOTE10_XNU_RUNTIME_OBSERVATION\n\tdefault n\n'

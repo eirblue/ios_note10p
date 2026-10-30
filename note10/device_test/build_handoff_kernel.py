@@ -446,8 +446,12 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
         if caps:run([*make,'drivers/misc/note10_handoff_caps.o'],'04-caps-object.log')
         if reserve:run([*make,'arch/arm64/mm/init.o'],'04-reservation-object.log')
         if xnu_runtime_scratch:
-            from xnu_runtime_scratch_stack import preflight as preflight_stack,CAPTURE_MODEL
+            from xnu_runtime_scratch_stack import preflight as preflight_stack,CAPTURE_MODEL,LEAF_MODEL,FOLDER as STACK_FOLDER
             report['xnu_runtime_scratch_stack_preflight_sha256']=preflight_stack(objects,OUT,source,report,target_make_succeeded=True)
+            run([sys.executable,str(ROOT/'note10/device_test/test_xnu_runtime_leaf.py'),
+                 '--preflight',str(OUT/STACK_FOLDER/'preflight'),'--expected-id',report['reservation_evidence_id'],
+                 '--output',str(OUT/LEAF_MODEL)],'04-xnu-runtime-leaf-model.log')
+            report['xnu_runtime_scratch_leaf_model_sha256']=hashlib.sha256((OUT/LEAF_MODEL/'result.json').read_bytes()).hexdigest()
             run([sys.executable,str(ROOT/'note10/device_test/test_xnu_runtime_scratch_stack.py'),
                  '--recorded-command',str(objects/'arch/arm64/mm/.init.o.cmd'),
                  '--provenance-scripts',str(source),

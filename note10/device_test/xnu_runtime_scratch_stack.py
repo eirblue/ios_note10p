@@ -9,6 +9,7 @@ from prepare_xnu_runtime_observation import sha
 
 FOLDER='xnu-runtime-scratch-stack'
 CAPTURE_MODEL=FOLDER+'/capture-model'
+LEAF_MODEL=FOLDER+'/leaf-model'
 KERNEL='android_kernel_samsung_universal9820-55f042627bb7030c93550faafa117674d32b21d1'
 KBUILD_PINS={
  'scripts/Makefile.build':'b8eb9a53659f378ef1973889ae7e7a76aa3b043e83a7cce02e6a7588364f785c',
@@ -98,30 +99,49 @@ def thread_size(raw):
     if len(found)!=1 or found[0] not in (16384,32768,65536):raise ValueError('compiled THREAD_SIZE missing/unsupported')
     return found[0]
 
-def calculate(usage,obj):
+PLANNER={'n10_observe_runtime_plan','n10_xnu_runtime_plan_check','n10_runtime_plan_report'}
+RUNTIME={'n10_rt_validate_adt','n10_rt_plan','n10_rt_serialize_boot_args','n10_rt_serialize_record','n10_rt_build'}
+SCRATCH={'n10_scratch_build','n10_scratch_check','n10_scratch_expected','n10_scratch_report','n10_observe_runtime_scratch'}
+
+def calculate(usage,obj,sources=None,expected_id=None):
     rows={}
     for line in usage.decode().splitlines():
         fields=line.split('\t')
         if len(fields)!=3:raise ValueError('stack-usage syntax unsupported')
         name=fields[0].rsplit(':',1)[-1];base=name.split('.')[0]
-        if base.startswith(('n10_rt_','n10_scratch_','n10_observe_runtime_scratch')) or base in HELPERS:
+        if base.startswith(('n10_rt_','n10_scratch_','n10_observe_runtime_scratch','n10_observe_runtime_plan','n10_xnu_runtime_plan','n10_runtime_plan')) and base not in RUNTIME|SCRATCH|PLANNER:raise ValueError('unknown relevant runtime/planner function')
+        if base in RUNTIME|SCRATCH|PLANNER|HELPERS:
             if fields[2]!='static' or not fields[1].isdigit():raise ValueError('unbounded production stack')
             if name in rows:raise ValueError('duplicate stack function')
             rows[name]=int(fields[1])
     required={'n10_rt_build','n10_rt_plan','n10_rt_validate_adt','n10_rt_serialize_boot_args',
       'n10_rt_serialize_record','n10_scratch_build','n10_scratch_check','n10_scratch_report',
-      'n10_observe_runtime_scratch','n10_scratch_expected','note10_check_xnu_window','adt_node'}
+      'n10_observe_runtime_scratch','n10_scratch_expected','note10_check_xnu_window','adt_node'}|PLANNER
     if not required<={n.split('.')[0] for n in rows}:raise ValueError('production stack function missing; do not infer zero')
-    # Sum all emitted frames, even mutually exclusive build/check/report paths.
-    # Inline code is charged to emitted callers; all nine bounded ADT levels
-    # are charged even though this immutable synthetic fixture has one level.
+    leaf=None;levels=9
+    if sources is not None or expected_id is not None:
+        from xnu_runtime_leaf import prove
+        leaf=prove(obj,sources,expected_id)
+        leaf['usage_sha256']=sha(usage);levels=leaf['adt_levels']
+    scratch_rows={n:v for n,v in rows.items() if n.split('.')[0] not in PLANNER}
+    # Without the complete caller proof, assume no sequential exclusion and
+    # charge every tracked caller frame together at generic depth9.
+    path_rows={'generic':rows} if leaf is None else {'scratch':scratch_rows}
+    if leaf is not None:
+        if not PLANNER<={n.split('.')[0] for n in rows}:raise ValueError('proven sequential planner caller frames missing')
+        # Exact reviewed sources prove the planner never calls build or either
+        # serializer, and the two diagnostics are sequential sibling calls.
+        planner_reachable=HELPERS|PLANNER|{'n10_rt_plan','n10_rt_validate_adt'}
+        path_rows['planner']={n:v for n,v in rows.items() if n.split('.')[0] in planner_reachable}
     recursive=max(v for n,v in rows.items() if n.split('.')[0]=='adt_node')
-    measured=sum(rows.values())+8*recursive
+    path_sums={name:sum(values.values())+(levels-1)*recursive for name,values in path_rows.items()}
+    measured=max(path_sums.values())
     # External printk/scnprintf/initcall ancestors and interrupt headroom are
     # reserved independently; this is not a whole-kernel stack maximum claim.
     external=2048;bound=measured+external;thread=thread_size(obj)
     if bound>8192 or thread-bound<8192:raise ValueError('scratch stack budget/margin gate rejected')
-    return dict(passed=True,frames=rows,adt_levels=9,conservative_function_sum=measured,
+    return dict(passed=True,frames=rows,adt_levels=levels,leaf_proof=leaf,path_frames=path_rows,path_frame_sums=path_sums,
+      sequential_path_maximum=leaf is not None,conservative_function_sum=measured,
       external_reserve=external,cumulative_bound=bound,thread_size=thread,margin=thread-bound,
       maximum_bound=8192,minimum_margin=8192,scope='scoped compiler function-frame estimate',
       compiler_estimate_only=True,physical_stack_safety_proven=False,
@@ -172,7 +192,8 @@ def _capture(objects,output,source,build,image=None,preliminary=False,target_mak
         if sidecar.is_symlink() or not sidecar.is_file() or not sidecar.resolve().is_relative_to(directory.resolve()):raise ValueError('recorded compiler stack sidecar missing/unsafe')
         raw=sidecar.read_bytes();(folder/'init.su').write_bytes(raw)
         evidence['files_sha256']['init.su']=sha(raw);_save(folder,'evidence.json',evidence)
-        result=calculate(raw,(folder/'init.o').read_bytes())
+        source_bytes={n:(folder/'source'/n).read_bytes() for n in final}
+        result=calculate(raw,(folder/'init.o').read_bytes(),source_bytes,build.get('reservation_evidence_id'))
         result['preliminary']=preliminary;result['accepted_full_build']=not preliminary
         result['files_sha256']={n:evidence['files_sha256'][n] for n in ('init.su','init.o')}
         result['production_binding']={'command_sha256':evidence['files_sha256']['init.o.cmd'],
@@ -188,6 +209,11 @@ def _capture(objects,output,source,build,image=None,preliminary=False,target_mak
                 raise ValueError('standalone object preflight provenance missing/differs')
             result['production_binding']['preflight_sha256']=sha(early)
             result['production_binding']['preflight_object_changed']=preflight_result['files_sha256']['init.o']!=evidence['files_sha256']['init.o']
+            result['production_binding']['leaf_model_input_phase']='standalone-init-object-preflight'
+            result['production_binding']['final_estimate_phase']='independently-recomputed-final-object'
+            leaf_model=Path(output)/LEAF_MODEL/'result.json'
+            result['leaf_model_sha256']=sha(leaf_model.read_bytes())
+            if result['leaf_model_sha256']!=build.get('xnu_runtime_scratch_leaf_model_sha256'):raise ValueError('fixed leaf fixture proof missing/differs')
             proof=Path(output)/CAPTURE_MODEL/'result.json'
             result['capture_model_sha256']=sha(proof.read_bytes())
             if result['capture_model_sha256']!=build.get('xnu_runtime_scratch_capture_model_sha256'):raise ValueError('capture fixture proof missing/differs')
@@ -212,7 +238,8 @@ def validate(root,build):
     if sha(raw)!=build.get('xnu_runtime_scratch_stack_sha256'):raise ValueError('stack evidence hash differs')
     files={n:(folder/n).read_bytes() for n in ('init.su','init.o')}
     if saved.get('files_sha256')!={n:sha(r) for n,r in files.items()}:raise ValueError('actual stack files differ')
-    expected=calculate(files['init.su'],files['init.o'])
+    source_bytes={n:(folder/'source'/n).read_bytes() for n in build['xnu_runtime_scratch_prepared_sha256']}
+    expected=calculate(files['init.su'],files['init.o'],source_bytes,build.get('reservation_evidence_id'))
     if any(saved.get(k)!=v for k,v in expected.items()):raise ValueError('stack derivation differs')
     if saved.get('preliminary') is not False or saved.get('accepted_full_build') is not True:raise ValueError('preliminary stack proof cannot accept Image')
     binding=saved.get('production_binding',{});command=(folder/'init.o.cmd').read_bytes()
@@ -244,6 +271,28 @@ def validate(root,build):
     if (model.get('passed') is not True or model.get('fixture_only') is not True or model.get('canonical_suite_complete') is not True or tuple(model.get('cases',{}))!=CASES or
         not all(model['cases'].values()) or model.get('source_sha256')!=sha(Path(__file__).read_bytes()) or
         model.get('test_source_sha256')!=sha((Path(__file__).parent/'test_xnu_runtime_scratch_stack.py').read_bytes())):raise ValueError('capture focused model differs')
+    leaf_model=(Path(root)/LEAF_MODEL/'result.json').read_bytes()
+    if sha(leaf_model)!=saved.get('leaf_model_sha256') or sha(leaf_model)!=build.get('xnu_runtime_scratch_leaf_model_sha256'):raise ValueError('fixed leaf model hash differs')
+    from test_xnu_runtime_leaf import validate_result as validate_leaf_model
+    leaf_analysis=json.loads(leaf_model)
+    validate_leaf_model(leaf_analysis)
+    # The hosted model analyzes the early object. Bind it to retained early
+    # inputs and rederive its estimate separately from the final object above.
+    from xnu_runtime_leaf import SOURCE_PINS as LEAF_SOURCES,RESERVE as LEAF_RESERVE
+    early_folder=folder/'preflight'
+    early_object=(early_folder/'init.o').read_bytes();early_usage=(early_folder/'init.su').read_bytes()
+    early_sources={n:(early_folder/'source'/n).read_bytes() for n in (*LEAF_SOURCES,LEAF_RESERVE)}
+    early_inputs={'object_sha256':sha(early_object),'usage_sha256':sha(early_usage),
+      'source_sha256':{n:sha(raw) for n,raw in early_sources.items()}}
+    if leaf_analysis.get('analysis_inputs')!=early_inputs:raise ValueError('leaf model is not bound to retained preliminary inputs')
+    if (preflight_result['files_sha256'].get('init.o')!=early_inputs['object_sha256'] or
+        preflight_result['files_sha256'].get('init.su')!=early_inputs['usage_sha256']):raise ValueError('preliminary object/usage bytes differ')
+    early_estimate=calculate(early_usage,early_object,early_sources,build.get('reservation_evidence_id'))
+    if (leaf_analysis.get('estimate')!=early_estimate or
+        any(preflight_result.get(k)!=v for k,v in early_estimate.items())):raise ValueError('leaf model/preliminary estimate differs from actual early bytes')
+    if (binding.get('leaf_model_input_phase')!='standalone-init-object-preflight' or
+        binding.get('final_estimate_phase')!='independently-recomputed-final-object' or
+        binding.get('preflight_object_changed')!=(early_inputs['object_sha256']!=sha(files['init.o']))):raise ValueError('early model/final independent proof phase differs')
     for name,digest in binding['final_sources_sha256'].items():
         if sha((folder/'source'/name).read_bytes())!=digest:raise ValueError('stack production source snapshot differs')
     return expected
