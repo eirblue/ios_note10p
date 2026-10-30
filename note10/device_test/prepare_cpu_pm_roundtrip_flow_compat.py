@@ -237,8 +237,8 @@ def prepare(source, destination):
     if counts_entries in ([COUNTS_OPTION + b'=y'], [COUNTS_OPTION + b'=n'],
                           [b'# ' + COUNTS_OPTION + b' is not set']):
         lines.remove(counts_entries[0])
-    lines = [line for line in lines if b'CONFIG_NOTE10_XNU_RUNTIME_OBSERVATION' not in line]
-    report = {key:value for key,value in report.items() if key!='xnu_runtime_observation' and not key.startswith('xnu_runtime_observation_')}
+    lines = [line for line in lines if b'CONFIG_NOTE10_XNU_RUNTIME_OBSERVATION' not in line and b'CONFIG_NOTE10_XNU_RUNTIME_SCRATCH' not in line]
+    report = {key:value for key,value in report.items() if key not in ('xnu_runtime_observation','xnu_runtime_scratch') and not key.startswith(('xnu_runtime_observation_','xnu_runtime_scratch_'))}
     trace_option = b'CONFIG_NOTE10_CPU_PM_NOTIFIER_TRACE'
     lines = [line for line in lines if trace_option not in line]
     report = {key: value for key, value in report.items()

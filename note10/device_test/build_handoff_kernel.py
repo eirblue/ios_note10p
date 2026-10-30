@@ -33,7 +33,7 @@ def branch_source_path(out, model):
     return source
 
 
-def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manifest=None,cpu_cache=False,pm_timer=False,auto_return=False,screen_log=False,gic_roundtrip=False,dma_pm_audit=False,ufs_pm_audit=False,ehld_lock_audit=False,ehld_irqsave_audit=False,ehld_running_lock_audit=False,cpu_pm_roundtrip=False,cpu_pm_notifier_counts=False,cpu_pm_notifier_trace=False,xnu_runtime_observation=False):
+def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manifest=None,cpu_cache=False,pm_timer=False,auto_return=False,screen_log=False,gic_roundtrip=False,dma_pm_audit=False,ufs_pm_audit=False,ehld_lock_audit=False,ehld_irqsave_audit=False,ehld_running_lock_audit=False,cpu_pm_roundtrip=False,cpu_pm_notifier_counts=False,cpu_pm_notifier_trace=False,xnu_runtime_observation=False,xnu_runtime_scratch=False):
     if not sys.platform.startswith('linux'): raise RuntimeError('Linux CI host required')
     if os.environ.get('PLATFORM_VERSION')!='11' or os.environ.get('ANDROID_MAJOR_VERSION')!='r':
         raise ValueError('Pinned Samsung build requires PLATFORM_VERSION=11 and ANDROID_MAJOR_VERSION=r')
@@ -56,6 +56,7 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
     if cpu_pm_notifier_trace and not cpu_pm_notifier_counts:raise ValueError('CPU_PM notifier trace requires cpu_pm_notifier_counts=true')
     if type(xnu_runtime_observation) is not bool or (xnu_runtime_observation and not (cpu_pm_notifier_trace and auto_return and xnu_payload is not None)):
         raise ValueError('Runtime observation requires full trace/payload/recovery chain')
+    if type(xnu_runtime_scratch) is not bool or (xnu_runtime_scratch and not xnu_runtime_observation):raise ValueError("Scratch requires runtime observation")
     OUT.mkdir(parents=True,exist_ok=True)
     report = {'source_repository':REPOSITORY,'source_commit':COMMIT,
               'platform_version':os.environ['PLATFORM_VERSION'],
@@ -369,7 +370,7 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
               # Avoid DWARF5 forms unsupported by this source's objdump-based
               # scripts. Do not disable -Werror globally: cc-option probes
               # must reject unsupported compiler switches correctly.
-              'HOSTCC=gcc','HOSTCFLAGS=-Wno-error=deprecated-declarations','KCFLAGS=-gdwarf-4']
+              'HOSTCC=gcc','HOSTCFLAGS=-Wno-error=deprecated-declarations','KCFLAGS=-gdwarf-4'+(' -fstack-usage' if xnu_runtime_scratch else '')]
         run([*make,'exynos9820-d2x_defconfig'],'01-configure.log')
         config=objects/'.config'
         original=config.read_bytes();(OUT/'public-baseline.config').write_bytes(original)
@@ -405,6 +406,13 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             run([sys.executable,str(ROOT/'note10/device_test/test_xnu_runtime_observation.py'),'--artifact',str(OUT),'--output',str(OUT/'xnu-runtime-observation-model'),'--cc','clang-14'],'03-xnu-runtime-observation.log')
             report['xnu_runtime_observation_model_sha256']=hashlib.sha256((OUT/'xnu-runtime-observation-model/result.json').read_bytes()).hexdigest()
         if xnu_runtime_observation:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_XNU_RUNTIME_OBSERVATION'],'02-xnu-runtime-observation.log')
+        if xnu_runtime_scratch:
+            from prepare_xnu_runtime_scratch import prepare as prepare_scratch
+            report.update(prepare_scratch(source,OUT,report,enabled=True))
+            (OUT/'build-result.json').write_text(json.dumps(report,indent=2)+'\n',encoding='utf8')
+            run([sys.executable,str(ROOT/'note10/device_test/test_xnu_runtime_scratch.py'),'--artifact',str(OUT),'--output',str(OUT/'xnu-runtime-scratch-model'),'--cc','clang-14'],'03-xnu-runtime-scratch.log')
+            report['xnu_runtime_scratch_model_sha256']=hashlib.sha256((OUT/'xnu-runtime-scratch-model/result.json').read_bytes()).hexdigest()
+            run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_XNU_RUNTIME_SCRATCH'],'02-xnu-runtime-scratch.log')
         run([*make,'olddefconfig'],'03-olddefconfig.log')
         configured=config.read_text()
         required=('CONFIG_KEXEC=y','CONFIG_KEXEC_CORE=y','CONFIG_PM_SLEEP_SMP=y','CONFIG_ARM64_4K_PAGES=y')
@@ -420,6 +428,7 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
         if cpu_pm_notifier_counts:required+=('CONFIG_NOTE10_CPU_PM_NOTIFIER_COUNTS=y',)
         if cpu_pm_notifier_trace:required+=('CONFIG_NOTE10_CPU_PM_NOTIFIER_TRACE=y',)
         if xnu_runtime_observation:required+=('CONFIG_NOTE10_XNU_RUNTIME_OBSERVATION=y',)
+        if xnu_runtime_scratch:required+=('CONFIG_NOTE10_XNU_RUNTIME_SCRATCH=y',)
         if reserve:required+=('CONFIG_INITRAMFS_FORCE=y','CONFIG_CMDLINE_EXTEND=y','CONFIG_CMDLINE="rdinit=/init"')
         if xnu_payload is not None:required+=('CONFIG_CRYPTO=y','CONFIG_CRYPTO_HASH=y','CONFIG_CRYPTO_SHA256=y')
         if cpu_cache:required+=('CONFIG_HOTPLUG_CPU=y','CONFIG_SMP=y','CONFIG_PM_SLEEP_SMP=y')
@@ -544,7 +553,7 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             for name,digest in final_sources.items():
                 if hashlib.sha256((source/name).read_bytes()).hexdigest()!=digest:raise ValueError('Final Image source changed after composed CPU PM snapshot: '+name)
         if xnu_runtime_observation:
-            for name,digest in report['xnu_runtime_observation_prepared_sha256'].items():
+            for name,digest in report['xnu_runtime_scratch_prepared_sha256' if xnu_runtime_scratch else 'xnu_runtime_observation_prepared_sha256'].items():
                 if hashlib.sha256((source/name).read_bytes()).hexdigest()!=digest:raise ValueError('Runtime observation final source changed: '+name)
         if reserve and target.read_bytes().count(report['reservation_evidence_id'].encode())!=1:
             raise ValueError('Unique reservation evidence ID not embedded in Image')
@@ -578,6 +587,15 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             if any(('__ksymtab_' in n or '__kstrtab_' in n) and ('n10_rt_' in n or 'n10_observe_runtime' in n) for n in linked):raise ValueError('Planner API unexpectedly exported')
             report['xnu_runtime_observation_link_symbols']=sorted(n for n in linked if n.startswith(('n10_rt_','n10_observe_runtime_plan')))
             report['xnu_runtime_observation_link_verified']=True
+        if (b'N10XSO1' in target.read_bytes()) is not xnu_runtime_scratch:raise ValueError('Scratch Image scope differs')
+        if xnu_runtime_scratch:
+            linked={line.split()[-1] for line in symbol_text.splitlines() if line.split()}
+            names=sorted(n for n in linked if n.startswith(('n10_scratch_','n10_observe_runtime_scratch')))
+            if any(('__ksymtab_' in n or '__kstrtab_' in n) and 'scratch' in n for n in linked):raise ValueError('Scratch API exported')
+            report['xnu_runtime_scratch_link_symbols']=names
+            report['xnu_runtime_scratch_link_verified']=True
+            from xnu_runtime_scratch_stack import capture as capture_stack
+            report['xnu_runtime_scratch_stack_sha256']=capture_stack(objects,OUT,source,target,report)
         if pm_timer:
             from pm_quiesce_binding import validate_model as validate_quiesce
             validation.call('pm_quiesce_binding',validate_quiesce,OUT,report)
@@ -767,6 +785,12 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             report['xnu_runtime_observation_package_sha256']=hashlib.sha256((OUT/'xnu-runtime-observation-package-model/result.json').read_bytes()).hexdigest()
             from xnu_runtime_observation_binding import validate as validate_runtime_observation
             validation.call('xnu_runtime_observation_binding',validate_runtime_observation,OUT,report,require_package_flow=True)
+        if xnu_runtime_scratch:
+            (OUT/'build-result.json').write_text(json.dumps(report,indent=2)+'\n',encoding='utf8')
+            run([sys.executable,str(ROOT/'note10/device_test/test_xnu_runtime_scratch_package.py'),'--artifact',str(OUT),'--output',str(OUT/'xnu-runtime-scratch-package-model')],'03-xnu-runtime-scratch-package.log')
+            report['xnu_runtime_scratch_package_sha256']=hashlib.sha256((OUT/'xnu-runtime-scratch-package-model/result.json').read_bytes()).hexdigest()
+            from xnu_runtime_scratch_binding import validate as validate_scratch
+            validation.call('xnu_runtime_scratch_binding',validate_scratch,OUT,report,require_package_flow=True)
         if auto_return:
             from materialize_auto_cycle import SLOT
             if b'N10RET1' not in target.read_bytes() or target.read_bytes().count(SLOT+b'\0')!=1:raise ValueError('Auto-return marker/unique data slot missing')
@@ -805,5 +829,6 @@ if __name__=='__main__':
     parser.add_argument('--cpu-pm-notifier-counts',action='store_true',help='Opt in to bounded notifier callback counts within the guarded CPU_PM pair')
     parser.add_argument('--cpu-pm-notifier-trace',action='store_true',help='Opt in to bounded notifier-block dispatch order; requires notifier counts')
     parser.add_argument('--xnu-runtime-observation',action='store_true',help='Hypothetical local planner observation only; requires full diagnostic trace chain')
+    parser.add_argument('--xnu-runtime-scratch',action='store_true',help='Caller-owned scratch metadata only; requires runtime observation')
     args=parser.parse_args();main(caps=args.caps,reserve=args.reserve,window_access=args.window_access,
-                                   xnu_payload=args.xnu_payload,xnu_manifest=args.xnu_payload_manifest,cpu_cache=args.cpu_cache,pm_timer=args.pm_timer,auto_return=args.auto_return,screen_log=args.screen_log,gic_roundtrip=args.gic_roundtrip,dma_pm_audit=args.dma_pm_audit,ufs_pm_audit=args.ufs_pm_audit,ehld_lock_audit=args.ehld_lock_audit,ehld_irqsave_audit=args.ehld_irqsave_audit,ehld_running_lock_audit=args.ehld_running_lock_audit,cpu_pm_roundtrip=args.cpu_pm_roundtrip,cpu_pm_notifier_counts=args.cpu_pm_notifier_counts,cpu_pm_notifier_trace=args.cpu_pm_notifier_trace,xnu_runtime_observation=args.xnu_runtime_observation)
+                                   xnu_payload=args.xnu_payload,xnu_manifest=args.xnu_payload_manifest,cpu_cache=args.cpu_cache,pm_timer=args.pm_timer,auto_return=args.auto_return,screen_log=args.screen_log,gic_roundtrip=args.gic_roundtrip,dma_pm_audit=args.dma_pm_audit,ufs_pm_audit=args.ufs_pm_audit,ehld_lock_audit=args.ehld_lock_audit,ehld_irqsave_audit=args.ehld_irqsave_audit,ehld_running_lock_audit=args.ehld_running_lock_audit,cpu_pm_roundtrip=args.cpu_pm_roundtrip,cpu_pm_notifier_counts=args.cpu_pm_notifier_counts,cpu_pm_notifier_trace=args.cpu_pm_notifier_trace,xnu_runtime_observation=args.xnu_runtime_observation,xnu_runtime_scratch=args.xnu_runtime_scratch)

@@ -28,13 +28,16 @@ ENTRYPOINTS.update({name + '_binding': 'validate' for name in
                     'fpsimd_reference', 'rcu_context', 'ehld_lock', 'ehld_irqsave',
                     'ehld_running_lock', 'cpu_pm_roundtrip')})
 ENTRYPOINTS['xnu_runtime_observation_binding']='validate'
+ENTRYPOINTS['xnu_runtime_scratch_binding']='validate'
 OPTIONAL_DIRECT=(('xnu_runtime_observation_binding',True),)
 
 
 def active_direct(report=None):
     flag=report.get('xnu_runtime_observation',False) if report is not None else False
     if type(flag) is not bool:raise ValueError('manifest planner opt-in must be bool')
-    return DIRECT+(OPTIONAL_DIRECT if flag else ())
+    scratch=report.get('xnu_runtime_scratch',False) if report is not None else False
+    if type(scratch) is not bool or (scratch and not flag):raise ValueError('manifest scratch prerequisite invalid')
+    return DIRECT+(OPTIONAL_DIRECT if flag else ())+((('xnu_runtime_scratch_binding',True),) if scratch else ())
 
 
 DIRECT = (
@@ -99,11 +102,15 @@ PROOFS = {
                                  'cpu-pm-notifier-counts-model/result.json', 'cpu-pm-notifier-trace-model/result.json'),
 }
 PROOFS['xnu_runtime_observation_binding']=('xnu-runtime-observation-model/result.json','xnu-runtime-observation-package-model/result.json')
+PROOFS['xnu_runtime_scratch_binding']=('xnu-runtime-scratch-model/result.json','xnu-runtime-scratch-package-model/result.json','xnu-runtime-scratch-stack/result.json')
 PACKAGE_PROOFS = {name + '_binding': name.replace('_', '-') + '-package-flow-model/result.json'
                   for name in ('pmu_failure', 'gic_priority', 'pmu_state', 'pmu_control',
                                'fpsimd_reference', 'rcu_context', 'ehld_lock',
                                'ehld_irqsave', 'ehld_running_lock', 'cpu_pm_roundtrip')}
 EXISTING_FIELDS = {
+    'xnu-runtime-scratch-model/result.json':'xnu_runtime_scratch_model_sha256',
+    'xnu-runtime-scratch-package-model/result.json':'xnu_runtime_scratch_package_sha256',
+    'xnu-runtime-scratch-stack/result.json':'xnu_runtime_scratch_stack_sha256',
     'xnu-runtime-observation-model/result.json':'xnu_runtime_observation_model_sha256',
     'xnu-runtime-observation-package-model/result.json':'xnu_runtime_observation_package_sha256',
     'ehld-irqsave-model/result.json': 'ehld_irqsave_model_sha256',

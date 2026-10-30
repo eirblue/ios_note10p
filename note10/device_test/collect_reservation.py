@@ -93,6 +93,15 @@ def decode_runtime_plan_observation(text,identity,build):
         return {'observation':{'observed':False,'decode_error':str(error)},'evaluation_item':{'required':True,'status':'failed'}}
 
 
+def decode_runtime_scratch_observation(text,identity,build):
+    from decode_xnu_runtime_scratch import decode
+    try:
+        value=decode(text,identity,build['xnu_payload_sha256'],build['xnu_payload_size'],build['xnu_runtime_scratch_geometry_sha256'])
+        return {'observation':value,'evaluation_item':{'required':True,'status':'passed'}}
+    except (ValueError,KeyError,UnicodeError) as error:
+        return {'observation':{'observed':False,'decode_error':str(error)},'evaluation_item':{'required':True,'status':'failed'}}
+
+
 def select_latest_boot(data,expected_banner,allow_panic_corroboration=False,boot_binding_id=None):
     """Select one contiguous boot using an intact zero-time Linux banner.
 
@@ -203,6 +212,9 @@ def collect(packages,kernel_build,adb):
     from xnu_runtime_observation_binding import validate as validate_runtime_observation,package_scope as runtime_scope
     runtime_observation=validate_runtime_observation(kernel_build,result)
     runtime_observations=[]
+    from xnu_runtime_scratch_binding import validate as validate_scratch,package_scope as scratch_scope
+    scratch=validate_scratch(kernel_build,result)
+    scratch_observations=[]
     from pm_irq_binding import assert_scope as assert_irq_scope,validate_model as validate_irq
     pm_irq=assert_irq_scope(kernel_build,result)
     if pm_irq:validate_irq(kernel_build,result)
@@ -267,6 +279,8 @@ def collect(packages,kernel_build,adb):
     if roundtrip_package_scope(paired) is not cpu_pm_roundtrip:raise ValueError('CPU PM roundtrip package/kernel scope differs')
     if counts_package_scope(paired) is not cpu_pm_notifier_counts:raise ValueError('CPU PM notifier-count package/kernel scope differs')
     if trace_package_scope(paired) is not cpu_pm_notifier_trace:raise ValueError('CPU PM notifier-trace package/kernel scope differs')
+    if scratch_scope(paired) is not scratch:raise ValueError('Scratch package/kernel scope differs')
+    if scratch and paired.get('xnu_runtime_scratch_geometry_sha256')!=result.get('xnu_runtime_scratch_geometry_sha256'):raise ValueError('Scratch external geometry differs')
     if runtime_scope(paired) is not runtime_observation:raise ValueError('Runtime observation package/kernel scope differs')
     if runtime_observation and paired.get('xnu_runtime_observation_geometry_sha256')!=result.get('xnu_runtime_observation_geometry_sha256'):raise ValueError('Runtime observation external geometry binding differs')
     if bool(paired.get('pm_irq_diagnostic'))!=pm_irq or (pm_irq and paired.get('pm_irq_evidence_version')!=1):raise ValueError('CPU0 IRQ package/kernel scope differs')
@@ -376,6 +390,7 @@ def collect(packages,kernel_build,adb):
                 selection['selected_file']=selected_name
             text=selected.decode(errors='replace')
             if runtime_observation:runtime_observations.append(decode_runtime_plan_observation(text,evidence_id,result))
+            if scratch:scratch_observations.append(decode_runtime_scratch_observation(text,evidence_id,result))
             if not fpsimd_reference and 'N10FPS' in text:raise ValueError('unexpected FPSIMD reference evidence')
             if not rcu_context and 'N10RC' in text:raise ValueError('unexpected RCU context evidence')
             if not ehld_lock and 'N10EL' in text:raise ValueError('unexpected EHLD lock evidence')
@@ -635,6 +650,13 @@ def collect(packages,kernel_build,adb):
         report['xnu_runtime_observation_scope_verified']=True
         report['xnu_runtime_plan_observation']=runtime_item['observation']
         report['evaluation_items']['xnu_runtime_plan']=runtime_item['evaluation_item']
+        report['diagnostic_passed']=report['diagnostic_passed'] and bool(successful)
+    if scratch:
+        successful=[item for item in scratch_observations if item['evaluation_item']['status']=='passed']
+        item=successful[0] if successful else {'observation':{'observed':False},'evaluation_item':{'required':True,'status':'failed'}}
+        report['xnu_runtime_scratch_scope_verified']=True
+        report['xnu_runtime_scratch_observation']=item['observation']
+        report['evaluation_items']['xnu_runtime_scratch']=item['evaluation_item']
         report['diagnostic_passed']=report['diagnostic_passed'] and bool(successful)
     (out/'capture-result.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
     return report

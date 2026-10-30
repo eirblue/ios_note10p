@@ -85,6 +85,9 @@ def validate(root,build,require_package_flow=False):
     validate_providers({name:prior[name] for name in PROVIDERS},build,manifest)
     for name in set(before)-{RESERVE,KCONFIG}:
         if prior[name]!=final[name]:raise ValueError('planner mutated preserved provider')
+    if build.get('xnu_runtime_scratch') is True:
+        from prepare_xnu_runtime_scratch import validate_delta
+        validate_delta(root,build)
     current={name:sha((HERE/name).read_bytes()) for name in SOURCES}
     if build.get(FLAG+'_sources_sha256')!=current:raise ValueError('planner production source closure differs')
     for name,digest in REUSE.items():

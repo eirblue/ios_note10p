@@ -204,6 +204,12 @@ def check(packages,kernel_build,backup,core_model,gate_model,init_model,adb):
         if runtime_observation:
             if any(m.get('xnu_runtime_observation_geometry_sha256')!=build.get('xnu_runtime_observation_geometry_sha256') for m in (paired,diagnostic)):raise ValueError('Runtime observation geometry differs')
             report['xnu_runtime_observation_scope_verified']=True
+        from xnu_runtime_scratch_binding import validate as validate_scratch,package_scope as scratch_scope
+        scratch=validate_scratch(kernel_build,build)
+        if any(scratch_scope(m) is not scratch for m in (paired,diagnostic)):raise ValueError('Scratch package/build scope differs')
+        if scratch:
+            if any(m.get('xnu_runtime_scratch_geometry_sha256')!=build.get('xnu_runtime_scratch_geometry_sha256') for m in (paired,diagnostic)):raise ValueError('Scratch geometry differs')
+            report['xnu_runtime_scratch_scope_verified']=True
         from pm_irq_binding import assert_scope as assert_irq_scope,validate_model as validate_irq
         irq_scope=assert_irq_scope(kernel_build,build)
         if any(irq_scope!=bool(m.get('pm_irq_diagnostic')) for m in (paired,diagnostic)):raise ValueError('CPU0 IRQ package scope differs')

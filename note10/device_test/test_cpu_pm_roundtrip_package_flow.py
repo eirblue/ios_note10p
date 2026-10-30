@@ -65,7 +65,7 @@ def make_fixture(root,artifact,mode,scope_expected,counts_expected=False,trace_e
  identity=build.get('reservation_evidence_id','e'*32)
  if not isinstance(identity,str) or len(identity)!=32:raise ValueError('invalid fixture reservation identity')
  # Legacy fixture scopes intentionally exclude the independent later planner feature.
- build={key:value for key,value in build.items() if key!='xnu_runtime_observation' and not key.startswith('xnu_runtime_observation_')}
+ build={key:value for key,value in build.items() if key not in ('xnu_runtime_observation','xnu_runtime_scratch') and not key.startswith(('xnu_runtime_observation_','xnu_runtime_scratch_'))}
  build['reservation_evidence_id']=identity
  build.setdefault('reservation_evidence_version',2)
  image=model_image(identity,scope_expected,counts_expected,trace_expected);(art/'Image').write_bytes(image)
@@ -89,7 +89,7 @@ def make_fixture(root,artifact,mode,scope_expected,counts_expected=False,trace_e
    build.pop(key)
  config=(art/'handoff.config').read_text(encoding='ascii').splitlines()
  count_option='CONFIG_NOTE10_CPU_PM_NOTIFIER_COUNTS'
- config=[line for line in config if count_option not in line and 'CONFIG_NOTE10_CPU_PM_NOTIFIER_TRACE' not in line and 'CONFIG_NOTE10_XNU_RUNTIME_OBSERVATION' not in line]
+ config=[line for line in config if count_option not in line and 'CONFIG_NOTE10_CPU_PM_NOTIFIER_TRACE' not in line and 'CONFIG_NOTE10_XNU_RUNTIME_OBSERVATION' not in line and 'CONFIG_NOTE10_XNU_RUNTIME_SCRATCH' not in line]
  if trace_expected:config.append('CONFIG_NOTE10_CPU_PM_NOTIFIER_TRACE=y')
  build['cpu_pm_notifier_counts']=counts_expected
  build['cpu_pm_notifier_counts_version']=1 if counts_expected else None
