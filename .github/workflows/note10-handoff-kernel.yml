@@ -334,6 +334,7 @@ jobs:
           if-no-files-found: error
           path: |
             note10/private/handoff-kernel/build-result.json
+            note10/private/handoff-kernel/binding-validation-result.json
             note10/private/handoff-kernel/abox-pm-model/result.json
             note10/private/handoff-kernel/abox-pm-model/*.log
             note10/private/handoff-kernel/abox-pmu-model/result.json

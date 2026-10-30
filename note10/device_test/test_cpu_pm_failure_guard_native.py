@@ -6,9 +6,10 @@ from prepare_pm_callbacks import PINS, reverse_guard, GUARD_MARKER, verify_edge_
 
 def sha(b): return hashlib.sha256(b).hexdigest()
 def main():
- ap=argparse.ArgumentParser();ap.add_argument('--source-root',required=True);ap.add_argument('--cpu-source');ap.add_argument('--output',required=True);a=ap.parse_args();root=Path(a.source_root);out=Path(a.output);out.mkdir(parents=True,exist_ok=True)
+ ap=argparse.ArgumentParser();ap.add_argument('--source-root',required=True);ap.add_argument('--cpu-source');ap.add_argument('--notifier-source');ap.add_argument('--output',required=True);a=ap.parse_args();root=Path(a.source_root);out=Path(a.output);out.mkdir(parents=True,exist_ok=True)
  files={n:(root/n).read_bytes() for n in ('kernel/cpu_pm.c','kernel/notifier.c','drivers/base/syscore.c','include/linux/notifier.h','include/linux/cpu_pm.h')}
  if a.cpu_source:files['kernel/cpu_pm.c']=Path(a.cpu_source).read_bytes()
+ if a.notifier_source:files['kernel/notifier.c']=Path(a.notifier_source).read_bytes()
  cpu=files['kernel/cpu_pm.c']; suffix=b'\n#ifdef CONFIG_NOTE10_PM_CALLBACK_INVENTORY\n#include "note10_pm_callbacks_cpu_pm.c"\n#endif\n'
  if not cpu.endswith(suffix) or not cpu[:-len(suffix)].endswith(GUARD_MARKER) or sha(reverse_guard(cpu[:-len(suffix)-len(GUARD_MARKER)]))!=PINS['kernel/cpu_pm.c']:raise ValueError('guard composition differs')
  original_syscore=verify_edge_syscore(files['drivers/base/syscore.c']).decode()

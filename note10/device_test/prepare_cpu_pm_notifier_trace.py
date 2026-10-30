@@ -20,7 +20,8 @@ SOURCES = ('prepare_cpu_pm_notifier_trace.py', 'decode_cpu_pm_notifier_trace.py'
            'test_cpu_pm_notifier_trace.py', 'test_cpu_pm_notifier_trace_package.py',
            'cpu_pm_roundtrip_binding.py', 'build_handoff_kernel.py',
            'prepare_cpu_pm_roundtrip_flow_compat.py',
-           'test_cpu_pm_roundtrip_package_flow.py')
+           'test_cpu_pm_roundtrip_package_flow.py', 'binding_validation_manifest.py',
+           'test_binding_validation_manifest.py')
 BLOCK = b'''\nconfig NOTE10_CPU_PM_NOTIFIER_TRACE
 \tbool "Observe guarded CPU PM notifier dispatch order"
 \tdepends on NOTE10_CPU_PM_NOTIFIER_COUNTS && NOTE10_CPU_PM_ROUNDTRIP

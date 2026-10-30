@@ -70,6 +70,8 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
               'cpu_pm_notifier_trace':False,
               'auto_return_diagnostic':auto_return,
               'commands':[]}
+    from binding_validation_manifest import Recorder
+    validation=Recorder(OUT,report,COMMIT,enabled=cpu_pm_notifier_trace)
     def run(arguments, log_name, timeout=120):
         report['commands'].append(arguments)
         print(log_name,flush=True)
@@ -444,7 +446,14 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
                 run([sys.executable,str(ROOT/'note10/device_test/test_pm_callbacks_binding.py'),'--output',str(OUT/'pm-callbacks-binding-model')],'03-pm-callbacks-binding.log')
                 run([sys.executable,str(ROOT/'note10/device_test/test_pm_callbacks_integration_native.py'),'--source-root',str(OUT/'pm-callbacks-prepared'),'--output',str(OUT/'pm-callbacks-integration-model')],'03-pm-callbacks-integration.log')
                 run([sys.executable,str(ROOT/'note10/device_test/test_pm_build_concurrency.py'),'--output',str(OUT/'pm-build-concurrency-model')],'03-pm-build-concurrency.log')
-                run([sys.executable,str(ROOT/'note10/device_test/test_cpu_pm_failure_guard_native.py'),'--source-root',str(source),'--cpu-source',str(OUT/'pm-callbacks-prepared/kernel/cpu_pm.c'),'--output',str(OUT/'cpu-pm-failure-guard-model')],'03-cpu-pm-failure-guard.log')
+                failure_guard_extra=[]
+                if cpu_pm_notifier_trace:
+                    from prepare_cpu_pm_notifier_trace import BASE as TRACE_BASE,TARGETS as TRACE_TARGETS,transform as trace_transform
+                    trace_before={n:(OUT/TRACE_BASE/n).read_bytes() for n in TRACE_TARGETS}
+                    trace_after=trace_transform(trace_before)
+                    if any((source/n).read_bytes()!=trace_after[n] for n in TRACE_TARGETS):raise ValueError('Legacy notifier input is not bound to actual production trace composition')
+                    failure_guard_extra=['--notifier-source',str(OUT/TRACE_BASE/'kernel/notifier.c')]
+                run([sys.executable,str(ROOT/'note10/device_test/test_cpu_pm_failure_guard_native.py'),'--source-root',str(source),'--cpu-source',str(OUT/'pm-callbacks-prepared/kernel/cpu_pm.c'),*failure_guard_extra,'--output',str(OUT/'cpu-pm-failure-guard-model')],'03-cpu-pm-failure-guard.log')
                 for script,model in (('test_pm_preconditions_native.py','getters'),('test_pm_preconditions_gic_native.py','gic'),('test_pm_preconditions_lifecycle.py','lifecycle'),('test_pm_preconditions_producer.py','producer')):
                     run([sys.executable,str(ROOT/'note10/device_test'/script),'--output',str(OUT/('pm-preconditions-'+model+'-model'))],'03-pm-preconditions-'+model+'.log')
                 run([sys.executable,str(ROOT/'note10/device_test/test_pm_preconditions_caller.py'),'--source-root',str(OUT/'pm-preconditions-prepared'),'--output',str(OUT/'pm-preconditions-caller-model')],'03-pm-preconditions-caller.log')
@@ -551,48 +560,48 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
         elif trace_names:raise ValueError('Disabled dispatch code remains linked')
         if pm_timer:
             from pm_quiesce_binding import validate_model as validate_quiesce
-            validate_quiesce(OUT,report)
+            validation.call('pm_quiesce_binding',validate_quiesce,OUT,report)
         if screen_log and b'N10DSP1' not in target.read_bytes():raise ValueError('Screen log marker missing')
         if gic_roundtrip:
             from gic_roundtrip_binding import validate_model as validate_gic
-            validate_gic(OUT,report)
+            validation.call('gic_roundtrip_binding',validate_gic,OUT,report)
         if dma_pm_audit:
             from dma_pm_binding import validate_model as validate_dma
-            validate_dma(OUT,report)
+            validation.call('dma_pm_binding',validate_dma,OUT,report)
         if ufs_pm_audit:
             from ufs_pm_binding import validate_model as validate_ufs
-            validate_ufs(OUT,report)
+            validation.call('ufs_pm_binding',validate_ufs,OUT,report)
             from iommu_pm_binding import validate_model as validate_iommu
-            validate_iommu(OUT,report)
+            validation.call('iommu_pm_binding',validate_iommu,OUT,report)
             from abox_pm_binding import validate_model as validate_abox
-            validate_abox(OUT,report)
+            validation.call('abox_pm_binding',validate_abox,OUT,report)
             from abox_pmu_binding import validate_model as validate_pmu
-            validate_pmu(OUT,report)
+            validation.call('abox_pmu_binding',validate_pmu,OUT,report)
             from pm_noirq_binding import validate_model as validate_noirq
-            validate_noirq(OUT,report)
+            validation.call('pm_noirq_binding',validate_noirq,OUT,report)
             from pmu_settle_binding import validate_model as validate_settle
-            validate_settle(OUT,report)
+            validation.call('pmu_settle_binding',validate_settle,OUT,report)
             from pm_cpus_binding import validate_model as validate_cpus
-            validate_cpus(OUT,report)
+            validation.call('pm_cpus_binding',validate_cpus,OUT,report)
             from pm_post_arch_binding import validate_model as validate_post_arch
-            validate_post_arch(OUT,report)
+            validation.call('pm_post_arch_binding',validate_post_arch,OUT,report)
             from pm_edge_binding import validate_model as validate_edge
-            validate_edge(OUT,report)
+            validation.call('pm_edge_binding',validate_edge,OUT,report)
             from pm_callbacks_binding import validate_model as validate_callbacks, binding_inputs as callback_binding_inputs
             (OUT/'pm-callbacks-binding-input.json').write_text(json.dumps(callback_binding_inputs(report),indent=2)+'\n',encoding='utf-8')
             run([sys.executable,str(ROOT/'note10/device_test/test_pm_callbacks_full_binding.py'),'--artifact',str(OUT),'--output',str(OUT/'pm-callbacks-coverage-model')],'03-pm-callbacks-coverage.log')
-            validate_callbacks(OUT,report)
+            validation.call('pm_callbacks_binding',validate_callbacks,OUT,report)
             from pm_preconditions_binding import validate_model as validate_preconditions
             (OUT/'build-result.json').write_text(json.dumps(report,indent=2)+'\n',encoding='utf-8')
             run([sys.executable,str(ROOT/'note10/device_test/test_pm_preconditions_scope.py'),'--artifact',str(OUT),'--output',str(OUT/'pm-preconditions-scope-model')],'03-pm-preconditions-scope.log')
-            validate_preconditions(OUT,report)
+            validation.call('pm_preconditions_binding',validate_preconditions,OUT,report)
             from pm_branch_binding import validate_model as validate_branch
             run([sys.executable,str(ROOT/'note10/device_test/test_pm_branch_scope.py'),'--artifact',str(OUT),'--output',str(OUT/'pm-branch-scope-model')],'03-pm-branch-scope.log')
-            validate_branch(OUT,report)
+            validation.call('pm_branch_binding',validate_branch,OUT,report)
             (OUT/'build-result.json').write_text(json.dumps(report,indent=2)+'\n',encoding='utf-8')
             run([sys.executable,str(ROOT/'note10/device_test/test_pmu_failure_binding.py'),'--artifact',str(OUT),'--output',str(OUT/'pmu-failure-binding-model')],'03-pmu-failure-binding.log')
             from pmu_failure_binding import validate as validate_failure
-            validate_failure(OUT,report,require_package_flow=False)
+            validation.call('pmu_failure_binding',validate_failure,OUT,report,require_package_flow=False)
             from prepare_pmu_failure_flow_compat import prepare as prepare_prior_flow
             from prepare_pmu_state_flow_compat import prepare as prepare_state_compat
             from prepare_pmu_control_flow_compat import prepare as prepare_control_compat
@@ -620,10 +629,10 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
                 old40=prepare_state_compat(old41,Path(temp)/'v40-fixture')
                 prior_flow=prepare_prior_flow(old40,Path(temp)/'v39-fixture')
                 run([sys.executable,str(ROOT/'note10/device_test/test_pmu_failure_package_flow.py'),'--artifact',str(prior_flow),'--output',str(OUT/'pmu-failure-package-flow-model')],'03-pmu-failure-package-flow.log')
-            validate_failure(OUT,report)
+            validation.call('pmu_failure_binding',validate_failure,OUT,report)
             run([sys.executable,str(ROOT/'note10/device_test/test_gic_priority_binding.py'),'--artifact',str(OUT),'--output',str(OUT/'gic-priority-binding-model')],'03-gic-priority-binding.log')
             from gic_priority_binding import validate as validate_priority
-            validate_priority(OUT,report,require_package_flow=False)
+            validation.call('gic_priority_binding',validate_priority,OUT,report,require_package_flow=False)
             with tempfile.TemporaryDirectory() as temp:
                 v46_base=prepare_v46_flow_base(temp)
                 irqsave_base=prepare_irqsave_compat(v46_base,Path(temp)/'v45-fixture') if ehld_irqsave_audit else v46_base
@@ -631,60 +640,60 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
                 old41=prepare_control_compat(prepare_fpsimd_compat(prepare_rcu_compat(ehld_base,Path(temp)/'v43-fixture'),Path(temp)/'v42-fixture'),Path(temp)/'v41-fixture')
                 old40=prepare_state_compat(old41,Path(temp)/'v40-fixture')
                 run([sys.executable,str(ROOT/'note10/device_test/test_gic_priority_package_flow.py'),'--artifact',str(old40),'--output',str(OUT/'gic-priority-package-flow-model')],'03-gic-priority-package-flow.log')
-            validate_priority(OUT,report)
+            validation.call('gic_priority_binding',validate_priority,OUT,report)
             run([sys.executable,str(ROOT/'note10/device_test/test_pmu_state_binding.py'),'--artifact',str(OUT),'--output',str(OUT/'pmu-state-binding-model')],'03-pmu-state-binding.log')
             from pmu_state_binding import validate as validate_state
-            validate_state(OUT,report,require_package_flow=False)
+            validation.call('pmu_state_binding',validate_state,OUT,report,require_package_flow=False)
             with tempfile.TemporaryDirectory() as temp:
                 v46_base=prepare_v46_flow_base(temp)
                 irqsave_base=prepare_irqsave_compat(v46_base,Path(temp)/'v45-fixture') if ehld_irqsave_audit else v46_base
                 ehld_base=prepare_ehld_compat(irqsave_base,Path(temp)/'v44-fixture') if ehld_lock_audit else OUT
                 old41=prepare_control_compat(prepare_fpsimd_compat(prepare_rcu_compat(ehld_base,Path(temp)/'v43-fixture'),Path(temp)/'v42-fixture'),Path(temp)/'v41-fixture')
                 run([sys.executable,str(ROOT/'note10/device_test/test_pmu_state_package_flow.py'),'--artifact',str(old41),'--output',str(OUT/'pmu-state-package-flow-model')],'03-pmu-state-package-flow.log')
-            validate_state(OUT,report)
+            validation.call('pmu_state_binding',validate_state,OUT,report)
             run([sys.executable,str(ROOT/'note10/device_test/test_pmu_control_binding.py'),'--artifact',str(OUT),'--output',str(OUT/'pmu-control-binding-model')],'03-pmu-control-binding.log')
             from pmu_control_binding import validate as validate_control
-            validate_control(OUT,report,require_package_flow=False)
+            validation.call('pmu_control_binding',validate_control,OUT,report,require_package_flow=False)
             with tempfile.TemporaryDirectory() as temp:
                 v46_base=prepare_v46_flow_base(temp)
                 irqsave_base=prepare_irqsave_compat(v46_base,Path(temp)/'v45-fixture') if ehld_irqsave_audit else v46_base
                 ehld_base=prepare_ehld_compat(irqsave_base,Path(temp)/'v44-fixture') if ehld_lock_audit else OUT
                 old42=prepare_fpsimd_compat(prepare_rcu_compat(ehld_base,Path(temp)/'v43-fixture'),Path(temp)/'v42-fixture')
                 run([sys.executable,str(ROOT/'note10/device_test/test_pmu_control_package_flow.py'),'--artifact',str(old42),'--output',str(OUT/'pmu-control-package-flow-model')],'03-pmu-control-package-flow.log')
-            validate_control(OUT,report)
+            validation.call('pmu_control_binding',validate_control,OUT,report)
             run([sys.executable,str(ROOT/'note10/device_test/test_fpsimd_reference_binding.py'),'--artifact',str(OUT),'--output',str(OUT/'fpsimd-reference-binding-model')],'03-fpsimd-reference-binding.log')
             from fpsimd_reference_binding import validate as validate_fpsimd
-            validate_fpsimd(OUT,report,require_package_flow=False)
+            validation.call('fpsimd_reference_binding',validate_fpsimd,OUT,report,require_package_flow=False)
             with tempfile.TemporaryDirectory() as temp:
                 v46_base=prepare_v46_flow_base(temp)
                 irqsave_base=prepare_irqsave_compat(v46_base,Path(temp)/'v45-fixture') if ehld_irqsave_audit else v46_base
                 ehld_base=prepare_ehld_compat(irqsave_base,Path(temp)/'v44-fixture') if ehld_lock_audit else OUT
                 old43=prepare_rcu_compat(ehld_base,Path(temp)/'v43-fixture')
                 run([sys.executable,str(ROOT/'note10/device_test/test_fpsimd_reference_package_flow.py'),'--artifact',str(old43),'--output',str(OUT/'fpsimd-reference-package-flow-model')],'03-fpsimd-reference-package-flow.log')
-            validate_fpsimd(OUT,report)
+            validation.call('fpsimd_reference_binding',validate_fpsimd,OUT,report)
             run([sys.executable,str(ROOT/'note10/device_test/test_rcu_context_binding.py'),'--artifact',str(OUT),'--output',str(OUT/'rcu-context-binding-model')],'03-rcu-context-binding.log')
             from rcu_context_binding import validate as validate_rcu
-            validate_rcu(OUT,report,require_package_flow=False)
+            validation.call('rcu_context_binding',validate_rcu,OUT,report,require_package_flow=False)
             with tempfile.TemporaryDirectory() as temp:
                 v46_base=prepare_v46_flow_base(temp)
                 irqsave_base=prepare_irqsave_compat(v46_base,Path(temp)/'v45-fixture') if ehld_irqsave_audit else v46_base
                 rcu_flow_input=prepare_ehld_compat(irqsave_base,Path(temp)/'v44-fixture') if ehld_lock_audit else OUT
                 run([sys.executable,str(ROOT/'note10/device_test/test_rcu_context_package_flow.py'),'--artifact',str(rcu_flow_input),'--output',str(OUT/'rcu-context-package-flow-model')],'03-rcu-context-package-flow.log')
-            validate_rcu(OUT,report)
+            validation.call('rcu_context_binding',validate_rcu,OUT,report)
         if ehld_lock_audit:
             (OUT/'Image').write_bytes(target.read_bytes())
             (OUT/'handoff.config').write_bytes((OUT/'objects/.config').read_bytes())
             (OUT/'build-result.json').write_text(json.dumps(report,indent=2)+'\n',encoding='utf-8',newline='\n')
             run([sys.executable,str(ROOT/'note10/device_test/test_ehld_lock_binding.py'),'--artifact',str(OUT),'--output',str(OUT/'ehld-lock-binding-model')],'03-ehld-lock-binding.log')
             from ehld_lock_binding import validate as validate_ehld
-            validate_ehld(OUT,report,require_package_flow=False)
+            validation.call('ehld_lock_binding',validate_ehld,OUT,report,require_package_flow=False)
             with tempfile.TemporaryDirectory() as temp:
                 v46_base=prepare_v46_flow_base(temp)
                 ehld_flow_input=prepare_irqsave_compat(v46_base,Path(temp)/'v45-fixture') if ehld_irqsave_audit else v46_base
                 run([sys.executable,str(ROOT/'note10/device_test/test_ehld_lock_package_flow.py'),'--artifact',str(ehld_flow_input),'--output',str(OUT/'ehld-lock-package-flow-model')],'03-ehld-lock-package-flow.log')
-            validate_ehld(OUT,report)
+            validation.call('ehld_lock_binding',validate_ehld,OUT,report)
             from pm_irq_binding import validate_model as validate_irq
-            validate_irq(OUT,report)
+            validation.call('pm_irq_binding',validate_irq,OUT,report)
         if ehld_irqsave_audit:
             (OUT/'Image').write_bytes(target.read_bytes())
             (OUT/'handoff.config').write_bytes((OUT/'objects/.config').read_bytes())
@@ -692,13 +701,13 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             run([sys.executable,str(ROOT/'note10/device_test/test_ehld_irqsave_binding.py'),'--artifact',str(OUT),'--output',str(OUT/'ehld-irqsave-binding-model')],'03-ehld-irqsave-binding.log')
             report['ehld_irqsave_binding_sha256']=hashlib.sha256((OUT/'ehld-irqsave-binding-model/result.json').read_bytes()).hexdigest()
             from ehld_irqsave_binding import validate as validate_irqsave
-            validate_irqsave(OUT,report,require_package_flow=False)
+            validation.call('ehld_irqsave_binding',validate_irqsave,OUT,report,require_package_flow=False)
             (OUT/'build-result.json').write_text(json.dumps(report,indent=2)+'\n',encoding='utf-8',newline='\n')
             with tempfile.TemporaryDirectory() as temp:
                 v46_base=prepare_v46_flow_base(temp)
                 run([sys.executable,str(ROOT/'note10/device_test/test_ehld_irqsave_package_flow.py'),'--artifact',str(v46_base),'--output',str(OUT/'ehld-irqsave-package-flow-model')],'03-ehld-irqsave-package-flow.log')
             report['ehld_irqsave_package_flow_sha256']=hashlib.sha256((OUT/'ehld-irqsave-package-flow-model/result.json').read_bytes()).hexdigest()
-            validate_irqsave(OUT,report)
+            validation.call('ehld_irqsave_binding',validate_irqsave,OUT,report)
         if ehld_running_lock_audit:
             (OUT/'Image').write_bytes(target.read_bytes())
             (OUT/'handoff.config').write_bytes((OUT/'objects/.config').read_bytes())
@@ -706,13 +715,13 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             run([sys.executable,str(ROOT/'note10/device_test/test_ehld_running_lock_binding.py'),'--artifact',str(OUT),'--output',str(OUT/'ehld-running-lock-binding-model')],'03-ehld-running-lock-binding.log')
             report['ehld_running_lock_binding_sha256']=hashlib.sha256((OUT/'ehld-running-lock-binding-model/result.json').read_bytes()).hexdigest()
             from ehld_running_lock_binding import validate as validate_running_lock
-            validate_running_lock(OUT,report,require_package_flow=False)
+            validation.call('ehld_running_lock_binding',validate_running_lock,OUT,report,require_package_flow=False)
             (OUT/'build-result.json').write_text(json.dumps(report,indent=2)+'\n',encoding='utf-8',newline='\n')
             with tempfile.TemporaryDirectory() as temp:
                 v48_base=prepare_v48_flow_base(temp)
                 run([sys.executable,str(ROOT/'note10/device_test/test_ehld_running_lock_package_flow.py'),'--artifact',str(v48_base),'--output',str(OUT/'ehld-running-lock-package-flow-model')],'03-ehld-running-lock-package-flow.log')
             report['ehld_running_lock_package_flow_sha256']=hashlib.sha256((OUT/'ehld-running-lock-package-flow-model/result.json').read_bytes()).hexdigest()
-            validate_running_lock(OUT,report)
+            validation.call('ehld_running_lock_binding',validate_running_lock,OUT,report)
         if cpu_pm_roundtrip:
             (OUT/'Image').write_bytes(target.read_bytes())
             (OUT/'handoff.config').write_bytes((OUT/'objects/.config').read_bytes())
@@ -723,7 +732,7 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             run([sys.executable,str(ROOT/'note10/device_test/test_cpu_pm_roundtrip_binding.py'),'--artifact',str(OUT),'--output',str(OUT/'cpu-pm-roundtrip-binding-model')],'03-cpu-pm-roundtrip-binding.log')
             report['cpu_pm_roundtrip_binding_sha256']=hashlib.sha256((OUT/'cpu-pm-roundtrip-binding-model/result.json').read_bytes()).hexdigest()
             from cpu_pm_roundtrip_binding import validate as validate_roundtrip
-            validate_roundtrip(OUT,report,require_package_flow=False)
+            validation.call('cpu_pm_roundtrip_binding',validate_roundtrip,OUT,report,require_package_flow=False)
             (OUT/'build-result.json').write_text(json.dumps(report,indent=2)+'\n',encoding='utf-8',newline='\n')
             run([sys.executable,str(ROOT/'note10/device_test/test_cpu_pm_roundtrip_package_flow.py'),'--artifact',str(OUT),'--output',str(OUT/'cpu-pm-roundtrip-package-flow-model')],'03-cpu-pm-roundtrip-package-flow.log')
             report['cpu_pm_roundtrip_package_flow_sha256']=hashlib.sha256((OUT/'cpu-pm-roundtrip-package-flow-model/result.json').read_bytes()).hexdigest()
@@ -731,7 +740,7 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
                 (OUT/'build-result.json').write_text(json.dumps(report,indent=2)+'\n',encoding='utf-8',newline='\n')
                 run([sys.executable,str(ROOT/'note10/device_test/test_cpu_pm_notifier_trace_package.py'),'--artifact',str(OUT),'--output',str(OUT/'cpu-pm-notifier-trace-package-model')],'03-cpu-pm-notifier-trace-package.log')
                 report['cpu_pm_notifier_trace_package_sha256']=hashlib.sha256((OUT/'cpu-pm-notifier-trace-package-model/result.json').read_bytes()).hexdigest()
-            validate_roundtrip(OUT,report)
+            validation.call('cpu_pm_roundtrip_binding',validate_roundtrip,OUT,report)
         if auto_return:
             from materialize_auto_cycle import SLOT
             if b'N10RET1' not in target.read_bytes() or target.read_bytes().count(SLOT+b'\0')!=1:raise ValueError('Auto-return marker/unique data slot missing')
@@ -740,6 +749,7 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
                       arm64_text_offset=hex(text_offset),arm64_header_image_size=image_size,arm64_flags=hex(flags))
         for name,command in (('compiler',['clang-14','--version']),('linker',['aarch64-linux-gnu-ld','--version'])):
             report[name]=subprocess.check_output(command,text=True).splitlines()[0]
+        report.update(validation.finalize())
     except Exception as error:
         report['failure']=str(error)
         raise
