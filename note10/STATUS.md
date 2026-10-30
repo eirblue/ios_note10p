@@ -1,5 +1,11 @@
 # 작업 상태 (2026-10-30, Asia/Seoul)
 
+## 2026-10-30: v54 네이티브 런타임 재배치 PC 구성요소 준비
+
+- 재사용 가능한 freestanding C planner, boot_args v2 1152바이트 serializer와 원본 N10XFER1 64바이트 record를 준비한다. 실제 소스 빌드 XNU의 VA에서 32MiB 정렬 virtual RAM base를 계산하고, 호출자가 준 합성 물리 base에 256MiB 배치를 검증한다.
+- C가 만든 metadata를 직접 사용하는 4-buffer bundle, 저장된 ABI oracle을 재컴파일하지 않는 새 ARM64 object 비교, 실제 XNU·adapter의 MMU 활성화 직전까지 새 PC 모델 1건을 대상으로 한다. 기존 entry·VM·seed·PM 시험 묶음은 반복하지 않는다.
+- v54 시험·CI 성공은 아직 기록하지 않는다. 기기 시험은 0회 범위이며 커널/기기 통합·물리 metadata 쓰기·XNU jump는 포함하지 않는다. v53 성공과 이전 실패 이력은 그대로 보존한다. [구현 범위와 계획](xnu26/RUNTIME-RELOCATION.md).
+
 ## 2026-10-30: v53 CPU_PM dispatch 순서 관측과 단일 실기기 진단 통과
 
 - **검증 소스:** `9c8410fac2fcca8cd7aeddb1ef79f5582c0a626f`; [CI 41010158045](https://github.com/eirblue/ios_note10p/actions/runs/41010158045) 통과. 실제 산출물의 manifest에서 26개 고유 결속 검증, 기존 직접 호출 36회와 중첩을 포함한 실제 호출 127회를 확인했다. trace native 22개·parser 24개·package 22개 증거가 결속됐다.

@@ -1,0 +1,23 @@
+{
+  "structure_size": 1152,
+  "offsets": {
+    "Revision": 0,
+    "Version": 2,
+    "virtBase": 8,
+    "physBase": 16,
+    "memSize": 24,
+    "topOfKernelData": 32,
+    "Video": 40,
+    "machineType": 88,
+    "deviceTreeP": 96,
+    "deviceTreeLength": 104,
+    "CommandLine": 108,
+    "bootFlags": 1136,
+    "memSizeActual": 1144
+  },
+  "c_initializer_bytes_compared": 1152,
+  "source_commit": "ac9718fb1af618d5ce8678d0dc6e8a58f252216f",
+  "header_sha256": "479a74f100116358a0e425d8deefc62c5bcbee72e49e69721c9e2d9c53465cd3",
+  "schema": 1,
+  "scope": "Sanitized numeric facts from saved real public XNU header oracle; no device ABI claim"
+}

@@ -1,0 +1,52 @@
+name: Note10 native runtime relocation PC component
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  runtime-component:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install focused host and instruction-model tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y clang lld
+          python -m pip install unicorn==2.1.4 capstone==5.0.9
+      - name: Download the exact source-built native XNU artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: note10-experimental-native-build
+          run-id: 39560904016
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: note10/private/runtime-relocation-input
+      - name: Compile the existing actual adapter for the PC model
+        run: |
+          mkdir -p note10/private/runtime-relocation-adapter note10/private/runtime-relocation-tmp
+          export TMPDIR="$GITHUB_WORKSPACE/note10/private/runtime-relocation-tmp"
+          export TMP="$TMPDIR" TEMP="$TMPDIR"
+          clang --target=aarch64-none-elf -march=armv8.2-a -Wall -Wextra -Werror -c note10/shim/xnu_transfer.S -o note10/private/runtime-relocation-adapter/transfer.o
+          ld.lld -T note10/shim/cap_link.ld note10/private/runtime-relocation-adapter/transfer.o -o note10/private/runtime-relocation-adapter/transfer.elf
+      - name: Run only the new C component and one new pre-MMU model case
+        run: |
+          python -B note10/xnu26/test_runtime_relocation.py --kernel-build note10/private/runtime-relocation-input --adapter note10/private/runtime-relocation-adapter/transfer.elf --output note10/private/runtime-relocation-proof
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: note10-runtime-relocation-pc-only
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            note10/private/runtime-relocation-proof/**
+            note10/private/runtime-relocation-adapter/transfer.o
+            note10/private/runtime-relocation-adapter/transfer.elf

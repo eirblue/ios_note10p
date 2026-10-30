@@ -12,18 +12,18 @@ import struct
 import sys
 from audit_kernel_instructions import image_layout
 from verify_experimental_artifact import verify
-from boot_contract import Region, PAGE, encode_boot_args, validate_placement
+from boot_contract import Region, PAGE, encode_boot_args, validate_placement, uint
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def run_case(directory, ram_base, outside_bootstrap_block=False, transfer_elf=None, handoff_bundle=None,ram_size=0x40000000,continuation=None,cpu_model=None):
+def run_case(directory, ram_base, outside_bootstrap_block=False, transfer_elf=None, handoff_bundle=None,ram_size=0x40000000,continuation=None,cpu_model=None,*,virtual_ram_base=0xfffffff000000000):
     from unicorn import Uc, UC_ARCH_ARM64, UC_MODE_ARM, UC_HOOK_CODE, UC_HOOK_MEM_WRITE
     from unicorn import arm64_const as regs
     from capstone import Cs, CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN
     checked = verify(directory)
     raw = (directory/'note10-experimental.macho').read_bytes()
-    virtual_ram = 0xfffffff000000000  # Synthetic virtual/physical mapping contract.
+    virtual_ram = uint(virtual_ram_base)  # Original default; optional explicit synthetic contract.
     image_base = min(s['virtual_address'] for s in checked['segments'] if s['virtual_size'])
     physical_image = ram_base + image_base-virtual_ram
     span = max(s['virtual_address']+s['virtual_size'] for s in checked['segments'])-image_base
