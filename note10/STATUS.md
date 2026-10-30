@@ -1,5 +1,11 @@
 # 작업 상태 (2026-10-30, Asia/Seoul)
 
+## 2026-10-30: v55 XNU runtime planner 커널 컴포넌트 PC 검증 계획
+
+- 기본 비활성 옵션과 예약 전용 소스 준비 경로를 분리한다. 현재 부팅의 예약 상태·주소·전체 reserved page를 확인한 뒤 로컬 C planner 계산만 수행하며 예약 RAM 접근·metadata 작성은 하지 않는다.
+- 새 host wrapper/preparer 시험과 고정 Linux 소스의 disabled/enabled `arch/arm64/mm/init.o` 실제 Kbuild가 대상이다. 실제 커널 헤더·설정·명령·의존성·object 증거 확인은 아직 대기 중이다. 기존 v54·PM 시험 묶음은 반복하지 않는다.
+- 전체 Image·BOOT·기기 조작·XNU 실행은 범위 밖이다. v54 통과 결과와 기존 이력은 보존한다. [계획과 제한](device_test/XNU-RUNTIME-PLAN.md).
+
 ## 2026-10-30: v54 네이티브 런타임 재배치 PC 검증 통과
 
 - **검증 소스:** `78797cb2e37e97d99463217f5418740a5ed76141`; [CI 41050904567](https://github.com/eirblue/ios_note10p/actions/runs/41050904567) 첫 번째 시도 통과. 결과의 13개 소스 해시를 결속했다. freestanding C planner·1152바이트 boot_args·64바이트 N10XFER1이 만든 metadata를 실제 4-buffer PC bundle에 직접 사용했다.

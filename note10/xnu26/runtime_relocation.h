@@ -1,8 +1,23 @@
 /* PC-only reusable preparation. No reservation, hardware ownership or transfer. */
 #ifndef N10_RUNTIME_RELOCATION_H
 #define N10_RUNTIME_RELOCATION_H
+#ifdef __KERNEL__
+#include <linux/types.h>
+#include <linux/stddef.h>
+#include <linux/kernel.h>
+#ifndef UINT64_C
+#define UINT64_C(value) value##ULL
+#endif
+#ifndef UINT64_MAX
+#define UINT64_MAX ((uint64_t)~0ULL)
+#endif
+#ifndef UINTPTR_MAX
+#define UINTPTR_MAX ((uintptr_t)~0UL)
+#endif
+#else
 #include <stdint.h>
 #include <stddef.h>
+#endif
 #define N10_RT_PAGE UINT64_C(0x4000)
 #define N10_RT_BLOCK UINT64_C(0x2000000)
 #define N10_RT_WINDOW UINT64_C(0x10000000)

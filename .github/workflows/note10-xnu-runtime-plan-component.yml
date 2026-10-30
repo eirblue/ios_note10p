@@ -1,0 +1,45 @@
+name: Note10 XNU runtime planner component (PC only)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  component:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install component toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-14 gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi gcc make bc bison flex libssl-dev libelf-dev
+      - name: Build isolated disabled and enabled init.o only
+        run: >-
+          python note10/device_test/build_xnu_runtime_plan_component.py
+          --output note10/private/xnu-runtime-plan-component
+          --jobs 2
+      - name: Upload actual component proof
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: note10-xnu-runtime-plan-component-pc-only
+          include-hidden-files: true
+          if-no-files-found: error
+          path: |
+            note10/private/xnu-runtime-plan-component/result.json
+            note10/private/xnu-runtime-plan-component/toolchain/
+            note10/private/xnu-runtime-plan-component/host-wrapper-driver.log
+            note10/private/xnu-runtime-plan-component/host-wrapper/result.json
+            note10/private/xnu-runtime-plan-component/host-wrapper/compile.log
+            note10/private/xnu-runtime-plan-component/host-wrapper/wrapper.log
+            note10/private/xnu-runtime-plan-component/host-wrapper/host-wrapper.c
+            note10/private/xnu-runtime-plan-component/host-wrapper/host-wrapper
+            note10/private/xnu-runtime-plan-component/host-wrapper/note10_xnu_runtime_geometry.h
+            note10/private/xnu-runtime-plan-component/disabled/proof/
+            note10/private/xnu-runtime-plan-component/enabled/proof/
