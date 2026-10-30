@@ -64,9 +64,12 @@ def production(root,artifact,build,enabled):
         stack.enter_context(patch.object(legacy.prep.subprocess,'run',side_effect=fake_mk))
         report=legacy.prep.prepare(backup,art,twrp,mk,prototype,auto_cycle_token=metadata['reservation_evidence_id'])
         packages=legacy.packages.build(backup,prototype,packages_out)
-    records=legacy.verify_packages(packages_out)
-    precheck=legacy.run_precheck_flow(art,backup,packages_out,header,parts)
-    collector=legacy.run_collector_flow(art,backup,packages_out,case)
+        records=legacy.verify_packages(packages_out)
+        try:
+            precheck=legacy.run_precheck_flow(art,backup,packages_out,header,parts)
+            collector=legacy.run_collector_flow(art,backup,packages_out,case)
+        except Exception as error:
+            raise AssertionError('runtime package fixture '+('on' if enabled else 'off')+' precheck/collector: '+str(error)) from error
     if package_scope(report) is not enabled or package_scope(packages) is not enabled:raise AssertionError('production prepare/package new scope differs')
     if enabled and precheck.get(prepare.FLAG+'_scope_verified') is not True:raise AssertionError('production precheck planner gate missing')
     if any(package_scope(record) is not (enabled and record['mode']=='diagnostic') for record in records):raise AssertionError('planner rollback scope differs')
