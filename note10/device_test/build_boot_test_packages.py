@@ -195,11 +195,15 @@ def build(backup,prototype,output,current_packages=None):
     cpu_pm_roundtrip=roundtrip_package_scope(metadata)
     from cpu_pm_roundtrip_binding import counts_package_scope,COUNTS_MARKER
     cpu_pm_notifier_counts=counts_package_scope(metadata)
+    from cpu_pm_roundtrip_binding import trace_package_scope
+    from prepare_cpu_pm_notifier_trace import MARKER as TRACE_MARKER
+    cpu_pm_notifier_trace=trace_package_scope(metadata)
     cpu_pm_roundtrip_version=metadata.get('cpu_pm_roundtrip_version') if cpu_pm_roundtrip else None
     if cpu_pm_roundtrip and not metadata.get('auto_return_diagnostic') is True:raise ValueError('CPU PM roundtrip requires auto-return diagnostic')
     from cpu_pm_roundtrip_binding import MARKER as roundtrip_marker
     if (roundtrip_marker in raw) is not cpu_pm_roundtrip:raise ValueError('Prototype CPU PM roundtrip Image scope differs')
     if (COUNTS_MARKER in raw) is not cpu_pm_notifier_counts:raise ValueError('Prototype CPU PM notifier-count Image scope differs')
+    if (TRACE_MARKER in raw) is not cpu_pm_notifier_trace:raise ValueError('Prototype CPU PM notifier-trace Image scope differs')
     pm_irq=metadata.get('pm_irq_diagnostic') is True
     if pm_irq and (not pm_edge or not pm_post_arch or not pm_cpus or metadata.get('pm_irq_evidence_version')!=1):raise ValueError('Incomplete CPU0 IRQ package contract')
     if dma_pm_audit and (not gic_roundtrip or metadata.get('dma_pm_audit_evidence_version')!=1):
@@ -260,6 +264,7 @@ def build(backup,prototype,output,current_packages=None):
             'ehld_running_lock_audit':ehld_running_lock,'ehld_running_lock_audit_version':ehld_running_lock_version,
             'cpu_pm_roundtrip':cpu_pm_roundtrip,'cpu_pm_roundtrip_version':cpu_pm_roundtrip_version,
             'cpu_pm_notifier_counts':cpu_pm_notifier_counts,'cpu_pm_notifier_counts_version':1 if cpu_pm_notifier_counts else None,
+            'cpu_pm_notifier_trace':cpu_pm_notifier_trace,'cpu_pm_notifier_trace_version':1 if cpu_pm_notifier_trace else None,
             'pm_irq_diagnostic':pm_irq,'pm_irq_evidence_version':1 if pm_irq else None,
             'abox_pmu_audit_diagnostic':abox_pmu_audit,'abox_pmu_audit_evidence_version':3 if abox_pmu_audit else None,
             'abox_pm_audit_diagnostic':abox_pm_audit,'abox_pm_audit_evidence_version':8 if abox_pm_audit else None,
@@ -331,6 +336,8 @@ def build(backup,prototype,output,current_packages=None):
         metadata['cpu_pm_roundtrip_version']=cpu_pm_roundtrip_version if cpu_pm_roundtrip and mode=='diagnostic' else None
         metadata['cpu_pm_notifier_counts']=cpu_pm_notifier_counts and mode=='diagnostic'
         metadata['cpu_pm_notifier_counts_version']=1 if cpu_pm_notifier_counts and mode=='diagnostic' else None
+        metadata['cpu_pm_notifier_trace']=cpu_pm_notifier_trace and mode=='diagnostic'
+        metadata['cpu_pm_notifier_trace_version']=1 if cpu_pm_notifier_trace and mode=='diagnostic' else None
         metadata['pm_irq_diagnostic']=pm_irq and mode=='diagnostic'
         metadata['pm_irq_evidence_version']=1 if pm_irq and mode=='diagnostic' else None
         metadata['abox_pmu_audit_diagnostic']=abox_pmu_audit and mode=='diagnostic'

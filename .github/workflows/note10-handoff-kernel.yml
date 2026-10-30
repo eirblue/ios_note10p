@@ -72,6 +72,10 @@ on:
         type: boolean
         default: false
 
+      cpu_pm_notifier_trace:
+        description: Observe bounded CPU_PM notifier-block dispatch order; requires cpu_pm_notifier_counts
+        type: boolean
+        default: false
       auto_return:
         description: Opt-in one-shot recovery request; cycle token required at BOOT packaging
         type: boolean
@@ -137,6 +141,7 @@ jobs:
           NOTE10_EHLD_RUNNING_LOCK_AUDIT: ${{ inputs.ehld_running_lock_audit }}
           NOTE10_CPU_PM_ROUNDTRIP: ${{ inputs.cpu_pm_roundtrip }}
           NOTE10_CPU_PM_NOTIFIER_COUNTS: ${{ inputs.cpu_pm_notifier_counts }}
+          NOTE10_CPU_PM_NOTIFIER_TRACE: ${{ inputs.cpu_pm_notifier_trace }}
         run: |
           if [ "$NOTE10_EHLD_LOCK_AUDIT" = true ] && { [ "$NOTE10_XNU_STAGE" != true ] || [ "$NOTE10_UFS_PM_AUDIT" != true ]; }; then
             echo "ehld_lock_audit requires xnu_stage=true and ufs_pm_audit=true" >&2
@@ -153,6 +158,10 @@ jobs:
           if [ "$NOTE10_CPU_PM_ROUNDTRIP" = true ] && { [ "$NOTE10_EHLD_RUNNING_LOCK_AUDIT" != true ] || [ "$NOTE10_AUTO_RETURN" != true ]; }; then
             echo "cpu_pm_roundtrip requires ehld_running_lock_audit=true and auto_return=true" >&2
             exit 2
+          fi
+          if [ "$NOTE10_CPU_PM_NOTIFIER_TRACE" = true ] && [ "$NOTE10_CPU_PM_NOTIFIER_COUNTS" != true ]; then
+            echo "cpu_pm_notifier_trace requires cpu_pm_notifier_counts=true" >&2
+            exit 1
           fi
           if [ "$NOTE10_CPU_PM_NOTIFIER_COUNTS" = true ] && [ "$NOTE10_CPU_PM_ROUNDTRIP" != true ]; then
             echo "cpu_pm_notifier_counts requires cpu_pm_roundtrip=true" >&2
@@ -255,6 +264,7 @@ jobs:
           NOTE10_EHLD_RUNNING_LOCK_AUDIT: ${{ inputs.ehld_running_lock_audit }}
           NOTE10_CPU_PM_ROUNDTRIP: ${{ inputs.cpu_pm_roundtrip }}
           NOTE10_CPU_PM_NOTIFIER_COUNTS: ${{ inputs.cpu_pm_notifier_counts }}
+          NOTE10_CPU_PM_NOTIFIER_TRACE: ${{ inputs.cpu_pm_notifier_trace }}
         run: |
           count="$(find note10/private/xnu-input -name note10-experimental.macho -type f | wc -l)"
           [ "$count" -eq 1 ]
@@ -308,6 +318,10 @@ jobs:
           if [ "$NOTE10_CPU_PM_NOTIFIER_COUNTS" = true ]; then
             if [ "$NOTE10_CPU_PM_ROUNDTRIP" != true ]; then exit 2; fi
             EXTRA+=(--cpu-pm-notifier-counts)
+          fi
+          if [ "$NOTE10_CPU_PM_NOTIFIER_TRACE" = true ]; then
+            test "$NOTE10_CPU_PM_NOTIFIER_COUNTS" = true
+            EXTRA+=(--cpu-pm-notifier-trace)
           fi
           python note10/device_test/build_handoff_kernel.py --caps --reserve --window-access \
             --xnu-payload note10/private/xnu-stage-payload/kernel.mem \
@@ -487,6 +501,10 @@ jobs:
             note10/private/handoff-kernel/cpu-pm-roundtrip-binding-model/**
             note10/private/handoff-kernel/cpu-pm-roundtrip-package-flow-model/**
             note10/private/handoff-kernel/cpu-pm-notifier-counts-model/**
+            note10/private/handoff-kernel/cpu-pm-notifier-trace-baseline/**
+            note10/private/handoff-kernel/cpu-pm-notifier-trace-prepared/**
+            note10/private/handoff-kernel/cpu-pm-notifier-trace-model/**
+            note10/private/handoff-kernel/cpu-pm-notifier-trace-package-model/**
             note10/private/handoff-kernel/collector-generation-binding-proof.json
             note10/private/handoff-kernel/pmu-failure-binding-model/result.json
             note10/private/handoff-kernel/pmu-failure-package-flow-model/result.json

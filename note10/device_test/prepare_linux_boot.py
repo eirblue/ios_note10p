@@ -137,6 +137,8 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output,auto_cycle_token=None):
     if type(roundtrip_scope) is not bool or roundtrip_scope is not roundtrip_package_scope(build):raise ValueError('CPU PM roundtrip build validation scope differs')
     from cpu_pm_roundtrip_binding import counts_package_scope
     notifier_counts_scope=counts_package_scope(build,allow_build_proof=True)
+    from cpu_pm_roundtrip_binding import trace_package_scope
+    notifier_trace_scope=trace_package_scope(build,allow_build_proof=True)
     if roundtrip_scope and not auto_return:raise ValueError('CPU PM roundtrip requires automatic recovery')
     from cpu_pm_roundtrip_binding import MARKER as roundtrip_marker
     if (roundtrip_marker in data) is not roundtrip_scope:raise ValueError('CPU PM roundtrip Image scope differs')
@@ -281,6 +283,8 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output,auto_cycle_token=None):
             'cpu_pm_roundtrip_version':build.get('cpu_pm_roundtrip_version') if roundtrip_scope else None,
             'cpu_pm_notifier_counts':notifier_counts_scope,
             'cpu_pm_notifier_counts_version':1 if notifier_counts_scope else None,
+            'cpu_pm_notifier_trace':notifier_trace_scope,
+            'cpu_pm_notifier_trace_version':1 if notifier_trace_scope else None,
             'pm_irq_diagnostic':build.get('pm_irq_diagnostic') is True,
             'pm_irq_evidence_version':build.get('pm_irq_evidence_version'),
             'abox_pmu_audit_diagnostic':build.get('abox_pmu_audit_diagnostic') is True,

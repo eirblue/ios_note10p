@@ -29,24 +29,26 @@ COLLECTOR_CASES=('on','off','invalid-pair')
 PRECHECK_CASES=('on','off','invalid-pair')
 def sha(raw):return hashlib.sha256(raw).hexdigest()
 
-def model_image(identity,roundtrip=False,counts=False):
+def model_image(identity,roundtrip=False,counts=False,trace=False):
  if not isinstance(identity,str) or len(identity)!=32 or any(c not in '0123456789abcdef' for c in identity):raise ValueError('invalid fixture reservation identity')
  image=bytearray(4096);image[56:60]=b'ARM\x64'
- markers=(b'N10CPMRT1' if roundtrip else b'')+(b'N10CPNC1' if counts else b'')+b''.join(CALLBACKS+PRECONDITIONS+BRANCH)+PMU_FAILURE+GIC_PRIORITY+b''.join(PMU_STATE+PMU_CONTROL+FPSIMD+RCU_MARKERS+LOCK_MARKERS)+b'N10RET1N10MEM1N10XNU1N10QUI1N10CPU2N10PMS1N10PMT1N10TMR1N10BND1N10TRY1'+identity.encode()
+ markers=(b'N10CPDC1' if trace else b'')+(b'N10CPMRT1' if roundtrip else b'')+(b'N10CPNC1' if counts else b'')+b''.join(CALLBACKS+PRECONDITIONS+BRANCH)+PMU_FAILURE+GIC_PRIORITY+b''.join(PMU_STATE+PMU_CONTROL+FPSIMD+RCU_MARKERS+LOCK_MARKERS)+b'N10RET1N10MEM1N10XNU1N10QUI1N10CPU2N10PMS1N10PMT1N10TMR1N10BND1N10TRY1'+identity.encode()
  image[128:128+len(markers)]=markers
  banner=b'Linux version 4.14.113-note10-reserve-pc fixture-v49'
  image[1024:1024+len(banner)]=banner
  return bytes(image)
 
-def make_fixture(root,artifact,mode,scope_expected,counts_expected=False):
+def make_fixture(root,artifact,mode,scope_expected,counts_expected=False,trace_expected=False):
  from prepare_ehld_irqsave_flow_compat import KEEP_FILES,MODEL_PREFIXES
  artifact=Path(artifact);art=root/'artifact'
  if artifact.is_symlink() or not artifact.is_dir() or art.exists() or art.is_symlink():raise ValueError('unsafe package-flow fixture paths')
  art.mkdir(parents=True)
  for item in artifact.iterdir():
   if item.is_symlink():raise ValueError('symlink in package-flow input')
+  trace_model=item.name.startswith('cpu-pm-notifier-trace-')
   counts_model=item.name=='cpu-pm-notifier-counts-model'
   keep_dir=item.is_dir() and (item.name.startswith(MODEL_PREFIXES) or item.name.startswith('cpu-pm-roundtrip-')) and (not counts_model or counts_expected)
+  if trace_model:keep_dir=item.is_dir() and trace_expected
   keep_file=item.is_file() and (item.name in KEEP_FILES or (item.suffix=='.log' and item.stat().st_size<=1024*1024) or item.name in ('window-core-model.json','window-gate-model.json','window-init-model.json'))
   if not (keep_dir or keep_file):continue
   destination=art/item.name
@@ -64,19 +66,29 @@ def make_fixture(root,artifact,mode,scope_expected,counts_expected=False):
  if not isinstance(identity,str) or len(identity)!=32:raise ValueError('invalid fixture reservation identity')
  build['reservation_evidence_id']=identity
  build.setdefault('reservation_evidence_version',2)
- image=model_image(identity,scope_expected,counts_expected);(art/'Image').write_bytes(image)
+ image=model_image(identity,scope_expected,counts_expected,trace_expected);(art/'Image').write_bytes(image)
  initramfs=b'v47-offline-initramfs-fixture';(art/'initramfs.cpio').write_bytes(initramfs)
  build['image_sha256']=sha(image);build['image_size']=len(image);build['initramfs_cpio_sha256']=sha(initramfs)
  # Normalize every notifier-count field/option for this synthetic scope.  The
  # input can be a counts-enabled CI artifact even when this fixture models the
  # legacy feature-off package; production validators remain strict.
+ trace_prefix='cpu_pm_notifier_trace_'
+ for key in list(build):
+  if key.startswith(trace_prefix):build.pop(key)
+ build['cpu_pm_notifier_trace']=trace_expected
+ build['cpu_pm_notifier_trace_version']=1 if trace_expected else None
+ if trace_expected:
+  from prepare_cpu_pm_notifier_trace import SOURCES as trace_sources
+  build['cpu_pm_notifier_trace_sources_sha256']={n:sha((Path(__file__).resolve().parent/n).read_bytes()) for n in trace_sources}
+  build['cpu_pm_notifier_trace_model_sha256']='0'*64
  count_prefix='cpu_pm_notifier_counts_'
  for key in list(build):
   if key.startswith(count_prefix) and key not in ('cpu_pm_notifier_counts_version',):
    build.pop(key)
  config=(art/'handoff.config').read_text(encoding='ascii').splitlines()
  count_option='CONFIG_NOTE10_CPU_PM_NOTIFIER_COUNTS'
- config=[line for line in config if count_option not in line]
+ config=[line for line in config if count_option not in line and 'CONFIG_NOTE10_CPU_PM_NOTIFIER_TRACE' not in line]
+ if trace_expected:config.append('CONFIG_NOTE10_CPU_PM_NOTIFIER_TRACE=y')
  build['cpu_pm_notifier_counts']=counts_expected
  build['cpu_pm_notifier_counts_version']=1 if counts_expected else None
  if counts_expected:
@@ -175,9 +187,9 @@ def _patch_legacy_gates(stack):
 def _header(kernel_sha):
  return {'header_version':1,'page_size':2048,'recovery_dtbo_size':0,'second_size':0,'kernel_addr':0,'tags_addr':0,'arm64_text_offset':0,'ramdisk_addr':0,'ramdisk_file_offset':2048,'ramdisk_size':0,'second_file_offset':32,'cmdline':'fixture','name':'fixture','os_version':'1.0.0','security_patch_month':'2026-01','kernel_sha256':kernel_sha}
 
-def _prepare_packages(root,source,mode,identity,scope_expected,counts_expected=False):
- case_root=root/mode;case_root.mkdir();art,backup,twrp,mk,parts=make_fixture(case_root,source,mode,scope_expected,counts_expected)
- image=model_image(identity,scope_expected,counts_expected);(art/'Image').write_bytes(image)
+def _prepare_packages(root,source,mode,identity,scope_expected,counts_expected=False,trace_expected=False):
+ case_root=root/mode;case_root.mkdir();art,backup,twrp,mk,parts=make_fixture(case_root,source,mode,scope_expected,counts_expected,trace_expected)
+ image=model_image(identity,scope_expected,counts_expected,trace_expected);(art/'Image').write_bytes(image)
  build=json.loads((art/'build-result.json').read_text(encoding='utf8'));build.update(reservation_evidence_id=identity,reservation_evidence_version=2,image_sha256=sha(image),image_size=len(image),build_passed=True,early_xnu_reservation=True,cpu_pm_notifier_counts=counts_expected,cpu_pm_notifier_counts_version=1 if counts_expected else None)
  (art/'build-result.json').write_text(json.dumps(build,indent=2)+'\n',encoding='utf8',newline='\n')
  header=_header(build['image_sha256']);prototype=case_root/(mode+'.img');packages_out=case_root/'packages'
@@ -210,7 +222,7 @@ def _prepare_packages(root,source,mode,identity,scope_expected,counts_expected=F
       precheck_result.get('cpu_pm_notifier_counts_scope_verified') is not counts_expected):
    raise AssertionError('production precheck scope/result differs')
   collector_result=run_collector_flow(art,backup,packages_out,case_root)
-  expected_rows=41 if counts_expected else (40 if scope_expected else 39)
+  expected_rows=42 if trace_expected else (41 if counts_expected else (40 if scope_expected else 39))
   if len(collector_result.get('evaluation_items',{}))!=expected_rows or collector_result.get('cpu_pm_roundtrip_scope_verified') is not scope_expected or collector_result.get('cpu_pm_notifier_counts_scope_verified') is not counts_expected:
    raise AssertionError('production collector scope/39-row contract differs')
  return {'art':art,'backup':backup,'twrp':twrp,'mkboot':mk,'parts':parts,'prototype':prototype,'packages':packages_out,'header':header,

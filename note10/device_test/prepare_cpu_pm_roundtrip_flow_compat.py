@@ -9,6 +9,8 @@ DROP_DIRS = {
     'cpu-pm-roundtrip-prepared', 'cpu-pm-roundtrip-model',
     'cpu-pm-roundtrip-binding-model', 'cpu-pm-roundtrip-package-flow-model',
     'cpu-pm-notifier-counts-model',
+    'cpu-pm-notifier-trace-model', 'cpu-pm-notifier-trace-package-model',
+    'cpu-pm-notifier-trace-baseline', 'cpu-pm-notifier-trace-prepared',
 }
 KEEP_DIRS = (
     'abox-pm-model',
@@ -195,6 +197,8 @@ def prepare(source, destination):
     if count_metadata - allowed_count_metadata:
         raise ValueError('v52 notifier-count metadata contains unknown fields')
 
+    from cpu_pm_roundtrip_binding import _validate_trace
+    _validate_trace(source, report)
     raw_config = (source / 'handoff.config').read_bytes()
     lines = raw_config.splitlines()
     entries = [line for line in lines if OPTION in line]
@@ -233,8 +237,12 @@ def prepare(source, destination):
     if counts_entries in ([COUNTS_OPTION + b'=y'], [COUNTS_OPTION + b'=n'],
                           [b'# ' + COUNTS_OPTION + b' is not set']):
         lines.remove(counts_entries[0])
+    trace_option = b'CONFIG_NOTE10_CPU_PM_NOTIFIER_TRACE'
+    lines = [line for line in lines if trace_option not in line]
+    report = {key: value for key, value in report.items()
+              if key != 'cpu_pm_notifier_trace' and not key.startswith('cpu_pm_notifier_trace_')}
     config = b'\n'.join(lines) + (b'\n' if raw_config.endswith(b'\n') else b'')
-    if OPTION in config or COUNTS_OPTION in config:
+    if OPTION in config or COUNTS_OPTION in config or trace_option in config:
         raise ValueError('legacy compatibility config retained a CPU-PM feature option')
     report = {key: value for key, value in report.items()
               if key != 'cpu_pm_roundtrip' and not key.startswith('cpu_pm_roundtrip_')

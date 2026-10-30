@@ -5,7 +5,7 @@ from prepare_cpu_pm_roundtrip import KCONFIG, OPTION, SCHEMA_VERSION, TARGETS, p
 
 HERE=Path(__file__).resolve().parent
 SOURCES=('prepare_cpu_pm_roundtrip.py','prepare_cpu_pm_roundtrip_flow_compat.py','test_cpu_pm_roundtrip.py','decode_cpu_pm_roundtrip.py','test_cpu_pm_roundtrip_decoder.py','test_cpu_pm_notifier_counts.py','cpu_pm_roundtrip_binding.py','test_cpu_pm_roundtrip_binding.py','test_cpu_pm_roundtrip_package_flow.py')
-PACKAGE_SOURCES=('prepare_linux_boot.py','build_boot_test_packages.py','precheck_window_access.py','stage_phase2.py','collect_reservation.py','decode_cpu_pm_roundtrip.py')
+PACKAGE_SOURCES=('prepare_linux_boot.py','build_boot_test_packages.py','precheck_window_access.py','stage_phase2.py','collect_reservation.py','decode_cpu_pm_roundtrip.py','decode_cpu_pm_notifier_trace.py')
 PREFIX='cpu_pm_roundtrip_'
 MARKER=b'N10CPMRT1'
 TERMINAL_MARKER=b'N10CPT1'
@@ -142,6 +142,105 @@ def counts_package_scope(metadata,allow_build_proof=False):
  if stray:raise ValueError('CPU_PM notifier-count proof is stray while disabled')
  return flag
 
+def trace_package_scope(metadata,allow_build_proof=False):
+ from prepare_cpu_pm_notifier_trace import FLAG,VERSION,PREFIX
+ if not isinstance(metadata,dict) or type(allow_build_proof) is not bool:
+  raise ValueError('CPU_PM dispatch metadata/options malformed')
+ counts=counts_package_scope(metadata,allow_build_proof=allow_build_proof)
+ flag=metadata.get(FLAG,False)
+ if type(flag) is not bool:raise ValueError('CPU_PM dispatch flag must be bool')
+ version=metadata.get(VERSION)
+ if flag:
+  if not counts or type(version) is not int or version!=1:raise ValueError('CPU_PM dispatch requires versioned counts')
+ elif version is not None:raise ValueError('disabled CPU_PM dispatch version is stray')
+ allowed={VERSION}
+ if flag and allow_build_proof:
+  allowed.update(PREFIX+n for n in ('baseline_sha256','prepared_sha256','sources_sha256','model_sha256','package_sha256','link_symbols','link_verified'))
+ if any(k.startswith(PREFIX) and k not in allowed for k in metadata):
+  raise ValueError('CPU_PM dispatch proof metadata is stray or unknown')
+ return flag
+
+def _validate_trace(root,build,require_package_flow=False):
+ from prepare_cpu_pm_notifier_trace import (FLAG,PREFIX,OPTION,MARKER,BASE,PREPARED,
+  MODEL,PACKAGE,TARGETS as DT,SOURCES as DS,transform as dispatch_transform)
+ root=Path(root);enabled=trace_package_scope(build,allow_build_proof=True)
+ entries=[line for line in (root/'handoff.config').read_bytes().splitlines() if OPTION.encode() in line]
+ if enabled:
+  if entries!=[OPTION.encode()+b'=y']:raise ValueError('CPU_PM dispatch config scope differs')
+ elif entries not in ([],[OPTION.encode()+b'=n'],[b'# '+OPTION.encode()+b' is not set']):
+  raise ValueError('CPU_PM dispatch disabled config malformed')
+ if (MARKER in (root/'Image').read_bytes()) is not enabled:raise ValueError('CPU_PM dispatch Image scope differs')
+ dirs=(BASE,PREPARED,MODEL,PACKAGE)
+ if any(p.name.startswith('cpu-pm-notifier-trace-') and p.name not in dirs for p in root.iterdir()):
+  raise ValueError('unknown CPU_PM dispatch output directory')
+ if not enabled:
+  if any((root/name).exists() or (root/name).is_symlink() for name in dirs):raise ValueError('disabled CPU_PM dispatch evidence exists')
+  return False
+ if build.get(PREFIX+'sources_sha256')!=_filemap(HERE,DS):raise ValueError('CPU_PM dispatch source closure differs')
+ expected_link=['n10_dispatch_arm','n10_dispatch_begin','n10_dispatch_disarm','n10_dispatch_finish','n10_dispatch_marker','n10_dispatch_observe','n10_dispatch_seed']
+ if build.get(PREFIX+'link_verified') is not True or build.get(PREFIX+'link_symbols')!=expected_link:
+  raise ValueError('CPU_PM dispatch private kernel link proof differs')
+ maps=[];inputs=[]
+ for dirname,key in ((BASE,'baseline_sha256'),(PREPARED,'prepared_sha256')):
+  directory=root/dirname
+  if directory.is_symlink() or not directory.is_dir() or any(p.is_symlink() for p in directory.rglob('*')):
+   raise ValueError('CPU_PM dispatch snapshot unsafe')
+  if _files(directory)!=set(DT):raise ValueError('CPU_PM dispatch snapshot inventory differs')
+  mapping=_filemap(directory,DT)
+  if not _map(build.get(PREFIX+key),DT) or build[PREFIX+key]!=mapping:raise ValueError('CPU_PM dispatch snapshot hash differs')
+  maps.append(mapping);inputs.append({n:(directory/n).read_bytes() for n in DT})
+ if dispatch_transform(inputs[0])!=inputs[1]:raise ValueError('CPU_PM composed dispatch transformation differs')
+ for name in DT:
+  if name!='kernel/notifier.c' and sha((root/'cpu-pm-roundtrip-prepared'/name).read_bytes())!=maps[0][name]:
+   raise ValueError('CPU_PM dispatch baseline differs from validated v52 composition')
+ proof_root=root/MODEL
+ if proof_root.is_symlink() or not proof_root.is_dir() or any(p.is_symlink() for p in proof_root.rglob('*')):
+  raise ValueError('CPU_PM dispatch model unsafe')
+ raw=(proof_root/'result.json').read_bytes()
+ if sha(raw)!=build.get(PREFIX+'model_sha256'):raise ValueError('CPU_PM dispatch model digest differs')
+ proof=json.loads(raw)
+ from test_cpu_pm_notifier_trace import NATIVE_CASES,PARSER_CASES,native_source,disabled_source
+ if (proof.get('passed') is not True or proof.get('synthetic_only') is not True or
+     proof.get('hardware_verified') is not False or proof.get('native_cases')!=list(NATIVE_CASES) or
+     proof.get('parser_cases')!=list(PARSER_CASES) or proof.get('source_sha256')!=maps[1] or
+     proof.get('baseline_sha256')!=maps[0] or proof.get('sources_sha256')!=_filemap(HERE,DS) or
+     proof.get('original_callback_operand_preserved') is not True or
+     proof.get('original_notify_enter_exit_preserved') is not True):
+  raise ValueError('CPU_PM dispatch model contract/source differs')
+ if proof.get('generated_sha256')!=sha(native_source(inputs[1])) or proof.get('disabled_source_sha256')!=sha(disabled_source(inputs[1])):
+  raise ValueError('CPU_PM dispatch generated source differs from actual extracted production functions')
+ for filename,key in (('dispatch-native.c','generated_sha256'),('compile.log','compile_log_sha256'),('native.log','native_log_sha256'),('parser.log','parser_log_sha256'),('parser-vectors.json','parser_vectors_sha256'),('dispatch-disabled.c','disabled_source_sha256'),('disabled-compile.log','disabled_compile_log_sha256'),('disabled-native.log','disabled_native_log_sha256')):
+  if proof.get(key)!=sha((proof_root/filename).read_bytes()):raise ValueError('CPU_PM dispatch native evidence differs')
+ candidates=[proof_root/n for n in ('dispatch-native','dispatch-native.exe')]
+ if any(p.is_symlink() or (p.exists() and not p.is_file()) for p in candidates):raise ValueError('CPU_PM dispatch executable unsafe')
+ executables=[p for p in candidates if p.is_file()]
+ if len(executables)!=1 or proof.get('executable_sha256')!=sha(executables[0].read_bytes()):raise ValueError('CPU_PM dispatch executable missing/ambiguous/hash differs')
+ expected_native=''.join('PASS|'+name+'\n' for name in NATIVE_CASES)
+ if (proof_root/'native.log').read_text(encoding='ascii')!=expected_native:raise ValueError('CPU_PM dispatch native case transcript differs')
+ if proof.get('parser_results')!={name:True for name in PARSER_CASES}:raise ValueError('CPU_PM dispatch parser outcomes differ')
+ if (proof_root/'parser.log').read_text(encoding='ascii')!=''.join('PASS|'+name+'\n' for name in PARSER_CASES):raise ValueError('CPU_PM dispatch parser case transcript differs')
+ candidates=[proof_root/n for n in ('dispatch-disabled','dispatch-disabled.exe')]
+ if any(p.is_symlink() or (p.exists() and not p.is_file()) for p in candidates):raise ValueError('disabled dispatch executable unsafe')
+ executables=[p for p in candidates if p.is_file()]
+ if (len(executables)!=1 or proof.get('disabled_executable_sha256')!=sha(executables[0].read_bytes()) or
+     MARKER in executables[0].read_bytes() or proof.get('disabled_marker_absent') is not True or
+     (proof_root/'disabled-native.log').read_text(encoding='ascii')!='PASS|trace-disabled-original-semantics\n'):
+  raise ValueError('disabled dispatch native behavior/marker binding differs')
+ if require_package_flow:
+  path=root/PACKAGE
+  if path.is_symlink() or not path.is_dir() or any(p.is_symlink() for p in path.rglob('*')):raise ValueError('CPU_PM dispatch package proof unsafe')
+  raw=(path/'result.json').read_bytes()
+  if sha(raw)!=build.get(PREFIX+'package_sha256'):raise ValueError('CPU_PM dispatch package proof hash differs')
+  package=json.loads(raw)
+  from test_cpu_pm_notifier_trace_package import CASES as PC
+  if (package.get('passed') is not True or package.get('synthetic_fixture') is not True or
+      package.get('hardware_verified') is not False or package.get('cases')!=list(PC) or
+      package.get('results')!={name:True for name in PC} or package.get('sources_sha256')!=_filemap(HERE,DS) or
+      package.get('package_sources_sha256')!=_filemap(HERE,PACKAGE_SOURCES) or
+      package.get('cpu_pm_validator_scope_only_stub') is not True):
+   raise ValueError('CPU_PM dispatch package proof contract differs')
+ return True
+
 def assert_scope(root,build):
  root=Path(root)
  if not isinstance(build,dict): raise ValueError('CPU_PM build metadata must be an object')
@@ -171,6 +270,7 @@ def assert_scope(root,build):
  image=image_path.read_bytes()
  if (MARKER in image) is not enabled or (TERMINAL_MARKER in image) is not enabled: raise ValueError('CPU_PM Image marker/scope differs')
  if (COUNTS_MARKER in image) is not counts_enabled:raise ValueError('CPU_PM notifier-count Image marker/scope differs')
+ _validate_trace(root,build)
  dirs=(PREPARED,NATIVE,DECODER,BINDING,PACKAGE,COUNTS)
  straydirs=[p.name for p in root.iterdir() if p.name.startswith(('cpu-pm-roundtrip-','cpu-pm-notifier-counts-')) and p.name not in dirs]
  if not enabled:
@@ -345,6 +445,7 @@ def validate(root,build,require_package_flow=True):
  scope=assert_scope(root,build)
  if scope is not True:return False
  if require_package_flow is not False and require_package_flow is not True:raise ValueError('require_package_flow must be bool')
+ if require_package_flow:_validate_trace(root,build,require_package_flow=True)
  binding=root/BINDING
  if binding.is_symlink() or not binding.is_dir():raise ValueError('v49 binding proof missing')
  braw=(binding/'result.json').read_bytes()
