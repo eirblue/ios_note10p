@@ -1,12 +1,20 @@
 # 작업 상태 (2026-10-30, Asia/Seoul)
 
+## 2026-10-30: v51 CPU_PM 세대 결속 수정과 단일 실기기 진단 통과
+
+- **검증 소스:** `bbf3b4bd8167cbbe103266d2da6809de4a9f8d3b`; [CI 40979304539](https://github.com/eirblue/ios_note10p/actions/runs/40979304539) 통과. 실제 산출물의 26개 결속과 새 collector 집중 증거를 확인했다. 기존 native·decoder 증거 바이트는 재사용했으며 이전 모델을 로컬에서 다시 돌리지 않았다.
+- **실기기 결과:** 새 계획과 journal로 단일 사이클 1회를 수행했다. 필수 42개 평가가 모두 통과했고 CPU_PM 쌍은 strict generation 결속을 통과했다. 정상 TWRP 자동 복귀, 다섯 파티션 해시, 복귀 확인 후 밝기 raw 10을 확인했다. 설치 직전 배터리는 39%였다.
+- **결과 증거:** 저장된 `RESULT.json`의 `source_commit`은 위 검증 소스 커밋이며 상태는 `single physical diagnostic passed`다. 결과 파일 SHA-256은 `20ea4047b6bf773143043ebb45049241c189e179948dd1c6651ae9ae2bed2c52`. 결과 증거는 소스 커밋과 구분되는 산출물이며 별도의 소스 커밋으로 표시하지 않는다.
+- v50의 41/42 실패 기록과 journal은 그대로 보존했고 재실행하지 않았다. 이 결과는 callback별 runtime trace, 전체 DMA 정지, XNU 실행 또는 iOS 부팅을 확인하지 않는다.
+- 수정 원인과 세대 변환 계약: [CPU-PM 왕복 진단](device_test/CPU-PM-ROUNDTRIP.md).
+
 ## 2026-10-30: v50 CPU_PM 세대 결속 수정 제안
 
 - 소스 `d37a8677fa4f1187dfd740c56ea9eb951f0df955`의 [CI 40972669928](https://github.com/eirblue/ios_note10p/actions/runs/40972669928)가 통과했고 실제 산출물 26개 결속을 확인했다.
 - 단일 v50 실기기 진단은 실패로 기록됐다. 필수 42개 평가 중 41개 통과, CPU_PM enter/exit 쌍 평가 1개는 collector 세대 결속 오류로 실패 유지.
 - 저장된 pair 기록의 transaction generation은 producer 계약상 완료된 quiescence generation의 선행값이다. v50 collector가 완료값을 strict decoder에 직접 전달해 거부했다.
 - v51에서는 collector만 uint32 완료값을 선행 세대로 변환한다. producer와 strict decoder는 유지한다. 성공/terminal 경로, wraparound, 잘못된 입력, 오래된 세대, ID·checksum 거부를 새 집중 시험으로 확인했고, 저장된 v50 로그는 오프라인에서만 재해석했다.
-- v50 실패 기록은 변경하지 않는다. v51의 실제 결과에는 새 CI 산출물, 새 계획과 단일 새 실기기 시험이 필요하다. 복귀·다섯 파티션 무결성 및 확인 뒤 raw 밝기 10은 통과했으며, XNU 실행과 전체 DMA 정지는 확인되지 않았다.
+- v50 실패 기록은 변경하지 않으며 v51에서 재실행하지 않았다. 당시 검증 결과와 후속 v51 단일 진단은 위 항목에 기록했다. XNU 실행과 전체 DMA 정지는 확인되지 않았다.
 - 상세 범위와 한계: [CPU-PM 왕복 진단](device_test/CPU-PM-ROUNDTRIP.md).
 
 ## 2026-10-30: v49 빌드 성공·실기기 PM 단계 실패
