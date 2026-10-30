@@ -66,6 +66,7 @@ def production(root,artifact,build,enabled):
         packages=legacy.packages.build(backup,prototype,packages_out)
         records=legacy.verify_packages(packages_out)
         try:
+            (packages_out/'ram-stage-fixture.json').write_text(json.dumps({'ram_directory':'/tmp/note10-reserve-deadbeef','fixture_only':True}),encoding='utf8',newline='\n')
             precheck=legacy.run_precheck_flow(art,backup,packages_out,header,parts)
             collector=legacy.run_collector_flow(art,backup,packages_out,case)
         except Exception as error:
