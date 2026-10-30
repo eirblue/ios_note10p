@@ -82,6 +82,13 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             result=subprocess.run(arguments,stdout=log,stderr=subprocess.STDOUT,timeout=timeout)
         if result.returncode:raise RuntimeError(log_name+' failed; see saved build diagnostics')
     try:
+        if cpu_pm_notifier_trace:
+            from binding_validation_manifest import schedule_preflight
+            report['binding_validation_schedule_preflight_sha256']=schedule_preflight(OUT,Path(__file__))
+            run([sys.executable,str(ROOT/'note10/device_test/test_binding_validation_schedule.py'),
+                 '--builder',str(Path(__file__)),'--output',str(OUT/'binding-validation-schedule-model')],
+                '00-binding-validation-schedule.log')
+            report['binding_validation_schedule_model_sha256']=hashlib.sha256((OUT/'binding-validation-schedule-model/result.json').read_bytes()).hexdigest()
         archive=OUT/'source.tar.gz'
         url='https://codeload.github.com/'+REPOSITORY+'/tar.gz/'+COMMIT
         print('Fetching pinned public kernel source',flush=True)

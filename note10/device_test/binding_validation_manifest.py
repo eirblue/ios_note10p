@@ -15,6 +15,9 @@ import sys
 
 SCHEMA = 1
 FILENAME = 'binding-validation-result.json'
+TRACE_FILENAME = 'binding-validation-incomplete-trace.json'
+ERROR_FILENAME = 'binding-validation-finalize-error.json'
+PREFLIGHT_FILENAME = 'binding-validation-schedule-preflight.json'
 KERNEL_COMMIT = '55f042627bb7030c93550faafa117674d32b21d1'
 HERE = Path(__file__).resolve().parent
 ENTRYPOINTS = {
@@ -30,6 +33,7 @@ ENTRYPOINTS.update({name + '_binding': 'validate' for name in
 ENTRYPOINTS['xnu_runtime_observation_binding']='validate'
 ENTRYPOINTS['xnu_runtime_scratch_binding']='validate'
 OPTIONAL_DIRECT=(('xnu_runtime_observation_binding',True),)
+SCRATCH_OPTIONAL_DIRECT=(('xnu_runtime_scratch_binding',True),)
 
 
 def active_direct(report=None):
@@ -37,7 +41,7 @@ def active_direct(report=None):
     if type(flag) is not bool:raise ValueError('manifest planner opt-in must be bool')
     scratch=report.get('xnu_runtime_scratch',False) if report is not None else False
     if type(scratch) is not bool or (scratch and not flag):raise ValueError('manifest scratch prerequisite invalid')
-    return DIRECT+(OPTIONAL_DIRECT if flag else ())+((('xnu_runtime_scratch_binding',True),) if scratch else ())
+    return DIRECT+(OPTIONAL_DIRECT if flag else ())+(SCRATCH_OPTIONAL_DIRECT if scratch else ())
 
 
 DIRECT = (
@@ -204,9 +208,25 @@ def verify_builder_schedule(raw):
                     package = keyword.value.value
             instrumented.append((node.lineno, validator, package))
     schedule = tuple((validator, package) for _, validator, package in sorted(instrumented))
-    if naked or schedule != DIRECT+OPTIONAL_DIRECT:
+    if naked or schedule != DIRECT+OPTIONAL_DIRECT+SCRATCH_OPTIONAL_DIRECT:
         raise ValueError('reviewed existing production validator schedule differs')
     return True
+
+
+def schedule_preflight(artifact,builder):
+    """Static source check only; no validator/model or compiler execution."""
+    raw=Path(builder).read_bytes();result={'kind':'static builder schedule preflight',
+      'builder_sha256':sha(raw),'recorder_sha256':sha(Path(__file__).read_bytes()),
+      'canonical_manifest_accepted':False,'validators_executed':False,'passed':False}
+    try:
+        verify_builder_schedule(raw);result['passed']=True
+    except Exception as error:
+        result['error_type']=type(error).__name__;result['error']=str(error)
+        raise
+    finally:
+        output=Path(artifact)/PREFLIGHT_FILENAME
+        with output.open('x',encoding='utf8',newline='\n') as stream:json.dump(result,stream,indent=2);stream.write('\n')
+    return sha(output.read_bytes())
 
 
 class Recorder:
@@ -270,6 +290,42 @@ class Recorder:
         return outcome
 
     def finalize(self):
+        if not self.enabled:return {}
+        trace=self.snapshot_incomplete()
+        try:return self._finalize_canonical()
+        except Exception as error:
+            receipt={'kind':'binding manifest final audit rejected','complete':False,'accepted':False,
+              'trace_path':TRACE_FILENAME,'trace_sha256':trace['sha256'],
+              'error_type':type(error).__name__,'error':str(error)}
+            with (self.root/ERROR_FILENAME).open('x',encoding='utf8',newline='\n') as stream:
+                json.dump(receipt,stream,indent=2);stream.write('\n')
+            raise
+
+    def snapshot_incomplete(self):
+        """Preserve actual events before any terminal audit can reject them."""
+        sources={};source_errors={}
+        for name,path in (('builder',HERE/'build_handoff_kernel.py'),('recorder',Path(__file__))):
+            try:sources[name]=sha(path.read_bytes())
+            except OSError as error:sources[name]=None;source_errors[name]=str(error)
+        order=list(dict.fromkeys(record['validator'] for record in self.calls))
+        document={'kind':'actual profiling events; terminal audit not accepted',
+          'complete':False,'accepted':False,'canonical_manifest':False,
+          'identity_scope':'available raw environment values, not yet validated CI identity',
+          'observed_ci_environment':{n:os.environ.get(n) for n in ('GITHUB_SHA','GITHUB_RUN_ID','GITHUB_RUN_ATTEMPT')},
+          'kernel_source_commit':self.kernel,'source_sha256':sources,'source_read_errors':source_errors,
+          'observed_build_passed':self.report.get('build_passed'),
+          'actual_direct_calls_completed':self.direct_count,'actual_invocation_count':len(self.calls),
+          'actual_validator_order':order,'actual_multiplicities':{n:sum(r['validator']==n for r in self.calls) for n in order},
+          'pending_profile_frames':len(self.frames),'pending_profile_stack':list(self.stack),
+          'profile_error':self.error,'calls':self.calls}
+        document['observed_identity_context_sha256']=sha(json.dumps(
+          {'environment':document['observed_ci_environment'],'kernel_source_commit':self.kernel},
+          sort_keys=True).encode('utf8'))
+        raw=(json.dumps(document,indent=2)+'\n').encode('utf8')
+        with (self.root/TRACE_FILENAME).open('xb') as stream:stream.write(raw)
+        return {'path':TRACE_FILENAME,'sha256':sha(raw)}
+
+    def _finalize_canonical(self):
         if not self.enabled: return {}
         if self.direct_count != len(active_direct(self.report)) or self.report.get('build_passed') is not True:
             raise ValueError('existing binding calls/build have not completed')

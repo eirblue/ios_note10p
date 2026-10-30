@@ -132,6 +132,8 @@ jobs:
           test -r /usr/aarch64-linux-gnu/include/asm/unistd.h
           test -r /usr/arm-linux-gnueabi/include/asm/unistd.h
       - name: Build the pinned public d2x source with legacy kexec
+        id: baseline_checks
+        shell: bash --noprofile --norc -euo pipefail {0}
         env:
           NOTE10_CAPS: ${{ inputs.caps }}
           NOTE10_RESERVE: ${{ inputs.reserve }}
@@ -153,6 +155,9 @@ jobs:
           NOTE10_XNU_RUNTIME_OBSERVATION: ${{ inputs.xnu_runtime_observation }}
           NOTE10_XNU_RUNTIME_SCRATCH: ${{ inputs.xnu_runtime_scratch }}
         run: |
+          if [ "$NOTE10_XNU_RUNTIME_SCRATCH" = true ]; then
+            python note10/device_test/test_ci_step_receipts.py --output note10/private/ci-step-receipt-model
+          fi
           if [ "$NOTE10_EHLD_LOCK_AUDIT" = true ] && { [ "$NOTE10_XNU_STAGE" != true ] || [ "$NOTE10_UFS_PM_AUDIT" != true ]; }; then
             echo "ehld_lock_audit requires xnu_stage=true and ufs_pm_audit=true" >&2
             exit 2
@@ -256,6 +261,9 @@ jobs:
           else
             python note10/device_test/build_handoff_kernel.py
           fi
+          if [ "$NOTE10_XNU_RUNTIME_SCRATCH" = true ]; then
+            python note10/device_test/ci_step_receipts.py --step baseline
+          fi
       - name: Download verified experimental XNU artifact
         if: inputs.xnu_stage
         uses: actions/download-artifact@v4
@@ -265,6 +273,8 @@ jobs:
           github-token: ${{ github.token }}
           path: note10/private/xnu-input
       - name: Materialize XNU data and build integrated diagnostics
+        id: integrated_diagnostics
+        shell: bash --noprofile --norc -euo pipefail {0}
         if: inputs.xnu_stage
         env:
           NOTE10_CPU_CACHE: ${{ inputs.cpu_cache }}
@@ -351,6 +361,9 @@ jobs:
           python note10/device_test/build_handoff_kernel.py --caps --reserve --window-access \
             --xnu-payload note10/private/xnu-stage-payload/kernel.mem \
             --xnu-payload-manifest note10/private/xnu-stage-payload/payload-manifest.json "${EXTRA[@]}"
+          if [ "$NOTE10_XNU_RUNTIME_SCRATCH" = true ]; then
+            python note10/device_test/ci_step_receipts.py --step materialization
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -358,8 +371,20 @@ jobs:
           retention-days: 7
           if-no-files-found: error
           path: |
+            note10/private/ci-step-receipts/baseline/receipt.json
+            note10/private/ci-step-receipts/baseline/snapshots/collector-generation-binding-proof.json
+            note10/private/ci-step-receipts/materialization/receipt.json
+            note10/private/ci-step-receipts/materialization/snapshots/build-result.json
+            note10/private/ci-step-receipts/materialization/snapshots/binding-validation-result.json
+            note10/private/ci-step-receipts/materialization/inputs/payload-manifest.json
+            note10/private/ci-step-receipt-model/result.json
             note10/private/handoff-kernel/build-result.json
             note10/private/handoff-kernel/binding-validation-result.json
+            note10/private/handoff-kernel/binding-validation-incomplete-trace.json
+            note10/private/handoff-kernel/binding-validation-finalize-error.json
+            note10/private/handoff-kernel/binding-validation-schedule-preflight.json
+            note10/private/handoff-kernel/binding-validation-schedule-model/result.json
+            note10/private/handoff-kernel/00-binding-validation-schedule.log
             note10/private/handoff-kernel/abox-pm-model/result.json
             note10/private/handoff-kernel/abox-pm-model/*.log
             note10/private/handoff-kernel/abox-pmu-model/result.json
