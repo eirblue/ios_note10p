@@ -33,7 +33,7 @@ def branch_source_path(out, model):
     return source
 
 
-def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manifest=None,cpu_cache=False,pm_timer=False,auto_return=False,screen_log=False,gic_roundtrip=False,dma_pm_audit=False,ufs_pm_audit=False,ehld_lock_audit=False,ehld_irqsave_audit=False,ehld_running_lock_audit=False,cpu_pm_roundtrip=False,cpu_pm_notifier_counts=False,cpu_pm_notifier_trace=False):
+def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manifest=None,cpu_cache=False,pm_timer=False,auto_return=False,screen_log=False,gic_roundtrip=False,dma_pm_audit=False,ufs_pm_audit=False,ehld_lock_audit=False,ehld_irqsave_audit=False,ehld_running_lock_audit=False,cpu_pm_roundtrip=False,cpu_pm_notifier_counts=False,cpu_pm_notifier_trace=False,xnu_runtime_observation=False):
     if not sys.platform.startswith('linux'): raise RuntimeError('Linux CI host required')
     if os.environ.get('PLATFORM_VERSION')!='11' or os.environ.get('ANDROID_MAJOR_VERSION')!='r':
         raise ValueError('Pinned Samsung build requires PLATFORM_VERSION=11 and ANDROID_MAJOR_VERSION=r')
@@ -54,6 +54,8 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
     if cpu_pm_roundtrip and (not ehld_running_lock_audit or not auto_return):raise ValueError('CPU_PM roundtrip requires EHLD running-lock audit and auto_return=true')
     if cpu_pm_notifier_counts and not cpu_pm_roundtrip:raise ValueError('CPU_PM notifier counts require cpu_pm_roundtrip=true')
     if cpu_pm_notifier_trace and not cpu_pm_notifier_counts:raise ValueError('CPU_PM notifier trace requires cpu_pm_notifier_counts=true')
+    if type(xnu_runtime_observation) is not bool or (xnu_runtime_observation and not (cpu_pm_notifier_trace and auto_return and xnu_payload is not None)):
+        raise ValueError('Runtime observation requires full trace/payload/recovery chain')
     OUT.mkdir(parents=True,exist_ok=True)
     report = {'source_repository':REPOSITORY,'source_commit':COMMIT,
               'platform_version':os.environ['PLATFORM_VERSION'],
@@ -357,6 +359,12 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
                 report['cpu_pm_notifier_trace_model_sha256']=hashlib.sha256((OUT/'cpu-pm-notifier-trace-model/result.json').read_bytes()).hexdigest()
             report['pm_quiesce_patched_sha256']['kernel/power/Kconfig']=report['pm_callbacks_prepared_sha256']['kernel/power/Kconfig']
             report['scope']='Bundled PM, CPU architecture and payload observations; no global DMA shutdown or XNU execution claim'
+        if xnu_runtime_observation:
+            from prepare_xnu_runtime_observation import prepare as prepare_runtime
+            report.update(prepare_runtime(source,OUT,report,xnu_manifest,enabled=True))
+            (OUT/'build-result.json').write_text(json.dumps(report,indent=2)+'\n',encoding='utf8')
+            run([sys.executable,str(ROOT/'note10/device_test/test_xnu_runtime_observation.py'),'--artifact',str(OUT),'--output',str(OUT/'xnu-runtime-observation-model'),'--cc','clang-14'],'03-xnu-runtime-observation.log')
+            report['xnu_runtime_observation_model_sha256']=hashlib.sha256((OUT/'xnu-runtime-observation-model/result.json').read_bytes()).hexdigest()
         make=['make','-C',str(source),'O='+str(objects),'ARCH=arm64',
               'CC=clang-14','CROSS_COMPILE=aarch64-linux-gnu-',
               'CLANG_TRIPLE=aarch64-linux-gnu-','CROSS_COMPILE_ARM32=arm-linux-gnueabi-',
@@ -395,6 +403,7 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
         if cpu_pm_roundtrip:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_CPU_PM_ROUNDTRIP'],'02-cpu-pm-roundtrip.log')
         if cpu_pm_notifier_counts:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_CPU_PM_NOTIFIER_COUNTS'],'02-cpu-pm-notifier-counts.log')
         if cpu_pm_notifier_trace:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_CPU_PM_NOTIFIER_TRACE'],'02-cpu-pm-notifier-trace.log')
+        if xnu_runtime_observation:run([str(source/'scripts/config'),'--file',str(config),'--enable','NOTE10_XNU_RUNTIME_OBSERVATION'],'02-xnu-runtime-observation.log')
         run([*make,'olddefconfig'],'03-olddefconfig.log')
         configured=config.read_text()
         required=('CONFIG_KEXEC=y','CONFIG_KEXEC_CORE=y','CONFIG_PM_SLEEP_SMP=y','CONFIG_ARM64_4K_PAGES=y')
@@ -409,6 +418,7 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
         if cpu_pm_roundtrip:required+=('CONFIG_NOTE10_CPU_PM_ROUNDTRIP=y','CONFIG_NOTE10_EHLD_RUNNING_LOCK_AUDIT=y','CONFIG_NOTE10_PM_IRQ_TEST=y','CONFIG_NOTE10_CPU_PM_PRECONDITIONS=y')
         if cpu_pm_notifier_counts:required+=('CONFIG_NOTE10_CPU_PM_NOTIFIER_COUNTS=y',)
         if cpu_pm_notifier_trace:required+=('CONFIG_NOTE10_CPU_PM_NOTIFIER_TRACE=y',)
+        if xnu_runtime_observation:required+=('CONFIG_NOTE10_XNU_RUNTIME_OBSERVATION=y',)
         if reserve:required+=('CONFIG_INITRAMFS_FORCE=y','CONFIG_CMDLINE_EXTEND=y','CONFIG_CMDLINE="rdinit=/init"')
         if xnu_payload is not None:required+=('CONFIG_CRYPTO=y','CONFIG_CRYPTO_HASH=y','CONFIG_CRYPTO_SHA256=y')
         if cpu_cache:required+=('CONFIG_HOTPLUG_CPU=y','CONFIG_SMP=y','CONFIG_PM_SLEEP_SMP=y')
@@ -533,6 +543,9 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             if cpu_pm_notifier_trace:final_sources.update(report['cpu_pm_notifier_trace_prepared_sha256'])
             for name,digest in final_sources.items():
                 if hashlib.sha256((source/name).read_bytes()).hexdigest()!=digest:raise ValueError('Final Image source changed after composed CPU PM snapshot: '+name)
+        if xnu_runtime_observation:
+            for name,digest in report['xnu_runtime_observation_prepared_sha256'].items():
+                if hashlib.sha256((source/name).read_bytes()).hexdigest()!=digest:raise ValueError('Runtime observation final source changed: '+name)
         if reserve and target.read_bytes().count(report['reservation_evidence_id'].encode())!=1:
             raise ValueError('Unique reservation evidence ID not embedded in Image')
         if xnu_payload is not None:
@@ -558,6 +571,13 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
             report['cpu_pm_notifier_trace_link_symbols']=sorted(expected_trace)
             report['cpu_pm_notifier_trace_link_verified']=True
         elif trace_names:raise ValueError('Disabled dispatch code remains linked')
+        if (b'N10XPO1' in target.read_bytes()) is not xnu_runtime_observation:raise ValueError('Runtime observation Image scope differs')
+        if xnu_runtime_observation:
+            linked={line.split()[-1] for line in symbol_text.splitlines() if line.split()}
+            if 'n10_rt_plan' not in linked or not any(n.startswith('n10_observe_runtime_plan') for n in linked):raise ValueError('Runtime observation compiled integration missing')
+            if any(('__ksymtab_' in n or '__kstrtab_' in n) and ('n10_rt_' in n or 'n10_observe_runtime' in n) for n in linked):raise ValueError('Planner API unexpectedly exported')
+            report['xnu_runtime_observation_link_symbols']=sorted(n for n in linked if n.startswith(('n10_rt_','n10_observe_runtime_plan')))
+            report['xnu_runtime_observation_link_verified']=True
         if pm_timer:
             from pm_quiesce_binding import validate_model as validate_quiesce
             validation.call('pm_quiesce_binding',validate_quiesce,OUT,report)
@@ -741,6 +761,12 @@ def main(caps=False,reserve=False,window_access=False,xnu_payload=None,xnu_manif
                 run([sys.executable,str(ROOT/'note10/device_test/test_cpu_pm_notifier_trace_package.py'),'--artifact',str(OUT),'--output',str(OUT/'cpu-pm-notifier-trace-package-model')],'03-cpu-pm-notifier-trace-package.log')
                 report['cpu_pm_notifier_trace_package_sha256']=hashlib.sha256((OUT/'cpu-pm-notifier-trace-package-model/result.json').read_bytes()).hexdigest()
             validation.call('cpu_pm_roundtrip_binding',validate_roundtrip,OUT,report)
+        if xnu_runtime_observation:
+            (OUT/'build-result.json').write_text(json.dumps(report,indent=2)+'\n',encoding='utf8')
+            run([sys.executable,str(ROOT/'note10/device_test/test_xnu_runtime_observation_package.py'),'--artifact',str(OUT),'--output',str(OUT/'xnu-runtime-observation-package-model')],'03-xnu-runtime-observation-package.log')
+            report['xnu_runtime_observation_package_sha256']=hashlib.sha256((OUT/'xnu-runtime-observation-package-model/result.json').read_bytes()).hexdigest()
+            from xnu_runtime_observation_binding import validate as validate_runtime_observation
+            validation.call('xnu_runtime_observation_binding',validate_runtime_observation,OUT,report,require_package_flow=True)
         if auto_return:
             from materialize_auto_cycle import SLOT
             if b'N10RET1' not in target.read_bytes() or target.read_bytes().count(SLOT+b'\0')!=1:raise ValueError('Auto-return marker/unique data slot missing')
@@ -778,5 +804,6 @@ if __name__=='__main__':
     parser.add_argument('--cpu-pm-roundtrip',action='store_true',help='Opt in to one bounded original CPU_PM enter/exit pair; requires EHLD running-lock audit and automatic recovery')
     parser.add_argument('--cpu-pm-notifier-counts',action='store_true',help='Opt in to bounded notifier callback counts within the guarded CPU_PM pair')
     parser.add_argument('--cpu-pm-notifier-trace',action='store_true',help='Opt in to bounded notifier-block dispatch order; requires notifier counts')
+    parser.add_argument('--xnu-runtime-observation',action='store_true',help='Hypothetical local planner observation only; requires full diagnostic trace chain')
     args=parser.parse_args();main(caps=args.caps,reserve=args.reserve,window_access=args.window_access,
-                                   xnu_payload=args.xnu_payload,xnu_manifest=args.xnu_payload_manifest,cpu_cache=args.cpu_cache,pm_timer=args.pm_timer,auto_return=args.auto_return,screen_log=args.screen_log,gic_roundtrip=args.gic_roundtrip,dma_pm_audit=args.dma_pm_audit,ufs_pm_audit=args.ufs_pm_audit,ehld_lock_audit=args.ehld_lock_audit,ehld_irqsave_audit=args.ehld_irqsave_audit,ehld_running_lock_audit=args.ehld_running_lock_audit,cpu_pm_roundtrip=args.cpu_pm_roundtrip,cpu_pm_notifier_counts=args.cpu_pm_notifier_counts,cpu_pm_notifier_trace=args.cpu_pm_notifier_trace)
+                                   xnu_payload=args.xnu_payload,xnu_manifest=args.xnu_payload_manifest,cpu_cache=args.cpu_cache,pm_timer=args.pm_timer,auto_return=args.auto_return,screen_log=args.screen_log,gic_roundtrip=args.gic_roundtrip,dma_pm_audit=args.dma_pm_audit,ufs_pm_audit=args.ufs_pm_audit,ehld_lock_audit=args.ehld_lock_audit,ehld_irqsave_audit=args.ehld_irqsave_audit,ehld_running_lock_audit=args.ehld_running_lock_audit,cpu_pm_roundtrip=args.cpu_pm_roundtrip,cpu_pm_notifier_counts=args.cpu_pm_notifier_counts,cpu_pm_notifier_trace=args.cpu_pm_notifier_trace,xnu_runtime_observation=args.xnu_runtime_observation)

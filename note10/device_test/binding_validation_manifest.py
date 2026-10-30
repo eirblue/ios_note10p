@@ -27,6 +27,16 @@ ENTRYPOINTS.update({name + '_binding': 'validate' for name in
                    ('pmu_failure', 'gic_priority', 'pmu_state', 'pmu_control',
                     'fpsimd_reference', 'rcu_context', 'ehld_lock', 'ehld_irqsave',
                     'ehld_running_lock', 'cpu_pm_roundtrip')})
+ENTRYPOINTS['xnu_runtime_observation_binding']='validate'
+OPTIONAL_DIRECT=(('xnu_runtime_observation_binding',True),)
+
+
+def active_direct(report=None):
+    flag=report.get('xnu_runtime_observation',False) if report is not None else False
+    if type(flag) is not bool:raise ValueError('manifest planner opt-in must be bool')
+    return DIRECT+(OPTIONAL_DIRECT if flag else ())
+
+
 DIRECT = (
     ('pm_quiesce_binding', None), ('gic_roundtrip_binding', None),
     ('dma_pm_binding', None), ('ufs_pm_binding', None), ('iommu_pm_binding', None),
@@ -88,11 +98,14 @@ PROOFS = {
     'cpu_pm_roundtrip_binding': ('cpu-pm-roundtrip-model/result.json', 'cpu-pm-roundtrip-binding-model/result.json',
                                  'cpu-pm-notifier-counts-model/result.json', 'cpu-pm-notifier-trace-model/result.json'),
 }
+PROOFS['xnu_runtime_observation_binding']=('xnu-runtime-observation-model/result.json','xnu-runtime-observation-package-model/result.json')
 PACKAGE_PROOFS = {name + '_binding': name.replace('_', '-') + '-package-flow-model/result.json'
                   for name in ('pmu_failure', 'gic_priority', 'pmu_state', 'pmu_control',
                                'fpsimd_reference', 'rcu_context', 'ehld_lock',
                                'ehld_irqsave', 'ehld_running_lock', 'cpu_pm_roundtrip')}
 EXISTING_FIELDS = {
+    'xnu-runtime-observation-model/result.json':'xnu_runtime_observation_model_sha256',
+    'xnu-runtime-observation-package-model/result.json':'xnu_runtime_observation_package_sha256',
     'ehld-irqsave-model/result.json': 'ehld_irqsave_model_sha256',
     'ehld-irqsave-binding-model/result.json': 'ehld_irqsave_binding_sha256',
     'ehld-irqsave-package-flow-model/result.json': 'ehld_irqsave_package_flow_sha256',
@@ -130,14 +143,14 @@ def safe_file(root, name):
 
 def proof_names(validator, package):
     result = list(PROOFS[validator])
-    if package is True:
+    if package is True and validator in PACKAGE_PROOFS:
         result.append(PACKAGE_PROOFS[validator])
         if validator == 'cpu_pm_roundtrip_binding':
             result.append('cpu-pm-notifier-trace-package-model/result.json')
     return result
 
 
-def expected_calls():
+def expected_calls(report=None):
     result = []
     def expand(validator, package, root, parent):
         index = len(result)
@@ -149,7 +162,7 @@ def expected_calls():
                      False if validator in ('cpu_pm_roundtrip_binding','ehld_lock_binding') else
                      package if validator in ('ehld_running_lock_binding', 'ehld_irqsave_binding') else True)
             expand(child, stage, root, index)
-    for root, (validator, package) in enumerate(DIRECT):
+    for root, (validator, package) in enumerate(active_direct(report)):
         expand(validator, package, root, None)
     return result
 
@@ -184,7 +197,7 @@ def verify_builder_schedule(raw):
                     package = keyword.value.value
             instrumented.append((node.lineno, validator, package))
     schedule = tuple((validator, package) for _, validator, package in sorted(instrumented))
-    if naked or schedule != DIRECT:
+    if naked or schedule != DIRECT+OPTIONAL_DIRECT:
         raise ValueError('reviewed existing production validator schedule differs')
     return True
 
@@ -233,7 +246,8 @@ class Recorder:
     def call(self, validator, original, *args, **kwargs):
         if not self.enabled: return original(*args, **kwargs)
         package = kwargs.get('require_package_flow',True) if ENTRYPOINTS.get(validator)=='validate' else None
-        if (self.direct_count >= len(DIRECT) or DIRECT[self.direct_count] != (validator,package) or
+        direct=active_direct(self.report)
+        if (self.direct_count >= len(direct) or direct[self.direct_count] != (validator,package) or
                 original.__module__ != validator or original.__name__ != ENTRYPOINTS[validator]):
             raise ValueError('production validator call order/alias differs')
         if sys.getprofile() is not None: raise ValueError('existing profiler prevents exact validator audit')
@@ -250,7 +264,7 @@ class Recorder:
 
     def finalize(self):
         if not self.enabled: return {}
-        if self.direct_count != len(DIRECT) or self.report.get('build_passed') is not True:
+        if self.direct_count != len(active_direct(self.report)) or self.report.get('build_passed') is not True:
             raise ValueError('existing binding calls/build have not completed')
         verify_builder_schedule((HERE/'build_handoff_kernel.py').read_bytes())
         identity = {'project_head': os.environ.get('GITHUB_SHA',''),
@@ -264,7 +278,7 @@ class Recorder:
                     'builder_sha256': sha((HERE/'build_handoff_kernel.py').read_bytes()),
                     'recorder_path': 'note10/device_test/binding_validation_manifest.py',
                     'recorder_sha256': sha(Path(__file__).read_bytes()),
-                    'direct_calls': [{'validator': name,'require_package_flow': stage} for name,stage in DIRECT],
+                    'direct_calls': [{'validator': name,'require_package_flow': stage} for name,stage in active_direct(self.report)],
                     'calls': self.calls}
         proof_fields = {}
         for record in self.calls:
@@ -308,10 +322,10 @@ def verify_document(document, artifact, report, identity, source_loader):
         if document.get(key+'_path')!=expected_path or document.get(key+'_sha256')!=sha(source_loader(expected_path)):
             raise ValueError('binding manifest builder/recorder differs from exact project HEAD')
     verify_builder_schedule(source_loader(document['builder_path']))
-    expected = expected_calls()
+    expected = expected_calls(report)
     calls = document.get('calls')
     if not isinstance(calls,list) or len(calls)!=len(expected): raise ValueError('binding call cardinality differs')
-    if document.get('direct_calls')!=[{'validator':name,'require_package_flow':stage} for name,stage in DIRECT]:
+    if document.get('direct_calls')!=[{'validator':name,'require_package_flow':stage} for name,stage in active_direct(report)]:
         raise ValueError('binding direct call order/multiplicity differs')
     proof_fields = {}
     for sequence,(record,wanted) in enumerate(zip(calls,expected)):
@@ -340,11 +354,12 @@ def verify_document(document, artifact, report, identity, source_loader):
             proof_fields.setdefault(name,{})[path]=digest
     order=list(dict.fromkeys(record['validator'] for record in calls))
     counts={name:sum(record['validator']==name for record in calls) for name in order}
-    if len(order)!=26 or set(order)!=set(ENTRYPOINTS) or document.get('validator_order')!=order or document.get('multiplicities')!=counts:
+    wanted_order=list(dict.fromkeys(item['validator'] for item in expected))
+    if order!=wanted_order or document.get('validator_order')!=order or document.get('multiplicities')!=counts:
         raise ValueError('binding unique validator inventory/order/multiplicities differ')
     if report.get('binding_validation_proof_sha256')!=proof_fields:raise ValueError('binding build-report proof map differs')
     return {'passed':True,'schema':SCHEMA,'identity':identity,'validator_order':order,
-            'binding_validator_count':26,'actual_invocation_count':len(calls),'multiplicities':counts,
+            'binding_validator_count':len(order),'actual_invocation_count':len(calls),'multiplicities':counts,
             'historical_validators_replayed_locally':False}
 
 

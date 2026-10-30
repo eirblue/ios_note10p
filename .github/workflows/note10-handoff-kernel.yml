@@ -72,6 +72,10 @@ on:
         type: boolean
         default: false
 
+      xnu_runtime_observation:
+        description: Hypothetical late-init planner observation only; requires full trace/payload/recovery chain
+        type: boolean
+        default: false
       cpu_pm_notifier_trace:
         description: Observe bounded CPU_PM notifier-block dispatch order; requires cpu_pm_notifier_counts
         type: boolean
@@ -142,6 +146,7 @@ jobs:
           NOTE10_CPU_PM_ROUNDTRIP: ${{ inputs.cpu_pm_roundtrip }}
           NOTE10_CPU_PM_NOTIFIER_COUNTS: ${{ inputs.cpu_pm_notifier_counts }}
           NOTE10_CPU_PM_NOTIFIER_TRACE: ${{ inputs.cpu_pm_notifier_trace }}
+          NOTE10_XNU_RUNTIME_OBSERVATION: ${{ inputs.xnu_runtime_observation }}
         run: |
           if [ "$NOTE10_EHLD_LOCK_AUDIT" = true ] && { [ "$NOTE10_XNU_STAGE" != true ] || [ "$NOTE10_UFS_PM_AUDIT" != true ]; }; then
             echo "ehld_lock_audit requires xnu_stage=true and ufs_pm_audit=true" >&2
@@ -157,6 +162,10 @@ jobs:
           fi
           if [ "$NOTE10_CPU_PM_ROUNDTRIP" = true ] && { [ "$NOTE10_EHLD_RUNNING_LOCK_AUDIT" != true ] || [ "$NOTE10_AUTO_RETURN" != true ]; }; then
             echo "cpu_pm_roundtrip requires ehld_running_lock_audit=true and auto_return=true" >&2
+            exit 2
+          fi
+          if [ "$NOTE10_XNU_RUNTIME_OBSERVATION" = true ] && { [ "$NOTE10_CPU_PM_NOTIFIER_TRACE" != true ] || [ "$NOTE10_XNU_STAGE" != true ] || [ "$NOTE10_AUTO_RETURN" != true ]; }; then
+            echo "xnu_runtime_observation requires full trace/payload/recovery chain" >&2
             exit 2
           fi
           if [ "$NOTE10_CPU_PM_NOTIFIER_TRACE" = true ] && [ "$NOTE10_CPU_PM_NOTIFIER_COUNTS" != true ]; then
@@ -265,6 +274,7 @@ jobs:
           NOTE10_CPU_PM_ROUNDTRIP: ${{ inputs.cpu_pm_roundtrip }}
           NOTE10_CPU_PM_NOTIFIER_COUNTS: ${{ inputs.cpu_pm_notifier_counts }}
           NOTE10_CPU_PM_NOTIFIER_TRACE: ${{ inputs.cpu_pm_notifier_trace }}
+          NOTE10_XNU_RUNTIME_OBSERVATION: ${{ inputs.xnu_runtime_observation }}
         run: |
           count="$(find note10/private/xnu-input -name note10-experimental.macho -type f | wc -l)"
           [ "$count" -eq 1 ]
@@ -322,6 +332,10 @@ jobs:
           if [ "$NOTE10_CPU_PM_NOTIFIER_TRACE" = true ]; then
             test "$NOTE10_CPU_PM_NOTIFIER_COUNTS" = true
             EXTRA+=(--cpu-pm-notifier-trace)
+          fi
+          if [ "$NOTE10_XNU_RUNTIME_OBSERVATION" = true ]; then
+            test "$NOTE10_CPU_PM_NOTIFIER_TRACE" = true
+            EXTRA+=(--xnu-runtime-observation)
           fi
           python note10/device_test/build_handoff_kernel.py --caps --reserve --window-access \
             --xnu-payload note10/private/xnu-stage-payload/kernel.mem \

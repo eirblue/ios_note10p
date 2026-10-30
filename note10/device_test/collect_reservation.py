@@ -84,6 +84,15 @@ def decode_cpu_pm_roundtrip_observation(text,identity,completed,counts_enabled=F
             'observation':value}
 
 
+def decode_runtime_plan_observation(text,identity,build):
+    from decode_xnu_runtime_observation import decode as decode_runtime
+    try:
+        value=decode_runtime(text,identity,build['xnu_payload_sha256'],build['xnu_payload_size'],build['xnu_runtime_observation_geometry_sha256'])
+        return {'observation':value,'evaluation_item':{'required':True,'status':'passed'}}
+    except (ValueError,KeyError,UnicodeError) as error:
+        return {'observation':{'observed':False,'decode_error':str(error)},'evaluation_item':{'required':True,'status':'failed'}}
+
+
 def select_latest_boot(data,expected_banner,allow_panic_corroboration=False,boot_binding_id=None):
     """Select one contiguous boot using an intact zero-time Linux banner.
 
@@ -191,6 +200,9 @@ def collect(packages,kernel_build,adb):
     cpu_pm_notifier_counts=counts_package_scope(result,allow_build_proof=True)
     from cpu_pm_roundtrip_binding import trace_package_scope
     cpu_pm_notifier_trace=trace_package_scope(result,allow_build_proof=True)
+    from xnu_runtime_observation_binding import validate as validate_runtime_observation,package_scope as runtime_scope
+    runtime_observation=validate_runtime_observation(kernel_build,result)
+    runtime_observations=[]
     from pm_irq_binding import assert_scope as assert_irq_scope,validate_model as validate_irq
     pm_irq=assert_irq_scope(kernel_build,result)
     if pm_irq:validate_irq(kernel_build,result)
@@ -255,6 +267,8 @@ def collect(packages,kernel_build,adb):
     if roundtrip_package_scope(paired) is not cpu_pm_roundtrip:raise ValueError('CPU PM roundtrip package/kernel scope differs')
     if counts_package_scope(paired) is not cpu_pm_notifier_counts:raise ValueError('CPU PM notifier-count package/kernel scope differs')
     if trace_package_scope(paired) is not cpu_pm_notifier_trace:raise ValueError('CPU PM notifier-trace package/kernel scope differs')
+    if runtime_scope(paired) is not runtime_observation:raise ValueError('Runtime observation package/kernel scope differs')
+    if runtime_observation and paired.get('xnu_runtime_observation_geometry_sha256')!=result.get('xnu_runtime_observation_geometry_sha256'):raise ValueError('Runtime observation external geometry binding differs')
     if bool(paired.get('pm_irq_diagnostic'))!=pm_irq or (pm_irq and paired.get('pm_irq_evidence_version')!=1):raise ValueError('CPU0 IRQ package/kernel scope differs')
     if bool(paired.get('abox_pmu_audit_diagnostic'))!=abox_pmu_audit or (abox_pmu_audit and paired.get('abox_pmu_audit_evidence_version')!=3):raise ValueError('PMU package/kernel scope differs')
     if xnu_stage and (paired.get('xnu_payload_sha256')!=result.get('xnu_payload_sha256') or
@@ -361,6 +375,7 @@ def collect(packages,kernel_build,adb):
                 (out/selected_name).write_bytes(selected)
                 selection['selected_file']=selected_name
             text=selected.decode(errors='replace')
+            if runtime_observation:runtime_observations.append(decode_runtime_plan_observation(text,evidence_id,result))
             if not fpsimd_reference and 'N10FPS' in text:raise ValueError('unexpected FPSIMD reference evidence')
             if not rcu_context and 'N10RC' in text:raise ValueError('unexpected RCU context evidence')
             if not ehld_lock and 'N10EL' in text:raise ValueError('unexpected EHLD lock evidence')
@@ -614,6 +629,13 @@ def collect(packages,kernel_build,adb):
     if cpu_pm_notifier_counts:
         counts_item=cpu_pm_roundtrip_observation.get('counts_evaluation_item') if cpu_pm_roundtrip_observation else None
         report['evaluation_items']['cpu0_cpu_pm_notifier_counts']=counts_item or {'required':True,'status':'failed'}
+    if runtime_observation:
+        successful=[item for item in runtime_observations if item['evaluation_item']['status']=='passed']
+        runtime_item=successful[0] if successful else {'observation':{'observed':False},'evaluation_item':{'required':True,'status':'failed'}}
+        report['xnu_runtime_observation_scope_verified']=True
+        report['xnu_runtime_plan_observation']=runtime_item['observation']
+        report['evaluation_items']['xnu_runtime_plan']=runtime_item['evaluation_item']
+        report['diagnostic_passed']=report['diagnostic_passed'] and bool(successful)
     (out/'capture-result.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
     return report
 

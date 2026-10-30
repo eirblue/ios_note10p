@@ -75,3 +75,13 @@ One fresh physical cycle passed all 44 required evaluations out of 45 total rows
 The device returned automatically to normal TWRP. All five partition hashes matched, brightness raw value 10 was verified after integrity checks, and installation battery was 23%. An earlier preinstall stop at battery 0% remains preserved; no installation or reboot occurred during that stop. After battery recovery, only the single fresh physical cycle was executed. Previous journals were not replayed. The successful result artifact SHA-256 is `8fbeff09a4cf9266652d4a600563a968a0d4d64aaf1f87d39512e059aa5dcf17` and binds to the source commit above.
 
 Earlier v53 [CI 41002376625](https://github.com/eirblue/ios_note10p/actions/runs/41002376625), [CI 41005053470](https://github.com/eirblue/ios_note10p/actions/runs/41005053470) and [CI 41008544786](https://github.com/eirblue/ios_note10p/actions/runs/41008544786) remain failed build records. Their host test input/workspace failures were corrected before the accepted build; they are not physical successes. The v49 and v50 failed results and all prior result history remain preserved. The v53 observation does not establish complete hardware DMA shutdown, XNU execution or iOS boot.
+
+
+## v56 planned compatible observation
+
+A separate default-off late-init XNU runtime-plan row is being added to the full
+v53 diagnostic chain. Enabled scope adds one independent required row (45/46);
+disabled scope preserves 44/45. Existing CPU_PM pairs, aggregate counts, dispatch
+trace, payload writer and recovery behavior remain independently required.
+Implementation acceptance and actual full CI are pending; no new physical result
+is claimed. See [planner-only scope](XNU-RUNTIME-OBSERVATION.md).

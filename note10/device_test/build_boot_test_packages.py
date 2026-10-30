@@ -198,6 +198,11 @@ def build(backup,prototype,output,current_packages=None):
     from cpu_pm_roundtrip_binding import trace_package_scope
     from prepare_cpu_pm_notifier_trace import MARKER as TRACE_MARKER
     cpu_pm_notifier_trace=trace_package_scope(metadata)
+    from xnu_runtime_observation_binding import package_scope as runtime_scope,metadata_fields as runtime_fields
+    from prepare_xnu_runtime_observation import MARKER as RUNTIME_MARKER
+    runtime_observation=runtime_scope(metadata)
+    runtime_metadata=runtime_fields(metadata)
+    if (RUNTIME_MARKER in raw) is not runtime_observation:raise ValueError('Prototype runtime observation Image scope differs')
     cpu_pm_roundtrip_version=metadata.get('cpu_pm_roundtrip_version') if cpu_pm_roundtrip else None
     if cpu_pm_roundtrip and not metadata.get('auto_return_diagnostic') is True:raise ValueError('CPU PM roundtrip requires auto-return diagnostic')
     from cpu_pm_roundtrip_binding import MARKER as roundtrip_marker
@@ -271,6 +276,7 @@ def build(backup,prototype,output,current_packages=None):
             'xnu_payload_sha256':metadata.get('xnu_payload_sha256') if xnu_stage else None,
             'xnu_payload_size':metadata.get('xnu_payload_size') if xnu_stage else None,
             'builder_device_operations':[],'device_boot_tested':False,'deployment_ready':False,'packages':[]}
+    result.update(runtime_metadata)
     for mode,payload in (('diagnostic',padded),('rollback',parts['boot'])):
         digest=hashlib.sha256(payload).hexdigest()
         script=updater(mode=mode,bootloader=manifest['bootloader'],partitions=manifest['partitions'],
@@ -349,6 +355,7 @@ def build(backup,prototype,output,current_packages=None):
         metadata['auto_cycle_token']=cycle if auto_return and mode=='diagnostic' else None
         metadata['xnu_payload_sha256']=xnu_sha if xnu_stage and mode=='diagnostic' else None
         metadata['xnu_payload_size']=xnu_size if xnu_stage and mode=='diagnostic' else None
+        if mode=='diagnostic':metadata.update(runtime_metadata)
         target=output/(('note10-reservation-' if reservation else 'note10-phase2-')+mode+'.zip')
         files={'META-INF/com/google/android/update-binary':script,
                'META-INF/com/google/android/updater-script':b'# BOOT-only manual test/rollback\n',

@@ -70,6 +70,8 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output,auto_cycle_token=None):
         raise ValueError('Diagnostic must preserve external initramfs in normal boot')
     if build.get('source_commit')!=KERNEL_COMMIT or build.get('public_defconfig')!='exynos9820-d2x_defconfig':
         raise ValueError('Unexpected kernel source or target')
+    from xnu_runtime_observation_binding import validate as validate_runtime_observation,metadata_fields as runtime_fields
+    runtime_scope=validate_runtime_observation(kernel_build,build)
     auto_return=build.get('auto_return_diagnostic') is True
     if auto_return!=(auto_cycle_token is not None):raise ValueError('Auto-return build and per-cycle token must be paired')
     if auto_cycle_token is not None and not re.fullmatch(r'[0-9a-f]{32}',auto_cycle_token):raise ValueError('Invalid cycle token')
@@ -305,6 +307,7 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output,auto_cycle_token=None):
             'deployment_ready':False,'partition_writes':False,'device_operations':[],
             'scope':'PC format/size validation only; Samsung runtime DT selection and boot behavior remain unverified',
             'command':command}
+    report.update(runtime_fields(build))
     output.with_suffix('.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
     return report
 

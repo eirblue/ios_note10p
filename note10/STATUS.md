@@ -1,5 +1,11 @@
 # 작업 상태 (2026-10-30, Asia/Seoul)
 
+## 2026-10-30: v56 late-init XNU runtime plan 관측 구현 계획
+
+- 기존 v53 전체 trace/count/pair·payload·PM·자동 복귀 경로에 기본 비활성 planner 관측 1개를 추가한다. 활성 시 필수 45/총 46, 비활성 시 기존 필수 44/총 45를 유지한다. 구현의 focused 시험·실제 전체 CI·독립 검토는 대기 중이다.
+- 새 관측은 late-init에서 예약 상태·payload geometry를 결속한 로컬 C 계산과 두 companion copy만 기록한다. PM 완료 관측이나 예약 RAM의 새 layout 작성·readback은 아니다. 기존 kernel-at-base writer와 모든 이전 필수 행을 유지한다.
+- v54/v55 PC 통과와 마지막 실기기 v53 결과를 보존한다. 새 기기 사이클은 아직 수행하지 않았다. [관측 계획과 제한](device_test/XNU-RUNTIME-OBSERVATION.md).
+
 ## 2026-10-30: v55 XNU runtime planner 커널 컴포넌트 PC 검증 통과
 
 - **검증 소스:** `9cb92b1d68bf2d80fc3a5f5cbde62193c75715f9`; [CI 41058332903](https://github.com/eirblue/ios_note10p/actions/runs/41058332903) 첫 번째 시도 통과. 실제 고정 Linux 헤더로 분리된 disabled/enabled `arch/arm64/mm/init.o`를 모두 컴파일·보존한 뒤 증거 gate를 적용했다. 11개 소스와 1,506개 proof-file 해시를 결속했다.

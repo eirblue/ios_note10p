@@ -21,6 +21,8 @@ def verify_packages(directory):
     counts_pair_scope=counts_package_scope(result)
     from cpu_pm_roundtrip_binding import trace_package_scope
     trace_pair_scope=trace_package_scope(result)
+    from xnu_runtime_observation_binding import package_scope as runtime_scope
+    runtime_pair_scope=runtime_scope(result)
     expected=({'note10-phase2-diagnostic.zip','note10-phase2-rollback.zip'},
               {'note10-reservation-diagnostic.zip','note10-reservation-rollback.zip'})
     records=result.get('packages',[])
@@ -86,6 +88,9 @@ def verify_packages(directory):
             roundtrip_expected=roundtrip_pair_scope if mode=='diagnostic' else False
             if roundtrip_package_scope(record) is not roundtrip_expected or roundtrip_package_scope(meta) is not roundtrip_expected:
                 raise ValueError('CPU PM roundtrip metadata, pair or rollback scope differs')
+            runtime_expected=runtime_pair_scope if mode=='diagnostic' else False
+            if runtime_scope(record) is not runtime_expected or runtime_scope(meta) is not runtime_expected:raise ValueError('Runtime observation package role differs')
+            if runtime_expected and any(m.get('xnu_runtime_observation_geometry_sha256')!=result.get('xnu_runtime_observation_geometry_sha256') for m in (record,meta)):raise ValueError('Runtime observation package geometry differs')
             trace_expected=trace_pair_scope if mode=='diagnostic' else False
             if trace_package_scope(record) is not trace_expected or trace_package_scope(meta) is not trace_expected:
                 raise ValueError('CPU PM notifier-trace metadata, pair or rollback scope differs')

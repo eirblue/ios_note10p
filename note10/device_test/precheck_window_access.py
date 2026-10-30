@@ -198,6 +198,12 @@ def check(packages,kernel_build,backup,core_model,gate_model,init_model,adb):
         trace_scope=trace_package_scope(build,allow_build_proof=True)
         if any(trace_package_scope(m) is not trace_scope for m in (paired,diagnostic)):raise ValueError('CPU PM notifier-trace package scope differs')
         report['cpu_pm_notifier_trace_scope_verified']=trace_scope
+        from xnu_runtime_observation_binding import validate as validate_runtime_observation,package_scope as runtime_scope
+        runtime_observation=validate_runtime_observation(kernel_build,build)
+        if any(runtime_scope(m) is not runtime_observation for m in (paired,diagnostic)):raise ValueError('Runtime observation package/build scope differs')
+        if runtime_observation:
+            if any(m.get('xnu_runtime_observation_geometry_sha256')!=build.get('xnu_runtime_observation_geometry_sha256') for m in (paired,diagnostic)):raise ValueError('Runtime observation geometry differs')
+            report['xnu_runtime_observation_scope_verified']=True
         from pm_irq_binding import assert_scope as assert_irq_scope,validate_model as validate_irq
         irq_scope=assert_irq_scope(kernel_build,build)
         if any(irq_scope!=bool(m.get('pm_irq_diagnostic')) for m in (paired,diagnostic)):raise ValueError('CPU0 IRQ package scope differs')
