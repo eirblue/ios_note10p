@@ -45,7 +45,8 @@ def make_fixture(root,artifact,mode,scope_expected,counts_expected=False):
  art.mkdir(parents=True)
  for item in artifact.iterdir():
   if item.is_symlink():raise ValueError('symlink in package-flow input')
-  keep_dir=item.is_dir() and (item.name.startswith(MODEL_PREFIXES) or item.name.startswith('cpu-pm-roundtrip-'))
+  counts_model=item.name=='cpu-pm-notifier-counts-model'
+  keep_dir=item.is_dir() and (item.name.startswith(MODEL_PREFIXES) or item.name.startswith('cpu-pm-roundtrip-')) and (not counts_model or counts_expected)
   keep_file=item.is_file() and (item.name in KEEP_FILES or (item.suffix=='.log' and item.stat().st_size<=1024*1024) or item.name in ('window-core-model.json','window-gate-model.json','window-init-model.json'))
   if not (keep_dir or keep_file):continue
   destination=art/item.name
@@ -54,6 +55,9 @@ def make_fixture(root,artifact,mode,scope_expected,counts_expected=False):
    shutil.copytree(item,destination)
   elif item.name not in ('Image','initramfs.cpio'):
    shutil.copy2(item,destination)
+ counts_model_dir=art/'cpu-pm-notifier-counts-model'
+ if counts_model_dir.exists() is not counts_expected:
+  raise AssertionError('notifier-count model directory feature scope differs from fixture expectation')
  # Compact model inputs retain the markers and measured hashes used by the production gates.
  build=json.loads((art/'build-result.json').read_text(encoding='utf8'))
  identity=build.get('reservation_evidence_id','e'*32)
@@ -63,16 +67,24 @@ def make_fixture(root,artifact,mode,scope_expected,counts_expected=False):
  image=model_image(identity,scope_expected,counts_expected);(art/'Image').write_bytes(image)
  initramfs=b'v47-offline-initramfs-fixture';(art/'initramfs.cpio').write_bytes(initramfs)
  build['image_sha256']=sha(image);build['image_size']=len(image);build['initramfs_cpio_sha256']=sha(initramfs)
+ # Normalize every notifier-count field/option for this synthetic scope.  The
+ # input can be a counts-enabled CI artifact even when this fixture models the
+ # legacy feature-off package; production validators remain strict.
+ count_prefix='cpu_pm_notifier_counts_'
+ for key in list(build):
+  if key.startswith(count_prefix) and key not in ('cpu_pm_notifier_counts_version',):
+   build.pop(key)
+ config=(art/'handoff.config').read_text(encoding='ascii').splitlines()
+ count_option='CONFIG_NOTE10_CPU_PM_NOTIFIER_COUNTS'
+ config=[line for line in config if count_option not in line]
  build['cpu_pm_notifier_counts']=counts_expected
  build['cpu_pm_notifier_counts_version']=1 if counts_expected else None
  if counts_expected:
   from cpu_pm_roundtrip_binding import SOURCES as count_sources
   build['cpu_pm_notifier_counts_sources_sha256']={n:sha((Path(__file__).resolve().parent/n).read_bytes()) for n in count_sources}
   build['cpu_pm_notifier_counts_model_sha256']='0'*64
-  config=(art/'handoff.config').read_text(encoding='ascii').splitlines()
-  option='CONFIG_NOTE10_CPU_PM_NOTIFIER_COUNTS'
-  config=[line for line in config if option not in line]+[option+'=y']
-  (art/'handoff.config').write_text('\n'.join(config)+'\n',encoding='ascii',newline='\n')
+  config.append(count_option+'=y')
+ (art/'handoff.config').write_text('\n'.join(config)+'\n',encoding='ascii',newline='\n')
  build['effective_config_sha256']=sha((art/'handoff.config').read_bytes())
  build['build_passed']=True;build['early_xnu_reservation']=True;build['reservation_evidence_version']=2
  (art/'build-result.json').write_text(json.dumps(build),encoding='utf8')
@@ -411,21 +423,47 @@ def main():
  initial=json.loads((a.artifact/'build-result.json').read_text(encoding='utf8'))
  if initial.get('cpu_pm_roundtrip_package_sources_sha256')!=measured:raise ValueError('v49 package source map differs')
  if initial.get('build_passed') is not False:raise ValueError('package-flow requires explicitly synthetic outer build_passed=False')
+ counts_enabled=initial.get('cpu_pm_notifier_counts',False)
+ if type(counts_enabled) is not bool:raise ValueError('counts fixture input flag must be bool or absent')
+ counts_version=initial.get('cpu_pm_notifier_counts_version')
+ count_option=b'CONFIG_NOTE10_CPU_PM_NOTIFIER_COUNTS'
+ input_config=(a.artifact/'handoff.config').read_bytes().splitlines()
+ count_config=[line for line in input_config if count_option in line]
+ input_image=(a.artifact/'Image').read_bytes()
+ count_model=(a.artifact/'cpu-pm-notifier-counts-model')
+ count_proof_keys=[k for k in initial if k.startswith('cpu_pm_notifier_counts_') and k!='cpu_pm_notifier_counts_version']
+ if counts_enabled:
+  if (type(counts_version) is not int or counts_version!=1 or
+      count_config!=[count_option+b'=y'] or b'N10CPNC1' not in input_image or
+      not count_model.is_dir() or not isinstance(initial.get('cpu_pm_notifier_counts_sources_sha256'),dict) or
+      not isinstance(initial.get('cpu_pm_notifier_counts_model_sha256'),str)):
+   raise ValueError('counts-enabled package-flow input is incomplete')
+ elif (counts_version is not None or count_config not in ([],[count_option+b'=n'],[b'# '+count_option+b' is not set']) or b'N10CPNC1' in input_image or
+       count_model.exists() or count_model.is_symlink() or count_proof_keys):
+  raise ValueError('counts-disabled package-flow input contains feature evidence')
  a.output.mkdir(parents=True,exist_ok=False)
  with tempfile.TemporaryDirectory(dir=prep.ROOT/'note10/private') as td:
   root=Path(td);on=_prepare_packages(root,a.artifact,'on','c'*32,True)
   off_base=root/'v46-compat';prepare_running_lock_off(a.artifact,off_base)
   off=_prepare_packages(root,off_base,'off','d'*32,False)
-  counts_on=_prepare_packages(root,a.artifact,'counts-on','f'*32,True,True)
+  counts_on=None
+  counts_on_model_dir=None
+  if counts_enabled:
+   counts_on=_prepare_packages(root,a.artifact,'counts-on','f'*32,True,True)
+   counts_on_model_dir=(counts_on['art']/'cpu-pm-notifier-counts-model').is_dir()
+  off_model_dir=(off['art']/'cpu-pm-notifier-counts-model').exists()
+  if (counts_enabled and counts_on_model_dir is not True) or off_model_dir is not False:
+   raise AssertionError('counts model directory was not kept ON/excluded OFF')
   if {k:v for k,v in on['collector']['evaluation_items'].items() if k!='cpu0_cpu_pm_enter_exit_pair'}!=off['collector']['evaluation_items']:
    raise AssertionError('the original collector evaluation rows changed with v49 scope')
-  unchanged={k:v for k,v in counts_on['collector']['evaluation_items'].items()
-             if k not in ('cpu0_cpu_pm_enter_exit_pair','cpu0_cpu_pm_notifier_counts')}
-  if unchanged!=off['collector']['evaluation_items']:
-   raise AssertionError('new counts scope changed legacy collector rows')
-  if (counts_on['collector']['evaluation_items'].get('cpu0_cpu_pm_enter_exit_pair',{}).get('required') is not True or
-      counts_on['collector']['evaluation_items'].get('cpu0_cpu_pm_notifier_counts')!={'required':True,'status':'failed'}):
-   raise AssertionError('counts feature rows do not remain independently required')
+  if counts_enabled:
+   unchanged={k:v for k,v in counts_on['collector']['evaluation_items'].items()
+              if k not in ('cpu0_cpu_pm_enter_exit_pair','cpu0_cpu_pm_notifier_counts')}
+   if unchanged!=off['collector']['evaluation_items']:
+    raise AssertionError('new counts scope changed legacy collector rows')
+   if (counts_on['collector']['evaluation_items'].get('cpu0_cpu_pm_enter_exit_pair',{}).get('required') is not True or
+       counts_on['collector']['evaluation_items'].get('cpu0_cpu_pm_notifier_counts')!={'required':True,'status':'failed'}):
+    raise AssertionError('counts feature rows do not remain independently required')
   invalid=_invalid_prepare(root,a.artifact,'e'*32)
   pre_rejected,collector_rejected=_mismatched_pair(root,off)
   package_results=[{'case':CASES[0],'accepted':True,'scope':True,'diagnostic':True,'rollback':False},
@@ -439,11 +477,17 @@ def main():
   terminal_cases,terminal_results=terminal_collector_cases()
   counts_cases,counts_results=notifier_count_collector_cases()
   count_scope_cases,count_scope_results=notifier_count_scope_cases()
-  counts_package_cases=['counts-on-build-prepare-package-precheck-stage-collector']
-  counts_package_results=[{'case':counts_package_cases[0],'build_flag':True,
-      'prototype_marker':True,'diagnostic_scope':True,'rollback_scope':False,
-      'precheck_scope':True,'collector_scope':True,'collector_rows':41,
-      'legacy_rows_equal_off':True,'missing_log_counts_row':'failed'}]
+  if counts_enabled:
+   counts_package_cases=['counts-on-build-prepare-package-precheck-stage-collector']
+   counts_package_results=[{'case':counts_package_cases[0],'build_flag':True,
+       'prototype_marker':True,'diagnostic_scope':True,'rollback_scope':False,
+       'precheck_scope':True,'collector_scope':True,'collector_rows':41,
+       'legacy_rows_equal_off':True,'missing_log_counts_row':'failed'}]
+   counts_package_status='counts-enabled production fixture passed'
+  else:
+   counts_package_cases=[]
+   counts_package_results=[]
+   counts_package_status='not executed; counts feature disabled in input'
   collector_entry_result=terminal_collect_entry_case(on,root/'collector-terminal-entry')
   collector_reservation_result=terminal_reservation_entry_case(on,root/'collector-reservation-terminal-entry')
   items=on['collector']['evaluation_items'];items_off=off['collector']['evaluation_items']
@@ -453,6 +497,9 @@ def main():
           'notifier_count_collector_cases':counts_cases,'notifier_count_collector_results':counts_results,
           'notifier_count_scope_cases':count_scope_cases,'notifier_count_scope_results':count_scope_results,
           'notifier_count_package_flow_cases':counts_package_cases,'notifier_count_package_flow_results':counts_package_results,
+          'notifier_count_package_flow_status':counts_package_status,
+          'counts_enabled_in_input':counts_enabled,
+          'counts_fixture_model_directory_scope':{'on_present':counts_on_model_dir,'off_present':off_model_dir},
           'collector_entry_failure_case':collector_entry_result,
           'collector_reservation_failure_case':collector_reservation_result,
           'collector_evaluation_items_sha256':sha(json.dumps(items,sort_keys=True,separators=(',',':')).encode()),
