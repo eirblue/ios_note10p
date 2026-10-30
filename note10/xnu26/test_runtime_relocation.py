@@ -7,6 +7,7 @@ import argparse
 import copy
 import hashlib
 import json
+from importlib.metadata import version
 import os
 from pathlib import Path
 import struct
@@ -233,6 +234,12 @@ def main():
     parser.add_argument('--base',type=lambda value:int(value,0),default=0x100000000)
     parser.add_argument('--host-cc',default='clang');parser.add_argument('--cross-cc',default='clang')
     args=parser.parse_args()
+    dependency_versions={'unicorn':version('unicorn'),'capstone':version('capstone')}
+    if dependency_versions!={'unicorn':'2.1.4','capstone':'5.0.9'}:
+        raise ValueError('installed instruction-model distribution versions differ')
+    import unicorn,capstone
+    module_versions={'unicorn':getattr(unicorn,'__version__',None),
+                     'capstone':getattr(capstone,'__version__',None)}
     inputs=[args.kernel_build,args.adapter.parent]
     if args.saved_oracle:inputs.append(args.saved_oracle)
     if args.kernel_mem:inputs.append(args.kernel_mem.parent)
@@ -267,8 +274,6 @@ def main():
                    ram_size=values['window_size'],virtual_ram_base=int(values['virtual_ram_base'],16))
     if entry.get('passed') is not True or entry.get('stop',{}).get('reason')!='before_mmu_enable' or entry.get('modeled_daif_before_mmu')!=0x3c0:
         raise ValueError('new C-buffer entry case did not reach its strict pre-MMU/DAIF boundary')
-    import unicorn,capstone
-    if unicorn.__version__!='2.1.4' or capstone.__version__!='5.0.9':raise ValueError('instruction-model dependency versions differ')
     result={'version':'v54','passed':True,'pc_only':True,'native_cases':cases,'bundle_mutations':negatives,
         'abi':abi,'codegen':codegen,'entry_cases':[entry],'new_entry_case_count':1,
         'source_sha256':{name:sha(regular(HERE/name)) for name in SOURCES},
@@ -278,7 +283,8 @@ def main():
         'c_plan':values,'bundle_manifest_sha256':sha(regular(bundle/'handoff.json')),
         'host_executable_sha256':sha(regular(executable)),'fresh_arm64_layout_sha256':sha(regular(args.output/'layout-arm64.o')),
         'fresh_arm64_codegen_sha256':sha(regular(args.output/'runtime-arm64.o')),
-        'unicorn_version':unicorn.__version__,'capstone_version':capstone.__version__,
+        'unicorn_version':dependency_versions['unicorn'],'capstone_version':dependency_versions['capstone'],
+        'unicorn_module_version':module_versions['unicorn'],'capstone_module_version':module_versions['capstone'],
         'saved_abi_recompiled':False,'old_entry_vm_seed_pm_suites_executed':False,
         'c_produced_buffers_used_directly':True,'synthetic_adt_only':True,'gic_handoff_declared':False,
         'physical_reservation_verified':False,'hardware_verified':False,'deployment_ready':False,
