@@ -26,6 +26,7 @@ DEFCONFIG='exynos9820-d2x_defconfig'
 OPTION=prepare.OPTION
 SOURCE_FILES=('note10/device_test/build_xnu_runtime_plan_component.py',
  'note10/device_test/prepare_xnu_runtime_plan.py','note10/device_test/test_xnu_runtime_plan.py',
+ 'note10/device_test/test_xnu_runtime_plan_dependencies.py',
  'note10/device_test/xnu_runtime_plan.c','note10/device_test/xnu_runtime_plan_payload.json',
  'note10/device_test/xnu_reserve.c','note10/device_test/prepare_reservation_kernel.py',
  'note10/xnu26/runtime_relocation.c','note10/xnu26/runtime_relocation.h',
@@ -111,19 +112,42 @@ def config_gate(path,enabled):
     return {'option':OPTION,'enabled':enabled,'lines':lines,'sha256':digest(path)}
 
 
+def parse_dependencies(text):
+    """Join physical continuations before capturing the logical deps assignment.
+
+    Capturing up to a blank line first drops the final continuation's newline,
+    leaving a lone backslash. No backslash token is silently discarded here.
+    Only literal paths and Kbuild's optional-header wildcard form are admitted.
+    """
+    logical=text.replace(chr(92)+'\n',' ')
+    assignments=re.findall(r'^deps_[^\s:=]+[ \t]*:=[ \t]*([^\n]*)$',logical,re.M)
+    if len(assignments)!=1:raise ValueError('unique actual Kbuild dependency assignment missing')
+    remaining=assignments[0].strip();ordinary=[];wildcard=[]
+    path=r'[^\s$()\\;:#*?\[\]]+'
+    token=re.compile(r'(?:\$\(wildcard[ \t]+('+path+r'(?:[ \t]+'+path+r')*)[ \t]*\)|('+path+r'))(?=[ \t]|$)')
+    while remaining:
+        match=token.match(remaining)
+        if not match:raise ValueError('malformed/unresolved Kbuild dependency expression or escape')
+        if match.group(1) is not None:wildcard.append(match.group(1).split())
+        else:ordinary.append(match.group(2))
+        remaining=remaining[match.end():].lstrip(' \t')
+    if not ordinary:raise ValueError('actual Kbuild dependency paths missing')
+    return ordinary,wildcard
+
+
 def dependency_closure(source,objects,path,enabled,compiler_include):
     """Hash actual .cmd prerequisites, including generated configuration headers."""
-    text=path.read_text();match=re.search(r'^deps_[^\n]*:=\s*\\\n(.*?)(?:\n\n|\Z)',text,re.M|re.S)
-    if not match or '-D__KERNEL__' not in text:raise ValueError('actual Kbuild dependency/command record missing')
-    prerequisites=match.group(1).replace('\\\n',' ').strip()
-    # Kbuild wraps optional per-symbol config headers in $(wildcard ...).
-    wildcard=re.findall(r'\$\(wildcard\s+([^()]+)\)',prerequisites)
-    ordinary=re.sub(r'\$\(wildcard\s+[^()]+\)',' ',prerequisites).split()
+    text=path.read_text()
+    if '-D__KERNEL__' not in text:raise ValueError('actual Kbuild kernel command record missing')
+    ordinary,wildcard=parse_dependencies(text)
     records={};missing=[]
     def resolve(name,optional=False):
         if '$' in name:raise ValueError('unresolved dependency expression')
         original=Path(name)
         candidates=[original] if original.is_absolute() else [objects/original,source/original]
+        allowed=(objects.resolve(),source.resolve(),compiler_include.resolve())
+        if not any(any(candidate.resolve().is_relative_to(root) for root in allowed) for candidate in candidates):
+            raise ValueError('dependency path escapes isolated roots')
         found=[candidate for candidate in candidates if candidate.is_file() and not candidate.is_symlink()]
         if not found:
             if optional:missing.append(name);return
@@ -136,7 +160,7 @@ def dependency_closure(source,objects,path,enabled,compiler_include):
         records[key]=digest(selected)
     for name in ordinary:resolve(name)
     for group in wildcard:
-        for name in group.split():resolve(name,True)
+        for name in group:resolve(name,True)
     for name in ('include/generated/autoconf.h','include/config/auto.conf','.config'):resolve(name)
     required={'source/'+prepare.INIT,'source/'+prepare.RESERVE,'source/include/linux/types.h'}
     runtime={'source/arch/arm64/mm/'+name for name in (*prepare.COPIES,prepare.GEOMETRY)}
@@ -144,6 +168,17 @@ def dependency_closure(source,objects,path,enabled,compiler_include):
     if enabled and not runtime.issubset(records):raise ValueError('enabled production runtime dependency closure incomplete')
     if not enabled and runtime.intersection(records):raise ValueError('disabled object depends on runtime component')
     return {'cmd_sha256':digest(path),'files_sha256':records,'optional_config_headers_absent':sorted(missing)}
+
+
+def preserve_kbuild(objects,proof):
+    """Persist available actual bytes before any post-compile gate can fail."""
+    captured={}
+    for name in (TARGET,CMD,'.config','include/generated/autoconf.h','include/config/auto.conf'):
+        original=objects/name
+        if original.is_file() and not original.is_symlink():
+            target=proof/'kbuild'/name;target.parent.mkdir(parents=True,exist_ok=True)
+            target.write_bytes(original.read_bytes());captured[name]=digest(target)
+    save(proof/'kbuild-capture.json',{'schema':1,'stage':'before post-compile validation','files_sha256':captured})
 
 
 def inspect_object(path,enabled,proof,environment,commands):
@@ -199,6 +234,8 @@ def main():
     compiler_include=Path(capture(['clang-14','-print-file-name=include'],output/'toolchain/compiler-include.txt',environment,commands).strip()).resolve()
     if not compiler_include.is_dir() or not compiler_include.is_absolute():raise ValueError('actual compiler include root missing')
     sources={mode:extract(archive,output/mode/'source') for mode in ('disabled','enabled')}
+    run([sys.executable,HERE/'test_xnu_runtime_plan_dependencies.py','--output',output/'toolchain/dependency-parser.json'],
+        output/'toolchain/dependency-parser.log',environment,commands)
     run([sys.executable,HERE/'test_xnu_runtime_plan.py','--kernel-source',sources['disabled'],
         '--payload-manifest',args.payload_manifest.resolve(),'--output',output/'host-wrapper','--cc','clang-14'],
         output/'host-wrapper-driver.log',environment,commands)
@@ -221,8 +258,12 @@ def main():
         run([*make,DEFCONFIG],proof/'01-defconfig.log',environment,commands)
         if enabled:run([source/'scripts/config','--file',objects/'.config','--enable',OPTION.removeprefix('CONFIG_')],proof/'02-opt-in.log',environment,commands)
         run([*make,'olddefconfig'],proof/'03-olddefconfig.log',environment,commands)
-        configuration=config_gate(objects/'.config',enabled)
-        run([*make,'V=1','-j'+str(args.jobs),TARGET],proof/'04-init-object.log',environment,commands)
+        try:
+            configuration=config_gate(objects/'.config',enabled)
+            run([*make,'V=1','-j'+str(args.jobs),TARGET],proof/'04-init-object.log',environment,commands)
+        finally:
+            # Also retain partial output when make/configuration itself fails.
+            preserve_kbuild(objects,proof)
         dependency=dependency_closure(source,objects,objects/CMD,enabled,compiler_include)
         save(proof/'dependencies.json',dependency)
         roots={'source':source,'objects':objects,'compiler-include':compiler_include}
@@ -232,9 +273,6 @@ def main():
             target.write_bytes(original.read_bytes())
             if digest(target)!=expected:raise ValueError('dependency bytes changed during proof capture')
         object_proof=inspect_object(objects/TARGET,enabled,proof,environment,commands)
-        # Retain compact actual proof bytes instead of uploading the source tree.
-        for name in (TARGET,CMD,'.config','include/generated/autoconf.h','include/config/auto.conf'):
-            target=proof/'kbuild'/name;target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes((objects/name).read_bytes())
         if any(objects.rglob('Image')) or any(objects.rglob('*.cpio')):raise ValueError('unexpected full-image/initramfs output')
         modes[mode]={'enabled':enabled,'canonical':canonical,'preparation':prepared,'configuration':configuration,
             'dependencies':dependency,'object':object_proof,'proof_files_sha256':{
@@ -246,6 +284,7 @@ def main():
       'kernel_archive_sha256':digest(archive),'kernel_archive_url':ARCHIVE_URL,'target':TARGET,
       'toolchain':versions,'source_sha256':source_map,'modes':modes,'commands':commands,
       'host_wrapper_result_sha256':digest(output/'host-wrapper/result.json'),
+      'dependency_parser_result_sha256':digest(output/'toolchain/dependency-parser.json'),
       'actual_kernel_objects_executed':False,'old_v54_or_pm_suites_replayed':False,
       'full_image_built':False,'minimal_init_or_cpio_generated':False,'materialized':False,
       'physical_reservation_verified':False,'hardware_verified':False,'xnu_executed':False,
