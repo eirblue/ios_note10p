@@ -29,12 +29,18 @@ def sha(raw):
 
 @contextmanager
 def fixture_workspace(artifact):
-    """Use active TMP and reject either ancestor relation before fixture copies."""
+    """Use the production private root and reject overlap before fixture copies."""
     artifact_root = Path(artifact).resolve()
-    with tempfile.TemporaryDirectory(prefix='cpu-pm-trace-fixture-') as temporary:
+    private_path = HERE.parent/'private'
+    if private_path.is_symlink() or not private_path.is_dir():
+        raise ValueError('trace fixture private root is missing or unsafe')
+    private_root = private_path.resolve()
+    with tempfile.TemporaryDirectory(dir=private_root, prefix='cpu-pm-trace-fixture-') as temporary:
         workspace = Path(temporary).resolve()
+        if workspace == private_root or not workspace.is_relative_to(private_root):
+            raise ValueError('trace fixture workspace must remain inside the private root')
         if workspace.is_relative_to(artifact_root) or artifact_root.is_relative_to(workspace):
-            raise ValueError('trace fixture workspace must be disjoint from artifact; configure TMP outside the artifact')
+            raise ValueError('trace fixture workspace must be disjoint from artifact')
         yield workspace
 
 
