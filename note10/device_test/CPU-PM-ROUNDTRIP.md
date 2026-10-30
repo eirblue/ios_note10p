@@ -77,11 +77,24 @@ The device returned automatically to normal TWRP. All five partition hashes matc
 Earlier v53 [CI 41002376625](https://github.com/eirblue/ios_note10p/actions/runs/41002376625), [CI 41005053470](https://github.com/eirblue/ios_note10p/actions/runs/41005053470) and [CI 41008544786](https://github.com/eirblue/ios_note10p/actions/runs/41008544786) remain failed build records. Their host test input/workspace failures were corrected before the accepted build; they are not physical successes. The v49 and v50 failed results and all prior result history remain preserved. The v53 observation does not establish complete hardware DMA shutdown, XNU execution or iOS boot.
 
 
-## v56 planned compatible observation
+## v56 compatible observation passed
 
-A separate default-off late-init XNU runtime-plan row is being added to the full
-v53 diagnostic chain. Enabled scope adds one independent required row (45/46);
-disabled scope preserves 44/45. Existing CPU_PM pairs, aggregate counts, dispatch
-trace, payload writer and recovery behavior remain independently required.
-Implementation acceptance and actual full CI are pending; no new physical result
-is claimed. See [planner-only scope](XNU-RUNTIME-OBSERVATION.md).
+Tested CI source `e4e662059413fc1157df0587e4b088f762b0621f` passed
+[CI 41075142026](https://github.com/eirblue/ios_note10p/actions/runs/41075142026),
+attempt 1. Its actual manifest records 27 unique validators and 128 calls; the new
+focused proofs contain native8/parser24/preparer18/package22 cases. The tested
+source identity is separate from publication of this result documentation.
+
+One fresh physical cycle passed all 45 required evaluations out of 46 total.
+All 44 prior required keys remain independently required, including the original
+CPU_PM pair, counts and dispatch trace. Normal automatic TWRP return, all five
+partition hashes and brightness raw10 after integrity checks were verified.
+
+The added `xnu_runtime_plan` row has two agreeing checksummed `N10XPO1` copies
+bound to the same boot/build and current reservation. Its own generation is 1,
+phase is late-init, and `pm_completion_claimed=0`. The observed facts retain
+`synthetic=1`, `materialized=0` and `ownership=0`. They establish a hypothetical
+local plan using a synthetic ADT; no new RAM layout or metadata was installed.
+The old kernel-at-base writer and the earlier callback-identity/order limits
+remain unchanged. This does not establish XNU execution, iOS boot, global DMA
+quiescence or physical ownership. See [result and scope](XNU-RUNTIME-OBSERVATION.md).

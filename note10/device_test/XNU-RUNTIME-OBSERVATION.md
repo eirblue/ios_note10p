@@ -1,13 +1,29 @@
-# Planned late-init runtime-plan observation
+# Verified late-init runtime-plan observation
 
-v56 adds a default-off `--xnu-runtime-observation` flag and
-`CONFIG_NOTE10_XNU_RUNTIME_OBSERVATION`. Focused checks, actual full kernel CI,
-source/artifact acceptance and any separately gated device cycle are pending.
-The last physical baseline remains v53 (44 required of 45 total); v54/v55 supply
-accepted PC evidence. Enabled scope requires the complete existing
+v56 passed [CI 41075142026](https://github.com/eirblue/ios_note10p/actions/runs/41075142026),
+attempt 1, for tested source `e4e662059413fc1157df0587e4b088f762b0621f`.
+The actual execution manifest records 27 unique validators and 128 calls. The
+new CI proofs passed native8/parser24/preparer18/package22 cases. This identifies
+the tested CI source; publication of the result documentation is separate.
+
+One physical cycle passed all 45 required evaluations out of 46 total. All 44
+previous required keys were preserved and the independent `xnu_runtime_plan` row
+passed. Normal automatic TWRP return, five matching partition hashes and
+brightness raw10 after integrity verification were confirmed.
+
+The actual selected-boot evidence contains two agreeing checksummed `N10XPO1`
+copies bound to the same build ID, current reservation, staged payload and
+validated geometry. They record `phase=late-init`, own `plan_generation=1`,
+`pm_completion_claimed=0`, `synthetic=1`, `materialized=0` and `ownership=0`.
+The planner's generation is independent of PM generations. The existing PM rows
+provide their own completion evidence; this companion makes no PM completion
+claim.
+
+The feature remains default-off through `--xnu-runtime-observation` and
+`CONFIG_NOTE10_XNU_RUNTIME_OBSERVATION`. Enabled scope requires the full existing
 trace/count/pair, staged payload, PM and automatic-recovery chain and adds one
-independent required row, for 45 required of 46 total. Disabled scope retains the
-previous schema and behavior.
+required row (45/46). Disabled scope retains the earlier 44/45 schema. Accepted
+v54/v55 PC results and the v53 physical predecessor remain preserved.
 
 A separate full-path source adapter preserves the original reservation preparer,
 v55 canonical-only helper, reusable C, header and wrapper byte pins. It checks
@@ -38,10 +54,15 @@ PM/MMIO/register API or transfer is added. No relocated image readback, live ADT
 physical ownership, GIC handoff, DMA quiescence, XNU execution, iOS boot or readiness
 is claimed.
 
-New focused native cases compile the production planner and companion in a host
-harness. Adapter/decoder and synthetic package/precheck/collector fixtures isolate
-the new feature while reusing earlier saved evidence. Old models are not replayed
-locally. The actual full build records the new binding validator through the
-existing execution recorder, including real completed calls and proof hashes;
-expected validator names alone cannot satisfy that closure. Test workspaces remain
-project-private and disjoint from input artifacts, with bounded file-map copies.
+Focused native cases compile the production planner and companion in a host
+harness; those synthetic proofs are separate from the actual physical companion.
+Package/precheck/collector fixtures isolate the new feature while reusing saved
+evidence. The actual full CI records the real production binding calls and proof
+hashes; an expected validator list alone does not establish that closure.
+
+Failed [CI 41066125298](https://github.com/eirblue/ios_note10p/actions/runs/41066125298)
+and [CI 41067698092](https://github.com/eirblue/ios_note10p/actions/runs/41067698092),
+and cancelled [CI 41072098813](https://github.com/eirblue/ios_note10p/actions/runs/41072098813),
+remain part of the history. Source preparation/profile pin ordering, artifact
+proof retention and synthetic fixture isolation/staging were corrected before
+the accepted CI. These earlier runs are not physical successes.

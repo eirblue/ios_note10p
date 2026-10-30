@@ -1,10 +1,12 @@
-# 작업 상태 (2026-10-30, Asia/Seoul)
+# 작업 상태 (2026-10-31, Asia/Seoul)
 
-## 2026-10-30: v56 late-init XNU runtime plan 관측 구현 계획
+## 2026-10-31: v56 late-init XNU runtime plan 단일 실기기 관측 통과
 
-- 기존 v53 전체 trace/count/pair·payload·PM·자동 복귀 경로에 기본 비활성 planner 관측 1개를 추가한다. 활성 시 필수 45/총 46, 비활성 시 기존 필수 44/총 45를 유지한다. 구현의 focused 시험·실제 전체 CI·독립 검토는 대기 중이다.
-- 새 관측은 late-init에서 예약 상태·payload geometry를 결속한 로컬 C 계산과 두 companion copy만 기록한다. PM 완료 관측이나 예약 RAM의 새 layout 작성·readback은 아니다. 기존 kernel-at-base writer와 모든 이전 필수 행을 유지한다.
-- v54/v55 PC 통과와 마지막 실기기 v53 결과를 보존한다. 새 기기 사이클은 아직 수행하지 않았다. [관측 계획과 제한](device_test/XNU-RUNTIME-OBSERVATION.md).
+- **검증 소스:** `e4e662059413fc1157df0587e4b088f762b0621f`; [CI 41075142026](https://github.com/eirblue/ios_note10p/actions/runs/41075142026) 첫 번째 시도 통과. 실제 실행 manifest의 고유 검증기 27개·호출 128회와 native 8개·parser 24개·preparer 18개·package 22개 증거를 결속했다. 이 소스 식별자는 결과 문서의 게시 commit과 구분한다.
+- **실기기 결과:** 새 단일 사이클 1회에서 총 46개 중 필수 45개가 모두 통과했다. 기존 필수 44개를 유지하고 `xnu_runtime_plan` 행을 추가했다. 정상 TWRP 자동 복귀, 다섯 파티션 해시 일치, 무결성 확인 뒤 밝기 raw 10을 확인했다.
+- **새 관측 범위:** 같은 부팅·build에 결속된 checksummed `N10XPO1` 두 copy가 일치했다. 자체 `plan_generation=1`, `phase=late-init`, `pm_completion_claimed=0`, `synthetic=1/materialized=0/ownership=0`이며 PM 완료 증거는 기존 독립 행에 남는다.
+- 실패한 CI 41066125298·41067698092와 취소한 CI 41072098813을 보존했다. 준비·fixture 오류를 수정한 뒤 위 CI와 실기기 결과를 별도로 수락했다. v53·v54·v55 및 이전 실패 이력도 보존한다.
+- 새 RAM layout이나 metadata를 설치하지 않았다. 기존 kernel-at-base writer는 유지하며 새 계획은 가상 배치 계산이다. XNU 실행·iOS 부팅·전역 DMA 정지·물리 소유권으로 확대하지 않는다. [결과와 제한](device_test/XNU-RUNTIME-OBSERVATION.md).
 
 ## 2026-10-30: v55 XNU runtime planner 커널 컴포넌트 PC 검증 통과
 
