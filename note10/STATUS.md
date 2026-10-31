@@ -1,5 +1,12 @@
 # 작업 상태 (2026-10-31, Asia/Seoul)
 
+## 2026-10-31: v58 PC 전용 payload 겹침 재배치·원복 검증 통과
+
+- **검증 소스:** `12549ffe88438aa583690da744b9a8d035d84019`; [CI 41161078327](https://github.com/eirblue/ios_note10p/actions/runs/41161078327) 첫 번째 시도 통과. 실제 산출물의 원본 입력·소스·컴파일·검사 기록·전체 바이트를 고정한 부모 검사기가 통과했다.
+- **PC 결과:** 새 네이티브 48개와 명령어 분류 39개가 통과했다. 실제 19,578,880바이트 payload를 모델 버퍼의 offset 0에서 planner가 계산한 `0x1004000`으로 겹침을 처리해 복사하고, 변경 영역 `0x22b0000`바이트 전체를 원복했다. 정상·주입 불일치 경로 모두 독립 snapshot과 바이트 대조를 통과했다.
+- **코드 생성:** 별도 비계측 AArch64 object를 기존 planner와 결합해 미해결 호출·쓰기 가능한 전역 상태·금지된 시스템/명시적 trap 명령 부재를 확인했다. 이 AArch64 object를 실행한 결과는 아니다.
+- v58 기기 조작·BOOT·Linux Image 빌드는 0회다. v57 실기기 46/46 성공과 이전 이력을 유지한다. 실패 CI 41160322285도 실패로 보존했으며 이전 entry·VM·seed 시험 묶음을 로컬에서 반복하지 않았다. 실제 예약 RAM 재배치·소유권·XNU 실행·iOS 부팅을 확인하지 않는다. [결과와 제한](xnu26/RUNTIME-RELOCATION.md).
+
 ## 2026-10-31: v57 caller-owned scratch 직렬화 단일 실기기 검증 통과
 
 - **검증 소스:** `5afedf0bd305861b1b98e7b975ad9a6405d38b6a`; [CI 41109866784](https://github.com/eirblue/ios_note10p/actions/runs/41109866784) 첫 번째 시도 통과. 실제 manifest의 고유 검증기 28개·호출 129회, 실제 CI 단계 완료 기록과 산출물 digest를 결속했다. 결과 문서 게시 commit은 검증 소스와 별도다.

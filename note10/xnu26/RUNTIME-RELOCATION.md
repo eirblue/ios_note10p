@@ -1,4 +1,71 @@
-# v54 native runtime relocation component (PC only)
+# Runtime relocation metadata and PC data trials
+
+## v58 overlapping payload trial passed
+
+Tested source `12549ffe88438aa583690da744b9a8d035d84019` passed
+[CI 41161078327](https://github.com/eirblue/ios_note10p/actions/runs/41161078327),
+attempt 1. The actual parent-pinned reader verified the authentic run, job and
+required step successes, artifact API digest/member bytes, exact source/input
+lineage, closed production object and independent saved byte comparisons.
+The saved v58 result SHA-256 is
+`5ada19a339fce7b56209bc31e1aa3fad998bea66cd34c73ad427c88924619f7d`.
+The tested source is distinct from publication of this result documentation.
+
+The new separate `runtime_relocation_trial.c/h` adds a data-only rehearsal over
+caller-owned PC buffers. The existing v54 planner/serializer sources remain
+byte-identical. The planner is recomputed from the request; numeric physical
+addresses supply offsets only and are never converted into host pointers.
+For the verified flat payload, 19,578,880 bytes move from window offset0 to
+`0x1004000`. These spans overlap, so the actual path copies backward. A separate
+backup saves the entire affected prefix `[0, 0x22b0000)`, or 36,372,480 bytes,
+before any window write.
+
+Capacity, pointer-overflow, alias and request admission precede output writes.
+A pre-admission rejection preserves window, backup and result. After admission,
+backup is output scratch holding the original full prefix; its old contents
+are not promised on an admitted failure. Every post-write path restores the
+whole affected prefix and compares it. The result is committed only after
+successful transient verification and complete restoration; failures leave the
+result sentinel unchanged. There is no new metadata, adapter placement or
+execution transfer in this trial.
+
+All 48 new host-native cases passed, including the real overlapping move,
+boundaries/admission rejections and an injected transient mismatch. The fixture
+captures actual destination bytes before comparison/restoration and before its
+optional mismatch injection. Independent pre-call and transient snapshots,
+separate from the algorithm's backup, prove payload identity and complete-prefix
+restoration for both the successful and injected-failure cases. These 48 cases
+are a new trial matrix, distinct from the preserved v54 metadata matrix below.
+The 39 instruction-classifier fixtures also passed. Existing entry/VM/seed
+models and earlier unchanged native suites were not replayed locally.
+
+The hosted fixture is deliberately instrumented; an additional uninstrumented
+freestanding AArch64 trial object has only the intended planner dependency.
+Linking it with the pinned planner yields a closed object with no unresolved
+symbols or writable global state. Decoded instruction fields pass the finite
+ordinary-operation policy and reject unknown/system/explicit trap instructions.
+The AArch64 object was not executed. SIMD access depends on processor control
+state, so this code-generation audit does not establish FP setup or kernel/EL1
+execution readiness. [Arm's A64 reference](https://documentation-service.arm.com/static/6245c734b059dc5ff9a8bdab)
+describes the conditional trapping behavior of these SIMD operations.
+
+The upstream source artifact is bound to native run39560904016, attempt2,
+its exact source head, archive digest and the Mach-O/flat-payload hashes retained
+below. A prior [CI 41160322285](https://github.com/eirblue/ios_note10p/actions/runs/41160322285)
+remains failed: Clang14 produced five ordinary data-operation mnemonics missing
+from the initial finite classifier. The correction added only those observed
+operations and focused cases; the transaction C core, harness and pinned
+planner were unchanged. The accepted fresh CI compiled and tested the corrected
+canonical source rather than promoting the failed run.
+
+v58 performed zero phone operations and built no BOOT or Linux Image. It did
+not relocate an image in physical reserved RAM or establish ownership, DMA/GIC
+handoff, XNU execution or iOS boot. Late-init/async-PM ordering and init-memory
+lifetime remain separate requirements for any future physical integration.
+The v57 physical result and its consumed single cycle remain unchanged.
+
+## v54 preserved native metadata component (PC only)
+
 
 This component prepares a synthetic relocation using reusable freestanding C and has passed the focused PC checks reported below. It does not reserve RAM, write physical metadata, change Linux or phone boot images, or authorize an XNU transfer. The v53 physical result and all earlier records remain separate and unchanged.
 
