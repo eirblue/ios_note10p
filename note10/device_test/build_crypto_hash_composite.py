@@ -1,21 +1,70 @@
 """One new actual Kbuild composite, selected byte/link origin only; no fixtures."""
-import argparse,hashlib,json,os,re,shlex,shutil,subprocess,sys,tarfile,time,urllib.request
-from pathlib import Path
+import argparse,hashlib,json,os,re,shlex,shutil,stat,subprocess,sys,tarfile,time,urllib.request
+from pathlib import Path,PurePosixPath
 sys.dont_write_bytecode=True
 from crypto_hash_composite import parse_object,link_origin,require,digest
 from crypto_hash_input_contract import KERNEL_COMMIT,KERNEL_SHA,KERNEL_BYTES,SOURCE_TOP,CAP,BASELINE_ROOT,NEW_ROOT,write,protected,stable,separate,disk_budget,tree_inventory,extract_kernel,extract_zip,verify_extraction,retrieve_baseline,baseline_labels,baseline_api_receipt,prerequisite_capture,leaf_equality,normalized,command_line,composite_command,config_contract,mirror_retrieval_evidence,redact_text
 
 ROOT=Path(__file__).resolve().parents[2]
-PUBLIC=('note10/device_test/build_crypto_hash_composite.py','note10/device_test/crypto_hash_composite.py','note10/device_test/crypto_hash_input_contract.py','note10/device_test/stage_crypto_hash_composite.py','note10/device_test/test_crypto_hash_composite.py','note10/device_test/test_crypto_hash_retrieval.py','.github/workflows/note10-crypto-hash-composite.yml')
+PUBLIC=('note10/device_test/build_crypto_hash_composite.py','note10/device_test/crypto_hash_composite.py','note10/device_test/crypto_hash_input_contract.py','note10/device_test/stage_crypto_hash_composite.py','note10/device_test/test_crypto_hash_composite.py','note10/device_test/test_crypto_hash_retrieval.py','note10/device_test/test_crypto_hash_routing.py','.github/workflows/note10-crypto-hash-composite.yml')
 FLAGS='-gdwarf-4 -fstack-usage -ffunction-sections -fdata-sections -mllvm -enable-machine-outliner=never -fno-inline-functions'
 TARGET='crypto/crypto_hash.o'
+ROUTING_WRAPPER=b'crypto/crypto_hash.o: prepare scripts FORCE\n\t$(Q)$(MAKE) $(build)=crypto crypto/crypto_hash.o\n'
+MAKE_ENVIRONMENT={'PLATFORM_VERSION':'11','ANDROID_MAJOR_VERSION':'r'}
+GENERATED_INPUTS=('.config','include/generated/autoconf.h','include/config/auto.conf')
 
 
 def sources():return {name:digest((ROOT/name).read_bytes()) for name in PUBLIC}
 
 
-def make_command(source,objects):
- return ['make','-C',str(source),'O='+str(objects),'ARCH=arm64','CC=clang-14','LD=aarch64-linux-gnu-ld','CROSS_COMPILE=aarch64-linux-gnu-','CLANG_TRIPLE=aarch64-linux-gnu-','CROSS_COMPILE_ARM32=arm-linux-gnueabi-','GCC_TOOLCHAIN_DIR=/usr/aarch64-linux-gnu/bin/','HOSTCC=gcc','HOSTCFLAGS=-Wno-error=deprecated-declarations','KCFLAGS='+FLAGS,'CONFIG_THIN_ARCHIVES=','LDFLAGS=-m aarch64linux --no-relax','V=1','-j2',TARGET]
+def make_command(source,objects,wrapper):
+ return ['make','-C',str(objects),'KBUILD_SRC='+str(source),'-f',str(source)+'/Makefile','-f',str(wrapper),'ARCH=arm64','CC=clang-14','LD=aarch64-linux-gnu-ld','CROSS_COMPILE=aarch64-linux-gnu-','CLANG_TRIPLE=aarch64-linux-gnu-','CROSS_COMPILE_ARM32=arm-linux-gnueabi-','GCC_TOOLCHAIN_DIR=/usr/aarch64-linux-gnu/bin/','HOSTCC=gcc','HOSTCFLAGS=-Wno-error=deprecated-declarations','KCFLAGS='+FLAGS,'CONFIG_THIN_ARCHIVES=','LDFLAGS=-m aarch64linux --no-relax','V=1','-j2',TARGET]
+
+
+def make_environment(inherited=None):return dict(os.environ if inherited is None else inherited,**MAKE_ENVIRONMENT)
+
+
+def ordinary_bytes(path,limit=8*1024*1024):
+ path=Path(path);before=path.lstat();require(stat.S_ISREG(before.st_mode) and not path.is_symlink() and not getattr(before,'st_file_attributes',0)&1024 and before.st_size<=limit,'bounded ordinary routing/config input, no links/reparse')
+ identity=lambda s:(s.st_dev,s.st_ino,s.st_size,s.st_mtime_ns)
+ with path.open('rb') as stream:require(identity(os.fstat(stream.fileno()))==identity(before),'same opened routing/config input');raw=stream.read(limit+1);require(len(raw)==before.st_size and len(raw)<=limit and identity(os.fstat(stream.fileno()))==identity(before)==identity(path.lstat()),'complete stable routing/config input')
+ return raw
+
+
+def create_routing_wrapper(workspace):
+ workspace=Path(workspace);require(workspace.is_dir() and not workspace.is_symlink() and not getattr(workspace.lstat(),'st_file_attributes',0)&1024,'ordinary fresh wrapper workspace');directory=workspace/'routing';require(not directory.exists() and not directory.is_symlink(),'exclusive fresh wrapper directory');directory.mkdir();path=directory/'composite.mk'
+ with path.open('xb') as stream:stream.write(ROUTING_WRAPPER)
+ require(ordinary_bytes(path)==ROUTING_WRAPPER,'exact fixed routing wrapper bytes');return path
+
+
+def initial_output_state(objects):
+ require(list(tree_inventory(objects))==['.config'],'fresh output contains accepted .config only, no prior leaf/composite or generated header');return ['.config']
+
+
+def generated_input_identity(objects,baseline_objects):
+ result={}
+ for name in GENERATED_INPUTS:
+  fresh=ordinary_bytes(Path(objects)/name);accepted=ordinary_bytes(Path(baseline_objects)/name);require(fresh==accepted,'exact complete generated input equality: '+name);result[name]={'bytes':len(fresh),'sha256':digest(fresh)}
+ return result
+
+
+def routing_evidence(source,objects,wrapper):
+ return {'schema':1,'source':str(source),'objects':str(objects),'wrapper_path':str(wrapper),'wrapper_evidence':'routing/composite.mk','wrapper_sha256':digest(ROUTING_WRAPPER),'make_argv':make_command(source,objects,wrapper),'environment':dict(MAKE_ENVIRONMENT),'preleaf_input_equality_claimed':False}
+
+
+def verify_routing_evidence(root,evidence,source,objects,commands):
+ expected_wrapper=str(PurePosixPath(objects).parent/'routing/composite.mk');expected=routing_evidence(source,objects,expected_wrapper);require(type(evidence) is dict and type(evidence.get('schema')) is int and evidence.get('preleaf_input_equality_claimed') is False and evidence==expected,'exact route schema, fixed derived wrapper path/argv/environment and no preleaf claim');require(ordinary_bytes(Path(root)/'routing/composite.mk')==ROUTING_WRAPPER and evidence['wrapper_sha256']==digest(ROUTING_WRAPPER),'independent fixed wrapper evidence bytes/hash');matches=[r for r in commands if r['command']==expected['make_argv']];require(len(commands)==4 and len(matches)==1 and sum(r['command'][0]=='make' for r in commands)==1 and matches[0]['make_environment']==MAKE_ENVIRONMENT,'four actual command receipts, one exact routed make and whitelisted effective environment');return expected['make_argv']
+
+
+def preserve_routing_diagnostics(out,workspace,ceiling=CAP):
+ require(0<ceiling<=CAP,'bounded routing diagnostic ceiling');workspace=Path(workspace);out=Path(out);allowed=[(workspace/'objects/include/config/auto.conf.cmd','objects/include/config/auto.conf.cmd')]+[(workspace/'source'/SOURCE_TOP/'scripts'/name,'source/scripts/'+name) for name in ('android-version.sh','android-major-version.sh')];result={};total=0
+ for source,key in allowed:
+  if not source.exists() and not source.is_symlink():continue
+  raw=ordinary_bytes(source,min(8*1024*1024,ceiling-total));total+=len(raw);require(total<=ceiling,'whole routing diagnostic cap');target=out/'routing-diagnostics'/key;target.parent.mkdir(parents=True,exist_ok=True)
+  with target.open('xb') as stream:stream.write(raw)
+  result[key]={'bytes':len(raw),'sha256':digest(raw)}
+ if result:write(out/'routing-diagnostics/manifest.json',{'files':result,'diagnostic_only':True,'Kconfig_cause_proven':False})
+ return result
 
 
 def build_output_size(objects,source):
@@ -71,6 +120,8 @@ def postprocess_commands(log,linker):
 
 def preserve_failure_files(out,workspace,baseline_input):
  retained=[];total=0;objects=Path(workspace)/'objects'
+ diagnostics=preserve_routing_diagnostics(out,workspace);retained.extend('routing-diagnostics/'+name for name in diagnostics)
+ if diagnostics:retained.append('routing-diagnostics/manifest.json')
  candidates=[(objects/'crypto'/name,Path('evidence/crypto')/name) for name in ('shash.o','ahash.o','crypto_hash.o','.shash.o.cmd','.ahash.o.cmd','.crypto_hash.o.cmd','.tmp_shash.o','.tmp_ahash.o','.tmp_shash.ver','.tmp_ahash.ver')]
  candidates += [(objects/name,Path('failure-config')/name) for name in ('.config','include/generated/autoconf.h','include/config/auto.conf')]
  if Path(baseline_input).is_dir():retained.extend('baseline-api/'+name for name in mirror_retrieval_evidence(baseline_input,Path(out)/'baseline-api',os.environ.get('GH_TOKEN','')))
@@ -93,13 +144,14 @@ def verify_bundle(root,kernel,baseline_zip,baseline_extraction,pins):
  for leaf in ('shash','ahash'):
   report=json.loads((root/'evidence'/leaf/'prerequisites.json').read_text());actual=tree_inventory(root/'evidence'/leaf/'dependency-files');require(set(actual)==set(report['files_sha256']) and all(actual[k]['sha256']==v for k,v in report['files_sha256'].items()),'complete uploaded actual leaf prerequisites')
  shash=json.loads((root/'evidence/shash/prerequisites.json').read_text());ahash=json.loads((root/'evidence/ahash/prerequisites.json').read_text());olddeps=json.loads((oldroot/'evidence/dependencies.json').read_text());equality=leaf_equality(old,olddeps,shash);require(equality==result['shash_input_equality'],'independent new shash input/argv equality');ahash_profile(shash,ahash);require((root/'tools/compiler-resource.log').read_text().strip()==shash['roots']['compiler-include'],'actual compiler resource probe binds captured prerequisite root')
+ generated=generated_input_identity(root/'evidence/shash/dependency-files/objects',oldroot/'evidence/dependency-files/objects');require(generated==result['generated_input_identity'],'independent exact three generated-input bytes/hash binding before origin parse')
  config=(root/'evidence/shash/dependency-files/objects/.config').read_bytes();config_contract(config);require(config==(oldroot/'evidence/dependency-files/objects/.config').read_bytes(),'exact baseline .config')
  cmd=(root/'evidence/crypto/.crypto_hash.o.cmd').read_text();composite_command(command_line(cmd,TARGET),result['linker'])
  post=postprocess_commands((root/'build/composite.log').read_text(),result['linker']);require(post==result['normal_leaf_postprocess']['expanded_selected_link_commands'],'independent actual full selected link/postprocess command binding')
  for leaf in ('shash','ahash'):
   report=json.loads((root/'evidence'/leaf/'prerequisites.json').read_text());cmd=(root/'evidence/crypto'/('.'+leaf+'.o.cmd')).read_text();require(command_line(cmd,'crypto/'+leaf+'.o')==report['actual_CC_argv'] and digest(cmd.encode())==report['actual_cmd_sha256'],'actual uploaded saved leaf command binds captured CC argv')
  for name in ('scripts/Makefile.build','scripts/Makefile.lib','scripts/Kbuild.include','crypto/Makefile','Makefile'):require((root/'evidence/stock-source'/name).read_bytes()==(oldroot/'evidence/stock-source'/name).read_bytes(),'unchanged accepted pinned Kbuild recipe bytes')
- make=result['composite_make_command'];require(make==make_command(shash['roots']['source'],shash['roots']['objects']),'exact declared actual Kbuild argv, one target and allowed overrides only');commands=json.loads((root/'commands.json').read_text());require(len(commands)==4 and sum(c['command']==make for c in commands)==1 and sum(c['command'][0]=='make' for c in commands)==1,'exactly one actual composite invocation and three tool probes')
+ commands=json.loads((root/'commands.json').read_text());make=verify_routing_evidence(root,result['routing'],shash['roots']['source'],shash['roots']['objects'],commands);require(make==result['composite_make_command'],'actual recorded composite argv equals independently bound route')
  for row in commands:require(row['completed'] is True and row['returncode']==0 and digest((root/row['log']).read_bytes())==row['log_sha256'] and type(row['start_ns']) is int and row['start_ns']<=row['end_ns'],'complete actual command/log/time receipts')
  build=next(c for c in commands if c['command']==make);fresh=result['build_freshness'];require(fresh['output_files_before']==['.config'] and all(build['start_ns']<=fresh['object_mtime_ns'][n]<=build['end_ns'] for n in ('shash.o','ahash.o','crypto_hash.o')),'fresh leaf/composite origins produced by the one recorded Kbuild invocation');archive_prerequisites(kernel,[json.loads((root/'evidence'/leaf/'prerequisites.json').read_text()) for leaf in ('shash','ahash')],root)
  require(result['config_packaging']==config_contract(config),'honest source/effective packaging split')
@@ -115,9 +167,11 @@ def main():
  require(out.name==NEW_ROOT and out.is_relative_to(private) and workspace.is_relative_to(private) and not out.exists() and not workspace.exists() and not baseline_input.exists() and not baseline_extraction.exists(),'fresh separate PC-only build roots');separate([out,workspace,kernel,baseline_input,baseline_extraction]);pins=json.loads(a.baseline_pins.read_text());out.mkdir(parents=True);commands=[]
  def run(args,name,cwd=None):
   path=out/name;path.parent.mkdir(parents=True,exist_ok=True)
-  started=time.time_ns()
-  with path.open('xb') as stream:done=subprocess.run(args,cwd=cwd,stdout=stream,stderr=subprocess.STDOUT,check=False)
-  ended=time.time_ns();commands.append({'command':args,'returncode':done.returncode,'completed':True,'log':name,'log_sha256':digest(path.read_bytes()),'start_ns':started,'end_ns':ended});require(done.returncode==0,'new Kbuild/tool command failed: '+name);return path.read_text()
+  started=time.time_ns();environment=make_environment()
+  with path.open('xb') as stream:done=subprocess.run(args,cwd=cwd,stdout=stream,stderr=subprocess.STDOUT,env=environment,check=False)
+  ended=time.time_ns();row={'command':args,'returncode':done.returncode,'completed':True,'log':name,'log_sha256':digest(path.read_bytes()),'start_ns':started,'end_ns':ended}
+  if args[0]=='make':row['make_environment']={key:environment[key] for key in MAKE_ENVIRONMENT}
+  commands.append(row);require(done.returncode==0,'new Kbuild/tool command failed: '+name);return path.read_text()
  try:
   write(out/'source-manifest.json',sources())
   for name in PUBLIC:dest=out/'source'/name;dest.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(ROOT/name,dest)
@@ -132,7 +186,7 @@ def main():
     for block in iter(lambda:response.read(1024*1024),b''):total+=len(block);require(total<=KERNEL_BYTES,'exact bounded stock compressed source');stream.write(block)
   kernel_before=protected(kernel,'kernel-source-v1',KERNEL_BYTES,KERNEL_SHA);separate([kernel,baseline_archive],[kernel_before['file_identity'],baseline_before['file_identity']]);write(out/'disk-before-extraction.json',disk_budget(private,4*1024**3+512*1024**2+CAP+512*1024**2));workspace.mkdir(parents=True);source,tar_report=extract_kernel(kernel,workspace/'source');objects=workspace/'objects';objects.mkdir();config=(oldroot/'evidence/dependency-files/objects/.config').read_bytes();packaging=config_contract(config);(objects/'.config').write_bytes(config)
   resource=run(['clang-14','-print-file-name=include'],'tools/compiler-resource.log').strip();require(Path(resource).is_absolute() and Path(resource).is_dir(),'actual compiler resource root')
-  make=make_command(source,objects);require(list(tree_inventory(objects))==['.config'],'fresh output contains only copied accepted config');freshness={'output_files_before':['.config']};build_log=run(make,'build/composite.log');freshness['object_mtime_ns']={n:(objects/'crypto'/n).stat().st_mtime_ns for n in ('shash.o','ahash.o','crypto_hash.o')};freshness['complete_output_size']=build_output_size(objects,source);postprocess=postprocess_commands(build_log,linker);require((objects/'.config').read_bytes()==config,'source config remains byte-identical')
+  wrapper=create_routing_wrapper(workspace);routing=routing_evidence(source,objects,wrapper);(out/'routing').mkdir();(out/'routing/composite.mk').write_bytes(ordinary_bytes(wrapper));make=routing['make_argv'];freshness={'output_files_before':initial_output_state(objects)};build_log=run(make,'build/composite.log');generated=generated_input_identity(objects,oldroot/'evidence/dependency-files/objects');freshness['object_mtime_ns']={n:(objects/'crypto'/n).stat().st_mtime_ns for n in ('shash.o','ahash.o','crypto_hash.o')};freshness['complete_output_size']=build_output_size(objects,source);postprocess=postprocess_commands(build_log,linker);require((objects/'.config').read_bytes()==config,'source config remains byte-identical')
   reports={}
   for leaf in ('shash','ahash'):
    reports[leaf]=prerequisite_capture(objects,source,resource,'crypto/'+leaf+'.o',out/'evidence'/leaf/'dependency-files');write(out/'evidence'/leaf/'prerequisites.json',reports[leaf])
@@ -144,7 +198,7 @@ def main():
    dest=out/'evidence/stock-source'/name;dest.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(source/name,dest)
   command=composite_command(command_line((objects/'crypto/.crypto_hash.o.cmd').read_text(),TARGET),linker);proof=link_origin(parse_object((oldroot/'evidence/kbuild/crypto/shash.o').read_bytes()),*[parse_object((objects/'crypto'/n).read_bytes()) for n in ('shash.o','ahash.o','crypto_hash.o')]);write(out/'commands.json',commands)
   after_kernel=stable(kernel_before);after_baseline=stable(baseline_before);require(after_kernel['file_identity']==kernel_before['file_identity'] and after_baseline['file_identity']==baseline_before['file_identity'],'both external protected inputs stable after build')
-  result={'schema':1,'version':'v65','passed':True,'executed_fixture_commands':0,'ci_context':{k:os.environ.get(k) for k in ('GITHUB_RUN_ID','GITHUB_RUN_ATTEMPT','GITHUB_SHA','GITHUB_JOB')},'source_sha256':sources(),'compiler':compiler,'linker':linker,'composite_make_command':make,'actual_composite_command':command,'config_packaging':packaging,'shash_input_equality':equality,'link_origin':proof,'build_freshness':freshness,'kernel_expansion':tar_report,'protected_inputs_before':[kernel_before,baseline_before],'protected_inputs_after':[after_kernel,after_baseline],'baseline_pins':pins,'baseline_original_producer_result_sha256':digest((oldroot/'result.json').read_bytes()),'normal_leaf_postprocess':{'same_GNU_LD_role':True,'full_expanded_command_log':'build/composite.log','expanded_selected_link_commands':postprocess,'saved_CC_commands':['evidence/crypto/.shash.o.cmd','evidence/crypto/.ahash.o.cmd'],'temporary_compiler_object_retained':False,'temporary_version_script_retained':False,'reason':'normal pinned Kbuild consumes temporary objects/version scripts; expanded actual shell provenance and final objects retained','declared_LDFLAGS':'-m aarch64linux --no-relax'},'physical_BOOT_reboot':0,'device_authorized':False,'deployment_ready':False,'old_semantic_or_target_execution':False};result['files']=tree_inventory(out);write(out/'result.json',result)
+  result={'schema':1,'version':'v65','passed':True,'executed_fixture_commands':0,'ci_context':{k:os.environ.get(k) for k in ('GITHUB_RUN_ID','GITHUB_RUN_ATTEMPT','GITHUB_SHA','GITHUB_JOB')},'source_sha256':sources(),'compiler':compiler,'linker':linker,'composite_make_command':make,'routing':routing,'generated_input_identity':generated,'actual_composite_command':command,'config_packaging':packaging,'shash_input_equality':equality,'link_origin':proof,'build_freshness':freshness,'kernel_expansion':tar_report,'protected_inputs_before':[kernel_before,baseline_before],'protected_inputs_after':[after_kernel,after_baseline],'baseline_pins':pins,'baseline_original_producer_result_sha256':digest((oldroot/'result.json').read_bytes()),'normal_leaf_postprocess':{'same_GNU_LD_role':True,'full_expanded_command_log':'build/composite.log','expanded_selected_link_commands':postprocess,'saved_CC_commands':['evidence/crypto/.shash.o.cmd','evidence/crypto/.ahash.o.cmd'],'temporary_compiler_object_retained':False,'temporary_version_script_retained':False,'reason':'normal pinned Kbuild consumes temporary objects/version scripts; expanded actual shell provenance and final objects retained','declared_LDFLAGS':'-m aarch64linux --no-relax'},'physical_BOOT_reboot':0,'device_authorized':False,'deployment_ready':False,'old_semantic_or_target_execution':False};result['files']=tree_inventory(out);write(out/'result.json',result)
  except BaseException as error:
   if not (out/'commands.json').exists():write(out/'commands.json',commands)
   try:retained=preserve_failure_files(out,workspace,baseline_input)
