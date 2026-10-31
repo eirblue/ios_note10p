@@ -13,6 +13,7 @@ import zipfile
 from relocation_trial_aarch64_model import (ROOT,CASES,COUNT_LIMIT,TIMEOUT_SECONDS,IMAGE,OFFSET,AFFECTED,
     PAYLOAD_SHA,ROW,require,sha,write,private_path,elf_image,verify_report,classify,wheel_metadata)
 from test_relocation_trial_wheel_metadata import run_cases as metadata_cases
+from test_relocation_trial_aarch64_binding import run_cases as binding_cases, CASE_INVENTORY as BINDING_CASES
 
 PRODUCTION={
  'note10/xnu26/runtime_relocation.c':'dc51d22fce4c8e0d566d6158f53aa3d512a65954541e4ea4201c5878cb17e448',
@@ -20,7 +21,8 @@ PRODUCTION={
  'note10/xnu26/runtime_relocation_trial.c':'3295a1d005c38b4ab213b69c56705a6caec453916a11d54e3287434b4a3853b9',
  'note10/xnu26/runtime_relocation_trial.h':'7b76597c2436029fdc3c259ec9d1998047d2b5e4c8ed33f9d47adf52be03eaf2'}
 NEW_SOURCES=('note10/device_test/relocation_trial_aarch64_abi.c','note10/device_test/relocation_trial_aarch64_model.py',
- 'note10/device_test/test_relocation_trial_aarch64.py','note10/device_test/test_relocation_trial_wheel_metadata.py','.github/workflows/note10-relocation-aarch64.yml')
+ 'note10/device_test/test_relocation_trial_aarch64.py','note10/device_test/test_relocation_trial_wheel_metadata.py',
+ 'note10/device_test/test_relocation_trial_aarch64_binding.py','.github/workflows/note10-relocation-aarch64.yml')
 SHARED=('note10/device_test/relocation_trial_input.py','note10/device_test/relocation_trial_instructions.py')
 LINKER_SCRIPT='''ENTRY(n10_rt_trial)
 PHDRS { code PT_LOAD FLAGS(5); ro PT_LOAD FLAGS(4); }
@@ -48,7 +50,7 @@ def disassembly_binding(text,image,reports):
         state=report['observer'];first=state['first_tail_write_pc'];restore=state['restore_start_pc'];read=state['first_tail_read_pc']
         restore_in_copy=bool(copy and copy['info']==2 and copy['flags']&4 and copy['size']>0 and copy['value']<=restore<copy['value']+copy['size'])
         require(start<=first<end and start<=read<end and (start<=restore<end or restore_in_copy) and
-          rows[first]['mnemonic']=='strb' and rows[restore]['mnemonic']=='strb' and
+          rows[first]['mnemonic'] in {'strb','sturb'} and rows[restore]['mnemonic'] in {'strb','sturb'} and
           rows[read]['mnemonic'] in {'ldr','ldrb','ldur','ldurb','ldp'},'actual hook PCs bind to target backward-store/compare/restore instructions')
     return {'classification':classification,'trial_function_address':start,'trial_function_size':trial['size'],
       'observed_boundary_instructions':{report['case']:{key:{'pc':report['observer'][key],**rows[report['observer'][key]]}
@@ -58,6 +60,8 @@ def verify_bundle(root,payload):
     """Independent artifact/data verification only; never replay the emulator."""
     result=json.loads((root/'result.json').read_text());require(result['passed'] is True and result['whole_ci_accepted'] is False,'completed PC model report')
     require(result['case_inventory']==list(CASES) and len(result['cases'])==4,'exact four target case inventory')
+    require([row['name'] for row in result['binding_fixture_cases']]==list(BINDING_CASES) and
+      all(row['passed'] is True for row in result['binding_fixture_cases']),'exact canonical byte-store binding fixtures')
     image=elf_image(root/'production.elf');require(image['sha256']==result['elf_sha256'] and image['abi']==result['abi'],'independent final ELF and target ABI')
     reports=[];blobs=set()
     for name,record in zip(CASES,result['cases']):
@@ -90,6 +94,8 @@ def main():
     dependency=out/'dependencies';dependency.mkdir();wheel=dependency/wheels[0].name;shutil.copyfile(wheels[0],wheel)
     metadata_fixtures=metadata_cases()
     write(out/'wheel-metadata-fixtures.json',{'fixture_only':True,'cases':metadata_fixtures,'whole_ci_accepted':False})
+    binding_fixtures=binding_cases(disassembly_binding)
+    write(out/'binding-fixtures.json',{'fixture_only':True,'synthetic_only':True,'cases':binding_fixtures,'whole_ci_accepted':False})
     with zipfile.ZipFile(wheel) as z:
         metadata=[n for n in z.namelist() if n.endswith('.dist-info/METADATA')];require(len(metadata)==1,'wheel metadata')
         wheel_metadata(z.read(metadata[0]))
@@ -124,6 +130,7 @@ def main():
       'elf_sha256':image['sha256'],'abi':image['abi'],'instruction_binding':binding,'toolchain':tools,
       'source_sha256':{name:sha(ROOT/name) for name in sources},'wheel':{'file':'dependencies/'+wheel.name,'sha256':sha(wheel)},
       'metadata_fixture_cases':metadata_fixtures,
+      'binding_fixture_cases':binding_fixtures,
       'payload_sha256':PAYLOAD_SHA,'payload_size':IMAGE,'kernel_offset':OFFSET,'affected_prefix':AFFECTED,
       'production_aarch64_model_executed':True,'hardware_verified':False,'physical_memory_or_hardware_accessed':False,'xnu_executed':False,
       'model_memory_only':True,'synthetic_adt':True,
