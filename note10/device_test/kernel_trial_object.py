@@ -1,6 +1,7 @@
 """Finite real-object projection/relocation and component-only stack proof."""
 import re
 import struct
+from pathlib import PurePosixPath
 from relocation_trial_aarch64_model import require,digest
 
 ENTRY='n10_kernel_trial_adapter'
@@ -9,6 +10,9 @@ span intersects copy zero_bytes copy_bytes add64 overlap pointer_overlap pointer
 name_byte gic_name take adt_node command_ok'''.split())
 DATA_SECTIONS={'.rodata.n10_component','.n10_abi','.n10_stack'}
 ROOT_SECTIONS={'.text.'+ENTRY,'.n10_abi','.n10_stack'}
+POOL='.rodata.str1.1'
+POOL_SIZE=1217
+POOL_MAXIMUM=2048
 
 def parse_elf(raw,kind):
     require(len(raw)>=64 and raw[:6]==b'\x7fELF\x02\x01' and struct.unpack_from('<HH',raw,16)==(kind,183),'bounded actual AArch64 ELF type')
@@ -21,7 +25,7 @@ def parse_elf(raw,kind):
     def string(table,index):
         end=table.find(b'\0',index);require(index<len(table) and end>=0,'bounded ELF string');return table[index:end].decode('ascii')
     strings=data(headers[names]);sections=[]
-    for index,s in enumerate(headers):sections.append({'index':index,'name':string(strings,s[0]),'type':s[1],'flags':s[2],'address':s[3],'bytes':data(s),'link':s[6],'info':s[7],'stride':s[9]})
+    for index,s in enumerate(headers):sections.append({'index':index,'name':string(strings,s[0]),'type':s[1],'flags':s[2],'address':s[3],'bytes':data(s),'link':s[6],'info':s[7],'alignment':s[8],'stride':s[9]})
     tables={};symbols=[]
     for s in sections:
         if s['type']!=2:continue
@@ -53,6 +57,42 @@ def section_map(obj):
         require(s['name'] not in result,'duplicate allocated section name');result[s['name']]=s
     return result
 
+def pool_attributes(section):
+    require(section['name']==POOL and section['type']==1 and section['flags']==0x32 and section['alignment']==1 and section['stride']==1 and
+      len(section['bytes'])==POOL_SIZE<=POOL_MAXIMUM and section['bytes'].endswith(b'\0') and section['bytes'].count(b'\0')==33 and
+      section['bytes'][736:741]==b'name\0','exact bounded readonly/NX whole string-pool attributes/content layout')
+
+def pool_input_contract(obj,selected_names):
+    pool=section_map(obj).get(POOL);require(pool is not None and POOL in selected_names,'required actual whole string pool missing/unselected')
+    pool_attributes(pool);incoming=[];component=[]
+    for rel in obj['relocations']:
+        require(rel['section']!=pool['index'],'outgoing string-pool relocation rejected')
+        if rel['symbol']['section']!=pool['index']:continue
+        symbol=rel['symbol'];record={'source':obj['sections'][rel['section']]['name'],'offset':rel['offset'],'type':rel['type'],
+          'target_offset':symbol['value']+rel['addend'],'addend':rel['addend'],'symbol_info':symbol['info'],'symbol_name':symbol['name'],'symbol_value':symbol['value']}
+        require(0<=record['target_offset']<POOL_SIZE,'original string-pool target offset out of bounds')
+        incoming.append(record)
+        if record['source'] in selected_names:component.append(record)
+    expected=[{'source':'.text.adt_node','offset':offset,'type':kind,'target_offset':736,'addend':736,'symbol_info':3,'symbol_name':'','symbol_value':0}
+      for offset,kind in ((0x234,275),(0x238,277))]
+    require(sorted(component,key=lambda r:r['offset'])==expected,'exact two component string-pool reference locations/types/section-symbol/addends')
+    return {'name':POOL,'size':POOL_SIZE,'maximum_bound':POOL_MAXIMUM,'sha256':digest(pool['bytes']),'string_count':33,
+      'contains_unused_unrelated_Linux_init_strings':True,'component_references':expected,'all_original_incoming_references':incoming,'outgoing_relocations':0}
+
+def pool_projection_contract(original,linked,final):
+    for section in (original,linked,final):pool_attributes(section)
+    require(original['bytes']==linked['bytes']==final['bytes'] and linked['address']==final['address'],'entire current original pool bytes/size/offset mapping changed')
+    return {'input_sha256':digest(original['bytes']),'linked_sha256':digest(linked['bytes']),'final_sha256':digest(final['bytes']),
+      'projected_base':final['address'],'preserved_offsets':[0,POOL_SIZE],'one_to_one_whole_section_mapping':True,'readonly_NX':True,'unused_Linux_strings_disclosed':True}
+
+def projection_link_command(output_root):
+    root=PurePosixPath(str(output_root));require(root.is_absolute() and '..' not in root.parts,'canonical recorded Linux projection root')
+    return ['ld.lld-14','-static','--gc-sections','--no-relax','--emit-relocs','--strip-debug','--no-undefined','-O0','-z','max-page-size=4096',
+      '-T',str(root/'projection/component.ld'),str(root/'evidence/enabled/kbuild/arch/arm64/mm/init.o'),'-o',str(root/'projection/with-relocations.elf')]
+
+def validate_projection_link(command,output_root):
+    require(command==projection_link_command(output_root),'exact pinned LLD14 nonrelocatable -O0 projection argv required; duplicate/conflicting/relocatable options rejected')
+
 def component_closure(obj,enabled=True):
     symbols=obj['symbols'];adapter=[s for s in symbols if s['name']==ENTRY]
     component=[s for s in symbols if s['name'].startswith('n10_rt_') or s['name'] in (ENTRY,'n10_trial_abi','n10_kernel_stack_oracle')]
@@ -68,7 +108,7 @@ def component_closure(obj,enabled=True):
     selected={named[n]['index'] for n in ROOT_SECTIONS};pending=list(selected);edges=set()
     while pending:
         index=pending.pop();s=sections[index];name=s['name']
-        require(not s['flags']&1 and (name in DATA_SECTIONS or name.startswith('.text.') and name[6:] in FUNCTIONS),'unexpected/writable retained component section: '+name)
+        require(not s['flags']&1 and (name in DATA_SECTIONS or name==POOL or name.startswith('.text.') and name[6:] in FUNCTIONS),'unexpected/writable retained component section: '+name)
         for rel in obj['relocations']:
             if rel['section']!=index:continue
             symbol=rel['symbol'];target=symbol['section'];require(0<target<len(sections),'component has external OS/provider/absolute relocation')
@@ -90,6 +130,7 @@ def component_closure(obj,enabled=True):
         require(node not in path,'unexpected mutually recursive component call graph')
         for child in graph[node]:acyclic(child,path|{node})
     for name in functions:acyclic(name,set())
+    if POOL in {sections[i]['name'] for i in selected}:pool_input_contract(obj,{sections[i]['name'] for i in selected})
     return {'selected_sections':sorted(sections[i]['name'] for i in selected),'functions':sorted(set(functions)),
       'call_edges':[list(e) for e in sorted(edges)],'adapter_uninvoked':True,'external_OS_calls':0}
 
@@ -119,7 +160,7 @@ def projection_proof(original,linked,final):
     closure=component_closure(original);names=set(closure['selected_sections']);a=section_map(original);b=section_map(linked);c=section_map(final)
     require(set(b)==names==set(c),'projection retained unexpected/unreviewed sections')
     require(not final['relocations'],'runtime projection still has relocations')
-    evidence={}
+    pool_input=pool_input_contract(original,names);pool_mapping=pool_projection_contract(a[POOL],b[POOL],c[POOL]);evidence={}
     for name in sorted(names):
         source=a[name];destination=b[name];require(destination['bytes']==c[name]['bytes'] and destination['address']==c[name]['address'],'relocation-metadata stripping changed executable bytes')
         expected=source['bytes'];rels=[rel for rel in original['relocations'] if rel['section']==source['index']]
@@ -137,7 +178,7 @@ def projection_proof(original,linked,final):
         evidence[name]={'original_sha256':digest(source['bytes']),'projected_sha256':digest(expected),'address':destination['address'],'relocation_count':len(rels)}
     for symbol in final['symbols']:
         if symbol['section'] and symbol['info']&15==2:require(symbol['name'] in closure['functions'],'unexpected final provider/function')
-    return {'closure':closure,'sections':evidence,'original_object_sha256':original['sha256'],'linked_relocation_proof_sha256':linked['sha256'],'final_ELF_sha256':final['sha256'],'bytes_and_relocations_recomputed':True,'standalone_recompile_substitute':False}
+    return {'closure':closure,'sections':evidence,'literal_pool':{'original':pool_input,'projection':pool_mapping},'original_object_sha256':original['sha256'],'linked_relocation_proof_sha256':linked['sha256'],'final_ELF_sha256':final['sha256'],'bytes_and_relocations_recomputed':True,'standalone_recompile_substitute':False}
 
 def usage_frames(text):
     result={}
@@ -159,6 +200,6 @@ def stack_estimate(frames,functions,thread_size):
 def linker_script():
     text='ENTRY('+ENTRY+')\nPHDRS { code PT_LOAD FLAGS(5); ro PT_LOAD FLAGS(4); }\nSECTIONS {\n . = 0x10000000;\n'
     for name in sorted(FUNCTIONS,key=lambda n:(n!=ENTRY,n)):text+=' .text.'+name+' : { *(.text.'+name+') } :code\n'
-    text+=' . = ALIGN(0x1000);\n .rodata.n10_component : { *(.rodata.n10_component) } :ro\n'
+    text+=' . = ALIGN(0x1000);\n .rodata.n10_component : { *(.rodata.n10_component) } :ro\n .rodata.str1.1 : { *(.rodata.str1.1) } :ro\n'
     text+=' .n10_abi : { KEEP(*(.n10_abi)) } :ro\n .n10_stack : { KEEP(*(.n10_stack)) } :ro\n'
     return text+' /DISCARD/ : { *(.comment) *(.note*) *(.eh_frame*) *(.llvm_addrsig) }\n}\n'

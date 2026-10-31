@@ -13,7 +13,7 @@ import tarfile
 from build_xnu_runtime_plan_component import acquire,extract,parse_dependencies,source_dependency,COMMIT,ARCHIVE_SHA,SOURCE_TOP,DEFCONFIG,TARGET,CMD
 import prepare_xnu_runtime_plan as canonical
 from prepare_kernel_trial_component import prepare,render,OPTION,ENTRY,FILES,EXTRAS
-from kernel_trial_object import parse_elf,component_closure,projection_proof,usage_frames,stack_estimate,linker_script
+from kernel_trial_object import parse_elf,component_closure,projection_proof,usage_frames,stack_estimate,linker_script,pool_input_contract,projection_link_command,validate_projection_link
 from xnu_runtime_scratch_stack import command_origin,postprocess_provenance,KBUILD_PINS
 from relocation_trial_aarch64_model import ROOT,CASES,LEAF,IMAGE,PAYLOAD_SHA,TIMEOUT_SECONDS,private_path,require,sha,digest,write,elf_image,verify_report,wheel_metadata
 from relocation_trial_kernel_profile import PROFILE_ID,kernel_profile,gpr_only
@@ -21,11 +21,12 @@ from test_relocation_trial_aarch64 import disassembly_binding,PRODUCTION
 from test_kernel_trial_component import run_cases,CASE_INVENTORY
 from test_kernel_trial_relocation_binding import run_cases as relocation_binding_cases
 from test_kernel_trial_outliner_flags import run_cases as outliner_flag_cases
+from test_kernel_trial_literal_pool import run_cases as literal_pool_cases
 
 PUBLIC=('note10/device_test/relocation_trial_aarch64_model.py','note10/device_test/kernel_trial_adapter.c','note10/device_test/kernel_trial_stack_oracle.c',
  'note10/device_test/prepare_kernel_trial_component.py','note10/device_test/kernel_trial_object.py','note10/device_test/build_kernel_trial_component.py',
  'note10/device_test/test_kernel_trial_component.py','note10/device_test/test_kernel_trial_relocation_binding.py',
- 'note10/device_test/test_kernel_trial_outliner_flags.py','.github/workflows/note10-kbuild-trial-component.yml')
+ 'note10/device_test/test_kernel_trial_outliner_flags.py','note10/device_test/test_kernel_trial_literal_pool.py','.github/workflows/note10-kbuild-trial-component.yml')
 IMMUTABLE=('note10/xnu26/runtime_relocation.c','note10/xnu26/runtime_relocation.h','note10/xnu26/runtime_relocation_trial.c','note10/xnu26/runtime_relocation_trial.h','note10/device_test/relocation_trial_aarch64_abi.c')
 SHARED=('note10/device_test/build_xnu_runtime_plan_component.py','note10/device_test/prepare_xnu_runtime_plan.py','note10/device_test/prepare_reservation_kernel.py','note10/device_test/xnu_reserve.c',
  'note10/device_test/xnu_runtime_scratch_stack.py','note10/device_test/prepare_xnu_runtime_observation.py',
@@ -118,10 +119,11 @@ def mode_proof(proof,enabled):
     scripts={name:(proof/'kbuild-source'/name).read_bytes() for name in KBUILD_PINS}
     provenance=postprocess_provenance(config,scripts,obj.read_bytes(),True)
     parsed=parse_elf(obj.read_bytes(),1);closure=component_closure(parsed,enabled)
+    pool=pool_input_contract(parsed,set(closure['selected_sections'])) if enabled else None
     sidecar=proof/'kbuild'/origin['sidecar'];require(sidecar.is_file(),'actual compiler-output-derived stack sidecar missing')
     report={'enabled':enabled,'object_sha256':sha(obj),'config_sha256':digest(config),'command_origin':origin,'actual_ordered_compiler_tokens':args,
       'postprocess_provenance':provenance,'component':closure,'sidecar_file':'kbuild/'+origin['sidecar'],'sidecar_sha256':sha(sidecar),
-      'instrumentation':INSTRUMENTATION,'outliner_instrumentation':outliner,'unchanged_production_Image_command':False,'kernel_TU_headers':True}
+      'instrumentation':INSTRUMENTATION,'outliner_instrumentation':outliner,'literal_pool':pool,'unchanged_production_Image_command':False,'kernel_TU_headers':True}
     return report
 
 def archive_files(path,names):
@@ -163,10 +165,20 @@ def verify_component_bundle(root,payload):
     immutable_sources()
     result=json.loads((root/'result.json').read_text());require(result['passed'] is True and result['deployment_ready'] is False and result['whole_ci_accepted'] is False,'PC-only component report')
     require(result['kernel_archive_sha256']==ARCHIVE_SHA and sha(root/'kernel-source.tar.gz')==ARCHIVE_SHA,'actual pinned kernel archive')
+    recorded_root=result['recorded_output_root'];require(PurePosixPath(recorded_root).is_absolute() and '..' not in PurePosixPath(recorded_root).parts,'recorded absolute Linux evidence root')
+    commands=json.loads((root/'commands.json').read_text());links=[c for c in commands if c['log']=='projection/link.log']
+    require(len(links)==1 and links[0]['completed'] is True and links[0]['returncode']==0,'one actual completed projection link')
+    validate_projection_link(links[0]['command'],recorded_root)
+    versions=[c for c in commands if c['log']=='toolchain/ld.lld-14.log']
+    require(len(versions)==1 and versions[0]['command']==['ld.lld-14','--version'] and versions[0]['completed'] is True and versions[0]['returncode']==0 and
+      re.search(r'\bLLD 14\.',(root/'toolchain/ld.lld-14.log').read_text()) and re.fullmatch('[0-9a-f]{64}',result['toolchain']['ld.lld-14']['sha256']),
+      'actual recorded pinned LLD14 version/executable identity')
     special={canonical.INIT,canonical.RESERVE,canonical.KCONFIG,*('arch/arm64/mm/'+n for n in FILES+EXTRAS)}
     wanted={canonical.INIT,canonical.KCONFIG}
     for mode in ('disabled','enabled'):
         proof=root/'evidence'/mode;deps=json.loads((proof/'dependencies.json').read_text())
+        require(deps['roots']['objects']==str(PurePosixPath(recorded_root)/'work'/mode/'objects') and
+          deps['roots']['source']==str(PurePosixPath(recorded_root)/'work'/mode/'source'/SOURCE_TOP),'link/object/source paths bound to same actual recorded output root')
         wanted.update(key[7:] for key in deps['files_sha256'] if key.startswith('source/') and key[7:] not in special)
         wanted.update(p.relative_to(proof/'kbuild-source').as_posix() for p in (proof/'kbuild-source').rglob('*') if p.is_file())
     archive_source=archive_files(root/'kernel-source.tar.gz',wanted)
@@ -239,7 +251,7 @@ def main():
         immutable_sources()
         source_map={name:sha(ROOT/name) for name in (*PUBLIC,*IMMUTABLE,*SHARED)};source_out=out/'source';source_out.mkdir()
         for name in source_map:shutil.copyfile(ROOT/name,source_out/Path(name).name)
-        fixtures=run_cases(canonical_key)+relocation_binding_cases()+outliner_flag_cases(validate_outliner_options);write(out/'fixtures.json',{'fixture_only':True,'synthetic_only':True,'cases':fixtures,'whole_ci_accepted':False})
+        fixtures=run_cases(canonical_key)+relocation_binding_cases()+outliner_flag_cases(validate_outliner_options)+literal_pool_cases();write(out/'fixtures.json',{'fixture_only':True,'synthetic_only':True,'cases':fixtures,'whole_ci_accepted':False})
         archive=out/'kernel-source.tar.gz'
         if a.archive:shutil.copyfile(a.archive,archive)
         else:acquire(archive)
@@ -263,7 +275,7 @@ def main():
             finally:capture_available(source,objects,proof)
             capture_dependencies(source,objects,compiler,proof);modes[mode]=mode_proof(proof,mode=='enabled');write(proof/'mode.json',modes[mode])
         projection=out/'projection';projection.mkdir();script=projection/'component.ld';script.write_text(linker_script(),encoding='utf-8',newline='\n');obj=out/'evidence/enabled/kbuild'/TARGET
-        run(['ld.lld-14','-static','--gc-sections','--no-relax','--emit-relocs','--strip-debug','--no-undefined','-z','max-page-size=4096','-T',script,obj,'-o',projection/'with-relocations.elf'],'projection/link.log')
+        link_command=projection_link_command(str(out));validate_projection_link(link_command,str(out));run(link_command,'projection/link.log')
         linked=parse_elf((projection/'with-relocations.elf').read_bytes(),2);remove=[s['name'] for s in linked['sections'] if s['type']==4]
         run(['llvm-objcopy-14',*[x for name in remove for x in ('--remove-section',name)],projection/'with-relocations.elf',projection/'production.elf'],'projection/strip-relocations.log')
         proof=projection_proof(parse_elf(obj.read_bytes(),1),linked,parse_elf((projection/'production.elf').read_bytes(),2));image=elf_image(projection/'production.elf',expected_entry=ENTRY)
@@ -280,7 +292,7 @@ def main():
             run([sys.executable,ROOT/'note10/device_test/relocation_trial_aarch64_model.py','--profile',PROFILE_ID,'--entry-symbol',ENTRY,'--elf',projection/'production.elf','--payload',a.payload.resolve(),
               '--case',name,'--output',out/'model/cases'/name,'--blobs',out/'model/blobs'],'model/'+name+'.log',TIMEOUT_SECONDS+30)
             reports.append(json.loads((out/'model/cases'/name/'result.json').read_text()))
-        result={'schema':1,'version':'v61','passed':True,'whole_ci_accepted':False,'deployment_ready':False,'kernel_commit':COMMIT,'kernel_archive_sha256':sha(archive),'source_sha256':source_map,
+        result={'schema':1,'version':'v61','passed':True,'whole_ci_accepted':False,'deployment_ready':False,'recorded_output_root':str(out),'kernel_commit':COMMIT,'kernel_archive_sha256':sha(archive),'source_sha256':source_map,
           'modes':modes,'projection':proof,'stack':dict(estimate,IRQ_STACK_SIZE=irq,IRQ_scope='constant only; no OS/IRQ safety claim'),'gpr_analysis':gpr,'entry_symbol':ENTRY,'codegen_profile':kernel_profile(PROFILE_ID),
           'case_inventory':list(CASES),'cases':[{'case':n,'report':'model/cases/'+n+'/result.json','sha256':sha(out/'model/cases'/n/'result.json')} for n in CASES],
           'instruction_binding':disassembly_binding(text,image,reports),'fixture_cases':fixtures,'toolchain':toolchain,'wheel':{'file':'dependencies/'+wheel.name,'sha256':sha(wheel)},
