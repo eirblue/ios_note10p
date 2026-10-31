@@ -1,5 +1,6 @@
 """Strict real-object DWARF type extraction. No handwritten layout fallback."""
 from pre_pm_archive_contract import require
+from shash_core_qualified_target import qualified_member_type,bind_qualified_targets
 ESSENTIAL=('crypto_shash','crypto_tfm','crypto_type','shash_alg','crypto_alg','shash_desc')
 
 def choose_layout(records,name):
@@ -21,7 +22,7 @@ def choose_layout(records,name):
  return canonical[0]
 
 def extract_layouts(elf,oracle):
- require(elf.has_dwarf_info(),'actual provider DWARF absent');dwarf=elf.get_dwarf_info();records=[];variables=[]
+ require(elf.has_dwarf_info(),'actual provider DWARF absent');dwarf=elf.get_dwarf_info();records=[];variables=[];qualified=[]
  def text(a):return a.value.decode('utf8')
  def scalar(die,key,required=True):
   attr=die.attributes.get(key)
@@ -65,6 +66,7 @@ def extract_layouts(elf,oracle):
     require(not any(k in member.attributes for k in ('DW_AT_bit_size','DW_AT_bit_offset','DW_AT_data_bit_offset')),'essential bitfield layout unsupported')
     require('DW_AT_name' in member.attributes and 'DW_AT_data_member_location' in member.attributes,'complete named member location')
     typ=describe(member.get_DIE_from_attribute('DW_AT_type'));off=offset(member.attributes['DW_AT_data_member_location'])
+    typ=qualified_member_type(name,text(member.attributes['DW_AT_name']),member.get_DIE_from_attribute('DW_AT_type'),typ,qualified)
     if typ.get('flexible_bound_unspecified'):require(off==size,'unspecified array only at actual struct end')
     members.append({'name':text(member.attributes['DW_AT_name']),'offset':off,'type':typ,'member_alignment':scalar(member,'DW_AT_alignment',False)})
    records.append({'name':name,'byte_size':size,'alignment':alignment,'members':members,'die_offset':die.offset,'CU_offset':cu.cu_offset})
@@ -72,6 +74,7 @@ def extract_layouts(elf,oracle):
  require(oracle is not None,'mandatory new real-header oracle')
  records=[crosscheck(r,oracle) if r['name'] in MEMBERS else r for r in records]
  layouts={n:choose_layout(records,n) for n in ESSENTIAL}
+ bind_qualified_targets(qualified,records,layouts)
  required={'shash_alg':{'init','update','final','finup','digest','export','import','setkey','digestsize','statesize','descsize','base'},'shash_desc':{'tfm','flags','__ctx'},'crypto_alg':{'cra_type','cra_flags','cra_alignmask'}}
  for name,names in required.items():require(names<={m['name'] for m in layouts[name]['members']},'essential actual callback/descriptor member set')
  return {'types':layouts,'layout_source':'mandatory actual DWARF; only absent alignment of three new types supplemented from same-Kbuild compiler oracle','old_type_alignment_assumed':False,'numeric_ABI_substitute':False}

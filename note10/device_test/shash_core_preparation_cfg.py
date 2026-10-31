@@ -7,6 +7,7 @@ import hashlib,itertools,struct
 from pre_pm_archive_contract import require
 from sha256_provider_object import one_symbol,exact_target
 from shash_core_instructions import decode,signed
+from shash_core_qualified_target import require_qualified_target
 
 
 def preparation_cfg_selected(obj,fn):
@@ -22,6 +23,11 @@ def preparation_cfg_selected(obj,fn):
   if op=='cond' and d['condition']!=8:return True
   if op=='movn' and (d['rd']!=0 or d['width']!=32):return True
  return False
+
+
+def preparation_type_target(type_pointer,layouts):
+ if type_pointer['target_tag']=='DW_TAG_const_type':require_qualified_target(type_pointer,layouts)
+ else:require(type_pointer['target_tag']=='DW_TAG_structure_type' and type_pointer['target_name']=='crypto_type','actual cra_type points to the crypto_type structure')
 
 
 def preparation_cfg(fact,layouts,oracle,obj):
@@ -45,7 +51,7 @@ def preparation_cfg(fact,layouts,oracle,obj):
  base=member('shash_alg','base',layouts['types']['crypto_alg']['byte_size']);flags=base+member('crypto_alg','cra_flags',4);type_slot=base+member('crypto_alg','cra_type',8,'pointer')
  base_type=next(m for m in layouts['types']['shash_alg']['members'] if m['name']=='base')['type'];type_pointer=next(m for m in layouts['types']['crypto_alg']['members'] if m['name']=='cra_type')['type']
  require(base_type['kind']=='structure' and base_type['name']=='crypto_alg','actual nested base is the crypto_alg structure')
- require(type_pointer['target_tag']=='DW_TAG_structure_type' and type_pointer['target_name']=='crypto_type','actual cra_type points to the crypto_type structure')
+ preparation_type_target(type_pointer,layouts)
  locations=[(off,size) for off,size in [(n,8) for n in slots.values()]+[(n,4) for n in sizes.values()]+[(flags,4),(type_slot,8)]]
  require(all(a+s<=b or b+t<=a for i,(a,s) in enumerate(locations) for b,t in locations[i+1:]),'all typed preparation destinations disjoint')
  require(all(off+size<=layouts['types']['shash_alg']['byte_size'] for off,size in locations),'all preparation members within actual type')
