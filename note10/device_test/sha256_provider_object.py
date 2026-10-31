@@ -138,7 +138,7 @@ def constants_from(headers):
   require(len(found)==1,'unique real source constant: '+name);result[name]=int(found[0],0)
  return result
 
-def provider_object_proof(raw,text,usage,ELFFile,headers):
- obj=parse_elf(raw,1);layouts=extract_layouts(ELFFile(io.BytesIO(raw)));constants=constants_from(headers)
+def provider_object_proof(raw,text,usage,ELFFile,headers,oracle=None):
+ obj=parse_elf(raw,1);layouts=extract_layouts(ELFFile(io.BytesIO(raw)),oracle);constants=constants_from(headers)
  table=table_proof(obj,layouts,constants);registration=registration_proof(obj,table['symbol']);code=code_proof(obj,text,usage)
  return {'object_sha256':obj['sha256'],'DWARF':layouts,'source_constants':constants,'table':table,'registration':registration,'code':code,'instrumented_analysis_object_only':True,'provider_executed':False,'full_Image_link_or_runtime_availability_proven':False}

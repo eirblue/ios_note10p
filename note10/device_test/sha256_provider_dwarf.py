@@ -20,7 +20,7 @@ def choose_layout(records,name):
  require(all(c==canonical[0] for c in canonical),'conflicting complete DWARF definitions: '+name)
  return canonical[0]
 
-def extract_layouts(elf):
+def extract_layouts(elf,oracle=None):
  require(elf.has_dwarf_info(),'actual provider DWARF absent');dwarf=elf.get_dwarf_info();records=[];variables=[]
  def text(a):return a.value.decode('utf8')
  def scalar(die,key,required=True):
@@ -67,11 +67,15 @@ def extract_layouts(elf):
     require('DW_AT_name' in member.attributes and 'DW_AT_data_member_location' in member.attributes,'complete named member location')
     typ=describe(member.get_DIE_from_attribute('DW_AT_type'));off=offset(member.attributes['DW_AT_data_member_location'])
     if typ.get('flexible_bound_unspecified'):require(off==size,'unspecified array only at actual struct end')
-    members.append({'name':text(member.attributes['DW_AT_name']),'offset':off,'type':typ})
+    members.append({'name':text(member.attributes['DW_AT_name']),'offset':off,'type':typ,'member_alignment':scalar(member,'DW_AT_alignment',False)})
    records.append({'name':name,'byte_size':size,'alignment':alignment,'members':members,'die_offset':die.offset,'CU_offset':cu.cu_offset})
+ crosschecks=[]
+ if oracle is not None:
+  from sha256_provider_oracle import supplement
+  records,crosschecks=supplement(records,oracle)
  layouts={n:choose_layout(records,n) for n in ESSENTIAL}
  required={'sha256_state':{'state','count','buf'},'shash_desc':{'tfm','flags','__ctx'},'shash_alg':{'init','update','final','finup','digestsize','descsize','base'},'crypto_alg':{'cra_name','cra_driver_name','cra_flags','cra_blocksize','cra_module'}}
  for name,names in required.items():require(names<={m['name'] for m in layouts[name]['members']},'complete essential DWARF member set: '+name)
  require(variables and all(v==variables[0] for v in variables),'unambiguous actual array variable DWARF')
  array=variables[0];require(array['kind']=='array' and array['count']==2 and array['element']['name']=='shash_alg' and array['byte_size']==2*layouts['shash_alg']['byte_size'],'actual provider array type/count/extent')
- return {'types':layouts,'array_variable':array,'layout_source':'actual complete DWARF only','handwritten_ABI_fallback_used':False}
+ return {'types':layouts,'array_variable':array,'layout_source':'mandatory actual DWARF; absent alignments only from same-Kbuild real-header oracle' if oracle is not None else 'actual complete DWARF only','oracle_crosschecks':crosschecks,'handwritten_ABI_fallback_used':False}

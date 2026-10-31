@@ -46,6 +46,11 @@ jobs:
           PYTHONDONTWRITEBYTECODE: '1'
         run: |
           python -B note10/device_test/build_sha256_provider.py --output note10/private/v63-ci-provider --archive-profile external-protected-kernel-archive-v1 --elftools-site note10/private/v63-dependency-site --elftools-wheel note10/private/v63-dependency-input/pyelftools-0.32-py3-none-any.whl --install-report note10/private/v63-dependency-install.json
+      - name: Stage exact provider evidence namespace
+        if: always()
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          python -B note10/device_test/stage_sha256_provider.py --source note10/private/v63-ci-provider --staging-parent note10/private/v63-upload-staging --receipt note10/private/v63-stage-receipt.json
       - name: Upload provider-object evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -55,5 +60,4 @@ jobs:
           retention-days: 7
           include-hidden-files: true
           path: |
-            note10/private/v63-ci-provider/
-            !note10/private/v63-ci-provider/work/**
+            note10/private/v63-upload-staging/
