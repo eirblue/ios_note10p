@@ -6,7 +6,7 @@ from crypto_hash_composite import parse_object,link_origin,require,digest
 from crypto_hash_input_contract import KERNEL_COMMIT,KERNEL_SHA,KERNEL_BYTES,SOURCE_TOP,CAP,BASELINE_ROOT,NEW_ROOT,write,protected,stable,separate,disk_budget,tree_inventory,extract_kernel,extract_zip,verify_extraction,retrieve_baseline,baseline_labels,baseline_api_receipt,prerequisite_capture,leaf_equality,normalized,command_line,composite_command,config_contract,mirror_retrieval_evidence,redact_text
 
 ROOT=Path(__file__).resolve().parents[2]
-PUBLIC=('note10/device_test/build_crypto_hash_composite.py','note10/device_test/crypto_hash_composite.py','note10/device_test/crypto_hash_input_contract.py','note10/device_test/stage_crypto_hash_composite.py','note10/device_test/test_crypto_hash_composite.py','note10/device_test/test_crypto_hash_retrieval.py','note10/device_test/test_crypto_hash_routing.py','.github/workflows/note10-crypto-hash-composite.yml')
+PUBLIC=('note10/device_test/build_crypto_hash_composite.py','note10/device_test/crypto_hash_composite.py','note10/device_test/crypto_hash_input_contract.py','note10/device_test/stage_crypto_hash_composite.py','note10/device_test/test_crypto_hash_composite.py','note10/device_test/test_crypto_hash_retrieval.py','note10/device_test/test_crypto_hash_routing.py','note10/device_test/test_crypto_hash_include_context.py','.github/workflows/note10-crypto-hash-composite.yml')
 FLAGS='-gdwarf-4 -fstack-usage -ffunction-sections -fdata-sections -mllvm -enable-machine-outliner=never -fno-inline-functions'
 TARGET='crypto/crypto_hash.o'
 ROUTING_WRAPPER=b'crypto/crypto_hash.o: prepare scripts FORCE\n\t$(Q)$(MAKE) $(build)=crypto crypto/crypto_hash.o\n'
@@ -18,7 +18,7 @@ def sources():return {name:digest((ROOT/name).read_bytes()) for name in PUBLIC}
 
 
 def make_command(source,objects,wrapper):
- return ['make','-C',str(objects),'KBUILD_SRC='+str(source),'-f',str(source)+'/Makefile','-f',str(wrapper),'ARCH=arm64','CC=clang-14','LD=aarch64-linux-gnu-ld','CROSS_COMPILE=aarch64-linux-gnu-','CLANG_TRIPLE=aarch64-linux-gnu-','CROSS_COMPILE_ARM32=arm-linux-gnueabi-','GCC_TOOLCHAIN_DIR=/usr/aarch64-linux-gnu/bin/','HOSTCC=gcc','HOSTCFLAGS=-Wno-error=deprecated-declarations','KCFLAGS='+FLAGS,'CONFIG_THIN_ARCHIVES=','LDFLAGS=-m aarch64linux --no-relax','V=1','-j2',TARGET]
+ return ['make','-C',str(objects),'KBUILD_SRC='+str(source),'--include-dir='+str(source),'-f',str(source)+'/Makefile','-f',str(wrapper),'ARCH=arm64','CC=clang-14','LD=aarch64-linux-gnu-ld','CROSS_COMPILE=aarch64-linux-gnu-','CLANG_TRIPLE=aarch64-linux-gnu-','CROSS_COMPILE_ARM32=arm-linux-gnueabi-','GCC_TOOLCHAIN_DIR=/usr/aarch64-linux-gnu/bin/','HOSTCC=gcc','HOSTCFLAGS=-Wno-error=deprecated-declarations','KCFLAGS='+FLAGS,'CONFIG_THIN_ARCHIVES=','LDFLAGS=-m aarch64linux --no-relax','V=1','-j2',TARGET]
 
 
 def make_environment(inherited=None):return dict(os.environ if inherited is None else inherited,**MAKE_ENVIRONMENT)
