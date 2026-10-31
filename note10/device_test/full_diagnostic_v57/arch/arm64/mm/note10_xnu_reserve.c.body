@@ -1,0 +1,138 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+/* Included by pinned arm64/mm/init.c before arm64_memblock_init.
+ * Reservation and opt-in cached RAM access test; never executes XNU.
+ */
+#include <linux/init.h>
+#include <linux/memblock.h>
+#include <linux/mm.h>
+#include <linux/kernel.h>
+
+#define N10_WINDOW_SIZE (256ULL << 20)
+#define N10_WINDOW_ALIGN (32ULL << 20)
+#define N10_WINDOW_LIMIT (1ULL << 40)
+
+static phys_addr_t n10_window_base;
+static int n10_window_status;
+
+/* Error detection for a complete ASCII evidence frame; not authentication. */
+static u32 n10_frame_checksum(const char *text, unsigned int length)
+{
+    u32 value = 2166136261U;
+    unsigned int i;
+#ifdef CONFIG_NOTE10_SCREEN_LOG
+    extern void n10_screen_frame(const char *text, unsigned int length);
+#endif
+    for (i = 0; i < length; ++i)
+        value = (value ^ (unsigned char)text[i]) * 16777619U;
+#ifdef CONFIG_NOTE10_SCREEN_LOG
+    n10_screen_frame(text, length);
+#endif
+    return value;
+}
+
+static void __init note10_reserve_xnu_window(void)
+{
+    phys_addr_t base;
+
+    base = memblock_find_in_range(1ULL << 31, N10_WINDOW_LIMIT,
+                                  N10_WINDOW_SIZE, N10_WINDOW_ALIGN);
+    if (!base || (base & (N10_WINDOW_ALIGN - 1)) ||
+        base > N10_WINDOW_LIMIT - N10_WINDOW_SIZE ||
+        !memblock_is_region_memory(base, N10_WINDOW_SIZE) ||
+        memblock_is_region_reserved(base, N10_WINDOW_SIZE)) {
+        n10_window_status = -1;
+        pr_err("N10RAM1 FAILED stage=find\n");
+        return;
+    }
+    if (memblock_reserve(base, N10_WINDOW_SIZE)) {
+        n10_window_status = -2;
+        pr_err("N10RAM1 FAILED stage=reserve\n");
+        return;
+    }
+    n10_window_base = base;
+    n10_window_status = 1;
+    pr_info("N10RAM1 RESERVED base=%llx size=%llx align=%llx\n",
+            (unsigned long long)base, N10_WINDOW_SIZE, N10_WINDOW_ALIGN);
+}
+
+#include "note10_xnu_window_access.c"
+#include "note10_xnu_payload_stage.c"
+#include "note10_cpu_cache_roundtrip.c"
+#include "note10_auto_return.c"
+#include "note10_pm_timer_roundtrip.c"
+
+#ifdef CONFIG_NOTE10_XNU_RUNTIME_OBSERVATION
+#include "runtime_relocation.c"
+#include "note10_xnu_runtime_plan.c"
+#include "note10_xnu_runtime_observation.c"
+#endif
+
+#ifdef CONFIG_NOTE10_XNU_RUNTIME_SCRATCH
+#include "note10_xnu_runtime_scratch.c"
+#endif
+
+static int __init note10_check_xnu_window(void)
+{
+    unsigned long start, count, i, reserved = 0, invalid = 0;
+
+    if (n10_arm_auto_return())
+        return 0;
+
+    if (n10_window_status != 1) {
+        pr_err("N10RAM1 FAILED stage=late-no-window\n");
+        return 0;
+    }
+    start = PHYS_PFN(n10_window_base);
+    count = N10_WINDOW_SIZE >> PAGE_SHIFT;
+    for (i = 0; i < count; ++i) {
+        if (!pfn_valid(start + i)) {
+            ++invalid;
+            continue;
+        }
+        if (PageReserved(pfn_to_page(start + i)))
+            ++reserved;
+    }
+    pr_info("N10RAM1 CHECK pages=%lu reserved=%lu invalid=%lu shift=%u\n",
+            count, reserved, invalid, (unsigned int)PAGE_SHIFT);
+    if (reserved != count || invalid)
+        pr_err("N10RAM1 FAILED stage=page-state\n");
+    /* Each copy includes geometry, state and an ID unique to this build.
+     * A reader must validate checksums and multiple agreeing sequences.
+     * Never repair corrupted text or infer a physical address from it.
+     */
+    {
+        unsigned int sequence;
+        char frame[256];
+        for (sequence = 0; sequence < 32; ++sequence) {
+            int length = scnprintf(frame, sizeof(frame),
+                "id=%s seq=%u base=%llx size=%llx align=%llx pages=%lu reserved=%lu invalid=%lu shift=%u",
+                N10_RESERVE_BUILD_ID, sequence,
+                (unsigned long long)n10_window_base,
+                N10_WINDOW_SIZE, N10_WINDOW_ALIGN,
+                count, reserved, invalid, (unsigned int)PAGE_SHIFT);
+            pr_info("N10RAM2 %s checksum=%08x\n", frame,
+                    n10_frame_checksum(frame, length));
+        }
+    }
+    if (note10_test_xnu_window_access(reserved, count, invalid))
+        return 0;
+
+    if (n10_stage_xnu_payload(reserved, count, invalid))
+        return 0;
+    if (n10_test_cpu_cache())
+        return 0;
+    n10_start_pm_timer();
+#ifdef CONFIG_NOTE10_XNU_RUNTIME_OBSERVATION
+    n10_observe_runtime_plan(reserved,count,invalid);
+#endif
+
+#ifdef CONFIG_NOTE10_XNU_RUNTIME_SCRATCH
+    n10_observe_runtime_scratch(reserved,count,invalid);
+#endif
+
+    /* Reserved pages remain excluded from Linux's allocator until reboot.
+     * This does not prove DMA quiescence or global SoC ownership.
+     */
+    return 0;
+}
+late_initcall(note10_check_xnu_window);

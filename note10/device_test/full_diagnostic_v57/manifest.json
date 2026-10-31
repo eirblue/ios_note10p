@@ -1,0 +1,916 @@
+{
+  "schema": 1,
+  "provenance": "Historical accepted v57 actual TU custom dependency/source maps; not a fresh original v57 API retrieval. Fresh v62 actual Kbuild validates this reviewed source overlay with exact pinned stock archive. No full historic non-TU driver tree or Image claim.",
+  "source_run": 41109866784,
+  "kernel_commit": "55f042627bb7030c93550faafa117674d32b21d1",
+  "files": [
+    {
+      "installed_path": "arch/arm64/Kconfig",
+      "public_source": "note10/device_test/full_diagnostic_v57/arch/arm64/Kconfig",
+      "sha256": "012b8954d931f2931ae3338589015a2d11ed91a1e26494c553b76570ee7c3dc6",
+      "bytes": 42960,
+      "origin": "accepted-v57-compiled-TU-source-snapshot",
+      "report_pins": [
+        {
+          "report_map": "xnu_runtime_scratch_prepared_sha256",
+          "key": "arch/arm64/Kconfig"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "arch/arm64/mm/init.c",
+      "public_source": "note10/device_test/full_diagnostic_v57/arch/arm64/mm/init.c",
+      "sha256": "5d52b5883ba502909294cefb6a97b19df3fe7b749eb404b677b90fc15fd233e2",
+      "bytes": 20365,
+      "origin": "accepted-v57-compiled-TU-source-snapshot",
+      "report_pins": [
+        {
+          "report_map": "xnu_runtime_scratch_prepared_sha256",
+          "key": "arch/arm64/mm/init.c"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "arch/arm64/mm/note10_abox_pm_probe.c",
+      "public_source": "note10/device_test/abox_pm_probe.c",
+      "sha256": "7ac49caa6de40e3edff9a3631ee4c6fc5dd6d2a79d802d74fd6f8d174107b6c8",
+      "bytes": 7983,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "abox_pm_sources_sha256",
+          "key": "abox_pm_probe.c"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "arch/arm64/mm/note10_abox_pmu_probe.c",
+      "public_source": "note10/device_test/abox_pmu_probe.c",
+      "sha256": "95de87bd3e365bef98ed58c60bc62297c25a4222ca3b84821a33a04c8b95cd95",
+      "bytes": 2498,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "abox_pmu_sources_sha256",
+          "key": "abox_pmu_probe.c"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "arch/arm64/mm/note10_auto_return.c",
+      "public_source": "note10/device_test/auto_return.c",
+      "sha256": "9ec43d3d17f12fe90d2ab36e4712537b7f8275f6f27b6536bbef826f9692037d",
+      "bytes": 2730,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "xnu_runtime_scratch_prepared_sha256",
+          "key": "arch/arm64/mm/note10_auto_return.c"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "arch/arm64/mm/note10_cpu_cache_roundtrip.c",
+      "public_source": "note10/device_test/cpu_cache_roundtrip.c",
+      "sha256": "44146bf358d73a831e9de2657eb16ae2a09caa87ab8ff715b428e3ddbc3759e6",
+      "bytes": 7026,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "xnu_runtime_scratch_prepared_sha256",
+          "key": "arch/arm64/mm/note10_cpu_cache_roundtrip.c"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "arch/arm64/mm/note10_dma_pm_probe.c",
+      "public_source": "note10/device_test/dma_pm_probe.c",
+      "sha256": "79c0e64ee18933d30969094b1e9019a8581baacb6e9817159b7db6bcbaf040de",
+      "bytes": 1156,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "dma_pm_audit_sources_sha256",
+          "key": "dma_pm_probe.c"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "arch/arm64/mm/note10_ehld_lock_probe.c",
+      "public_source": "note10/device_test/ehld_lock_probe.c",
+      "sha256": "ef326511907952b610e52a9b31c4a86d726bbff6bafe0afebeb3430e8124f130",
+      "bytes": 2072,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "cpu_pm_roundtrip_snapshot_sha256",
+          "key": "arch/arm64/mm/note10_ehld_lock_probe.c"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "arch/arm64/mm/note10_fpsimd_reference_probe.c",
+      "public_source": "note10/device_test/fpsimd_reference_probe.c",
+      "sha256": "44c4aaa73086063affef7c7a21eeb7218b0efceaa002ad9eefe2c17d590cf2ed",
+      "bytes": 1841,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "cpu_pm_roundtrip_snapshot_sha256",
+          "key": "arch/arm64/mm/note10_fpsimd_reference_probe.c"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "arch/arm64/mm/note10_gic_roundtrip_probe.c",
+      "public_source": "note10/device_test/gic_roundtrip_probe.c",
+      "sha256": "e5bf2b8330034c7182a4e12856141e5a47dde395aaf5276cea82b2f61608ea81",
+      "bytes": 1630,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "gic_roundtrip_sources_sha256",
+          "key": "gic_roundtrip_probe.c"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "arch/arm64/mm/note10_iommu_pm_probe.c",
+      "public_source": "note10/device_test/iommu_pm_probe.c",
+      "sha256": "295e983dc64c8785347820b41cd8e8e548a700a8a1047f6e8e270485f827a770",
+      "bytes": 2948,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "iommu_pm_sources_sha256",
+          "key": "iommu_pm_probe.c"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "arch/arm64/mm/note10_pm_branch_probe.c",
+      "public_source": "note10/device_test/pm_branch_probe.c",
+      "sha256": "3cf02b7bc2d23d6ea12d377f1cab56625294fd5a8033d1acf0139a10f9e6270d",
+      "bytes": 2939,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "cpu_pm_roundtrip_snapshot_sha256",
+          "key": "arch/arm64/mm/note10_pm_branch_probe.c"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "arch/arm64/mm/note10_pm_callbacks_probe.c",
+      "public_source": "note10/device_test/pm_callbacks_probe.c",
+      "sha256": "a426ebce85fb637eb36f11f77dcba5e06cb9d10aedeedc48df63054663d2d276",
+      "bytes": 3855,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "pm_callbacks_sources_sha256",
+          "key": "pm_callbacks_probe.c"
+        },
+        {
+          "report_map": "pm_callbacks_prepared_sha256",
+          "key": "arch/arm64/mm/note10_pm_callbacks_probe.c"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "arch/arm64/mm/note10_pm_cpus_probe.c",
+      "public_source": "note10/device_test/pm_cpus_probe.c",
+      "sha256": "aaa750a58758f1470d9fa27cb197f2ed79d51204cb3b085f42e79cf4d8cde15f",
+      "bytes": 1591,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "pm_cpus_sources_sha256",
+          "key": "pm_cpus_probe.c"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "arch/arm64/mm/note10_pm_cpus_timer_probe.c",
+      "public_source": "note10/device_test/pm_cpus_timer_probe.c",
+      "sha256": "a56c762118676468890944609b79995ecfea2f006e2f0a46630249c208682959",
+      "bytes": 1949,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "pm_cpus_sources_sha256",
+          "key": "pm_cpus_timer_probe.c"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "arch/arm64/mm/note10_pm_cpus_workqueue.c",
+      "public_source": "note10/device_test/pm_cpus_workqueue.c",
+      "sha256": "541d1b349d7dec0b6159ab39f28e329fda8e061eac22a2abfa92a433a6616ebf",
+      "bytes": 613,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "pm_cpus_sources_sha256",
+          "key": "pm_cpus_workqueue.c"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "arch/arm64/mm/note10_pm_edge_probe.c",
+      "public_source": "note10/device_test/pm_edge_probe.c",
+      "sha256": "32802cb6f0f97b66e1421d248943e44dddff762503c0924ec0e1ff39aaaacede",
+      "bytes": 7920,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "pm_edge_sources_sha256",
+          "key": "pm_edge_probe.c"
+        },
+        {
+          "report_map": "pm_edge_prepared_sha256",
+          "key": "arch/arm64/mm/note10_pm_edge_probe.c"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "arch/arm64/mm/note10_pm_irq_probe.c",
+      "public_source": "note10/device_test/pm_irq_probe.c",
+      "sha256": "22e4391fc109dd576fdc51442f0858e26511d3cbac3793e7215649c30a758f60",
+      "bytes": 4132,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "pm_irq_sources_sha256",
+          "key": "pm_irq_probe.c"
+        },
+        {
+          "report_map": "pm_irq_prepared_sha256",
+          "key": "arch/arm64/mm/note10_pm_irq_probe.c"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "arch/arm64/mm/note10_pm_noirq_probe.c",
+      "public_source": "note10/device_test/pm_noirq_probe.c",
+      "sha256": "d869adbf2d3b39e4c55ccae22fa0c818f4249fd4977944b7522bf2ae64e33fc9",
+      "bytes": 2084,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "pm_noirq_sources_sha256",
+          "key": "pm_noirq_probe.c"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "arch/arm64/mm/note10_pm_post_arch_probe.c",
+      "public_source": "note10/device_test/pm_post_arch_probe.c",
+      "sha256": "2f0c3475536fc71f0b746ad4921448376aaa823a2697bb83872ba5d6d4e8d41d",
+      "bytes": 3472,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "pm_post_arch_sources_sha256",
+          "key": "pm_post_arch_probe.c"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "arch/arm64/mm/note10_pm_pre_probe.c",
+      "public_source": "note10/device_test/full_diagnostic_v57/arch/arm64/mm/note10_pm_pre_probe.c",
+      "sha256": "ab6995c7789c52ed8879f5ccb92ed8e405281de6df660e500b7711e827f8abc9",
+      "bytes": 9780,
+      "origin": "accepted-v57-compiled-TU-source-snapshot",
+      "report_pins": [
+        {
+          "report_map": "cpu_pm_notifier_trace_prepared_sha256",
+          "key": "arch/arm64/mm/note10_pm_pre_probe.c"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "arch/arm64/mm/note10_pm_timer_roundtrip.c",
+      "public_source": "note10/device_test/full_diagnostic_v57/arch/arm64/mm/note10_pm_timer_roundtrip.c",
+      "sha256": "164aa5bed9eb6bf4692789e46e0cb59653a82156fb0e1bcab8b30ce7f3980763",
+      "bytes": 16164,
+      "origin": "accepted-v57-compiled-TU-source-snapshot",
+      "report_pins": [
+        {
+          "report_map": "xnu_runtime_scratch_prepared_sha256",
+          "key": "arch/arm64/mm/note10_pm_timer_roundtrip.c"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "arch/arm64/mm/note10_pmu_control_probe.c",
+      "public_source": "note10/device_test/pmu_control_probe.c",
+      "sha256": "4e705cdc1fc5fed0471c7da3847364e477177bbd0d1bcb0b75db008ed5c97c20",
+      "bytes": 2049,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "cpu_pm_roundtrip_snapshot_sha256",
+          "key": "arch/arm64/mm/note10_pmu_control_probe.c"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "arch/arm64/mm/note10_pmu_settle_probe.c",
+      "public_source": "note10/device_test/pmu_settle_probe.c",
+      "sha256": "d564a686600e77192a9647d58efd5dd6e359296e3eb42648c58115fe5b99a54a",
+      "bytes": 3334,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "pmu_settle_sources_sha256",
+          "key": "pmu_settle_probe.c"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "arch/arm64/mm/note10_pmu_state_probe.c",
+      "public_source": "note10/device_test/pmu_state_probe.c",
+      "sha256": "28cee23999b0c7db51c89fbe37722f920908bd796f7099f6eeba179852bbe313",
+      "bytes": 2123,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "cpu_pm_roundtrip_snapshot_sha256",
+          "key": "arch/arm64/mm/note10_pmu_state_probe.c"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "arch/arm64/mm/note10_rcu_context_probe.c",
+      "public_source": "note10/device_test/rcu_context_probe.c",
+      "sha256": "93181fb6c71f595efaa76fece6964289bde8c1a8a1f9baca5d99d78e7c9ad0c6",
+      "bytes": 1995,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "cpu_pm_roundtrip_snapshot_sha256",
+          "key": "arch/arm64/mm/note10_rcu_context_probe.c"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "arch/arm64/mm/note10_ufs_pm_probe.c",
+      "public_source": "note10/device_test/ufs_pm_probe.c",
+      "sha256": "da4d34be3079a64a14326269a461f9302e6eaf1d41165750d86e58af7701c8e2",
+      "bytes": 1220,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "ufs_pm_audit_sources_sha256",
+          "key": "ufs_pm_probe.c"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "arch/arm64/mm/note10_window_access_core.h",
+      "public_source": "note10/device_test/window_access_core.h",
+      "sha256": "79004f474e9ade5863700967116a20f186d44ab98fc8cc02c59c41935b22c72b",
+      "bytes": 1939,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "xnu_runtime_scratch_prepared_sha256",
+          "key": "arch/arm64/mm/note10_window_access_core.h"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "arch/arm64/mm/note10_xnu_observation_geometry.h",
+      "public_source": "note10/device_test/full_diagnostic_v57/arch/arm64/mm/note10_xnu_observation_geometry.h",
+      "sha256": "345bcc1f3bb6a2cf098892644d93cb7fdd631a60bb20a072ded423ebeeb3fc5f",
+      "bytes": 230,
+      "origin": "accepted-v57-compiled-TU-source-snapshot",
+      "report_pins": [
+        {
+          "report_map": "xnu_runtime_scratch_prepared_sha256",
+          "key": "arch/arm64/mm/note10_xnu_observation_geometry.h"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "arch/arm64/mm/note10_xnu_payload_stage.c",
+      "public_source": "note10/device_test/xnu_payload_stage.c",
+      "sha256": "35cdeae7cf59f3267aca91d65722760601389663c16bd0fb5a7799e3254f0529",
+      "bytes": 4292,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "xnu_runtime_scratch_prepared_sha256",
+          "key": "arch/arm64/mm/note10_xnu_payload_stage.c"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "arch/arm64/mm/note10_xnu_payload_stage.h",
+      "public_source": "note10/device_test/full_diagnostic_v57/arch/arm64/mm/note10_xnu_payload_stage.h",
+      "sha256": "1e4c2a5f164418673e8e9c5f0e5f9655d8f99264ddcfd54e5c5388a47516fb87",
+      "bytes": 240,
+      "origin": "accepted-v57-compiled-TU-source-snapshot",
+      "report_pins": [
+        {
+          "report_map": "xnu_runtime_scratch_prepared_sha256",
+          "key": "arch/arm64/mm/note10_xnu_payload_stage.h"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "arch/arm64/mm/note10_xnu_reserve.c",
+      "public_source": "note10/device_test/full_diagnostic_v57/arch/arm64/mm/note10_xnu_reserve.c.body",
+      "sha256": "9da5f31aab5fe6ea0072e8c20ace8a19bbd54248d64d0808e87b3f098d869a4e",
+      "bytes": 4613,
+      "origin": "accepted-v57-compiled-TU-source-snapshot",
+      "report_pins": [
+        {
+          "report_map": "xnu_runtime_scratch_prepared_sha256",
+          "key": "arch/arm64/mm/note10_xnu_reserve.c"
+        }
+      ],
+      "transform": "prepend fresh source-bound build ID line only"
+    },
+    {
+      "installed_path": "arch/arm64/mm/note10_xnu_runtime_geometry.h",
+      "public_source": "note10/device_test/full_diagnostic_v57/arch/arm64/mm/note10_xnu_runtime_geometry.h",
+      "sha256": "d0ac8d791601301607862b22539cc1ee2223bb41a616b7e4453d53dcc8fb6dc5",
+      "bytes": 531,
+      "origin": "accepted-v57-compiled-TU-source-snapshot",
+      "report_pins": [
+        {
+          "report_map": "xnu_runtime_scratch_prepared_sha256",
+          "key": "arch/arm64/mm/note10_xnu_runtime_geometry.h"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "arch/arm64/mm/note10_xnu_runtime_observation.c",
+      "public_source": "note10/device_test/xnu_runtime_observation.c",
+      "sha256": "a8d99bf3747a4e7a7064b95beaac67ae05346a2008f4a2497d4c973672323004",
+      "bytes": 1683,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "xnu_runtime_scratch_prepared_sha256",
+          "key": "arch/arm64/mm/note10_xnu_runtime_observation.c"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "arch/arm64/mm/note10_xnu_runtime_plan.c",
+      "public_source": "note10/device_test/xnu_runtime_plan.c",
+      "sha256": "82009f2f6355726556a83fe4040ca117557ae5d2c8456290ae72753d6c42fd7e",
+      "bytes": 3267,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "xnu_runtime_scratch_prepared_sha256",
+          "key": "arch/arm64/mm/note10_xnu_runtime_plan.c"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "arch/arm64/mm/note10_xnu_runtime_scratch.c",
+      "public_source": "note10/device_test/xnu_runtime_scratch.c",
+      "sha256": "3775f48d09fff787e921d3962aa5cf30fcce60524c5188f06b8f2b0f65934fe6",
+      "bytes": 5948,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "xnu_runtime_scratch_prepared_sha256",
+          "key": "arch/arm64/mm/note10_xnu_runtime_scratch.c"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "arch/arm64/mm/note10_xnu_window_access.c",
+      "public_source": "note10/device_test/xnu_window_access.c",
+      "sha256": "1990dba32dd509d563357fb64cd9e452ca5e9add8e145499b97cc815425e4e54",
+      "bytes": 2253,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "xnu_runtime_scratch_prepared_sha256",
+          "key": "arch/arm64/mm/note10_xnu_window_access.c"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "arch/arm64/mm/runtime_relocation.c",
+      "public_source": "note10/xnu26/runtime_relocation.c",
+      "sha256": "dc51d22fce4c8e0d566d6158f53aa3d512a65954541e4ea4201c5878cb17e448",
+      "bytes": 13518,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "xnu_runtime_scratch_prepared_sha256",
+          "key": "arch/arm64/mm/runtime_relocation.c"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "arch/arm64/mm/runtime_relocation.h",
+      "public_source": "note10/xnu26/runtime_relocation.h",
+      "sha256": "2956336fbec371636acb62a4fc51aae451e74a65bdf4595b12e80c3be8ca9037",
+      "bytes": 3114,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "xnu_runtime_scratch_prepared_sha256",
+          "key": "arch/arm64/mm/runtime_relocation.h"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "include/linux/note10_abox_pm.h",
+      "public_source": "note10/device_test/abox_pm_contract.h",
+      "sha256": "a1eff8b919193d515a1a7f28a8e6802c231b7962de54b87c36582903414dd9b3",
+      "bytes": 3369,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "abox_pm_sources_sha256",
+          "key": "abox_pm_contract.h"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "include/linux/note10_abox_pmu.h",
+      "public_source": "note10/device_test/abox_pmu_contract.h",
+      "sha256": "9ae4a4daaa416cad28afde0d752d8a891470ade7efd0f7c80b8c5c4dc423aa05",
+      "bytes": 1162,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "abox_pmu_sources_sha256",
+          "key": "abox_pmu_contract.h"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "include/linux/note10_dma_pm.h",
+      "public_source": "note10/device_test/dma_pm_contract.h",
+      "sha256": "046c941d4c3113989e923dd3d8def2ed191b6e6102299477a1724277675b0ac8",
+      "bytes": 602,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "dma_pm_audit_sources_sha256",
+          "key": "dma_pm_contract.h"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "include/linux/note10_ehld_lock_audit.h",
+      "public_source": "note10/device_test/ehld_lock_contract.h",
+      "sha256": "0539ab218119e00ae395238a632cf8ef3f3cebfa754b9e3cae3680459855d995",
+      "bytes": 1152,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "cpu_pm_roundtrip_snapshot_sha256",
+          "key": "include/linux/note10_ehld_lock_audit.h"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "include/linux/note10_fpsimd_reference_audit.h",
+      "public_source": "note10/device_test/fpsimd_reference_contract.h",
+      "sha256": "8723952deb15334b209341fd52616e96da3aac6c6fc586ed577a0164ac956c92",
+      "bytes": 846,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "cpu_pm_roundtrip_snapshot_sha256",
+          "key": "include/linux/note10_fpsimd_reference_audit.h"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "include/linux/note10_gic_roundtrip.h",
+      "public_source": "note10/device_test/gic_roundtrip_contract.h",
+      "sha256": "f022340837027a45efd4dd0dfe889c5c2e574faee6fce0ed9fa288607d365e7b",
+      "bytes": 385,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "gic_roundtrip_sources_sha256",
+          "key": "gic_roundtrip_contract.h"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "include/linux/note10_iommu_pm.h",
+      "public_source": "note10/device_test/iommu_pm_contract.h",
+      "sha256": "e874b5d503d33416b5e5c0a8b72705676fdec77ddc960908a214b0c4d0ea797c",
+      "bytes": 891,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "iommu_pm_sources_sha256",
+          "key": "iommu_pm_contract.h"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "include/linux/note10_pm_branch.h",
+      "public_source": "note10/device_test/pm_branch_contract.h",
+      "sha256": "313f437c8dbb5a025ed47de66e1da4a0dd55dcd564db44f46f9b0553ab516f6e",
+      "bytes": 871,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "cpu_pm_roundtrip_snapshot_sha256",
+          "key": "include/linux/note10_pm_branch.h"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "include/linux/note10_pm_callbacks.h",
+      "public_source": "note10/device_test/pm_callbacks_contract.h",
+      "sha256": "349096928bbc02ec76a3cfc7e7f04d7984689baf127b6edd336c6d4e02229c5c",
+      "bytes": 1114,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "pm_callbacks_sources_sha256",
+          "key": "pm_callbacks_contract.h"
+        },
+        {
+          "report_map": "pm_callbacks_prepared_sha256",
+          "key": "include/linux/note10_pm_callbacks.h"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "include/linux/note10_pm_contract.h",
+      "public_source": "note10/device_test/pm_test_contract.h",
+      "sha256": "cfbdcba68a43a297a98db813a8d3741137421db696856cbd23c3b26ecbe7642c",
+      "bytes": 634,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "pm_quiesce_sources_sha256",
+          "key": "pm_test_contract.h"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "include/linux/note10_pm_cpus.h",
+      "public_source": "note10/device_test/pm_cpus_contract.h",
+      "sha256": "4d26fcaab165335797003d4e377e13a432461bd716d2759a0d557b5e4611d935",
+      "bytes": 640,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "pm_cpus_sources_sha256",
+          "key": "pm_cpus_contract.h"
+        },
+        {
+          "report_map": "pm_preconditions_sources_sha256",
+          "key": "pm_cpus_contract.h"
+        },
+        {
+          "report_map": "pm_branch_sources_sha256",
+          "key": "pm_cpus_contract.h"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "include/linux/note10_pm_edge_dma.h",
+      "public_source": "note10/device_test/pm_edge_dma_contract.h",
+      "sha256": "5b1c12292b91267692a3a1d37154023673d7f7f8af23d4ba4b453e759d4ea345",
+      "bytes": 645,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "pm_edge_sources_sha256",
+          "key": "pm_edge_dma_contract.h"
+        },
+        {
+          "report_map": "pm_edge_prepared_sha256",
+          "key": "include/linux/note10_pm_edge_dma.h"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "include/linux/note10_pm_edge_iommu.h",
+      "public_source": "note10/device_test/pm_edge_iommu_contract.h",
+      "sha256": "fa4aecc1fc409cb5a37bf43ae65b7246bba6b105c403d9666803625197989d26",
+      "bytes": 937,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "pm_edge_sources_sha256",
+          "key": "pm_edge_iommu_contract.h"
+        },
+        {
+          "report_map": "pm_edge_prepared_sha256",
+          "key": "include/linux/note10_pm_edge_iommu.h"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "include/linux/note10_pm_edge_syscore.h",
+      "public_source": "note10/device_test/pm_edge_syscore_contract.h",
+      "sha256": "62c0f83942a6cc9813b2365b5cf39263dd54c2f57f4df3fa9fcd13410209dc5f",
+      "bytes": 599,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "pm_edge_sources_sha256",
+          "key": "pm_edge_syscore_contract.h"
+        },
+        {
+          "report_map": "pm_edge_prepared_sha256",
+          "key": "include/linux/note10_pm_edge_syscore.h"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "include/linux/note10_pm_irq.h",
+      "public_source": "note10/device_test/pm_irq_contract.h",
+      "sha256": "9a50f268ea9545139b99af71e43437ee338ca4e6d8b1f31f8477191231daebe1",
+      "bytes": 896,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "pm_irq_sources_sha256",
+          "key": "pm_irq_contract.h"
+        },
+        {
+          "report_map": "pm_irq_prepared_sha256",
+          "key": "include/linux/note10_pm_irq.h"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "include/linux/note10_pm_noirq.h",
+      "public_source": "note10/device_test/pm_noirq_contract.h",
+      "sha256": "7bbe3ffbb5c93a17e05c543d721d18b8855ea23d25260fb75cc8801f77824b06",
+      "bytes": 764,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "pm_noirq_sources_sha256",
+          "key": "pm_noirq_contract.h"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "include/linux/note10_pm_preconditions.h",
+      "public_source": "note10/device_test/full_diagnostic_v57/include/linux/note10_pm_preconditions.h",
+      "sha256": "610bd601d3d8ded0b8ec4294b8230a852edd6c0092260b3eec0aa5dbad3aebd3",
+      "bytes": 3757,
+      "origin": "accepted-v57-compiled-TU-source-snapshot",
+      "report_pins": [
+        {
+          "report_map": "cpu_pm_notifier_trace_prepared_sha256",
+          "key": "include/linux/note10_pm_preconditions.h"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "include/linux/note10_pmu_control_audit.h",
+      "public_source": "note10/device_test/pmu_control_contract.h",
+      "sha256": "219409a5fe8e4f5901f8499632d1553d1fbd80b74cee3f939bd68c466c0ff52b",
+      "bytes": 1111,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "cpu_pm_roundtrip_snapshot_sha256",
+          "key": "include/linux/note10_pmu_control_audit.h"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "include/linux/note10_pmu_settle.h",
+      "public_source": "note10/device_test/pmu_settle_contract.h",
+      "sha256": "10b053e7b5fff380791aecd6339cd2d6b3bd8c7b333be275821256d5ae48ad76",
+      "bytes": 479,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "pmu_settle_sources_sha256",
+          "key": "pmu_settle_contract.h"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "include/linux/note10_pmu_state_audit.h",
+      "public_source": "note10/device_test/pmu_state_contract.h",
+      "sha256": "4700e73cdde6fc3bd79615ae21a25592c84bab5a403b844d36da3bc96f97cd63",
+      "bytes": 959,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "cpu_pm_roundtrip_snapshot_sha256",
+          "key": "include/linux/note10_pmu_state_audit.h"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "include/linux/note10_rcu_context_audit.h",
+      "public_source": "note10/device_test/rcu_context_contract.h",
+      "sha256": "3b15c3f6ea3e846df328d9cbd10b0c4ff8e9023aa160e1d45b79c09b1f9955c1",
+      "bytes": 801,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "cpu_pm_roundtrip_snapshot_sha256",
+          "key": "include/linux/note10_rcu_context_audit.h"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "include/linux/note10_ufs_pm.h",
+      "public_source": "note10/device_test/ufs_pm_contract.h",
+      "sha256": "c1a183aa275e9ae6583a89c47e71f1205df1ac28015ee1ef80f5c4d0d0dfcf2c",
+      "bytes": 796,
+      "origin": "byte-identical-existing-public-source",
+      "report_pins": [
+        {
+          "report_map": "ufs_pm_audit_sources_sha256",
+          "key": "ufs_pm_contract.h"
+        }
+      ],
+      "transform": "none"
+    },
+    {
+      "installed_path": "kernel/power/Kconfig",
+      "public_source": "note10/device_test/full_diagnostic_v57/kernel/power/Kconfig",
+      "sha256": "b00159de4971279b011129de792ebe2865e2318443295519439db0a46df7e333",
+      "bytes": 16713,
+      "origin": "accepted-v57-compiled-TU-source-snapshot",
+      "report_pins": [
+        {
+          "report_map": "cpu_pm_notifier_trace_prepared_sha256",
+          "key": "kernel/power/Kconfig"
+        }
+      ],
+      "transform": "none"
+    }
+  ]
+}

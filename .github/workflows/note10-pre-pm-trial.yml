@@ -1,0 +1,61 @@
+name: Note10 dormant full pre-PM trial wrapper
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  pre-pm-wrapper:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install pinned Kbuild tools
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          packages=(clang-14 llvm-14 lld-14 gcc gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi make bc bison flex libssl-dev libelf-dev)
+          missing=()
+          for package in "${packages[@]}"; do
+            if [ "$(dpkg-query -W -f='${Status}' "$package" 2>/dev/null || true)" != "install ok installed" ]; then
+              missing+=("$package")
+            fi
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            if [ -f /etc/apt/apt-mirrors.txt ]; then
+              printf 'https://archive.ubuntu.com/ubuntu/\tpriority:1\nhttps://security.ubuntu.com/ubuntu/\tpriority:2\n' | sudo -n tee /etc/apt/apt-mirrors.txt >/dev/null
+            fi
+            sudo -n env DEBIAN_FRONTEND=noninteractive timeout --kill-after=30s 180s apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
+            sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a timeout --kill-after=30s 480s apt-get -o Dpkg::Use-Pty=0 -o DPkg::Lock::Timeout=60 -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install --no-install-recommends -y "${missing[@]}"
+          fi
+          clang-14 --version
+          llvm-objdump-14 --version
+          ld.lld-14 --version
+      - name: Verify exact pinned native input
+        id: native_input
+        shell: bash --noprofile --norc -euo pipefail {0}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python note10/device_test/relocation_trial_input.py --output note10/private/v62-ci-input
+      - name: Compile full diagnostic disabled and enabled init.o
+        id: static_full_TU
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          python note10/device_test/build_pre_pm_trial.py --payload note10/private/v62-ci-input/payload/kernel.mem --output note10/private/v62-ci-wrapper
+      - name: Upload full pre-PM static evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: note10-pre-pm-trial-pc-only
+          if-no-files-found: error
+          retention-days: 7
+          include-hidden-files: true
+          path: |
+            note10/private/v62-ci-input/
+            note10/private/v62-ci-wrapper/
+            !note10/private/v62-ci-wrapper/work/**
