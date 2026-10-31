@@ -1,5 +1,12 @@
 # 작업 상태 (2026-10-31, Asia/Seoul)
 
+## 2026-10-31: v59 비계측 AArch64 재배치·원복 PC 실행 검증 통과
+
+- **검증 소스:** `5c3ca5f5a3b21af725701df16e057a485d9add76`; [CI 41167139172](https://github.com/eirblue/ios_note10p/actions/runs/41167139172) 첫 번째 시도 통과. 실제 실행·단계·산출물 digest·전체 파일·소스·입력·관찰 바이트 결속을 부모 검사기로 확인했다.
+- **PC 실행:** 기존 production C/H를 바꾸거나 fixture observer를 넣지 않은 AArch64 ELF를 Unicorn 2.1.4에서 실행했다. 실제 payload 정상 이동·불일치 주입 뒤 전체 원복·backup 용량 거절·버퍼 alias 거절의 4개가 통과했다. 메타데이터 검사 8개와 명령어 결속 검사 6개도 통과했다.
+- **증거 범위:** `0x1004000` 목적지의 실제 payload와 `0x22b0000` 전체 prefix·backup·guard를 독립 바이트 대조했다. target ABI·12개 인수·복귀 PC·SP·callee-saved 레지스터를 확인했다. FP/AdvSIMD는 PC 모델의 명시적 가정이다.
+- v59 기기·BOOT·Linux Image 작업은 0회다. v57 단일 회차 소진 상태를 유지한다. 이전 통과 미변경 시험 묶음은 로컬에서 반복하지 않았다. 앞선 CI 41166367312는 최종 명령어 결속 오류로 실패한 이력을 보존했다. 물리 RAM 소유권·실기기 EL1 준비·XNU 실행·iOS 부팅을 확인한 결과는 아니다. [결과와 제한](xnu26/RUNTIME-RELOCATION.md).
+
 ## 2026-10-31: v58 PC 전용 payload 겹침 재배치·원복 검증 통과
 
 - **검증 소스:** `12549ffe88438aa583690da744b9a8d035d84019`; [CI 41161078327](https://github.com/eirblue/ios_note10p/actions/runs/41161078327) 첫 번째 시도 통과. 실제 산출물의 원본 입력·소스·컴파일·검사 기록·전체 바이트를 고정한 부모 검사기가 통과했다.

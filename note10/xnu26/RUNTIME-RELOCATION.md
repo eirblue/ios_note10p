@@ -1,5 +1,63 @@
 # Runtime relocation metadata and PC data trials
 
+## v59 production AArch64 PC execution passed
+
+Tested source `5c3ca5f5a3b21af725701df16e057a485d9add76` passed
+[CI 41167139172](https://github.com/eirblue/ios_note10p/actions/runs/41167139172),
+attempt 1. The authenticated parent reader verified actual run/job/step success,
+artifact API digest, every extracted member, exact source and upstream input
+lineage, the final closed ELF and full saved observations. The v59 result SHA-256
+is `8c11e9c3a2b27c06fd43afc2ceb4fe149aa861fea1bd818d32fd0f478f658113`.
+This tested source is separate from the result-document publication commit.
+
+The unchanged production planner and relocation-trial C/H are linked into a
+statically closed AArch64 ET_EXEC with a read-only ABI oracle. No fixture
+observer, runtime callback, writable global or external dependency is linked.
+The actual target instructions execute in Unicorn 2.1.4 over PC-owned mappings;
+the XNU payload is data in a non-executable buffer. Code is RX, oracle/input
+pages are read-only, and stack/output pages are RW/NX. The numeric requested
+physical base `0x80000000` is left unmapped and is distinct from buffer pointers.
+
+All four target cases passed: real overlapping relocation and restoration;
+a deliberately corrupted transient byte returning INVALID followed by complete
+restoration and an unchanged result sentinel; insufficient backup capacity;
+and overlapping window/backup rejection before writes. The latter two preserve
+all caller outputs. The target-size probe yields request/result sizes 96/48
+bytes. All twelve AAPCS64 arguments, sentinel return PC, 16-byte aligned SP,
+x19-x29 and the low 64 bits of v8-v15 are checked independently of return counts.
+
+Address-filtered memory watchers record the real target bytes before the single
+mismatch injection and again before restoration, together with the complete
+backup and before/after buffers. Deterministic compressed, deduplicated full
+observations are bounded-decoded by the parent reader and compared byte for
+byte. The exact 19,578,880-byte payload moves to offset `0x1004000`; the entire
+36,372,480-byte affected prefix (`0x22b0000`) and sentinel guards are restored.
+Observed PCs bind the backward store, comparison read and restoration store to
+the retained production ELF/disassembly. No per-instruction observer replaces
+the copy or comparison code.
+
+Eight wheel-metadata fixtures and six instruction-binding fixtures also pass.
+The metadata parser accepts LF/CRLF headers and rejects wrong, missing or
+duplicate identity/version headers. Byte-store binding accepts only STRB/STURB
+at the checked function extents and rejects wider stores or misplaced PCs.
+[Arm's instruction reference](https://documentation-service.arm.com/static/6245c734b059dc5ff9a8bdab)
+defines STURB as the unscaled byte-store form. The earlier
+[CI 41166367312](https://github.com/eirblue/ios_note10p/actions/runs/41166367312)
+remains failed: all four model subprocesses completed, but the final binding
+checker rejected the actual Clang14 STURB. A retained-data postcheck verified
+the narrow correction without replaying that emulator or changing its CI status;
+the successful corrected run above is fresh.
+
+The configured per-case ceiling is two billion instructions, with 180 seconds
+of emulator timeout and 210 seconds of process timeout. These are bounds;
+no executed instruction count is claimed. FP/AdvSIMD access is explicitly
+enabled only in the model. This does not prove physical EL1/FPU readiness,
+reserved-RAM ownership, asynchronous-PM ordering or init-memory lifetime.
+No device, BOOT or Linux Image action occurs in v59; v57 remains the last
+physical result with its single cycle consumed. No hardware XNU execution or
+iOS boot is established. Passed unchanged historical suites were not replayed
+locally; the preserved v58 hosted evidence and this target execution are distinct.
+
 ## v58 overlapping payload trial passed
 
 Tested source `12549ffe88438aa583690da744b9a8d035d84019` passed
