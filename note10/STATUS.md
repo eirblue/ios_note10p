@@ -1,5 +1,13 @@
 # 작업 상태 (2026-10-31, Asia/Seoul)
 
+## 2026-10-31: v61 실제 커널 TU 구성요소의 PC 실행 검증 통과
+
+- **검증 소스:** `557fa38b7ec52eb1a563860172f00e1125b60339`; [CI 41176433103](https://github.com/eirblue/ios_note10p/actions/runs/41176433103) 첫 번째 시도 통과. 부모 독립 판독기가 실제 API·전체 산출물·소스·커널 객체·재배치·관측 바이트 결속을 확인했다.
+- **실제 TU 범위:** 고정된 reservation-only `arch/arm64/mm/init.c`를 실제 커널 헤더·설정·Kbuild로 기본 비활성/활성 빌드했다. 기존 production C/H와 ABI는 유지하고, 부팅 경로에서 호출되지 않는 어댑터·닫힌 구성요소를 실제 `init.o`에서 추출해 PC 모델에서만 실행했다. 독립 재컴파일이나 OS provider stub은 사용하지 않았다.
+- **결과:** 새 경계 검사 57개와 실제 객체 기반 PC 실행 4개 통과. 정적 GPR 명령 918개, 전체 prefix 원복·ABI·guard·모델 CPACR 0 조건을 확인했다. 컴파일러 프레임의 구성요소 추정은 모델 leaf 1,440바이트, 거절 깊이 프레임을 포함한 일반 ADT 6,192바이트이며 실제 `THREAD_SIZE`는 16,384바이트다.
+- **분석 계측:** 함수/데이터 section·stack-usage·machine-outliner 비활성 옵션과 LLD14 `-O0`을 명시했다. 공유 읽기 전용 문자열 풀 1,217바이트 전체를 원본과 동일하게 보존하며 사용되지 않는 Linux 문자열도 포함함을 기록했다. 일반 production Image 명령이나 전체 OS/IRQ 스택 안전성의 증거는 아니다.
+- v61 기기·BOOT·Image 작업은 0회다. 앞선 CI 41174341105·41175122836은 실패로 보존했다. v57 단일 실기기 회차 소진 상태를 유지하며 실제 예약 RAM 쓰기·XNU 실행·iOS 부팅을 주장하지 않는다. [결과와 제한](xnu26/RUNTIME-RELOCATION.md).
+
 ## 2026-10-31: v60 커널 옵션 일부의 GPR 전용 PC 실행 검증 통과
 
 - **검증 소스:** `d5b56efa5b7d9f0313fb72639db332c581e7e6b2`; [CI 41168995359](https://github.com/eirblue/ios_note10p/actions/runs/41168995359) 첫 번째 시도 통과. 실제 API·전체 산출물·소스·입력·옵션·ABI·관찰 바이트 결속을 부모 검사기로 확인했다.

@@ -1,5 +1,62 @@
 # Runtime relocation metadata and PC data trials
 
+## v61 actual Kbuild component projection passed
+
+Tested source `557fa38b7ec52eb1a563860172f00e1125b60339` passed
+[CI 41176433103](https://github.com/eirblue/ios_note10p/actions/runs/41176433103),
+attempt 1. The independent authenticated parent reader verified actual run,
+job and step success, artifact digest and complete inventories, source and
+kernel input closure, original-object section bytes and exact relocations,
+ABI, native emulator wheel and full observations without re-emulating. The
+v61 result SHA-256 is `23f5ed8aed4c713fa349bcb20c2ed3b869d9378d6672f998ba1b1a213d18fd7c`.
+
+The unchanged production planner/trial C/H and ABI oracle were compiled
+inside the pinned reservation-only `arch/arm64/mm/init.c` translation unit
+using real kernel headers, configuration and Kbuild. Fresh disabled and
+enabled objects prove the default-off component and absence of incoming boot,
+initcall or export references to its pure forwarding adapter. The PC ELF is
+a closed projection of that actual enabled `init.o`, rooted at the explicit
+adapter entry; there is no standalone core recompilation or OS provider stub.
+The actual Linux initcall path is not exercised.
+
+Analysis instrumentation is explicit: `-gdwarf-4 -fstack-usage
+-ffunction-sections -fdata-sections -mllvm -enable-machine-outliner=never`,
+with a pinned LLD14 non-relocatable projection link using `-O0`, garbage
+collection and no relaxation. These choices change the analysis output; this
+is not an unchanged production Image command. The complete 1,217-byte shared
+readonly, non-executable string pool is preserved byte-for-byte and offset-for-
+offset from the original object. It includes unused Linux init strings;
+component references remain confined to the two evidenced relocations to the
+original `name` literal. No writable or unrelated executable section is admitted.
+
+All 57 new component gate fixtures and four actual-object adapter model cases
+passed. Real payload relocation, injected comparison failure with full restore,
+backup-capacity rejection and alias rejection retain the exact input geometry,
+full `0x22b0000` prefix/backup/guard checks and twelve-argument target ABI.
+Model CPACR_EL1 readbacks stay zero before and after all four cases. The 918
+GPR-only decoded instructions are a static code count, not an executed count.
+No FP trap probe, physical EL1 permission or fixed-x18 proof is inferred.
+
+Actual compiler frames sum to 1,408 bytes. Adding the adapter's 32-byte incoming
+stack-argument area gives a 1,440-byte bound for the immutable 56-byte leaf ADT,
+with a 14,944-byte margin against configured `THREAD_SIZE=16384`. The generic
+ADT estimate includes ten recursive frames (including rejecting depth 9) and
+is 6,192 bytes. Both satisfy the unchanged component budget/margin gates.
+These are scoped compiler estimates; Linux callers, allocator/crypto/PM,
+asynchronous IRQ and whole-OS stack contributions remain unresolved. The
+actual-header IRQ stack constant is not an IRQ stack-safety proof. No prior
+2,048-byte external-stack assumption is reused.
+
+The ten new private reader integrity fixtures passed locally in focused phases;
+unchanged older suites were not replayed locally. Earlier
+[CI 41174341105](https://github.com/eirblue/ios_note10p/actions/runs/41174341105)
+and [CI 41175122836](https://github.com/eirblue/ios_note10p/actions/runs/41175122836)
+remain failures, respectively at compiler-outline and shared-literal closure
+gates. Their evidence is retained. This result builds no Image or BOOT, performs
+no device action and proves no physical writer, reserved-RAM ownership, XNU
+execution or iOS boot. Deployment readiness remains false; v57 remains the last
+single, consumed physical diagnostic cycle.
+
 ## v60 observed kernel-option GPR profile passed
 
 Tested source `d5b56efa5b7d9f0313fb72639db332c581e7e6b2` passed
