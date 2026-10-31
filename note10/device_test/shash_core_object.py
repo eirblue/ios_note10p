@@ -5,7 +5,7 @@ from pre_pm_archive_contract import require
 from sha256_provider_object import one_symbol,exact_target
 from relocation_trial_kernel_profile import gpr_only
 from shash_core_dwarf import extract_layouts
-from shash_core_registration_cfg import registration_cfg
+from shash_core_clamped_cfg import registration_cfg_dispatch
 from shash_core_instructions import decode,trace,add,load
 ESSENTIAL=('crypto_register_shashes','crypto_register_shash','crypto_unregister_shash','shash_prepare_alg','crypto_shash_init_tfm','crypto_alloc_shash','crypto_shash_update','crypto_shash_final','crypto_shash_finup','crypto_shash_digest')
 ROW=re.compile(r'\s*([0-9a-f]+):\s+((?:[0-9a-f]{2} ){3}[0-9a-f]{2}|[0-9a-f]{8})\s+([a-zA-Z.][a-zA-Z0-9.]*)\s*(.*?)\s*')
@@ -83,7 +83,10 @@ def scoped_input(obj,fn,record):
 
 def function_facts(obj,fn,rows,frames):
  require(fn['size']>0 and fn['size']%4==0 and fn['name'] in frames,'actual essential function and stack row; no missing zero inference');sec=obj['sections'][fn['section']];start=fn['value'];end=start+fn['size'];require(end<=len(sec['bytes']),'actual function extent');words,text=scoped_input(obj,fn,rows)
- isa=gpr_only(text);require(all(decode(word)['op']!='unknown' for word in words.values()),'every scoped machine word belongs to the finite new GPR decoder; unsupported form rejects');rels={};calls={};external=[]
+ isa=gpr_only(text)
+ for off,word in words.items():
+  if decode(word)['op']=='unknown':raise ValueError('unsupported finite GPR word: function='+fn['name']+' section='+sec['name']+' offset='+hex(off)+' word='+hex(word)+' object_sha256='+obj.get('sha256','unavailable'))
+ rels={};calls={};external=[]
  for rel in obj['relocations']:
   if rel['section']!=fn['section'] or not start<=rel['offset']<end:continue
   require(rel['offset'] not in rels and rel['type'] in (275,277,282,283),'finite scoped new relocation kinds');sym=rel['symbol'];identity=(sym['name'],sym['section'],sym['value'],rel['addend'],sym['info'],sym['size']);rels[rel['offset']]={'type':rel['type'],'identity':identity}
@@ -168,7 +171,7 @@ def shash_object_proof(raw,text,usage,ELFFile,headers,oracle,config):
  require(hashlib.sha256(headers['crypto/shash.c']).hexdigest()==SOURCE_SHA,'unmodified pinned new stock source');obj=parse_elf(raw,1);layouts=extract_layouts(ELFFile(io.BytesIO(raw)),oracle);cfg=configuration(config);require(cfg['CONFIG_ARM64_4K_PAGES']=='y' and cfg['CONFIG_CRYPTO_HASH']=='y' and cfg['CONFIG_CRYPTO_HASH2']=='y','actual core configuration')
  require(b'crypto_hash-y += shash.o' in headers['crypto/Makefile'] and b'obj-$(CONFIG_CRYPTO_HASH2) += crypto_hash.o' in headers['crypto/Makefile'],'actual composite source inclusion plan')
  rows=object_rows(obj,text);frames=frame_rows(usage);facts={name:function_facts(obj,one_symbol(obj,name,2),rows,frames) for name in ESSENTIAL};table=table_proof(obj,layouts,oracle,cfg)
- dispatch={field:dispatch_proof(facts['crypto_shash_'+field],layouts,field) for field in ('update','final','finup','digest')};desc=descriptor_proof(facts['crypto_shash_init_tfm'],layouts);registration=registration_cfg(obj,facts['crypto_register_shashes']['symbol'],layouts['types']['shash_alg']['byte_size']);prepare=preparation_proof(facts['shash_prepare_alg'],layouts,oracle,obj)
+ dispatch={field:dispatch_proof(facts['crypto_shash_'+field],layouts,field) for field in ('update','final','finup','digest')};desc=descriptor_proof(facts['crypto_shash_init_tfm'],layouts);registration=registration_cfg_dispatch(obj,facts['crypto_register_shashes']['symbol'],layouts['types']['shash_alg']['byte_size']);prepare=preparation_proof(facts['shash_prepare_alg'],layouts,oracle,obj)
  require_calls(facts['crypto_alloc_shash'],('crypto_alloc_tfm',))
  alloc_calls=[e for e in facts['crypto_alloc_shash']['events'] if e.get('target')=='crypto_alloc_tfm']
  require(len(alloc_calls)==1 and address_target(alloc_calls[0]['arguments'][1],obj,'crypto_shash_type',1),'actual alloc_shash type argument; allocation still external/unproved')
