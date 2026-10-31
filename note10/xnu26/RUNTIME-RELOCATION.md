@@ -1,5 +1,19 @@
 # Runtime relocation metadata and PC data trials
 
+## v65 verified crypto hash composite origin
+
+Source `8d9678bcc0fb4046093e637ed8d8c61d523b79f2` passed [CI 41242201836](https://github.com/eirblue/ios_note10p/actions/runs/41242201836), attempt 1. The root strict reader ran once and exited 0; independent actual-result review accepted the static PC-only scope. Immutable private result digest: `174deddddbd6de3d3e0f8fb12384053bdcd7d197b536bede2254cb071d99c233`.
+
+The stock Kbuild target `crypto/crypto_hash.o` links `ahash.o` then `shash.o` through the pinned GNU LD-r branch. Composite SHA-256: `485b20e7075dc356325a0d33049b664ef7cc9f3c11a29838c0fc5221267b4edf`. The finite mapless proof binds 11 selected shash identities (ten functions and the passive `crypto_shash_type` table), 21 owned sections, complete selected bytes, symbol metadata and typed RELA records. It preserves the accepted v64 selected byte/relocation identities without rerunning its instruction, DWARF, callback or CFG proofs. This does not assert whole-object byte equality with v64.
+
+The complete 702-entry shash prerequisite map, three generated configuration files and normalized CC arguments equal the accepted v64 inputs. Mandatory primary C source capture is bound to its saved source assignment, single CC source operand and declared leaf mapping; bounded stable reads retain one buffer for copied bytes and SHA. The actual GNU make trace includes expanded leaf postprocessing and composite recipes; conditional branch execution remains unobserved.
+
+The original ZIP is 2,836,090 bytes, SHA-256 `8a81d7add74142ff009ae72a7bb9c09f7af2fb5fd76da445a8218acaf35fdf4e`; all 1,454 ordinary members and 9,543,577 expanded bytes were checked against the canonical collection map. The run/job/five required steps, individual artifact, current authenticated plaintext log, 16 local sources, 12 published blobs and both protected complete kernel/v64 ZIP inputs are bound to the fresh collector and separate reader pins. No selected-object repack replaced either original artifact.
+
+Fixture history remains tied to each original source checkpoint: CP1 public 120/private 42, CP2 53, CP3 58, CP4 16, CP5 89; unpublished CP6 R1/R3 partial completion of five/23 cases and final R4's 33 new cases retain separate records. Completed cases were not replayed and final CI invoked zero fixture suites. These counts are not a combined current-source regression claim. Five earlier v65 CI failures remain permanently unaccepted.
+
+Twenty-five external symbols remain unresolved. This result proves no ahash semantics, runtime provider availability, allocation success, callback execution, whole stack bound, full Image/BOOT build, XNU execution or iOS boot. Device/BOOT/reboot operations are zero; deployment readiness remains false. The consumed v57 physical cycle is not replayed.
+
 ## v64 verified shash core object static result
 
 Source `31ece2db6e6b5391283db5bbc8e91f90af12ec52` passed [CI 41219611380](https://github.com/eirblue/ios_note10p/actions/runs/41219611380), attempt 1. The parent independently verified authenticated run/job/required-step/artifact records, the complete 3,134,662-byte ZIP (SHA-256 `58ce98c1b25e4a439fb2cc4cd0c5512c51bea2d4d6f6dd80fc3167abd72d6c90`), all 1,470 members (10,036,869 expanded bytes), the 34-file source closure and protected complete kernel archive. Full ZIP hashing and source binding preceded final candidate/pins. Parent result digest: `8245e788969baca254b1007fce93a428429bb7017e22c44a931ad7167e08d0d3`.
