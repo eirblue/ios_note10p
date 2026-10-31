@@ -1,5 +1,56 @@
 # Runtime relocation metadata and PC data trials
 
+## v60 observed kernel-option GPR profile passed
+
+Tested source `d5b56efa5b7d9f0313fb72639db332c581e7e6b2` passed
+[CI 41168995359](https://github.com/eirblue/ios_note10p/actions/runs/41168995359),
+attempt 1. The authenticated parent reader bound actual run/job/step success,
+artifact digest and complete inventories, reviewed source/import closure,
+upstream input, exact compiler options, target ABI, native emulator wheel and
+full saved observations. The v60 result SHA-256 is
+`15339d5395b38e5469e0994aba90031f03e1fe203ac20354c92eddca1256b1d3`.
+The tested source is distinct from result-document publication.
+
+The new explicit `kernel-init-subset-v1` profile compiles the unchanged
+production planner/trial C/H and ABI oracle with a selected option subset from
+the saved v57 `init.o.cmd` (run41109866784). The historical command digest is
+`6c5dcb0e7c76b5bc00533d058458632b69efca4c1330be69bd90d4201b5bca32`;
+its original bytes are retained and checked locally. This is not a fresh
+upstream command retrieval, the full Linux command, Linux-header translation
+unit, kernel Image build or integration result. The exact nine selected options,
+including `-Oz`, `-mno-implicit-float` and `-march=armv8-a+lse`, are source-pinned
+in [the profile record](../device_test/relocation_trial_kernel_profile.json).
+Neither `-mgeneral-regs-only` nor `-ffixed-x18` is inferred from that command.
+
+The independent GPR-only gate parses every decoded instruction and its operand
+fields. It rejects FP/SIMD operations or register classes and malformed fields,
+while excluding addresses, encodings and symbol annotations from register-token
+checks. All 17 new profile fixtures pass. The CI ELF decodes to 1,270 GPR-only
+instruction records; the separate local compiler output had 1,193. These static
+counts are not executed instruction counts. The model sets `CPACR_EL1` to zero
+and verifies zero readback before and after each case. No FP-instruction trap
+probe was run, and this model state does not establish real EL1 permissions.
+
+All four new profile target cases pass: real overlapping relocation with full
+restoration; transient mismatch returning INVALID with full restoration and an
+unchanged result sentinel; backup-capacity rejection; and window/backup-alias
+rejection. The same pinned 19,578,880-byte payload, `0x1004000` destination,
+`0x22b0000` restored prefix, complete compressed observations, guard bytes,
+12-argument ABI, callee-saved checks, unmapped numeric physical range and
+instruction-PC bindings remain in force. A separate local private-reader run passed six new
+root/profile identity checks. The earlier v59 default and historical suites
+were not replayed locally; AST comparison preserves the original default
+executor body and FP predicate. Verification selects the expected profile from
+the caller and pinned source, never from the report itself.
+
+This is PC execution of a kernel-option code-generation subset. It does not
+access reserved physical RAM, establish ownership, resolve asynchronous-PM
+ordering or init-memory lifetime, prove hardware FPU/x18 state, or execute XNU
+on a phone. There are zero device, BOOT and Linux Image actions in v60. The
+last physical result remains v57 with its single cycle consumed. A future
+physical integration still requires its own source, context, lifetime, stack,
+recovery and integrity review under the existing safety gates.
+
 ## v59 production AArch64 PC execution passed
 
 Tested source `5c3ca5f5a3b21af725701df16e057a485d9add76` passed

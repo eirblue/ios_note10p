@@ -1,5 +1,12 @@
 # 작업 상태 (2026-10-31, Asia/Seoul)
 
+## 2026-10-31: v60 커널 옵션 일부의 GPR 전용 PC 실행 검증 통과
+
+- **검증 소스:** `d5b56efa5b7d9f0313fb72639db332c581e7e6b2`; [CI 41168995359](https://github.com/eirblue/ios_note10p/actions/runs/41168995359) 첫 번째 시도 통과. 실제 API·전체 산출물·소스·입력·옵션·ABI·관찰 바이트 결속을 부모 검사기로 확인했다.
+- **새 PC 범위:** 기존 production C/H를 유지하고, 보존된 v57 실제 컴파일 명령에서 선택한 `-Oz`·`-mno-implicit-float` 등 옵션 일부로 새 AArch64 ELF를 만들었다. 프로필/GPR 검사 17개와 새 프로필 대상 실행 4개가 통과했다. 실제 CI 정적 명령어 1,270개에서 FP/SIMD 명령·레지스터를 사용하지 않음을 확인했다. 이는 동적 실행 명령 수가 아니다.
+- **실행 증거:** 모델 `CPACR_EL1`을 0으로 설정하고 네 경우 모두 실행 전후 0 readback을 확인했다. 정상·불일치 주입의 전체 원복, 용량·alias 거절, 기존 ABI·guard·메모리 분리 조건을 유지했다. 기본 v59 경로는 AST 비교로 보존했으며 이전 통과 시험 묶음을 로컬에서 반복하지 않았다.
+- v60 기기·BOOT·Linux Image 작업은 0회다. 실제 Linux header/TU 통합, 실기기 EL1/FPU 준비, FP trap 동작 또는 x18 고정 여부를 증명하지 않는다. 현재 실기기 결과는 소진된 v57 단일 회차이며 XNU 실행·iOS 부팅은 없었다. [결과와 제한](xnu26/RUNTIME-RELOCATION.md).
+
 ## 2026-10-31: v59 비계측 AArch64 재배치·원복 PC 실행 검증 통과
 
 - **검증 소스:** `5c3ca5f5a3b21af725701df16e057a485d9add76`; [CI 41167139172](https://github.com/eirblue/ios_note10p/actions/runs/41167139172) 첫 번째 시도 통과. 실제 실행·단계·산출물 digest·전체 파일·소스·입력·관찰 바이트 결속을 부모 검사기로 확인했다.
