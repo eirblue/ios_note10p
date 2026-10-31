@@ -1,0 +1,59 @@
+name: Note10 crypto hash composite origin
+on:
+  workflow_dispatch:
+    inputs:
+      baseline_pins:
+        description: Exact accepted baseline API and full ZIP/object pins JSON
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+jobs:
+  crypto-hash-composite:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install pinned Kbuild tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-14 llvm-14 gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi binutils-aarch64-linux-gnu bc bison flex libssl-dev libelf-dev make
+      - name: Bind accepted baseline input pins
+        env:
+          BASELINE_PINS: ${{ inputs.baseline_pins }}
+        run: |
+          python -B -c 'import json,os,pathlib; p=pathlib.Path("note10/private/v65-baseline-pins.json"); p.parent.mkdir(parents=True,exist_ok=True); p.open("x").write(json.dumps(json.loads(os.environ["BASELINE_PINS"]),sort_keys=True)+"\n")'
+      - name: Compile actual crypto hash composite and origin proof
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python -B note10/device_test/build_crypto_hash_composite.py
+          --output note10/private/v65-ci-composite
+          --workspace note10/private/v65-ci-composite-workspace
+          --kernel-archive note10/private/v65-kernel-source-input.tar.gz
+          --baseline-pins note10/private/v65-baseline-pins.json
+          --baseline-input note10/private/v65-baseline-input
+          --baseline-extraction note10/private/v65-baseline-extraction
+      - name: Stage exact composite evidence namespace
+        if: always()
+        run: >-
+          python -B note10/device_test/stage_crypto_hash_composite.py
+          --source note10/private/v65-ci-composite
+          --staging-parent note10/private/v65-upload-staging
+          --receipt note10/private/v65-stage-receipt.json
+          --forensic-on-failure
+      - name: Upload composite origin evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: note10-crypto-hash-composite-pc-only
+          path: note10/private/v65-upload-staging
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
