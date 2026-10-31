@@ -1,5 +1,15 @@
 # Runtime relocation metadata and PC data trials
 
+## v64 verified shash core object static result
+
+Source `31ece2db6e6b5391283db5bbc8e91f90af12ec52` passed [CI 41219611380](https://github.com/eirblue/ios_note10p/actions/runs/41219611380), attempt 1. The parent independently verified authenticated run/job/required-step/artifact records, the complete 3,134,662-byte ZIP (SHA-256 `58ce98c1b25e4a439fb2cc4cd0c5512c51bea2d4d6f6dd80fc3167abd72d6c90`), all 1,470 members (10,036,869 expanded bytes), the 34-file source closure and protected complete kernel archive. Full ZIP hashing and source binding preceded final candidate/pins. Parent result digest: `8245e788969baca254b1007fce93a428429bb7017e22c44a931ad7167e08d0d3`.
+
+Actual Kbuild compiled stock `crypto/shash.o` and a separate data-only actual-header layout oracle. Mandatory DWARF and compiled-header facts bind the type table, descriptor-size bridge, registration/count/rollback CFG and preparation CFG. The 10 essential emitted functions contain 255 owned words: 251 ordinary GPR words and exactly four typed BLR sites with one-to-one callback/descriptor coverage. No arbitrary indirect-call or FP permission follows. Preparation binds three size-failure paths and 16 callback-presence paths, including the grouped export/import/statesize policy and branch-local zero return. The raw const-qualified `cra_type` target remains unchanged; its referenced complete `crypto_type` DIE is linked to the canonical actual layout digest rather than a handwritten size.
+
+Scoped compiler frames total 400 bytes; this sum is not a whole-path or IRQ/OS stack bound. Descriptor allocation, external crypto/memory providers, runtime registration/init order, pointer/count validity and overflow safety, provider availability and physical safety remain unproven. These explicit-analysis objects are not a linked production Image. No provider, callback or oracle was executed; full link/Image/BOOT/device/reboot operations are zero. v57 remains consumed 1/1 with no journal replay; XNU execution, iOS boot and deployment readiness are not established.
+
+Local CP1/CP2/CP3/CP4/CP5/CP6/CP7/CP8 results retain their original checkpoint labels and counts 49/28/14/76/53/50/165/86. Completed tests were not replayed, and these separate historical proofs are not a combined current-source regression pass. The final CI invoked zero fixture commands. Failed runs 41203755530, 41205176235, 41210655628, 41214486419 and 41217639368 remain failed and unaccepted with their raw evidence preserved.
+
 ## v63 verified SHA-256 provider object static result
 
 Source `fc15da51e2295022796eb44779a1eb8008450b65` passed [CI 41199181822](https://github.com/eirblue/ios_note10p/actions/runs/41199181822), attempt 1. The parent independently bound authenticated run/job/step/artifact records, the complete 2,615,308-byte ZIP (SHA-256 `d8108f02426702d97bce53f5ae4f9c4bd7e318ec3476da0d17a477a57d1ea1c1`), all 1,216 members (8,286,855 expanded bytes), source closure and the protected complete kernel archive. Parent result digest: `76a4dd0a726db14c142c4d95611ac0cedb29646db6b02d6f41ab8b7063961db1`.

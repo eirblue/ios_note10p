@@ -1,4 +1,11 @@
-# 작업 상태 (2026-10-31, Asia/Seoul)
+# 작업 상태 (2026-11-01, Asia/Seoul)
+
+## 2026-11-01: v64 shash core 객체·typed callback·준비 CFG 정적 검증 통과
+
+- **검증 소스:** `31ece2db6e6b5391283db5bbc8e91f90af12ec52`; [CI 41219611380](https://github.com/eirblue/ios_note10p/actions/runs/41219611380), 시도 1 성공. 부모 독립 판독·결과 검토 완료. 원본 ZIP 3,134,662바이트·전체 1,470개 항목·소스 34개·공유 커널 입력 결속.
+- **새 범위:** 실제 Kbuild `crypto/shash.o`와 데이터 전용 실제 헤더 오라클. 필수 10개 함수의 255개 word를 일반 GPR 251개와 엄격히 결속된 typed BLR 4개로 구분. 등록·rollback, descriptor bridge, 크기 거부·기본 콜백 준비 CFG 정적 증거. 원본 `const` 포인터 정보와 실제 `crypto_type` DIE·레이아웃 결속 유지.
+- **시험 이력:** CP1 49·CP2 28·CP3 14·CP4 76·CP5 53·CP6 50·CP7 165·CP8 86개 각각 1회 통과, 원래 소스·체크포인트별 보존. 기존 시험 재실행·최종 CI fixture 호출 0회. 현재 소스의 통합 회귀 성공으로 합산하지 않음. 앞선 CI 5건은 실패·미인정 상태로 보존.
+- 범위 내 compiler frame 합계 400바이트는 전체 호출 경로 상한이 아님. 제공자·콜백·오라클 실행, full link·Image·BOOT·기기·재부팅 0회. v57 실기기 회차 1/1 소진·재실행 금지 유지. XNU 실행·iOS 부팅·실행 준비 완료를 주장하지 않음. [결과와 제한](xnu26/RUNTIME-RELOCATION.md).
 
 ## 2026-10-31: v63 SHA-256 제공자 객체·실제 헤더 레이아웃 정적 검증 통과
 
