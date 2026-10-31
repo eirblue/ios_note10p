@@ -3,7 +3,7 @@ import hashlib,io,json,re,struct
 from kernel_trial_object import parse_elf
 from pre_pm_archive_contract import require
 from sha256_provider_object import one_symbol,exact_target
-from relocation_trial_kernel_profile import gpr_only
+from shash_core_gpr_policy import gpr_partition,bind_typed_coverage
 from shash_core_dwarf import extract_layouts
 from shash_core_clamped_cfg import registration_cfg_dispatch
 from shash_core_instructions import decode,trace,add,load
@@ -83,7 +83,7 @@ def scoped_input(obj,fn,record):
 
 def function_facts(obj,fn,rows,frames):
  require(fn['size']>0 and fn['size']%4==0 and fn['name'] in frames,'actual essential function and stack row; no missing zero inference');sec=obj['sections'][fn['section']];start=fn['value'];end=start+fn['size'];require(end<=len(sec['bytes']),'actual function extent');words,text=scoped_input(obj,fn,rows)
- isa=gpr_only(text)
+ isa=gpr_partition(obj,fn,words,text)
  for off,word in words.items():
   if decode(word)['op']=='unknown':raise ValueError('unsupported finite GPR word: function='+fn['name']+' section='+sec['name']+' offset='+hex(off)+' word='+hex(word)+' object_sha256='+obj.get('sha256','unavailable'))
  rels={};calls={};external=[]
@@ -171,8 +171,8 @@ def shash_object_proof(raw,text,usage,ELFFile,headers,oracle,config):
  require(hashlib.sha256(headers['crypto/shash.c']).hexdigest()==SOURCE_SHA,'unmodified pinned new stock source');obj=parse_elf(raw,1);layouts=extract_layouts(ELFFile(io.BytesIO(raw)),oracle);cfg=configuration(config);require(cfg['CONFIG_ARM64_4K_PAGES']=='y' and cfg['CONFIG_CRYPTO_HASH']=='y' and cfg['CONFIG_CRYPTO_HASH2']=='y','actual core configuration')
  require(b'crypto_hash-y += shash.o' in headers['crypto/Makefile'] and b'obj-$(CONFIG_CRYPTO_HASH2) += crypto_hash.o' in headers['crypto/Makefile'],'actual composite source inclusion plan')
  rows=object_rows(obj,text);frames=frame_rows(usage);facts={name:function_facts(obj,one_symbol(obj,name,2),rows,frames) for name in ESSENTIAL};table=table_proof(obj,layouts,oracle,cfg)
- dispatch={field:dispatch_proof(facts['crypto_shash_'+field],layouts,field) for field in ('update','final','finup','digest')};desc=descriptor_proof(facts['crypto_shash_init_tfm'],layouts);registration=registration_cfg_dispatch(obj,facts['crypto_register_shashes']['symbol'],layouts['types']['shash_alg']['byte_size']);prepare=preparation_proof(facts['shash_prepare_alg'],layouts,oracle,obj)
+ dispatch={field:dispatch_proof(facts['crypto_shash_'+field],layouts,field) for field in ('update','final','finup','digest')};typed_policy=bind_typed_coverage(facts,dispatch);desc=descriptor_proof(facts['crypto_shash_init_tfm'],layouts);registration=registration_cfg_dispatch(obj,facts['crypto_register_shashes']['symbol'],layouts['types']['shash_alg']['byte_size']);prepare=preparation_proof(facts['shash_prepare_alg'],layouts,oracle,obj)
  require_calls(facts['crypto_alloc_shash'],('crypto_alloc_tfm',))
  alloc_calls=[e for e in facts['crypto_alloc_shash']['events'] if e.get('target')=='crypto_alloc_tfm']
  require(len(alloc_calls)==1 and address_target(alloc_calls[0]['arguments'][1],obj,'crypto_shash_type',1),'actual alloc_shash type argument; allocation still external/unproved')
- return json.loads(json.dumps({'object_sha256':obj['sha256'],'layouts':layouts,'configuration_branches':cfg,'type_table':table,'functions':facts,'registration':registration,'preparation':prepare,'typed_callback_dispatch':dispatch,'descriptor_size_bridge':desc,'all_actual_stack_rows':frames,'external_and_dynamic_stack_bound':None,'source_header_init_inline':'source-only header inline; no fabricated init symbol or stack frame','runtime_registration_provider_allocation_or_callback_execution_proven':False,'whole_OS_stack_safety_proven':False,'object_or_oracle_executed':False}))
+ return json.loads(json.dumps({'object_sha256':obj['sha256'],'layouts':layouts,'configuration_branches':cfg,'type_table':table,'functions':facts,'registration':registration,'preparation':prepare,'typed_callback_dispatch':dispatch,'composite_GPR_typed_BLR_policy':typed_policy,'descriptor_size_bridge':desc,'all_actual_stack_rows':frames,'external_and_dynamic_stack_bound':None,'source_header_init_inline':'source-only header inline; no fabricated init symbol or stack frame','runtime_registration_provider_allocation_or_callback_execution_proven':False,'whole_OS_stack_safety_proven':False,'object_or_oracle_executed':False}))
