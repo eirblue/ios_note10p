@@ -123,7 +123,35 @@ def inventory(root,cap=CAP):
  return result
 
 
-def zip_inventory(record,role,extract=None):
+_ORIGINAL_BINDING_TOKEN=object()
+_ORIGINAL_PROFILES=frozenset(('accepted-v63-provider-ZIP-v1','accepted-v65-core-ZIP-v1'))
+
+
+class _OriginalInventory:
+ """Internally sealed immutable original-ZIP provenance and scalar row tuples."""
+ __slots__=('_profile','_role_digest','_root','_zip_bytes','_zip_sha256','_source_path','_source_identity','_rows')
+ def __new__(cls,record,role,members,token=None):
+  require(cls is _OriginalInventory and token is _ORIGINAL_BINDING_TOKEN,'original inventory is created only by the successful complete ZIP path');self=object.__new__(cls)
+  values={'_profile':role['profile'],'_role_digest':digest(json.dumps(role,sort_keys=True,separators=(',',':')).encode()),'_root':role['ZIP']['root'],'_zip_bytes':record['bytes'],'_zip_sha256':record['sha256'],'_source_path':str(record['path'].absolute()),'_source_identity':tuple(record['identity']),'_rows':tuple((name,row['bytes'],row['sha256']) for name,row in sorted(members.items()))}
+  for name,value in values.items():object.__setattr__(self,name,value)
+  return self
+ def __init__(self,record,role,members,token=None):pass
+ def __setattr__(self,name,value):raise TypeError('immutable original inventory')
+ def __delattr__(self,name):raise TypeError('immutable original inventory')
+ def __init_subclass__(cls,**kwargs):raise TypeError('original inventory cannot be subclassed')
+ @property
+ def rows(self):return self._rows
+ @property
+ def profile(self):return self._profile
+ def members(self):return {name:{'bytes':size,'sha256':sha} for name,size,sha in self._rows}
+ def check(self,role):
+  require(type(self) is _OriginalInventory and self._profile in _ORIGINAL_PROFILES and self._profile==role['profile'] and self._role_digest==digest(json.dumps(role,sort_keys=True,separators=(',',':')).encode()),'exact original inventory type/role record');require(self._root==role['ZIP']['root'] and self._zip_bytes==role['ZIP']['bytes'] and self._zip_sha256==role['ZIP']['sha256'] and len(self._rows)==role['ZIP']['ordinary_members'] and sum(size for _,size,_ in self._rows)==role['ZIP']['ordinary_expanded_bytes'],'same complete accepted raw-ZIP binding');require(api_identity(ordinary(Path(self._source_path)))[0]==self._source_identity,'original raw ZIP snapshot stable through use');return self
+ def summary(self):return {'profile':self._profile,'ZIP_sha256':self._zip_sha256,'ZIP_bytes':self._zip_bytes,'root':self._root,'ordinary_members':len(self._rows),'ordinary_expanded_bytes':sum(size for _,size,_ in self._rows),'inventory_sha256':digest(json.dumps(self._rows,separators=(',',':')).encode())}
+
+
+def zip_inventory(record,role,extract=None,original=False):
+ require(type(original) is bool,'explicit original-binding mode')
+ if original:require(role.get('profile') in _ORIGINAL_PROFILES and type(record['raw']) is bytes and len(record['raw'])==record['bytes'] and digest(record['raw'])==record['sha256'],'exact original profile and held raw snapshot bytes/hash');unchanged(record)
  z=role['ZIP'];require(record['bytes']==z['bytes'] and record['sha256']==z['sha256'],'exact protected whole ZIP');result={};total=0;seen=set()
  if extract is not None:require(not Path(extract).exists(),'fresh complete extraction');Path(extract).mkdir(parents=True)
  import io
@@ -139,17 +167,23 @@ def zip_inventory(record,role,extract=None):
  require(len(result)==z['ordinary_members'] and total==z['ordinary_expanded_bytes'],'exact complete accepted ZIP inventory count/bytes')
  for key in ('selected_object','producer_result','source_manifest'):require(result.get(role[key]['member'])=={k:role[key][k] for k in ('bytes','sha256')},'original exact selected member')
  if extract is not None:require(inventory(extract)==result,'complete extraction no missing/extra/changed member')
- unchanged(record);return result
+ unchanged(record)
+ if original:return _OriginalInventory(record,role,result,_ORIGINAL_BINDING_TOKEN)
+ return result
 
 
-def old_labels(extraction,role):
- root=Path(extraction)/role['ZIP']['root'];p=snapshot(Path(extraction)/role['producer_result']['member'],expected=role['producer_result']);prod=json_bytes(p['raw']);require(prod['passed'] is True,'original successful producer label');ctx=prod['ci_context'];require(ctx['GITHUB_SHA']==role['source_commit'] and ctx['GITHUB_RUN_ID']==str(role['run_id']) and ctx['GITHUB_RUN_ATTEMPT']=='1','exact old producer CI context')
- manifest_record=snapshot(Path(extraction)/role['source_manifest']['member'],expected=role['source_manifest']);manifest=json_bytes(manifest_record['raw']);require(type(manifest) is dict and manifest==prod['source_sha256'],'complete original source manifest')
- for name,expected in manifest.items():safe_name(name);require(snapshot(root/'source'/name)['sha256']==expected,'all original source bytes')
- files=prod.get('files',prod.get('files_sha256'));require(type(files) is dict and files,'complete original producer member labels')
- actual=inventory(root);require(set(actual)==set(files)|{'result.json'},'complete original producer namespace, no omitted member')
- for name,expected in files.items():safe_name(name);require(actual[name]==expected if type(expected) is dict else actual[name]['sha256']==expected,'all old producer file labels')
- unchanged(p);unchanged(manifest_record);return prod
+def old_labels(extraction,role,binding):
+ require(type(binding) is _OriginalInventory,'mandatory internally verified complete original inventory binding');binding.check(role);extraction=Path(extraction);expected=binding.members();require(inventory(extraction)==expected,'entire extraction equals the SAME complete bounded raw-ZIP inventory before producer parsing');prefix=role['ZIP']['root']+'/';require(all(name.startswith(prefix) for name in expected),'one exact original root prefix');actual={name[len(prefix):]:row for name,row in expected.items()};root=extraction/role['ZIP']['root'];p=snapshot(extraction/role['producer_result']['member'],expected=role['producer_result']);prod=json_bytes(p['raw']);require(prod['passed'] is True,'original successful producer label');ctx=prod['ci_context'];require(ctx['GITHUB_SHA']==role['source_commit'] and ctx['GITHUB_RUN_ID']==str(role['run_id']) and ctx['GITHUB_RUN_ATTEMPT']=='1','exact old producer CI context')
+ manifest_record=snapshot(extraction/role['source_manifest']['member'],expected=role['source_manifest']);manifest=json_bytes(manifest_record['raw']);require(type(manifest) is dict and manifest==prod['source_sha256'],'complete original source manifest')
+ files=prod.get('files',prod.get('files_sha256'));require(type(files) is dict and files,'complete original producer member labels');result_name=role['producer_result']['member'][len(prefix):];manifest_name=role['source_manifest']['member'][len(prefix):];require(result_name=='result.json' and result_name not in files and manifest_name=='source-manifest.json' and manifest_name in files,'result and already-declared manifest control records retained');extras={result_name};opaque='independent-verification.json'
+ if role['profile']=='accepted-v63-provider-ZIP-v1':require(opaque in actual and opaque not in files,'one mandatory provider-only unlisted opaque member');extras.add(opaque)
+ else:require(role['profile']=='accepted-v65-core-ZIP-v1' and opaque not in actual,'core has no provider opaque metadata exception')
+ require(set(actual)==set(files)|extras and not set(files)&extras,'complete exact original final namespace, no wildcard/subset/unlisted member')
+ for name,expected_row in files.items():safe_name(name);require(actual[name]==expected_row if type(expected_row) is dict else actual[name]['sha256']==expected_row,'every producer-declared row matches bound raw ZIP')
+ for name,sha in manifest.items():safe_name(name);require(snapshot(root/'source'/name)['sha256']==sha,'all original source bytes')
+ # The opaque provider entry was hashed in the complete extraction comparison;
+ # it has no invented direct control digest and its JSON is never deserialized.
+ unchanged(p);unchanged(manifest_record);binding.check(role);return prod
 
 
 def endpoints(role):

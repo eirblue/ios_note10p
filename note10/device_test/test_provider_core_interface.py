@@ -1,12 +1,13 @@
 """New v66 synthetic interface cases; actual committed control is preflight-hashed only."""
-import argparse,copy,json,tempfile
+import argparse,copy,io,json,tempfile,zipfile
 from pathlib import Path
 from crypto_hash_composite import require,digest
-from provider_core_input_contract import PUBLIC,snapshot,write_json,write_bytes,SCHEMA_MARKERS,BUILD_PROFILE_DELTAS,NONCLAIMS,validate_control
+from provider_core_input_contract import PUBLIC,snapshot,write_json,write_bytes,SCHEMA_MARKERS,BUILD_PROFILE_DELTAS,NONCLAIMS,validate_control,zip_inventory,old_labels
 from provider_core_interface import declared_profile,join_parsed
 
 HISTORICAL_CP2_CASES=('unique-provider-core-join-positive', 'original-input-facts-attributed-positive', 'provider-complete-init-span-positive', 'provider-complete-table-span-positive', 'registration-raw-relocation-binding-positive', 'source-prototype-declared-input-profile-positive', 'unresolved-frontier-carried-positive', 'missing-registration-reference-reject', 'duplicate-registration-reference-reject', 'wrong-registration-name-reject', 'wrong-provider-object-reject', 'wrong-core-object-reject', 'wrong-accepted-result-label-reject', 'weak-reference-reject', 'weak-definition-reject', 'common-or-absolute-definition-reject', 'duplicate-core-definition-reject', 'wrong-definition-section-reject', 'wrong-definition-coordinate-reject', 'definition-not-function-reject', 'unsupported-reference-type-pair-reject', 'visibility-drift-reject', 'wrong-call-relocation-kind-reject', 'wrong-call-addend-reject', 'relocation-outside-init-span-reject', 'truncated-init-span-reject', 'ambiguous-init-alias-reject', 'partial-table-span-reject', 'extra-table-relocation-reject', 'missing-table-relocation-reject', 'table-count-stride-disagreement-reject', 'wrong-table-target-ownership-reject', 'ABI-header-byte-drift-reject', 'generated-config-drift-reject', 'registration-prototype-drift-reject', 'declared-nested-type-header-drift-reject', 'provider-original-layout-provenance-drift-reject', 'declared-target-option-drift-reject', 'unapproved-CC-ABI-delta-reject', 'missing-layout-provenance-reject', 'old-proof-result-presented-as-new-pass-reject', 'new-join-nonclaims-preserved')
-CASES=('primary-header-approved-byte-identical-true-positive', 'primary-header-missing-byte-identical-reject', 'primary-header-false-or-nonbool-byte-identical-reject')
+HISTORICAL_CP3_CASES=('primary-header-approved-byte-identical-true-positive', 'primary-header-missing-byte-identical-reject', 'primary-header-false-or-nonbool-byte-identical-reject')
+CASES=('provider-opaque-member-whole-inventory-bound-positive', 'core-producer-plus-result-whole-inventory-bound-positive', 'provider-required-opaque-member-missing-reject', 'provider-opaque-size-or-digest-drift-reject', 'provider-unlisted-extra-member-reject', 'core-provider-only-opaque-crosswire-reject', 'original-namespace-inventory-binding-missing-reject', 'original-namespace-wrong-role-inventory-reject', 'declared-row-versus-bound-inventory-drift-reject', 'source-manifest-must-remain-declared-reject')
 
 
 def synthetic(tmp):
@@ -108,7 +109,7 @@ def historical_run_cases_CP2(completed=None):
 def main():
  p=argparse.ArgumentParser();p.add_argument('--checkpoint',type=Path,required=True);p.add_argument('--checkpoint-sha256',required=True);p.add_argument('--inventory',type=Path,required=True);p.add_argument('--inventory-sha256',required=True);p.add_argument('--output',type=Path,required=True);a=p.parse_args();root=Path(__file__).resolve().parents[2];require(a.output.absolute().is_relative_to(root/'note10/private') and not a.output.exists(),'fresh private public-case receipt');completed=[];phase='attribution';attribution={'checkpoint_path':str(a.checkpoint.absolute()),'inventory_path':str(a.inventory.absolute()),'checkpoint_sha256':a.checkpoint_sha256,'inventory_sha256':a.inventory_sha256}
  try:
-  cpraw=snapshot(a.checkpoint);invraw=snapshot(a.inventory);require(cpraw['sha256']==a.checkpoint_sha256 and invraw['sha256']==a.inventory_sha256,'exact checkpoint/inventory bytes');cp=json.loads(cpraw['raw']);inv=json.loads(invraw['raw']);require(cp['version']=='v66' and cp['checkpoint']==3 and cp['new_private_case_count']==0 and cp['new_private_fixture_inventory']==[] and inv['private_count']==0 and inv['public_cases']==list(CASES) and cp['new_public_fixture_inventory']==list(CASES) and inv['public_count']==len(CASES),'exact frozen public inventory')
+  cpraw=snapshot(a.checkpoint);invraw=snapshot(a.inventory);require(cpraw['sha256']==a.checkpoint_sha256 and invraw['sha256']==a.inventory_sha256,'exact checkpoint/inventory bytes');cp=json.loads(cpraw['raw']);inv=json.loads(invraw['raw']);require(cp['version']=='v66' and cp['checkpoint']==4 and cp['new_private_case_count']==0 and cp['new_private_fixture_inventory']==[] and inv['private_count']==0 and inv['public_cases']==list(CASES) and cp['new_public_fixture_inventory']==list(CASES) and inv['public_count']==len(CASES),'exact frozen public inventory')
   for group in ('public_sources_sha256','private_sources_sha256','shared_sources_sha256'):
    for name,expected in cp[group].items():require(snapshot(root/name)['sha256']==expected,'frozen source/control/import preflight hash only')
   phase='new_public_cases';result=run_cases(completed);result.update(attribution)
@@ -128,20 +129,21 @@ def complete_synthetic(c,producer,core,roots):
  flags='KCFLAGS=-gdwarf-4 -fstack-usage -ffunction-sections -fdata-sections -mllvm -enable-machine-outliner=never -fno-inline-functions';old_args=['make','ARCH=arm64','CC=clang-14',flags,'V=1','-j2','crypto/sha256_generic.o','crypto/n10_sha256_layout_oracle.o'];new_args=['make','--trace','ARCH=arm64','CC=clang-14',flags,'LD=aarch64-linux-gnu-ld','LDFLAGS=-m aarch64linux --no-relax','CONFIG_THIN_ARCHIVES=','V=0','-j2','crypto/crypto_hash.o'];environment={'PLATFORM_VERSION':'11','ANDROID_MAJOR_VERSION':'r'};write_json(roots['provider']/'commands.json',[{'command':old_args,'completed':True,'returncode':0}]);write_json(roots['core']/'commands.json',[{'command':new_args,'completed':True,'returncode':0,'make_environment':environment}]);core['composite_make_command']=list(new_args);core['config_packaging']={'source_CONFIG_THIN_ARCHIVES':'y','effective_make_CONFIG_THIN_ARCHIVES':'','declared_LDFLAGS':'-m aarch64linux --no-relax'};core['routing']={'environment':dict(environment)}
 
 
-def run_cases(completed=None):
+def historical_run_cases_CP3(completed=None):
+ raise ValueError('consumed CP3 cases must never execute')
  if completed is None:completed=[]
  require(not completed,'fresh new3-only run; no prefix replay')
- for name in CASES:
+ for name in HISTORICAL_CP3_CASES:
   with tempfile.TemporaryDirectory() as tmp:
    _,_,control,_,_,_=synthetic(tmp)
-   if name==CASES[0]:
+   if name==HISTORICAL_CP3_CASES[0]:
     require(all(row['byte_identical'] is True for row in control['source_input_profile']['primary_headers']),'approved synthetic five-key shape');validate_control(control)
-   elif name==CASES[1]:
+   elif name==HISTORICAL_CP3_CASES[1]:
     del control['source_input_profile']['primary_headers'][0]['byte_identical']
     try:validate_control(control)
     except (ValueError,KeyError,TypeError):pass
     else:raise ValueError('missing mandatory primary flag accepted')
-   elif name==CASES[2]:
+   elif name==HISTORICAL_CP3_CASES[2]:
     for value in (False,0,1,'true',None):
      mutant=copy.deepcopy(control);mutant['source_input_profile']['primary_headers'][0]['byte_identical']=value
      try:validate_control(mutant)
@@ -150,6 +152,49 @@ def run_cases(completed=None):
    else:raise ValueError('unfrozen CP3 case')
    completed.append(name)
  return {'passed':True,'cases':completed,'case_count':len(completed),'private_case_count':0,'synthetic_only':True,'actual_control_loaded_for_cases':False,'old54_replayed':False,'semantic_or_object_work':False}
+
+
+def namespace_fixture(tmp,kind='provider',defect=None):
+ """Invented tiny original ZIPs; opaque data is deliberately not JSON."""
+ tmp=Path(tmp);tmp.mkdir(parents=True,exist_ok=True);prefix='synthetic-'+kind+'-original';head=('e' if kind=='provider' else 'f')*40;run=1901 if kind=='provider' else 1902;source=b'# SYNTHETIC original namespace source\n';manifest={'synthetic.py':digest(source)};encode=lambda data:(json.dumps(data,sort_keys=True)+'\n').encode();files={'source/synthetic.py':source,'source-manifest.json':encode(manifest),'evidence/object.o':b'SYNTHETIC bytes, not ELF'};declared={name:digest(raw) for name,raw in files.items()}
+ if defect=='declared-row-drift':declared['source/synthetic.py']=digest(b'wrong synthetic declared row')
+ if defect=='manifest-undeclared':del declared['source-manifest.json']
+ prod={'passed':True,'ci_context':{'GITHUB_SHA':head,'GITHUB_RUN_ID':str(run),'GITHUB_RUN_ATTEMPT':'1'},'source_sha256':manifest,'files_sha256':declared};files['result.json']=encode(prod)
+ if kind=='provider' and defect!='missing-opaque' or kind=='core' and defect=='core-opaque':files['independent-verification.json']=b'SYNTHETIC opaque, not JSON:\xff'
+ if defect=='extra-member':files['unexpected.json']=b'{}'
+ stream=io.BytesIO()
+ with zipfile.ZipFile(stream,'w',compression=zipfile.ZIP_DEFLATED) as archive:
+  for name,raw in files.items():archive.writestr(prefix+'/'+name,raw)
+ raw=stream.getvalue();archive_path=tmp/'input.zip';write_bytes(archive_path,raw);member=lambda name:{'member':prefix+'/'+name,'bytes':len(files[name]),'sha256':digest(files[name])};role={'profile':'accepted-v63-provider-ZIP-v1' if kind=='provider' else 'accepted-v65-core-ZIP-v1','source_commit':head,'run_id':run,'run_attempt':1,'ZIP':{'root':prefix,'bytes':len(raw),'sha256':digest(raw),'ordinary_members':len(files),'ordinary_expanded_bytes':sum(len(value) for value in files.values())},'selected_object':member('evidence/object.o'),'producer_result':member('result.json'),'source_manifest':member('source-manifest.json')};record=snapshot(archive_path,16*1024*1024,role['ZIP']);extraction=tmp/'extracted';binding=zip_inventory(record,role,extraction,original=True);return role,record,extraction,binding,prod
+
+
+def run_cases(completed=None):
+ if completed is None:completed=[]
+ require(not completed,'fresh CP4 new10-only run, no prefix replay')
+ def rejected(fn):
+  try:fn()
+  except (ValueError,TypeError,KeyError,AttributeError):return
+  raise ValueError('invalid new original inventory path accepted')
+ for name in CASES:
+  with tempfile.TemporaryDirectory() as tmp:
+   if name in CASES[:2]:
+    role,record,extraction,binding,prod=namespace_fixture(tmp,'provider' if name==CASES[0] else 'core');require(old_labels(extraction,role,binding)==prod,'original producer return shape, complete role namespace');require(type(binding.rows) is tuple and all(type(row) is tuple and all(type(value) in (str,int) for value in row) for row in binding.rows),'deeply immutable scalar inventory rows');copy_map=binding.members();key=next(iter(copy_map));copy_map[key]['sha256']=digest(b'copy mutation');require(binding.members()[key]['sha256']!=copy_map[key]['sha256'],'returned map copies cannot mutate binding');rejected(lambda:setattr(binding,'_profile','foreign'))
+    try:binding.rows[0][1]=999
+    except TypeError:pass
+    else:raise ValueError('nested binding row was mutable')
+   elif name=='provider-opaque-size-or-digest-drift-reject':
+    for defect in ('size','digest'):
+     role,record,extraction,binding,_=namespace_fixture(Path(tmp)/defect);opaque=extraction/role['ZIP']['root']/'independent-verification.json';raw=opaque.read_bytes();opaque.write_bytes(raw+b'x' if defect=='size' else b'X'+raw[1:]);rejected(lambda:old_labels(extraction,role,binding))
+   elif name=='original-namespace-inventory-binding-missing-reject':
+    role,record,extraction,binding,_=namespace_fixture(tmp)
+    for missing in (None,binding.members(),binding.rows):rejected(lambda:old_labels(extraction,role,missing))
+    rejected(lambda:type(binding)(record,role,binding.members()))
+   elif name=='original-namespace-wrong-role-inventory-reject':
+    role,_,extraction,_,_=namespace_fixture(Path(tmp)/'provider');_,_,_,other,_=namespace_fixture(Path(tmp)/'core','core');rejected(lambda:old_labels(extraction,role,other))
+   else:
+    kind='core' if name=='core-provider-only-opaque-crosswire-reject' else 'provider';defect={'provider-required-opaque-member-missing-reject':'missing-opaque','provider-unlisted-extra-member-reject':'extra-member','core-provider-only-opaque-crosswire-reject':'core-opaque','declared-row-versus-bound-inventory-drift-reject':'declared-row-drift','source-manifest-must-remain-declared-reject':'manifest-undeclared'}.get(name);require(defect is not None,'frozen CP4 case definition');role,_,extraction,binding,_=namespace_fixture(tmp,kind,defect);rejected(lambda:old_labels(extraction,role,binding))
+   completed.append(name)
+ return {'passed':True,'cases':completed,'case_count':len(completed),'private_case_count':0,'synthetic_only':True,'actual_control_loaded_for_cases':False,'old57_or_CP3_schema_audit_replayed':False,'ELF_semantic_API_compiler_work':False}
 
 
 if __name__=='__main__':main()
