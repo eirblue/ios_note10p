@@ -4,6 +4,7 @@ from kernel_trial_object import parse_elf,usage_frames
 from relocation_trial_instructions import ROW
 from relocation_trial_kernel_profile import gpr_only
 from prepare_pre_pm_trial import require
+from pre_pm_trial_lowering import restore_lowering,advance_obligation
 CALLER='note10_check_xnu_window'
 ORDER=('n10_arm_auto_return','n10_stage_xnu_payload','n10_test_cpu_cache','n10_pre_pm_trial','n10_start_pm_timer')
 KERNEL_CONTEXT={('mrs','sp_el0'),('mrs','tpidr_el1'),('mrs','daif'),('msr','daifset'),('msr','daifclr')}
@@ -107,22 +108,22 @@ def wrapper_unwind(obj,rows):
  trial=[o for o,n in calls.items() if n=='n10_rt_trial'];require(len(trial)==1,'single admitted actual production trial call')
  # The post-call path must always restore, barrier, both full hashes, byte compare,
  # and both guards before freeing or returning. No short-circuit evidence claim.
- obligations=['restore','barrier','n10_pre_pm_hash','n10_pre_pm_hash','memcmp','n10_pre_pm_guard','n10_pre_pm_guard']
+ lowering=restore_lowering(code,calls,trial[0])
+ obligations=['restore','barrier','n10_pre_pm_hash','n10_pre_pm_hash','full-prefix-equality','n10_pre_pm_guard','n10_pre_pm_guard']
  todo=[(trial[0]+4,0)];seen=set();restore_sites=[]
  while todo:
   off,state=todo.pop()
   if (off,state) in seen:continue
   seen.add((off,state));target=calls.get(off);row=code[off]
-  expected=obligations[state] if state<len(obligations) else None
-  event='restore' if target in ('memcpy','__memcpy') else 'barrier' if row['mnemonic'] in ('dmb','dsb') else target
-  if event==expected:
-   if event=='restore':restore_sites.append(off)
-   state+=1
+  event='full-prefix-equality' if off==lowering['comparison_call_offset'] else 'restore' if target in ('memcpy','__memcpy') else 'barrier' if row['mnemonic'] in ('dmb','dsb') else target
+  advanced=advance_obligation(state,event,obligations)
+  if advanced!=state and event=='restore':restore_sites.append(off)
+  state=advanced
   if target in ('vfree','kfree','crypto_free_shash') or not edges[off]:require(state==len(obligations),'post-trial path bypasses complete restore/check/unwind sequence')
   require(target!='n10_start_pm_timer','wrapper cannot queue PM')
   todo.extend((n,state) for n in edges[off])
  require(restore_sites and any(not edges[o] for o,_ in seen),'actual restoration and exit reachable')
- return {'trial_offset':trial[0],'unconditional_full_restore_sites':sorted(set(restore_sites)),'sequenced_postcheck_obligations':obligations,'all_post_trial_exits_verified':True,'backup_corruption_DMA_restoration_guarantee':False}
+ return {'lowering_argument_and_result_proof':lowering,'trial_offset':trial[0],'unconditional_full_restore_sites':sorted(set(restore_sites)),'sequenced_postcheck_obligations':obligations,'all_post_trial_exits_verified':True,'backup_corruption_DMA_restoration_guarantee':False}
 
 def reachable_functions(obj,rows):
  todo=['n10_pre_pm_trial','n10_pre_pm_cmp'];seen=set();external=[];indirect=[]

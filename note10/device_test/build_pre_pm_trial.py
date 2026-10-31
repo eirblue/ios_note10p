@@ -5,10 +5,13 @@ from build_xnu_runtime_plan_component import acquire,extract,parse_dependencies,
 from prepare_pre_pm_trial import ROOT,BASE,OPTION,render,install,config_settings,require,digest
 from pre_pm_trial_object import object_proof
 from pre_pm_crypto_provider import provider_proof
+from pre_pm_trial_lowering import bcmp_source_proof
+from test_pre_pm_lowering import NEW_CASES,CASES as LOWERING_LOGICAL_CASES
 from xnu_runtime_scratch_stack import command_origin,postprocess_provenance,KBUILD_PINS
 INSTRUMENTATION='-gdwarf-4 -fstack-usage -ffunction-sections -fdata-sections -mllvm -enable-machine-outliner=never -fno-inline-functions'
+CARRIED_PRIOR_PROOFS=[{'group': 'public-policy-source-object-38', 'case_count': 38, 'result_sha256': '691420e24856b85e06bcb79c5ec0873072dec98f597a18541fc92ec4ce2f993b', 'original_source_commit': 'f2687365db7ceb9b8691c484f33c4e0c9e515cd9', 'original_run_id': 41183097021, 'original_run_conclusion': 'failure', 'group_result_passed': True, 'current_source_rerun_claim': False}, {'group': 'provider-source-13', 'case_count': 13, 'result_sha256': '2a416fadab2abaf10ca7f00832d523e897b41ee6785cb83ee0af28756b432c7f', 'original_source_commit': 'f2687365db7ceb9b8691c484f33c4e0c9e515cd9', 'original_run_id': 41183097021, 'original_run_conclusion': 'failure', 'group_result_passed': True, 'current_source_rerun_claim': False}, {'group': 'pre-word-decoder-lowering-20', 'case_count': 20, 'result_sha256': '2e546dbcb035fc017e8c9f2629f7026168a97763ef300aa8bb8dd5eb28d5fe88', 'operator_receipt_sha256': '3e1579a372c4fb2a1e809e825070ff17ab076557e21930977bb4f6a0297b586e', 'tested_checkpoint_sha256': '2374c5c8ac6e8f7c27aaa3fb81d59924bc06693ac02d294a1a5b7b80176b16dd', 'group_result_passed': True, 'current_word_decoder_coverage_claim': False, 'current_source_rerun_claim': False}]
 PUBLIC_DRIVER='note10/device_test/build_pre_pm_trial.py'
-EXTRA_SOURCE=('note10/device_test/pre_pm_trial_wrapper.c','note10/device_test/pre_pm_trial_policy.h','note10/device_test/pre_pm_trial_policy_fixture.c','note10/device_test/kernel_trial_stack_oracle.c','note10/device_test/relocation_trial_input.py','note10/device_test/test_pre_pm_provider.py','.github/workflows/note10-pre-pm-trial.yml')
+EXTRA_SOURCE=('note10/device_test/pre_pm_trial_wrapper.c','note10/device_test/pre_pm_trial_policy.h','note10/device_test/pre_pm_trial_policy_fixture.c','note10/device_test/kernel_trial_stack_oracle.c','note10/device_test/relocation_trial_input.py','note10/device_test/test_pre_pm_provider.py','note10/device_test/test_pre_pm_lowering.py','.github/workflows/note10-pre-pm-trial.yml')
 IMMUTABLE=('note10/xnu26/runtime_relocation.c','note10/xnu26/runtime_relocation.h','note10/xnu26/runtime_relocation_trial.c','note10/xnu26/runtime_relocation_trial.h','note10/device_test/relocation_trial_aarch64_abi.c')
 CORE_PINS={
  'note10/xnu26/runtime_relocation.c':'dc51d22fce4c8e0d566d6158f53aa3d512a65954541e4ea4201c5878cb17e448',
@@ -16,7 +19,7 @@ CORE_PINS={
  'note10/xnu26/runtime_relocation_trial.c':'3295a1d005c38b4ab213b69c56705a6caec453916a11d54e3287434b4a3853b9',
  'note10/xnu26/runtime_relocation_trial.h':'7b76597c2436029fdc3c259ec9d1998047d2b5e4c8ed33f9d47adf52be03eaf2',
  'note10/device_test/relocation_trial_aarch64_abi.c':'e20258dfbb8cc93793c974a4386df5e8dda32a9db77c3d14e0c3456601b7b0d7'}
-KBUILD_FILES=(*KBUILD_PINS,'scripts/basic/fixdep.c','scripts/config','Makefile','arch/arm64/Makefile','arch/arm64/mm/Makefile','arch/arm64/configs/'+DEFCONFIG,'crypto/sha256_generic.c','crypto/Makefile','include/crypto/sha.h','crypto/Kconfig','include/linux/preempt.h','include/linux/preempt_mask.h','include/linux/interrupt.h','include/linux/vmalloc.h','include/linux/sort.h','include/crypto/hash.h')
+KBUILD_FILES=(*KBUILD_PINS,'scripts/basic/fixdep.c','scripts/config','Makefile','arch/arm64/Makefile','arch/arm64/mm/Makefile','arch/arm64/configs/'+DEFCONFIG,'lib/string.c','include/linux/string.h','crypto/sha256_generic.c','crypto/Makefile','include/crypto/sha.h','crypto/Kconfig','include/linux/preempt.h','include/linux/preempt_mask.h','include/linux/interrupt.h','include/linux/vmalloc.h','include/linux/sort.h','include/crypto/hash.h')
 PREFIX_SHA='3b3e7299672928ebe7086582891ddf35878e1cd5ed60bfd9ce710d8a864e7b36'
 def sha(path):
  h=hashlib.sha256()
@@ -112,7 +115,8 @@ def verify_mode(proof,enabled,identifier):
  require((proof/'dependency-files/objects/.config').read_bytes()==config,'config closure actual bytes')
  provider=provider_proof(config,(proof/'kbuild-source/crypto/Makefile').read_bytes(),(proof/'kbuild-source/crypto/sha256_generic.c').read_bytes(),(proof/'kbuild-source/include/crypto/sha.h').read_bytes())
  proof_object=object_proof(obj,(proof/'disassembly.log').read_text(),usage.read_text(),enabled)
- return {'provider_source_plan':provider,'config':config_proof,'command_origin':origin,'flags':flags,'postprocess':post,'object':proof_object,'dependencies_sha256':sha(proof/'dependencies.json')}
+ comparator_source=bcmp_source_proof((proof/'kbuild-source/include/linux/string.h').read_bytes(),(proof/'kbuild-source/lib/string.c').read_bytes()) if enabled and proof_object['post_trial_unwind']['lowering_argument_and_result_proof']['comparison_target']=='bcmp' else None
+ return {'comparator_provider_source':comparator_source,'provider_source_plan':provider,'config':config_proof,'command_origin':origin,'flags':flags,'postprocess':post,'object':proof_object,'dependencies_sha256':sha(proof/'dependencies.json')}
 def archive_sources(archive,names):
  wanted={SOURCE_TOP+'/'+n:n for n in names};found={};total=0
  with tarfile.open(archive,'r|gz') as z:
@@ -141,6 +145,16 @@ def verify_bundle(root,payload):
     require((proof/'dependency-files'/n).read_bytes()==expected,'real stock header/source or exact reviewed overlay')
   for n in KBUILD_FILES:require((proof/'kbuild-source'/n).read_bytes()==original[n],'real archive provider/API/Kbuild source')
  commands=json.loads((root/'commands.json').read_text())
+ require(result['fixture_execution_scope']=='newly-added-only' and result['executed_fixture_case_inventory']==list(NEW_CASES) and result['carried_prior_proofs']==CARRIED_PRIOR_PROOFS,'new-only execution and source-pinned historical references')
+ fixture_commands=[row for row in commands if len(row['command'])>1 and PurePosixPath(row['command'][1]).name.startswith('test_')]
+ require(len(fixture_commands)==1,'only the newly-added test selection may execute')
+ command=fixture_commands[0]['command'];recorded_root=PurePosixPath(result['recorded_repository_root']);recorded_out=PurePosixPath(result['recorded_output_root'])
+ require(recorded_root.is_absolute() and recorded_out.is_relative_to(recorded_root/'note10/private') and '..' not in recorded_root.parts and '..' not in recorded_out.parts,'canonical actual repository/output roots')
+ require(command[1:]==[str(recorded_root/'note10/device_test/test_pre_pm_lowering.py'),'--new-only','--output',str(recorded_out/'lowering-fixtures/result.json')],'exact new-only fixture command, no old suites/extra selections')
+ require(not (root/'fixtures').exists() and not (root/'provider-fixtures').exists(),'old fixture outputs must not be recreated')
+ selected=json.loads((root/'lowering-fixtures/result.json').read_text())
+ require(selected['passed_scope']=='selected-new-eight-only' and selected['all_logical_cases_executed'] is False and selected['new_only'] is True and selected['prior_cases_rerun'] is False and selected['selected_case_inventory']==list(NEW_CASES) and
+  selected['skipped_case_inventory']==list(LOWERING_LOGICAL_CASES[:-8]) and [r['name'] for r in selected['cases']]==list(NEW_CASES) and all(r['passed'] is True for r in selected['cases']),'exact selected eight only, historical cases not replayed')
  require(all(row['completed'] is True and row['returncode']==0 for row in commands),'all recorded actual producer commands completed')
  for mode in ('disabled','enabled'):
   selected=[row for row in commands if row['log']=='evidence/'+mode+'/03-init-object.log'];require(len(selected)==1,'actual unique object-only make')
@@ -164,8 +178,7 @@ def main():
   source_map={n:sha(ROOT/n) for n in import_closure()}
   write(out/'source-manifest.json',source_map)
   for name in source_map:dest=out/'source'/name;dest.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(ROOT/name,dest)
-  run([sys.executable,ROOT/'note10/device_test/test_pre_pm_trial.py','--output',out/'fixtures'],'fixtures.log')
-  run([sys.executable,ROOT/'note10/device_test/test_pre_pm_provider.py','--output',out/'provider-fixtures/result.json'],'provider-fixtures.log')
+  run([sys.executable,ROOT/'note10/device_test/test_pre_pm_lowering.py','--new-only','--output',out/'lowering-fixtures/result.json'],'lowering-fixtures.log')
   archive=out/'kernel-source.tar.gz'
   if a.archive:shutil.copyfile(a.archive,archive)
   else:acquire(archive)
@@ -190,7 +203,7 @@ def main():
     except Exception as capture_error:write(proof/'capture-failure.json',{'error':repr(capture_error),'accepted':False})
    run(['llvm-objdump-14','-d',objects/TARGET],'evidence/'+mode+'/disassembly.log');modes[mode]=verify_mode(proof,mode=='enabled',identifier)
   payload=a.payload.read_bytes();require(digest(payload+b'\0'*(0x22b0000-len(payload)))==PREFIX_SHA,'actual fresh staged prefix')
-  result={'schema':1,'version':'v62','passed':True,'source_sha256':source_map,'kernel_commit':COMMIT,'kernel_archive_sha256':sha(archive),'build_id':identifier,'modes':modes,'prefix_sha256':PREFIX_SHA,'toolchain':tools,'ci_context':{k:os.environ.get(k) for k in ('GITHUB_RUN_ID','GITHUB_RUN_ATTEMPT','GITHUB_SHA','GITHUB_JOB')},'wrapper_executed':False,'whole_ci_accepted':False,'hardware_verified':False,'physical_memory_or_hardware_accessed':False,'full_Image_or_BOOT_built':False,'deployment_ready':False}
+  result={'schema':1,'version':'v62','passed':True,'fixture_execution_scope':'newly-added-only','executed_fixture_case_inventory':list(NEW_CASES),'carried_prior_proofs':CARRIED_PRIOR_PROOFS,'recorded_repository_root':ROOT.as_posix(),'recorded_output_root':out.as_posix(),'source_sha256':source_map,'kernel_commit':COMMIT,'kernel_archive_sha256':sha(archive),'build_id':identifier,'modes':modes,'prefix_sha256':PREFIX_SHA,'toolchain':tools,'ci_context':{k:os.environ.get(k) for k in ('GITHUB_RUN_ID','GITHUB_RUN_ATTEMPT','GITHUB_SHA','GITHUB_JOB')},'wrapper_executed':False,'whole_ci_accepted':False,'hardware_verified':False,'physical_memory_or_hardware_accessed':False,'full_Image_or_BOOT_built':False,'deployment_ready':False}
   result['files_sha256']={p.relative_to(out).as_posix():sha(p) for p in out.rglob('*') if p.is_file() and 'work' not in p.relative_to(out).parts};write(out/'result.json',result);write(out/'independent-verification.json',verify_bundle(out,payload))
  except Exception as error:write(out/'failure.json',{'error':repr(error),'accepted':False,'wrapper_executed':False,'ci_context':{k:os.environ.get(k) for k in ('GITHUB_RUN_ID','GITHUB_RUN_ATTEMPT','GITHUB_SHA','GITHUB_JOB')},'files_sha256':{p.relative_to(out).as_posix():sha(p) for p in out.rglob('*') if p.is_file() and 'work' not in p.relative_to(out).parts}});raise
 if __name__=='__main__':main()
