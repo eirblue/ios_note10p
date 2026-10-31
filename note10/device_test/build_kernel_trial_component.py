@@ -20,22 +20,32 @@ from relocation_trial_kernel_profile import PROFILE_ID,kernel_profile,gpr_only
 from test_relocation_trial_aarch64 import disassembly_binding,PRODUCTION
 from test_kernel_trial_component import run_cases,CASE_INVENTORY
 from test_kernel_trial_relocation_binding import run_cases as relocation_binding_cases
+from test_kernel_trial_outliner_flags import run_cases as outliner_flag_cases
 
 PUBLIC=('note10/device_test/relocation_trial_aarch64_model.py','note10/device_test/kernel_trial_adapter.c','note10/device_test/kernel_trial_stack_oracle.c',
  'note10/device_test/prepare_kernel_trial_component.py','note10/device_test/kernel_trial_object.py','note10/device_test/build_kernel_trial_component.py',
- 'note10/device_test/test_kernel_trial_component.py','note10/device_test/test_kernel_trial_relocation_binding.py','.github/workflows/note10-kbuild-trial-component.yml')
+ 'note10/device_test/test_kernel_trial_component.py','note10/device_test/test_kernel_trial_relocation_binding.py',
+ 'note10/device_test/test_kernel_trial_outliner_flags.py','.github/workflows/note10-kbuild-trial-component.yml')
 IMMUTABLE=('note10/xnu26/runtime_relocation.c','note10/xnu26/runtime_relocation.h','note10/xnu26/runtime_relocation_trial.c','note10/xnu26/runtime_relocation_trial.h','note10/device_test/relocation_trial_aarch64_abi.c')
 SHARED=('note10/device_test/build_xnu_runtime_plan_component.py','note10/device_test/prepare_xnu_runtime_plan.py','note10/device_test/prepare_reservation_kernel.py','note10/device_test/xnu_reserve.c',
  'note10/device_test/xnu_runtime_scratch_stack.py','note10/device_test/prepare_xnu_runtime_observation.py',
  'note10/device_test/relocation_trial_kernel_profile.py','note10/device_test/relocation_trial_kernel_profile.json','note10/device_test/relocation_trial_instructions.py',
  'note10/device_test/test_relocation_trial_aarch64.py','note10/device_test/test_relocation_trial_wheel_metadata.py','note10/device_test/test_relocation_trial_aarch64_binding.py','note10/device_test/relocation_trial_input.py')
-INSTRUMENTATION='-gdwarf-4 -fstack-usage -ffunction-sections -fdata-sections'
+BASE_INSTRUMENTATION='-gdwarf-4 -fstack-usage -ffunction-sections -fdata-sections'
+INSTRUMENTATION=BASE_INSTRUMENTATION+' -mllvm -enable-machine-outliner=never'
 KBUILD_SOURCE_FILES=(*KBUILD_PINS,'scripts/basic/fixdep.c','Makefile','arch/arm64/Makefile','arch/arm64/mm/Makefile','arch/arm64/configs/'+DEFCONFIG)
 
 def immutable_sources():
     for name,value in PRODUCTION.items():require(sha(ROOT/name)==value,'immutable planner/trial C/H changed')
     require(sha(ROOT/'note10/device_test/relocation_trial_aarch64_abi.c')=='e20258dfbb8cc93793c974a4386df5e8dda32a9db77c3d14e0c3456601b7b0d7','immutable ABI oracle changed')
     require(len(LEAF)==56 and digest(LEAF)=='37154617c91027ac8e52fea9924579df6f135b0c1179892aad1fe77fb0936d80','immutable modeled leaf ADT call path')
+
+def validate_outliner_options(args):
+    positions=[i for i,token in enumerate(args) if 'enable-machine-outliner' in token]
+    require(len(positions)==1,'unique explicit machine-outliner control required; no duplicate/conflicting later option')
+    index=positions[0]
+    require(index>0 and args[index]=='-enable-machine-outliner=never' and args[index-1]=='-mllvm','exact adjacent Clang14 backend outliner-never pair required')
+    return {'pair':['-mllvm','-enable-machine-outliner=never'],'backend_option_index':index,'instrumented_analysis_only':True,'unchanged_production_Image_command':False}
 
 def canonical_key(name,roots):
     p=PurePosixPath(name)
@@ -103,14 +113,15 @@ def mode_proof(proof,enabled):
     for expected,group in groups:require([x for x in args if x in group][-1:]==[expected],'actual selected-option ordering override: '+expected)
     require([x for x in args if x.startswith('-march=')][-1:]==['-march=armv8-a+lse'] and
       [x for x in args if x.startswith(('-fstack-protector','-fno-stack-protector'))][-1:]==['-fno-stack-protector'],'actual architecture/protector option ordering override')
-    for flag in INSTRUMENTATION.split():require(args.count(flag)==1,'actual projection instrumentation differs: '+flag)
+    for flag in BASE_INSTRUMENTATION.split():require(args.count(flag)==1,'actual projection instrumentation differs: '+flag)
+    outliner=validate_outliner_options(args)
     scripts={name:(proof/'kbuild-source'/name).read_bytes() for name in KBUILD_PINS}
     provenance=postprocess_provenance(config,scripts,obj.read_bytes(),True)
     parsed=parse_elf(obj.read_bytes(),1);closure=component_closure(parsed,enabled)
     sidecar=proof/'kbuild'/origin['sidecar'];require(sidecar.is_file(),'actual compiler-output-derived stack sidecar missing')
     report={'enabled':enabled,'object_sha256':sha(obj),'config_sha256':digest(config),'command_origin':origin,'actual_ordered_compiler_tokens':args,
       'postprocess_provenance':provenance,'component':closure,'sidecar_file':'kbuild/'+origin['sidecar'],'sidecar_sha256':sha(sidecar),
-      'instrumentation':INSTRUMENTATION,'unchanged_production_Image_command':False,'kernel_TU_headers':True}
+      'instrumentation':INSTRUMENTATION,'outliner_instrumentation':outliner,'unchanged_production_Image_command':False,'kernel_TU_headers':True}
     return report
 
 def archive_files(path,names):
@@ -228,7 +239,7 @@ def main():
         immutable_sources()
         source_map={name:sha(ROOT/name) for name in (*PUBLIC,*IMMUTABLE,*SHARED)};source_out=out/'source';source_out.mkdir()
         for name in source_map:shutil.copyfile(ROOT/name,source_out/Path(name).name)
-        fixtures=run_cases(canonical_key)+relocation_binding_cases();write(out/'fixtures.json',{'fixture_only':True,'synthetic_only':True,'cases':fixtures,'whole_ci_accepted':False})
+        fixtures=run_cases(canonical_key)+relocation_binding_cases()+outliner_flag_cases(validate_outliner_options);write(out/'fixtures.json',{'fixture_only':True,'synthetic_only':True,'cases':fixtures,'whole_ci_accepted':False})
         archive=out/'kernel-source.tar.gz'
         if a.archive:shutil.copyfile(a.archive,archive)
         else:acquire(archive)
