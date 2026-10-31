@@ -17,7 +17,8 @@ ubfiz ubfx udiv umaddl umnegl umsubl umulh umull uxtb uxth
 addp cmeq cmge cmgt cmhi cmhs cmle cmlt cmtst cnt dup ext fmov ins
 ld1 ld2 ld3 ld4 movi mvni not orn orr rev64 shl shrn sli sqxtn srshr
 sshr st1 st2 st3 st4 tbl tbx trn1 trn2 uaddlv uaddlp uaddw uaddl
-umaxv uminv urshr ushr uzp1 uzp2 xtn zip1 zip2'''.split())
+umaxv uminv urshr ushr uzp1 uzp2 xtn zip1 zip2
+ushll sshll bit umov bfi'''.split())
 ROW=re.compile(r'^\s*([0-9a-fA-F]+):\s+((?:[0-9a-fA-F]{2}\s+){3}[0-9a-fA-F]{2}|[0-9a-fA-F]{8})\s+([a-z][a-z0-9.]*)\s*(.*?)\s*$')
 LABEL=re.compile(r'^\s*[0-9a-fA-F]+ <[^<>]+>:\s*$')
 
