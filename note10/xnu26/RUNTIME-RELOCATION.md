@@ -1,5 +1,21 @@
 # Runtime relocation metadata and PC data trials
 
+## v62 verified full diagnostic TU static result
+
+Source `f4dd45ff040df1a6c67b4390d17046dc6970d921` passed [CI 41189249719](https://github.com/eirblue/ios_note10p/actions/runs/41189249719), attempt 1. The parent independently verified the actual run/job/required steps, authenticated full ZIP and every extracted member, source closure, real Kbuild objects and the protected complete source archive. Parent result digest: `09e615e7b7fc6d42fe47f5dffa54a06f47fdeb0b7cf7f314c6c1a8a5cdca85a8`.
+
+The full diagnostic `arch/arm64/mm/init.c` and its reviewed TU/Kconfig overlay compiled in default-disabled and explicitly enabled modes against real generated headers and configuration. This is an object target with explicit analysis flags, including no-inline and no machine outliner; no full production Image or BOOT image was built. Existing production C/H and the trial ABI remain unchanged.
+
+The enabled object binds the actual pre-PM call order, guarded failure returns and every post-trial cleanup/return path. The static proof binds the complete 36,372,480-byte restore/comparison span, both hashes, byte equality, both guards and the unmasked rejection result. Clang's `bcmp` equality lowering is tied to the pinned declaration/source fallback and 50 independently decoded instruction-word fields. Neither the wrapper nor a kernel instruction model was executed.
+
+Selected ordinary GPR instructions number 1,516; the scoped selection separately records three expected kernel-context instructions and unresolved kernel providers. It makes no whole-TU GPR or hardware FP-permission claim. The actual wrapper frame is 368 bytes. Actual header constants are `THREAD_SIZE=16384` and `IRQ_STACK_SIZE=16384`; recorded scoped frames are not a whole OS/IRQ stack bound. Generic ADT accounting retains ten possible frames, including the rejection-depth frame. No fixed external-stack allowance supplies a physical bound.
+
+The new artifact profile retains the original 23,625,005-byte ZIP and all 2,173 members (59,593,293 expanded bytes). ZIP SHA-256: `cf4f8cf7960baabe5173d050150a6cda13aeb8ab13154d25b17e12eac988633f`. The complete 212,648,376-byte archive for kernel commit `55f042627bb7030c93550faafa117674d32b21d1` remains a protected shared input with SHA-256 `46d6a563af04e0c2ed9c96c2a1af8cab2344b458c9554b09098e6a9e7219ae4c`. The producer hashes it before compiling outside the uploaded roots; the parent independently hashes its retained copy and compares every archive-derived prerequisite byte. Generated/config and compiler-resource inputs retain separate bytes and provenance. The ZIP contains zero archive payload copies; collection creates zero hardlinks and leaves shared input bytes and identity unchanged.
+
+Only the new external-profile synthetic cases ran locally: 18 passed. The final CI invoked zero existing fixture suites. Earlier 38/13/20/8-case evidence remains historical and tied to its original source/run or unpublished local checkpoint, without a current-source rerun claim. Failed runs 41183097021 and 41186369912 remain failed; the latter exposed a nonexistent explicit `preempt_mask.h` expectation, which was removed without dropping any real dependency.
+
+Physical cycles, BOOT writes and reboots are zero for v62. The consumed v57 cycle was not replayed. External allocator/crypto/IRQ stack limits, actual provider availability, runtime page ownership, duration, recovery races, DMA and restoration under backup corruption remain unproven. Phone RAM writes, phone XNU execution, iOS boot and deployment readiness are not established.
+
 ## v61 actual Kbuild component projection passed
 
 Tested source `557fa38b7ec52eb1a563860172f00e1125b60339` passed
