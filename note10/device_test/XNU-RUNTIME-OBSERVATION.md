@@ -1,4 +1,63 @@
-# Verified late-init runtime-plan observation
+# Verified late-init runtime metadata observations
+
+## v57 caller-owned scratch result
+
+Tested source `5afedf0bd305861b1b98e7b975ad9a6405d38b6a` passed
+[CI 41109866784](https://github.com/eirblue/ios_note10p/actions/runs/41109866784),
+attempt 1. The canonical manifest measures 28 unique production validators and
+129 actual calls. Both required named API steps completed successfully; genuine
+post-command receipts independently bind the pinned workflow/helper, runner
+context, original dispatch inputs and selected output bytes to the verified
+artifact ZIP digest.
+
+One fresh physical cycle passed all 46 required evaluations out of 47 total.
+The complete v56 set of 45 required keys was preserved; the added independent
+`xnu_runtime_scratch` row passed. Changed recovery boot identity, fresh normal
+bound TWRP and matching hashes for all five partitions established automatic
+return and integrity. Brightness raw10 was verified after integrity checks;
+installation battery was 29%. The saved result SHA-256 is
+`0a169946fa423240ac2ea35ec4b152e790f83e72a0f607593928d8cc2578105b`.
+This result publication is separate from the tested source commit.
+
+The default-off `--xnu-runtime-scratch` option and
+`CONFIG_NOTE10_XNU_RUNTIME_SCRATCH` require the existing runtime-observation and
+full payload/PM/trace/recovery chain. A private caller-owned `__initdata` object
+holds bounded buffers for 1152-byte boot_args, a 64-byte transfer record and a
+56-byte synthetic leaf ADT. The production serializer/checker roundtrips every
+expected byte and canary and clears the private scratch object after use.
+Focused host proofs contain native11/parser29/adapter4 cases, plus 24 production
+package-flow cases; those synthetic proofs are distinct from the real boot log.
+
+Two agreeing checksummed `N10XSO1` copies bind the current boot/build,
+reservation, payload and geometry. They report `phase=late-init`, their own
+generation 1 and `pm_completion_claimed=0`, with `bytes_checked=1`,
+`canaries_checked=1`, `synthetic_adt=1`, `scratch_materialized=1`,
+`reserved_materialized=0`, `ownership=0` and `executed=0`. Existing `N10XPO1`
+semantics and the independent PM evidence rows remain unchanged. The serializer
+writes only the private scratch object; the old kernel-at-base writer is
+unchanged. No new metadata or hypothetical runtime layout was installed in the
+reserved RAM window, and no ownership or execution transfer occurred.
+
+The retained compiler estimate is 7,840 bytes against a 16,384-byte task stack,
+leaving an estimated 8,544-byte margin. Its 2,048-byte external allowance is an
+assumption: the saved compiler inputs do not measure every initcall ancestor,
+exception/IRQ return, preemption/scheduler or console path. The fixed-leaf proof
+is tied to the same actual source/object and the planner/scratch paths are
+sequential. This is not a measured whole-OS stack bound or a general physical
+stack-safety proof; the single device observation does not remove that limit.
+
+Failed [CI 41090887005](https://github.com/eirblue/ios_note10p/actions/runs/41090887005),
+[CI 41097401475](https://github.com/eirblue/ios_note10p/actions/runs/41097401475) and
+[CI 41101985523](https://github.com/eirblue/ios_note10p/actions/runs/41101985523)
+remain failed. Compiler sidecar provenance/capture, fixed-leaf estimation and
+the terminal validator schedule were corrected before the accepted run. Failed
+artifacts, prior results and journals were preserved; no previous physical
+journal was replayed. Neither this result nor the synthetic ADT establishes
+live hardware ADT readiness, global DMA shutdown, physical ownership, XNU
+execution or iOS boot.
+
+## v56 preserved planner observation
+
 
 v56 passed [CI 41075142026](https://github.com/eirblue/ios_note10p/actions/runs/41075142026),
 attempt 1, for tested source `e4e662059413fc1157df0587e4b088f762b0621f`.

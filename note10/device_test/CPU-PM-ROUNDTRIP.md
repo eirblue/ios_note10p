@@ -98,3 +98,24 @@ local plan using a synthetic ADT; no new RAM layout or metadata was installed.
 The old kernel-at-base writer and the earlier callback-identity/order limits
 remain unchanged. This does not establish XNU execution, iOS boot, global DMA
 quiescence or physical ownership. See [result and scope](XNU-RUNTIME-OBSERVATION.md).
+
+
+## v57 compatible scratch serialization passed
+
+Tested source `5afedf0bd305861b1b98e7b975ad9a6405d38b6a` passed
+[CI 41109866784](https://github.com/eirblue/ios_note10p/actions/runs/41109866784),
+attempt 1, with 28 measured validator identities and 129 actual calls. One fresh
+physical cycle passed all 46 required evaluations out of 47 total. All 45 v56
+required keys, including the original CPU_PM pair, counts, dispatch trace and
+planner observation, remain independently required. Automatic normal TWRP
+return, five partition hashes and post-integrity brightness raw10 were verified;
+installation battery was 29%.
+
+The added `xnu_runtime_scratch` row observes bounded boot_args/record/synthetic
+ADT serialization and byte/canary checks inside private caller-owned initdata.
+The new companion claims no PM completion, reserved-window metadata installation,
+physical ownership or XNU execution. No additional CPU_PM API pair or new
+hardware API is introduced. The existing callback-identity/order limits and
+all prior failed/successful results remain preserved. The compiler stack
+estimate retains an assumed external allowance and is not a whole-OS safety
+proof. See [scratch result and limitations](XNU-RUNTIME-OBSERVATION.md).

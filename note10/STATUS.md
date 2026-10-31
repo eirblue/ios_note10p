@@ -1,5 +1,13 @@
 # 작업 상태 (2026-10-31, Asia/Seoul)
 
+## 2026-10-31: v57 caller-owned scratch 직렬화 단일 실기기 검증 통과
+
+- **검증 소스:** `5afedf0bd305861b1b98e7b975ad9a6405d38b6a`; [CI 41109866784](https://github.com/eirblue/ios_note10p/actions/runs/41109866784) 첫 번째 시도 통과. 실제 manifest의 고유 검증기 28개·호출 129회, 실제 CI 단계 완료 기록과 산출물 digest를 결속했다. 결과 문서 게시 commit은 검증 소스와 별도다.
+- **실기기 결과:** 새 단일 회차 1회에서 총 47개 중 필수 46개 모두 통과. v56의 필수 45개를 유지하고 `xnu_runtime_scratch`를 추가했다. 정상 TWRP 자동 복귀, 다섯 파티션 해시 일치, 복귀 무결성 확인 뒤 밝기 raw 10을 확인했다. 설치 직전 배터리는 29%였다.
+- **새 관측 범위:** 전용 `__initdata` 버퍼에 boot_args 1152바이트·record 64바이트·합성 ADT 56바이트를 만들고 바이트와 canary를 대조했다. 같은 부팅에 결속된 checksummed `N10XSO1` 두 copy가 일치했으며 `scratch_materialized=1`, `reserved_materialized=0`, `ownership=0`, `executed=0`이다. 기존 `N10XPO1` 관측과 PM 판정은 유지한다.
+- **스택 증거 한계:** 컴파일러 추정 7,840바이트와 16,384바이트 task stack의 차이는 8,544바이트다. 외부 경로 2,048바이트는 가정이며 전체 OS 스택 안전성의 측정·증명이 아니다.
+- 앞선 실패 CI 41090887005·41097401475·41101985523과 v56 이전 이력을 보존했다. 이전 journal은 재실행하지 않았다. 새 예약 RAM metadata 설치·XNU 실행·iOS 부팅은 없었다. [결과와 제한](device_test/XNU-RUNTIME-OBSERVATION.md).
+
 ## 2026-10-31: v56 late-init XNU runtime plan 단일 실기기 관측 통과
 
 - **검증 소스:** `e4e662059413fc1157df0587e4b088f762b0621f`; [CI 41075142026](https://github.com/eirblue/ios_note10p/actions/runs/41075142026) 첫 번째 시도 통과. 실제 실행 manifest의 고유 검증기 27개·호출 128회와 native 8개·parser 24개·preparer 18개·package 22개 증거를 결속했다. 이 소스 식별자는 결과 문서의 게시 commit과 구분한다.
