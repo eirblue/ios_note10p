@@ -305,14 +305,35 @@ def dependency_tokens(text,target):
  require(tokens,'complete nonempty fixdep dependency inventory');return tokens
 
 
+def primary_stat_identity(st,platform):
+ require(platform in ('nt','posix'),'supported primary metadata API profile');names=('st_dev','st_ino','st_nlink','st_size','st_mtime_ns','st_ctime_ns')+(('st_birthtime_ns',) if platform=='nt' else ());require(all(type(getattr(st,name,None)) is int for name in names),'required exact integer primary identity fields');api=tuple(getattr(st,name) for name in names);compatible=api[:5]+((st.st_birthtime_ns,) if platform=='nt' else (st.st_ctime_ns,));return api,compatible
+
+
+def primary_api_stability(path_before,fd_before,fd_after,path_after,platform):
+ pb,pc=primary_stat_identity(path_before,platform);fb,fc=primary_stat_identity(fd_before,platform);fa,fac=primary_stat_identity(fd_after,platform);pa,pac=primary_stat_identity(path_after,platform);require(pb==pa and fb==fa,'exact identity/ctime stability within each primary metadata API');require(pc==fc==fac==pac,'exact compatible primary cross-API identity and platform timestamps');return pb
+
+
+def mandatory_primary(text,target,objects,source):
+ declared={'crypto/shash.o':'crypto/shash.c','crypto/ahash.o':'crypto/ahash.c'};require(target in declared,'finite declared leaf primary mapping');prefix='source_'+target+' := ';lines=[line for line in text.splitlines() if line.startswith('source_')];require(len(lines)==1 and lines[0].startswith(prefix),'one actual source assignment for declared leaf');token=lines[0][len(prefix):];require(token and len(token)<=4096 and not any(c in token for c in ('$', ';','`','|','&','<','>','#','\\','\n')) and shlex.split(token)==[token],'one bounded literal actual primary token')
+ args=command_line(text,target);operands=[arg for arg in args[1:] if not arg.startswith('-') and arg.endswith('.c')];require(args.count('-c')==1 and operands==[token] and args[-1]==token,'actual saved CC has exactly one agreeing primary source operand');candidate=Path(token) if Path(token).is_absolute() else Path(objects)/token;source=Path(source);expected=source/declared[target];require('..' not in candidate.parts and candidate.absolute()==expected.absolute(),'actual primary matches finite declared source under pinned root without aliases/escape')
+ for component in (candidate,*candidate.parents):
+  st=component.lstat();require(not stat.S_ISLNK(st.st_mode) and not component.is_symlink() and not getattr(st,'st_file_attributes',0)&1024,'no primary or ancestor symlink/reparse before resolution')
+ path=candidate.resolve();root=source.resolve();require(path.is_relative_to(root) and path.relative_to(root).as_posix()==declared[target],'contained exact declared primary source');before=path.lstat();require(stat.S_ISREG(before.st_mode) and before.st_size<=8*1024*1024,'mandatory ordinary primary at most 8MiB before materialization')
+ with path.open('rb') as stream:
+  fd_before=os.fstat(stream.fileno());primary_api_stability(before,fd_before,fd_before,before,os.name);raw=stream.read(8*1024*1024+1);fd_after=os.fstat(stream.fileno());after=path.lstat();primary_api_stability(before,fd_before,fd_after,after,os.name);require(len(raw)==before.st_size and len(raw)<=8*1024*1024,'complete bounded stable primary bytes')
+ return {'token':token,'key':'source/'+declared[target],'path':path,'raw':raw,'sha256':digest(raw),'identity':primary_stat_identity(before,os.name)[0],'actual_CC_argv':args}
+
+
 def prerequisite_capture(objects,source,compiler_include,target,destination):
- roots={'objects':str(Path(objects).resolve()),'source':str(Path(source).resolve()),'compiler-include':str(Path(compiler_include).resolve())};objects=Path(objects);destination=Path(destination);destination.mkdir(parents=True);cmd=objects/(PurePosixPath(target).parent/('.'+PurePosixPath(target).name+'.cmd'));text=cmd.read_text();tokens=dependency_tokens(text,target);tokens+=[(str(objects/x),False) for x in ('.config','include/generated/autoconf.h','include/config/auto.conf')];files={};optional=[];mapping={}
+ roots={'objects':str(Path(objects).resolve()),'source':str(Path(source).resolve()),'compiler-include':str(Path(compiler_include).resolve())};objects=Path(objects);destination=Path(destination);destination.mkdir(parents=True);cmd=objects/(PurePosixPath(target).parent/('.'+PurePosixPath(target).name+'.cmd'));text=cmd.read_text();primary=mandatory_primary(text,target,objects,source);require([label for label,root in roots.items() if primary['path'].is_relative_to(Path(root))]==['source'],'primary belongs only to explicit pinned source root');tokens=dependency_tokens(text,target);tokens+=[(str(objects/x),False) for x in ('.config','include/generated/autoconf.h','include/config/auto.conf')];files={primary['key']:primary['sha256']};optional=[];mapping={primary['token']:primary['key']};out=destination/primary['key'];out.parent.mkdir(parents=True,exist_ok=True)
+ with out.open('xb') as stream:stream.write(primary['raw'])
  for token,may_absent in tokens:
   path=Path(token) if Path(token).is_absolute() else objects/token;path=path.resolve();matches=[(label,Path(root)) for label,root in roots.items() if path.is_relative_to(Path(root))];require(len(matches)==1,'prerequisite belongs to one explicit actual root');label,root=matches[0];key=label+'/'+path.relative_to(root).as_posix()
+  if path==primary['path']:require(token==primary['token'] and key==primary['key'] and not may_absent,'duplicate primary must be identical mandatory token/key, no aliases/optional downgrade');continue
   if not path.exists():require(may_absent,'mandatory prerequisite missing');optional.append(key);continue
   require(path.is_file(),'ordinary actual prerequisite file');raw=path.read_bytes();require(len(raw)<=8*1024*1024,'bounded prerequisite bytes');files[key]=digest(raw);mapping[token]=key;out=destination/key;out.parent.mkdir(parents=True,exist_ok=True)
   if not out.exists():out.write_bytes(raw)
- require(sum(p.stat().st_size for p in destination.rglob('*') if p.is_file())<=CAP,'complete prerequisite capture cap');return {'roots':roots,'files_sha256':files,'optional_absent':sorted(set(optional)),'token_to_key':mapping,'actual_cmd_sha256':digest(cmd.read_bytes()),'actual_CC_argv':command_line(text,target)}
+ st=primary['path'].lstat();require(primary_stat_identity(st,os.name)[0]==primary['identity'] and not primary['path'].is_symlink() and not getattr(st,'st_file_attributes',0)&1024,'same-host primary remains stable through exact-buffer copy/coalescing');require(sum(p.stat().st_size for p in destination.rglob('*') if p.is_file())<=CAP,'complete prerequisite capture cap');return {'roots':roots,'files_sha256':files,'optional_absent':sorted(set(optional)),'token_to_key':mapping,'actual_cmd_sha256':digest(cmd.read_bytes()),'actual_CC_argv':primary['actual_CC_argv'],'primary_source':{'token':primary['token'],'key':primary['key'],'bytes':len(primary['raw']),'sha256':primary['sha256']}}
 
 
 def leaf_equality(baseline,old_dependencies,new_dependencies):
