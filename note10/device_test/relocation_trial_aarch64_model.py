@@ -207,7 +207,7 @@ def verify_case(root,report,payload,abi):
     require(report['metadata_unchanged'] is True and report['invalid_accesses']==[] and report['hardware_verified'] is False,'readonly input and mapped-memory scope')
     return {d['file'] for d in report['observations'].values()}
 
-def verify_report(root,report,payload,image):
+def verify_report(root,report,payload,image,expected_profile=None):
     require(report['elf_sha256']==image['sha256'] and report['abi']==image['abi'],'actual executed ELF and ABI binding')
     expected=[[s['start'],s['start']+s['mapped_size'],5 if s['flags']&1 else 1] for s in image['segments']]
     expected += [[REQUEST,REQUEST+PAGE,1],[ADT,ADT+PAGE,1],[WINDOW,WINDOW+MAX_DECODED,3],
@@ -217,20 +217,33 @@ def verify_report(root,report,payload,image):
     require(report['backup_mapping_role']==('unused-separate-mapping-sentinel' if alias else 'actual-backup-argument-mapping') and
       report['backup_argument']=={'address':WINDOW if alias else BACKUP,'role':'aliases-window' if alias else 'separate-backup'},'actual passed backup pointer and separate mapping evidence role')
     emulator=report['emulator']
-    require(emulator['distribution']=='2.1.4' and emulator['runtime']=='2.1.4' and emulator['api'][:2]==[2,1] and
-      emulator['fp_advsimd_setting']=={'register':'CPACR_EL1','value':3<<20,'model_assumption_only':True} and emulator['libraries_sha256'],'pinned model dependency/API/library identity')
+    require(emulator['distribution']=='2.1.4' and emulator['runtime']=='2.1.4' and emulator['api'][:2]==[2,1] and emulator['libraries_sha256'],'pinned model dependency/API/library identity')
+    if expected_profile is None:
+        require(emulator['fp_advsimd_setting']=={'register':'CPACR_EL1','value':3<<20,'model_assumption_only':True} and
+          'codegen_profile' not in report,'strict default v59 FP-enabled profile')
+    else:
+        from relocation_trial_kernel_profile import verify_profile_report
+        verify_profile_report(report,expected_profile)
     require(report['production_aarch64_model_executed'] is True and report['physical_memory_or_hardware_accessed'] is False and
       report['xnu_executed'] is False and report['whole_ci_accepted'] is False,'PC-model execution scope')
     return verify_case(root,report,payload,image['abi'])
 
-def execute_case(elf_path,payload_path,name,out,blob_directory):
+def execute_case(elf_path,payload_path,name,out,blob_directory,profile=None):
     import unicorn as u
     from unicorn import arm64_const as arm
     require(importlib.metadata.version('unicorn')=='2.1.4' and u.__version__=='2.1.4' and tuple(u.uc_version()[:2])==(2,1),'pinned Unicorn distribution/runtime/API')
     require(not os.environ.get('UNICORN_LIB_PATH'),'custom Unicorn engine search path rejected')
     image=elf_image(elf_path);abi=image['abi'];payload=payload_path.read_bytes();before=baseline(payload)
     uc=u.Uc(u.UC_ARCH_ARM64,u.UC_MODE_ARM)
-    uc.reg_write(arm.UC_ARM64_REG_CPACR_EL1,3<<20)
+    settings=None
+    if profile is None:
+        uc.reg_write(arm.UC_ARM64_REG_CPACR_EL1,3<<20)
+    else:
+        from relocation_trial_kernel_profile import kernel_profile
+        settings=kernel_profile(profile)
+        uc.reg_write(arm.UC_ARM64_REG_CPACR_EL1,0)
+        cpacr_before=uc.reg_read(arm.UC_ARM64_REG_CPACR_EL1)
+        require(cpacr_before==0,'actual FP-disabled model setup readback')
     mappings=[];mapping_permissions=[]
     def map_bytes(address,raw,size,permissions):
         require(address%PAGE==0 and size%PAGE==0 and len(raw)<=size,'model page mapping')
@@ -343,19 +356,24 @@ def execute_case(elf_path,payload_path,name,out,blob_directory):
       'metadata_unchanged':bytes(uc.mem_read(REQUEST,PAGE))==bytes(request) and bytes(uc.mem_read(ADT,len(LEAF)))==LEAF,
       'budget':{'instruction_ceiling':COUNT_LIMIT,'timeout_seconds':TIMEOUT_SECONDS,'executed_instruction_count':None},
       'emulator':{'distribution':importlib.metadata.version('unicorn'),'runtime':u.__version__,'api':list(u.uc_version()),'libraries_sha256':libraries,
-        'fp_advsimd_setting':{'register':'CPACR_EL1','value':3<<20,'model_assumption_only':True}},
+        'fp_advsimd_setting':{'register':'CPACR_EL1','value':(3<<20) if settings is None else cpacr_before,'model_assumption_only':True}},
       'model_mappings':mapping_permissions,'hardware_verified':False,'physical_memory_or_hardware_accessed':False,'xnu_executed':False,'whole_ci_accepted':False,
       'production_aarch64_model_executed':True,'model_memory_only':True,'synthetic_adt':True,
       'observations_codec':{'format':'zlib','compression_level':9,'maximum_decoded_size':MAX_DECODED,'runtime_version':zlib.ZLIB_RUNTIME_VERSION},
       'elf_sha256':image['sha256'],'abi':abi}
     # Independent byte verification uses full observed blobs, not returned counts.
+    if settings is not None:
+        report['codegen_profile']=settings
+        report['emulator']['cpacr_before']=cpacr_before
+        report['emulator']['cpacr_after']=uc.reg_read(arm.UC_ARM64_REG_CPACR_EL1)
     write(out/'observed.json',report)
-    verify_report(blob_directory.parent,report,payload,image);write(out/'result.json',report)
+    verify_report(blob_directory.parent,report,payload,image,expected_profile=profile);write(out/'result.json',report)
     return report
 
 if __name__=='__main__':
     ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('--elf',type=Path,required=True);ap.add_argument('--payload',type=Path,required=True)
     ap.add_argument('--case',choices=CASES,required=True);ap.add_argument('--output',type=Path,required=True);ap.add_argument('--blobs',type=Path,required=True)
+    ap.add_argument('--profile',choices=['kernel-init-subset-v1'],default=None,help='Explicit kernel-option subset model; omitted preserves v59 FP-enabled contract')
     a=ap.parse_args();out=private_path(a.output);blobs=private_path(a.blobs)
     require(blobs.parent==out.parent.parent,'shared blobs must belong to this model evidence root')
-    out.mkdir(parents=True,exist_ok=False);execute_case(a.elf,a.payload,a.case,out,blobs)
+    out.mkdir(parents=True,exist_ok=False);execute_case(a.elf,a.payload,a.case,out,blobs,profile=a.profile)

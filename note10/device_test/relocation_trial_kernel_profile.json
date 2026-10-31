@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "profile_id": "kernel-init-subset-v1",
+  "selected_flags": [
+    "-mlittle-endian",
+    "-fno-common",
+    "-march=armv8-a+lse",
+    "-fno-PIE",
+    "-mno-implicit-float",
+    "-fno-pic",
+    "-Oz",
+    "-fno-stack-protector",
+    "-mno-global-merge"
+  ],
+  "origin": {
+    "run_id": 41109866784,
+    "canonical_member": "handoff-kernel/xnu-runtime-scratch-stack/init.o.cmd",
+    "command_sha256": "6c5dcb0e7c76b5bc00533d058458632b69efca4c1330be69bd90d4201b5bca32"
+  },
+  "scope": "Observed code-generation option subset only; not the full kernel command or Linux __KERNEL__ translation unit. PC model only; no FPU hardware, EL1 integration, x18-fixed or XNU execution claim."
+}
