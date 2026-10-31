@@ -1,0 +1,48 @@
+name: Note10 provider core interface metadata
+on:
+  workflow_dispatch:
+    inputs:
+      control_sha256:
+        description: Exact reviewed committed metadata control SHA256
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+jobs:
+  provider-core-interface:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Produce finite provider core metadata join
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CONTROL_SHA256: ${{ inputs.control_sha256 }}
+        run: >-
+          python -B note10/device_test/build_provider_core_interface.py
+          --control-sha256 "$CONTROL_SHA256"
+          --output note10/private/v66-ci-interface
+          --workspace note10/private/v66-ci-interface-workspace
+      - name: Stage exact interface evidence namespace
+        if: always()
+        run: >-
+          python -B note10/device_test/stage_provider_core_interface.py
+          --source note10/private/v66-ci-interface
+          --staging-parent note10/private/v66-upload-staging
+          --receipt note10/private/v66-stage-receipt.json
+          --forensic-on-failure
+      - name: Upload interface metadata evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: note10-provider-core-interface-pc-only
+          path: note10/private/v66-upload-staging
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
