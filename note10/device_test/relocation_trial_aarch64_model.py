@@ -67,7 +67,16 @@ def callee_seed():
     return {**{'x'+str(i):0x1937000000000000+i for i in range(19,30)},
       **{'d'+str(i):0x8837000000000000+i for i in range(8,16)}}
 
-def elf_image(path):
+def entry_contract(symbols,entry,expected_entry='n10_rt_trial'):
+    require(expected_entry in ('n10_rt_trial','n10_kernel_trial_adapter'),'caller-pinned supported entry required')
+    require(expected_entry in symbols and symbols[expected_entry]['info']==18 and symbols[expected_entry]['flags']&4 and
+      symbols[expected_entry]['size']>0 and entry==symbols[expected_entry]['value'],'ELF entry must match caller-pinned production symbol')
+
+def report_entry_contract(report,expected_entry='n10_rt_trial'):
+    require(expected_entry in ('n10_rt_trial','n10_kernel_trial_adapter') and
+      report.get('entry_symbol','n10_rt_trial')==expected_entry,'report cannot select a different entry')
+
+def elf_image(path,expected_entry='n10_rt_trial'):
     raw=path.read_bytes()
     require(len(raw)>=64 and raw[:6]==b'\x7fELF\x02\x01' and struct.unpack_from('<HH',raw,16)==(2,183),'closed AArch64 ET_EXEC required')
     entry,phoff,shoff=struct.unpack_from('<QQQ',raw,24)
@@ -103,7 +112,7 @@ def elf_image(path):
     require(not undefined,'no undefined target symbols')
     for name in ('n10_rt_trial','n10_rt_plan'):
         require(name in symbols and symbols[name]['info']==18 and symbols[name]['flags']&4 and symbols[name]['size']>0,'exact production function symbols')
-    require(entry==symbols['n10_rt_trial']['value'],'ELF entry must be actual trial function')
+    entry_contract(symbols,entry,expected_entry)
     segments=[];page_ranges=[]
     for i in range(phcount):
         kind,flags,offset,va,pa,filesz,memsz,align=struct.unpack_from('<IIQQQQQQ',raw,phoff+i*56)
@@ -207,8 +216,10 @@ def verify_case(root,report,payload,abi):
     require(report['metadata_unchanged'] is True and report['invalid_accesses']==[] and report['hardware_verified'] is False,'readonly input and mapped-memory scope')
     return {d['file'] for d in report['observations'].values()}
 
-def verify_report(root,report,payload,image,expected_profile=None):
+def verify_report(root,report,payload,image,expected_profile=None,expected_entry='n10_rt_trial'):
     require(report['elf_sha256']==image['sha256'] and report['abi']==image['abi'],'actual executed ELF and ABI binding')
+    entry_contract(image['symbols'],image['entry'],expected_entry)
+    report_entry_contract(report,expected_entry)
     expected=[[s['start'],s['start']+s['mapped_size'],5 if s['flags']&1 else 1] for s in image['segments']]
     expected += [[REQUEST,REQUEST+PAGE,1],[ADT,ADT+PAGE,1],[WINDOW,WINDOW+MAX_DECODED,3],
       [BACKUP,BACKUP+MAX_DECODED,3],[RESULT,RESULT+PAGE,3],[STACK,STACK+STACK_SIZE,3],[RETURN,RETURN+PAGE,5]]
@@ -228,12 +239,12 @@ def verify_report(root,report,payload,image,expected_profile=None):
       report['xnu_executed'] is False and report['whole_ci_accepted'] is False,'PC-model execution scope')
     return verify_case(root,report,payload,image['abi'])
 
-def execute_case(elf_path,payload_path,name,out,blob_directory,profile=None):
+def execute_case(elf_path,payload_path,name,out,blob_directory,profile=None,entry_symbol='n10_rt_trial'):
     import unicorn as u
     from unicorn import arm64_const as arm
     require(importlib.metadata.version('unicorn')=='2.1.4' and u.__version__=='2.1.4' and tuple(u.uc_version()[:2])==(2,1),'pinned Unicorn distribution/runtime/API')
     require(not os.environ.get('UNICORN_LIB_PATH'),'custom Unicorn engine search path rejected')
-    image=elf_image(elf_path);abi=image['abi'];payload=payload_path.read_bytes();before=baseline(payload)
+    image=elf_image(elf_path,expected_entry=entry_symbol);abi=image['abi'];payload=payload_path.read_bytes();before=baseline(payload)
     uc=u.Uc(u.UC_ARCH_ARM64,u.UC_MODE_ARM)
     settings=None
     if profile is None:
@@ -366,14 +377,16 @@ def execute_case(elf_path,payload_path,name,out,blob_directory,profile=None):
         report['codegen_profile']=settings
         report['emulator']['cpacr_before']=cpacr_before
         report['emulator']['cpacr_after']=uc.reg_read(arm.UC_ARM64_REG_CPACR_EL1)
+    if entry_symbol!='n10_rt_trial':report['entry_symbol']=entry_symbol
     write(out/'observed.json',report)
-    verify_report(blob_directory.parent,report,payload,image,expected_profile=profile);write(out/'result.json',report)
+    verify_report(blob_directory.parent,report,payload,image,expected_profile=profile,expected_entry=entry_symbol);write(out/'result.json',report)
     return report
 
 if __name__=='__main__':
     ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('--elf',type=Path,required=True);ap.add_argument('--payload',type=Path,required=True)
     ap.add_argument('--case',choices=CASES,required=True);ap.add_argument('--output',type=Path,required=True);ap.add_argument('--blobs',type=Path,required=True)
     ap.add_argument('--profile',choices=['kernel-init-subset-v1'],default=None,help='Explicit kernel-option subset model; omitted preserves v59 FP-enabled contract')
+    ap.add_argument('--entry-symbol',choices=['n10_rt_trial','n10_kernel_trial_adapter'],default='n10_rt_trial',help='Explicit caller-owned adapter entry; omitted preserves trial entry')
     a=ap.parse_args();out=private_path(a.output);blobs=private_path(a.blobs)
     require(blobs.parent==out.parent.parent,'shared blobs must belong to this model evidence root')
-    out.mkdir(parents=True,exist_ok=False);execute_case(a.elf,a.payload,a.case,out,blobs,profile=a.profile)
+    out.mkdir(parents=True,exist_ok=False);execute_case(a.elf,a.payload,a.case,out,blobs,profile=a.profile,entry_symbol=a.entry_symbol)
