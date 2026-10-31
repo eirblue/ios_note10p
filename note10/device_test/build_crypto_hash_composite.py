@@ -3,10 +3,10 @@ import argparse,hashlib,json,os,re,shlex,shutil,subprocess,sys,tarfile,time,urll
 from pathlib import Path
 sys.dont_write_bytecode=True
 from crypto_hash_composite import parse_object,link_origin,require,digest
-from crypto_hash_input_contract import KERNEL_COMMIT,KERNEL_SHA,KERNEL_BYTES,SOURCE_TOP,CAP,BASELINE_ROOT,NEW_ROOT,write,protected,stable,separate,disk_budget,tree_inventory,extract_kernel,extract_zip,verify_extraction,retrieve_baseline,baseline_labels,baseline_api_receipt,prerequisite_capture,leaf_equality,normalized,command_line,composite_command,config_contract
+from crypto_hash_input_contract import KERNEL_COMMIT,KERNEL_SHA,KERNEL_BYTES,SOURCE_TOP,CAP,BASELINE_ROOT,NEW_ROOT,write,protected,stable,separate,disk_budget,tree_inventory,extract_kernel,extract_zip,verify_extraction,retrieve_baseline,baseline_labels,baseline_api_receipt,prerequisite_capture,leaf_equality,normalized,command_line,composite_command,config_contract,mirror_retrieval_evidence,redact_text
 
 ROOT=Path(__file__).resolve().parents[2]
-PUBLIC=('note10/device_test/build_crypto_hash_composite.py','note10/device_test/crypto_hash_composite.py','note10/device_test/crypto_hash_input_contract.py','note10/device_test/stage_crypto_hash_composite.py','note10/device_test/test_crypto_hash_composite.py','.github/workflows/note10-crypto-hash-composite.yml')
+PUBLIC=('note10/device_test/build_crypto_hash_composite.py','note10/device_test/crypto_hash_composite.py','note10/device_test/crypto_hash_input_contract.py','note10/device_test/stage_crypto_hash_composite.py','note10/device_test/test_crypto_hash_composite.py','note10/device_test/test_crypto_hash_retrieval.py','.github/workflows/note10-crypto-hash-composite.yml')
 FLAGS='-gdwarf-4 -fstack-usage -ffunction-sections -fdata-sections -mllvm -enable-machine-outliner=never -fno-inline-functions'
 TARGET='crypto/crypto_hash.o'
 
@@ -73,7 +73,7 @@ def preserve_failure_files(out,workspace,baseline_input):
  retained=[];total=0;objects=Path(workspace)/'objects'
  candidates=[(objects/'crypto'/name,Path('evidence/crypto')/name) for name in ('shash.o','ahash.o','crypto_hash.o','.shash.o.cmd','.ahash.o.cmd','.crypto_hash.o.cmd','.tmp_shash.o','.tmp_ahash.o','.tmp_shash.ver','.tmp_ahash.ver')]
  candidates += [(objects/name,Path('failure-config')/name) for name in ('.config','include/generated/autoconf.h','include/config/auto.conf')]
- candidates += [(Path(baseline_input)/name,Path('baseline-api')/name) for name in ('run.json','jobs.json','artifacts.json','artifact.json','job-log.log','AUTHENTICATED-API-RETRIEVAL-RECEIPT.json')]
+ if Path(baseline_input).is_dir():retained.extend('baseline-api/'+name for name in mirror_retrieval_evidence(baseline_input,Path(out)/'baseline-api',os.environ.get('GH_TOKEN','')))
  for source,name in candidates:
   if not source.is_file() or source.is_symlink():continue
   total+=source.stat().st_size;require(total<=CAP,'bounded forensic-only new evidence copy');target=Path(out)/name
@@ -124,7 +124,7 @@ def main():
   compiler_path=Path(shutil.which('clang-14')).resolve();linker_path=Path(shutil.which('aarch64-linux-gnu-ld')).resolve();compiler_version=run(['clang-14','--version'],'tools/clang-version.log');linker_version=run(['aarch64-linux-gnu-ld','--version'],'tools/linker-version.log');compiler={'role':'clang-14','path':str(compiler_path),'sha256':digest(compiler_path.read_bytes()),'version':compiler_version};linker={'role':'aarch64-linux-gnu-ld','path':str(linker_path),'sha256':digest(linker_path.read_bytes()),'version':linker_version};composite_command(['aarch64-linux-gnu-ld','-m','aarch64linux','--no-relax','-r','-o',TARGET,'crypto/ahash.o','crypto/shash.o'],linker)
   budget=KERNEL_BYTES+pins['zip_bytes']+4*1024**3+CAP+512*1024**2+CAP+512*1024**2;write(out/'disk-before-inputs.json',disk_budget(private,budget))
   baseline_archive=retrieve_baseline(pins,baseline_input);baseline_before=protected(baseline_archive,'accepted-v64-baseline-ZIP-v1',pins['zip_bytes'],pins['zip_sha256']);extract_zip(baseline_archive,baseline_extraction,BASELINE_ROOT,pins['ordinary_members'],pins['expanded_bytes']);oldroot=baseline_extraction/BASELINE_ROOT;old=baseline_labels(oldroot,pins);olddeps=json.loads((oldroot/'evidence/dependencies.json').read_text());require(compiler['sha256']==old['toolchain']['clang-14']['sha256'] and linker['sha256']==old['toolchain']['aarch64-linux-gnu-ld']['sha256'],'accepted compiler/GNU linker binary identities')
-  for name in ('run.json','jobs.json','artifacts.json','artifact.json','job-log.log','AUTHENTICATED-API-RETRIEVAL-RECEIPT.json'):dest=out/'baseline-api'/name;dest.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(baseline_input/name,dest)
+  mirror_retrieval_evidence(baseline_input,out/'baseline-api',os.environ.get('GH_TOKEN',''))
   if not kernel.exists():
    kernel.parent.mkdir(parents=True,exist_ok=True)
    with urllib.request.urlopen('https://codeload.github.com/corsicanu/android_kernel_samsung_universal9820/tar.gz/'+KERNEL_COMMIT,timeout=120) as response,kernel.open('xb') as stream:
@@ -148,8 +148,8 @@ def main():
  except BaseException as error:
   if not (out/'commands.json').exists():write(out/'commands.json',commands)
   try:retained=preserve_failure_files(out,workspace,baseline_input)
-  except Exception as copying:retained={'copy_exception_type':type(copying).__name__,'copy_exception_message':str(copying)}
-  write(out/'failure.json',{'exception_type':type(error).__name__,'exception_message':str(error),'commands_completed':len(commands),'retained_forensic_files':retained,'passed':False,'automatic_retry':False});raise
+  except Exception as copying:retained={'copy_exception_type':type(copying).__name__,'copy_exception_message':redact_text(str(copying),os.environ.get('GH_TOKEN',''))}
+  write(out/'failure.json',{'exception_type':type(error).__name__,'exception_message':redact_text(str(error),os.environ.get('GH_TOKEN','')),'commands_completed':len(commands),'retained_forensic_files':retained,'passed':False,'automatic_retry':False});raise
 
 
 if __name__=='__main__':main()

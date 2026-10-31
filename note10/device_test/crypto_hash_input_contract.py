@@ -1,5 +1,5 @@
 """New composite's dual protected inputs, authenticated baseline and provenance."""
-import hashlib,json,os,posixpath,re,shlex,shutil,stat,subprocess,tarfile,zipfile
+import hashlib,json,os,posixpath,re,shlex,shutil,stat,subprocess,tarfile,threading,time,zipfile
 from pathlib import Path,PurePosixPath
 from crypto_hash_composite import require,digest
 
@@ -108,19 +108,142 @@ def api_validate(pins,run,jobs,listing,artifact):
  return {'run_id':run['id'],'attempt':run['run_attempt'],'job_id':job['id'],'artifact_id':artifact['id'],'source_commit':run['head_sha'],'repository':pins['repository']}
 
 
-def retrieve_baseline(pins,directory):
- require(re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+',pins['repository']) and all(type(pins[k]) is int and pins[k]>0 for k in ('run_id','run_attempt','workflow_id','job_id','artifact_id','zip_bytes')) and re.fullmatch(r'[0-9a-f]{40}',pins['source_commit']) and re.fullmatch(r'[0-9a-f]{64}',pins['zip_sha256']),'generic baseline API pins validated before credential use');directory=Path(directory);require(not directory.exists(),'fresh authenticated retrieval directory');directory.mkdir(parents=True);rows=[];env=dict(os.environ,GH_HOST='github.com');require(env.get('GH_TOKEN'),'existing Actions credential required, never altered or printed')
- def call(label,endpoint,binary=False):
-  require(endpoint.startswith('repos/'+pins['repository']+'/actions/') and '://' not in endpoint,'fixed authenticated github.com API endpoint');path=directory/(label+('.log' if binary=='log' else '.zip' if binary else '.json'));command=['gh','api',endpoint]
-  limit=pins['zip_bytes'] if binary is True else 16*1024*1024 if binary=='log' else 8*1024*1024
-  with path.open('xb') as stream:
-   process=subprocess.Popen(command,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,env=env);total=0
+BASELINE_ENDPOINT_ORDER=('run','jobs','artifacts','artifact','baseline')
+RETRIEVAL_RECEIPT='AUTHENTICATED-API-RETRIEVAL-RECEIPT.json'
+RETRIEVAL_MIRROR_FILES=tuple(label+suffix for label in BASELINE_ENDPOINT_ORDER[:-1] for suffix in ('.json','.stderr.txt'))+('baseline.stderr.txt',RETRIEVAL_RECEIPT,'diagnostics.json')
+
+
+def redact_bytes(raw,token):
+ secret=token.encode('utf8') if isinstance(token,str) else token
+ if not secret:return raw,False
+ result=raw.replace(secret,b'[REDACTED]')
+ # Do not retain a credential prefix when a capped response ends mid-token.
+ for length in range(min(len(secret)-1,len(result)),0,-1):
+  if result.endswith(secret[:length]):result=result[:-length]+b'[REDACTED]';break
+ return result,result!=raw
+
+
+def redact_text(text,token):return redact_bytes(str(text).encode('utf8',errors='replace'),token)[0].decode('utf8',errors='replace')
+
+
+def bounded_api_process(command,env,stdout_limit,deadline_seconds=120,stderr_limit=65536,process_factory=None):
+ """A supervising thread never blocks on a pipe, spawn or normal wait.
+
+ Raw capture is memory-only and bounded to each limit+1. A cancelled spawn
+ owns a late-child cleanup guard; any published child is killed and reaped.
+ """
+ require(type(stdout_limit) is int and 0<stdout_limit<=CAP and type(stderr_limit) is int and 0<stderr_limit<=65536 and deadline_seconds>0,'bounded API transport limits');started=time.monotonic();deadline=started+deadline_seconds;cancel=threading.Event();spawned=threading.Event();changed=threading.Event();lock=threading.Lock();cleanup_lock=threading.Lock();state={'process':None,'spawn_error':None,'cleaned':False,'killed':False,'reaped':False,'cleanup_error':None};captures={n:{'data':bytearray(),'eof':False,'error':None,'cap':False} for n in ('stdout','stderr')}
+ def stop_process():
+  with cleanup_lock:
+   process=state['process']
+   if state['cleaned'] or process is None:return
+   if isinstance(process,subprocess.Popen) and not getattr(process,'_child_created',False):return
+   state['cleaned']=True
    try:
-    for block in iter(lambda:process.stdout.read(1024*1024),b''):total+=len(block);require(total<=limit,'bounded complete authenticated API response');stream.write(block)
-    code=process.wait(timeout=120)
-   except BaseException:process.kill();process.wait();raise
-  require(code==0,'authenticated API retrieval failed: '+label);raw=path.read_bytes();rows.append({'label':label,'command':command,'returncode':0,'path':str(path),'bytes':len(raw),'sha256':digest(raw)});return path if binary else json.loads(raw)
- prefix='repos/'+pins['repository']+'/actions/';run=call('run',prefix+'runs/'+str(pins['run_id'])+'/attempts/'+str(pins['run_attempt']));jobs=call('jobs',prefix+'runs/'+str(pins['run_id'])+'/attempts/'+str(pins['run_attempt'])+'/jobs?filter=all&per_page=100');listing=call('artifacts',prefix+'runs/'+str(pins['run_id'])+'/artifacts?per_page=100');artifact=call('artifact',prefix+'artifacts/'+str(pins['artifact_id']));identity=api_validate(pins,run,jobs,listing,artifact);call('job-log',prefix+'jobs/'+str(pins['job_id'])+'/logs','log');raw=call('baseline',prefix+'artifacts/'+str(pins['artifact_id'])+'/zip',True);write(directory/'AUTHENTICATED-API-RETRIEVAL-RECEIPT.json',{'rows':rows,'identity':identity});return raw
+    if process.poll() is None:process.kill();state['killed']=True
+    process.wait(timeout=2);state['reaped']=True
+   except Exception as error:state['cleanup_error']=type(error).__name__+': '+str(error)
+ def spawn():
+  try:
+   if process_factory is None:
+    # Publish the owned Popen object before __init__ can wait on its exec pipe.
+    process=subprocess.Popen.__new__(subprocess.Popen);state['process']=process;subprocess.Popen.__init__(process,command,stdout=subprocess.PIPE,stderr=subprocess.PIPE,env=env,bufsize=0)
+   else:state['process']=process_factory(command,stdout=subprocess.PIPE,stderr=subprocess.PIPE,env=env,bufsize=0)
+  except BaseException as error:state['spawn_error']=type(error).__name__+': '+str(error)
+  finally:spawned.set();changed.set()
+  if cancel.is_set():stop_process()
+ spawner=threading.Thread(target=spawn,daemon=True);spawner.start();failure=None
+ readers=[]
+ try:
+  while not spawned.is_set():
+   remaining=deadline-time.monotonic()
+   if remaining<=0:failure='total-deadline-during-spawn';cancel.set();stop_process();break
+   changed.wait(min(remaining,.02));changed.clear()
+  readers=[];process=state['process']
+  def read_stream(name,stream,limit):
+   capture=captures[name]
+   try:
+    while not cancel.is_set():
+     with lock:remaining=limit+1-len(capture['data'])
+     if remaining<=0:
+      with lock:capture['cap']=True
+      changed.set();return
+     block=stream.read(min(8192,remaining))
+     with lock:
+      if not block:capture['eof']=True;changed.set();return
+      require(type(block) is bytes,'byte-oriented API pipe');capture['data'].extend(block)
+      if len(capture['data'])>limit:capture['cap']=True;changed.set();return
+     changed.set()
+   except Exception as error:
+    with lock:capture['error']=type(error).__name__+': '+str(error)
+    changed.set()
+  if failure is None and state['spawn_error'] is not None:failure='spawn-error'
+  if failure is None and time.monotonic()>=deadline:failure='total-deadline-after-spawn'
+  if failure is None:
+   for name,limit in (('stdout',stdout_limit),('stderr',stderr_limit)):
+    thread=threading.Thread(target=read_stream,args=(name,getattr(process,name),limit),daemon=True);readers.append(thread);thread.start()
+   while True:
+    with lock:cap=any(c['cap'] for c in captures.values());read_error=any(c['error'] for c in captures.values());eof=all(c['eof'] for c in captures.values())
+    if cap:failure='stream-cap';break
+    if read_error:failure='pipe-read-error';break
+    if time.monotonic()>=deadline:failure='total-deadline-during-read-or-wait';break
+    try:code=process.poll()
+    except Exception as error:failure='poll-error: '+type(error).__name__+': '+str(error);break
+    if code is not None and eof:
+     try:process.wait(timeout=max(.001,deadline-time.monotonic()));state['reaped']=True
+     except Exception as error:failure='wait-error: '+type(error).__name__+': '+str(error)
+     break
+    changed.wait(min(.02,max(.001,deadline-time.monotonic())));changed.clear()
+ except BaseException as error:failure='supervisor-error: '+type(error).__name__+': '+str(error);cancel.set();stop_process()
+ if failure is not None:cancel.set();stop_process()
+ for thread in readers:thread.join(timeout=.5)
+ spawner.join(timeout=.5)
+ if any(t.is_alive() for t in readers):failure=failure or 'pipe-reader-not-settled'
+ if spawner.is_alive():failure=failure or 'spawn-not-settled-with-cancel-guard'
+ with lock:result={name:{'observed':bytes(c['data']),'eof':c['eof'],'error':c['error'],'cap':c['cap']} for name,c in captures.items()}
+ result.update(returncode=getattr(state['process'],'returncode',None),failure=failure,spawn_error=state['spawn_error'],cleanup_error=state['cleanup_error'],killed=state['killed'],reaped=state['reaped'],elapsed_seconds=time.monotonic()-started,deadline_seconds=deadline_seconds);return result
+
+
+def mirror_retrieval_evidence(source,destination,token='',ceiling=CAP):
+ source=Path(source);destination=Path(destination);require(0<ceiling<=CAP and source.resolve()!=destination.resolve(),'bounded disjoint allowlisted retrieval mirror');destination.mkdir(parents=True,exist_ok=True);require(destination.is_dir() and not destination.is_symlink() and not getattr(destination.lstat(),'st_file_attributes',0)&1024,'ordinary retrieval mirror directory');rows={};total=0
+ for name in RETRIEVAL_MIRROR_FILES:
+  path=source/name
+  if not path.exists() and not path.is_symlink():continue
+  info=path.lstat();require(stat.S_ISREG(info.st_mode) and not path.is_symlink() and not getattr(info,'st_file_attributes',0)&1024,'ordinary allowlisted retrieval evidence only');require(info.st_size<=ceiling-total,'whole allowlisted retrieval mirror ceiling')
+  with path.open('rb') as stream:require(five(os.fstat(stream.fileno()))==five(info),'same opened mirror input');raw=stream.read(ceiling-total+1);require(len(raw)==info.st_size and five(os.fstat(stream.fileno()))==five(info)==five(path.lstat()),'bounded complete stable mirror input')
+  stored,redacted=redact_bytes(raw,token);total+=len(stored);require(total<=ceiling,'whole redacted retrieval mirror ceiling');target=destination/name
+  if target.exists():require(target.is_file() and not target.is_symlink() and target.read_bytes()==stored,'existing mirrored evidence unchanged')
+  else:
+   with target.open('xb') as stream:stream.write(stored)
+  rows[name]={'bytes':len(stored),'sha256':digest(stored),'mirror_redacted':redacted}
+ return rows
+
+
+def retrieve_baseline(pins,directory,process_factory=None,deadline_seconds=120):
+ require(re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+',pins['repository']) and all(type(pins[k]) is int and pins[k]>0 for k in ('run_id','run_attempt','workflow_id','job_id','artifact_id','zip_bytes')) and re.fullmatch(r'[0-9a-f]{40}',pins['source_commit']) and re.fullmatch(r'[0-9a-f]{64}',pins['zip_sha256']),'generic baseline API pins validated before credential use');directory=Path(directory);require(not directory.exists(),'fresh authenticated retrieval directory');directory.mkdir(parents=True);rows=[];env={k:v for k,v in os.environ.items() if not k.startswith(('GH_DEBUG','GH_TRACE','GIT_TRACE','CURL_VERBOSE'))};env['GH_HOST']='github.com';token=env.get('GH_TOKEN','');receipt={'schema':2,'rows':rows,'completed':False,'success':False,'identity_validation_success':False};previous=None
+ def persist():
+  nonlocal previous
+  path=directory/RETRIEVAL_RECEIPT
+  if previous is not None:require(path.is_file() and not path.is_symlink() and digest(path.read_bytes())==previous,'own exclusive canonical retrieval receipt')
+  else:require(not path.exists(),'fresh exclusive retrieval receipt')
+  raw=(json.dumps(receipt,indent=2,sort_keys=True)+'\n').encode();require(token.encode() not in raw if token else True,'no credential in canonical receipt');temporary=directory/(RETRIEVAL_RECEIPT+'.next')
+  with temporary.open('xb') as stream:stream.write(raw)
+  os.replace(temporary,path);previous=digest(raw)
+ def call(label,endpoint,binary=False):
+  require(label==BASELINE_ENDPOINT_ORDER[len(rows)] and endpoint.startswith('repos/'+pins['repository']+'/actions/') and '://' not in endpoint and token not in endpoint,'exact ordered credential-free API endpoint');command=['gh','api',endpoint];limit=pins['zip_bytes'] if binary else 8*1024*1024;capture=bounded_api_process(command,env,limit,deadline_seconds,process_factory=process_factory);row={'label':label,'command':command,'returncode':capture['returncode'],'no_code_reason':None if capture['returncode'] is not None else 'spawn/read failure without exit code','completed':False,'success':False,'killed':capture['killed'],'reaped':capture['reaped'],'elapsed_seconds':capture['elapsed_seconds'],'deadline_seconds':deadline_seconds,'spawn_error':redact_text(capture['spawn_error'],token) if capture['spawn_error'] else None,'cleanup_error':redact_text(capture['cleanup_error'],token) if capture['cleanup_error'] else None};rows.append(row)
+  for name,bound in (('stdout',limit),('stderr',65536)):
+   observed=capture[name]['observed'];kept=observed[:bound];stored,changed=(kept,False) if binary and name=='stdout' else redact_bytes(kept,token);stored_over_cap=len(stored)>bound;stored=stored[:bound];filename=label+('.zip' if binary and name=='stdout' else '.json' if name=='stdout' else '.stderr.txt')
+   with (directory/filename).open('xb') as stream:stream.write(stored)
+   row[name]={'path':filename,'observed_bytes':len(observed),'observed_sha256':digest(observed),'stored_bytes':len(stored),'stored_sha256':digest(stored),'redacted':changed,'truncated':len(observed)>bound or stored_over_cap,'eof':capture[name]['eof'],'read_error':redact_text(capture[name]['error'],token) if capture[name]['error'] else None}
+  row.update(path=row['stdout']['path'],bytes=row['stdout']['stored_bytes'],sha256=row['stdout']['stored_sha256']);reason=capture['failure'] or capture['spawn_error'] or capture['cleanup_error'];row['completed']=reason is None and all(capture[n]['eof'] for n in ('stdout','stderr')) and capture['reaped'];row['success']=row['completed'] and row['returncode']==0 and not row['stdout']['redacted'] and not row['stdout']['truncated'];row['failure_reason']=redact_text(reason or ('nonzero-exit' if row['returncode']!=0 else 'redacted-or-truncated-success-response' if not row['success'] else ''),token);persist()
+  require(row['success'],'authenticated baseline retrieval failed: '+label+' '+row['failure_reason'])
+  if binary:return directory/row['path']
+  try:return json.loads((directory/row['path']).read_bytes())
+  except Exception as error:row['success']=False;row['failure_reason']=redact_text(type(error).__name__+': '+str(error),token);persist();raise ValueError('invalid authenticated JSON: '+label) from None
+ try:
+  require(re.fullmatch(r'[A-Za-z0-9_.-]{8,4096}',token),'existing bounded ASCII Actions credential required, never printed');persist();prefix='repos/'+pins['repository']+'/actions/';run=call('run',prefix+'runs/'+str(pins['run_id'])+'/attempts/'+str(pins['run_attempt']));jobs=call('jobs',prefix+'runs/'+str(pins['run_id'])+'/attempts/'+str(pins['run_attempt'])+'/jobs?filter=all&per_page=100');listing=call('artifacts',prefix+'runs/'+str(pins['run_id'])+'/artifacts?per_page=100');artifact=call('artifact',prefix+'artifacts/'+str(pins['artifact_id']));identity=api_validate(pins,run,jobs,listing,artifact);receipt.update(identity=identity,identity_validation_success=True);persist();raw=call('baseline',prefix+'artifacts/'+str(pins['artifact_id'])+'/zip',True);require(raw.stat().st_size==pins['zip_bytes'] and digest(raw.read_bytes())==pins['zip_sha256'],'complete authenticated baseline ZIP digest/bytes');receipt.update(completed=True,success=True);persist();return raw
+ except BaseException as error:
+  receipt.update(completed=False,success=False,failure_reason=redact_text(type(error).__name__+': '+str(error),token));persist();write(directory/'diagnostics.json',{'success':False,'completed_endpoints':len(rows),'failure_reason':receipt['failure_reason'],'automatic_retry':False});raise ValueError(receipt['failure_reason']) from None
 
 
 def command_line(text,target):
@@ -160,11 +283,15 @@ def baseline_labels(root,pins):
 
 
 def baseline_api_receipt(directory,pins):
- directory=Path(directory);receipt=json.loads((directory/'AUTHENTICATED-API-RETRIEVAL-RECEIPT.json').read_text());rows=receipt['rows'];prefix='repos/'+pins['repository']+'/actions/';endpoints={'run':prefix+'runs/'+str(pins['run_id'])+'/attempts/'+str(pins['run_attempt']),'jobs':prefix+'runs/'+str(pins['run_id'])+'/attempts/'+str(pins['run_attempt'])+'/jobs?filter=all&per_page=100','artifacts':prefix+'runs/'+str(pins['run_id'])+'/artifacts?per_page=100','artifact':prefix+'artifacts/'+str(pins['artifact_id']),'job-log':prefix+'jobs/'+str(pins['job_id'])+'/logs','baseline':prefix+'artifacts/'+str(pins['artifact_id'])+'/zip'};require(len(rows)==len(endpoints) and {r['label'] for r in rows}==set(endpoints),'complete original baseline authenticated retrieval closure')
+ directory=Path(directory);receipt=json.loads((directory/RETRIEVAL_RECEIPT).read_text());rows=receipt['rows'];prefix='repos/'+pins['repository']+'/actions/';endpoints={'run':prefix+'runs/'+str(pins['run_id'])+'/attempts/'+str(pins['run_attempt']),'jobs':prefix+'runs/'+str(pins['run_id'])+'/attempts/'+str(pins['run_attempt'])+'/jobs?filter=all&per_page=100','artifacts':prefix+'runs/'+str(pins['run_id'])+'/artifacts?per_page=100','artifact':prefix+'artifacts/'+str(pins['artifact_id']),'baseline':prefix+'artifacts/'+str(pins['artifact_id'])+'/zip'};require(receipt['schema']==2 and receipt['completed'] is True and receipt['success'] is True and receipt['identity_validation_success'] is True and [r['label'] for r in rows]==list(BASELINE_ENDPOINT_ORDER),'exact successful ordered five-endpoint baseline closure')
  for row in rows:
-  label=row['label'];require(row['command']==['gh','api',endpoints[label]] and row['returncode']==0,'exact authenticated baseline endpoint receipt')
-  if label=='baseline':require(row['bytes']==pins['zip_bytes'] and row['sha256']==pins['zip_sha256'],'authenticated full raw baseline ZIP binding');continue
-  raw=(directory/(label+('.log' if label=='job-log' else '.json'))).read_bytes();require(len(raw)==row['bytes'] and digest(raw)==row['sha256'],'complete retained baseline API/log bytes')
+  label=row['label'];stdout=row['stdout'];stderr=row['stderr'];require(row['command']==['gh','api',endpoints[label]] and row['returncode']==0 and row['completed'] is True and row['success'] is True and row['reaped'] is True and row['killed'] is False and row['spawn_error'] is None and row['cleanup_error'] is None and row['failure_reason']=='' and not stdout['redacted'] and not stdout['truncated'] and not stderr['truncated'] and stdout['eof'] is True and stderr['eof'] is True and stdout['read_error'] is None and stderr['read_error'] is None,'complete unaltered successful baseline endpoint')
+  require(stdout['observed_bytes']==stdout['stored_bytes']==row['bytes'] and stdout['observed_sha256']==stdout['stored_sha256']==row['sha256'],'original observed/stored success response identity')
+  for stream in ('stdout','stderr'):
+   entry=row[stream];expected=label+('.zip' if label=='baseline' and stream=='stdout' else '.json' if stream=='stdout' else '.stderr.txt');require(entry['path']==expected,'exact allowlisted endpoint response path')
+   if label=='baseline' and stream=='stdout':require(row['bytes']==pins['zip_bytes'] and row['sha256']==pins['zip_sha256'],'authenticated full raw baseline ZIP binding');continue
+   raw=(directory/expected).read_bytes();require(len(raw)==entry['stored_bytes'] and digest(raw)==entry['stored_sha256'],'complete stored baseline metadata/diagnostic bytes')
+  require(row['path']==stdout['path'],'canonical response alias')
  return receipt
 
 
