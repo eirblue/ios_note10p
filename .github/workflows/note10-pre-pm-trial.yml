@@ -46,7 +46,7 @@ jobs:
         id: static_full_TU
         shell: bash --noprofile --norc -euo pipefail {0}
         run: |
-          python note10/device_test/build_pre_pm_trial.py --payload note10/private/v62-ci-input/payload/kernel.mem --output note10/private/v62-ci-wrapper
+          python note10/device_test/build_pre_pm_trial.py --payload note10/private/v62-ci-input/payload/kernel.mem --output note10/private/v62-ci-wrapper --archive-profile external-protected-kernel-archive-v1
       - name: Upload full pre-PM static evidence
         if: always()
         uses: actions/upload-artifact@v4
