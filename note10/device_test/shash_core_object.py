@@ -57,19 +57,33 @@ def table_proof(obj,layouts,oracle,config):
  return {'symbol':symbol,'callbacks':facts,'scalars':constants,'initcall_invented':False,'runtime_type_available':False}
 
 def object_rows(obj,text):
- sections={s['name']:s for s in obj['sections']};rows={};current=None
+ rows={};headers={};current=None
  for line in text.splitlines():
-  if line.startswith('Disassembly of section '):current=sections.get(line.removeprefix('Disassembly of section ').removesuffix(':'));continue
+  if line.startswith('Disassembly of section '):
+   match=re.fullmatch(r'Disassembly of section ([A-Za-z0-9_.$]+):',line);require(match is not None,'exact observed disassembly section header')
+   found=[section for section in obj['sections'] if section['name']==match[1]];require(len(found)==1,'observed header binds unique actual object section');current=found[0]
+   require(current['index'] not in headers,'one observed header per actual section');headers[current['index']]=line;continue
   match=ROW.fullmatch(line)
   if not match:continue
   require(current is not None,'new instruction section');off=int(match[1],16);encoded=bytes.fromhex(match[2]);encoded=encoded[::-1] if len(match[2])==8 else encoded
   require(len(encoded)==4 and current['bytes'][off:off+4]==encoded and (current['index'],off) not in rows,'actual new object/disassembly bytes');rows[current['index'],off]=line
- return rows
+ return {'instruction_rows':rows,'observed_section_headers':headers}
+
+def scoped_input(obj,fn,record):
+ require(fn['info']&15==2 and 0<fn['section']<len(obj['sections']),'actual scoped function section/type')
+ section=obj['sections'][fn['section']];start=fn['value'];end=start+fn['size'];require(start%4==0 and fn['size']>0 and fn['size']%4==0 and end<=len(section['bytes']),'actual scoped function extent')
+ header=record['observed_section_headers'].get(fn['section']);require(header is not None and header=='Disassembly of section '+section['name']+':','preserve exact observed header for actual function section')
+ words={};selected=[]
+ for off in range(start,end,4):
+  row=record['instruction_rows'].get((fn['section'],off));require(row is not None,'every scoped instruction present in its actual section');match=ROW.fullmatch(row);require(match is not None and int(match[1],16)==off,'preserve actual scoped row address')
+  encoded=bytes.fromhex(match[2]);encoded=encoded[::-1] if len(match[2])==8 else encoded;require(len(encoded)==4 and encoded==section['bytes'][off:off+4],'preserve actual scoped instruction bytes')
+  words[off]=struct.unpack_from('<I',section['bytes'],off)[0];selected.append(row)
+ return words,header+'\n'+'\n'.join(selected)
+
 
 def function_facts(obj,fn,rows,frames):
- require(fn['size']>0 and fn['size']%4==0 and fn['name'] in frames,'actual essential function and stack row; no missing zero inference');sec=obj['sections'][fn['section']];start=fn['value'];end=start+fn['size'];require(end<=len(sec['bytes']),'actual function extent');words={};text=[]
- for off in range(start,end,4):require((fn['section'],off) in rows,'every scoped instruction present');words[off]=struct.unpack_from('<I',sec['bytes'],off)[0];text.append(rows[fn['section'],off])
- isa=gpr_only('\n'.join(text));require(all(decode(word)['op']!='unknown' for word in words.values()),'every scoped machine word belongs to the finite new GPR decoder; unsupported form rejects');rels={};calls={};external=[]
+ require(fn['size']>0 and fn['size']%4==0 and fn['name'] in frames,'actual essential function and stack row; no missing zero inference');sec=obj['sections'][fn['section']];start=fn['value'];end=start+fn['size'];require(end<=len(sec['bytes']),'actual function extent');words,text=scoped_input(obj,fn,rows)
+ isa=gpr_only(text);require(all(decode(word)['op']!='unknown' for word in words.values()),'every scoped machine word belongs to the finite new GPR decoder; unsupported form rejects');rels={};calls={};external=[]
  for rel in obj['relocations']:
   if rel['section']!=fn['section'] or not start<=rel['offset']<end:continue
   require(rel['offset'] not in rels and rel['type'] in (275,277,282,283),'finite scoped new relocation kinds');sym=rel['symbol'];identity=(sym['name'],sym['section'],sym['value'],rel['addend'],sym['info'],sym['size']);rels[rel['offset']]={'type':rel['type'],'identity':identity}
