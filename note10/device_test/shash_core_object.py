@@ -6,6 +6,7 @@ from sha256_provider_object import one_symbol,exact_target
 from shash_core_gpr_policy import gpr_partition,bind_typed_coverage
 from shash_core_dwarf import extract_layouts
 from shash_core_clamped_cfg import registration_cfg_dispatch
+from shash_core_preparation_cfg import preparation_cfg_selected,preparation_cfg
 from shash_core_instructions import decode,trace,add,load
 ESSENTIAL=('crypto_register_shashes','crypto_register_shash','crypto_unregister_shash','shash_prepare_alg','crypto_shash_init_tfm','crypto_alloc_shash','crypto_shash_update','crypto_shash_final','crypto_shash_finup','crypto_shash_digest')
 ROW=re.compile(r'\s*([0-9a-f]+):\s+((?:[0-9a-f]{2} ){3}[0-9a-f]{2}|[0-9a-f]{8})\s+([a-zA-Z.][a-zA-Z0-9.]*)\s*(.*?)\s*')
@@ -147,6 +148,11 @@ def address_target(value,obj,name,kind):
  exact_reference(rel,one_symbol(obj,name,kind));return True
 
 def preparation_proof(fact,layouts,oracle,obj):
+ if preparation_cfg_selected(obj,fact['symbol']):return preparation_cfg(fact,layouts,oracle,obj)
+ return legacy_preparation_proof(fact,layouts,oracle,obj)
+
+
+def legacy_preparation_proof(fact,layouts,oracle,obj):
  events=fact['events'];bound=oracle['values']['PAGE_SIZE']//8;loads={e.get('address'):e for e in events if e['decoded']['op']=='load'}
  for field in ('digestsize','descsize','statesize'):require(add(('arg',0),member(layouts,'shash_alg',field)['offset']) in loads,'actual preparation size field read '+field)
  comparisons=[e for e in events if e['decoded']['op']=='sub' and e['decoded'].get('flags') and e['decoded'].get('rd')==31 and e['decoded'].get('imm')==bound];by={e['offset']:e for e in events}
