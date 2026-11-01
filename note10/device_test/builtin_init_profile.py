@@ -15,11 +15,12 @@ LOGS = (('last_kmsg.txt', '/proc/last_kmsg'),
 def current_boot_binding(plan, pair, diagnostic):
     # Device-specific payload pins belong to the private reviewed plan, never
     # public source constants. The live common precheck still checks the bytes.
+    fdt = plan.get('device_profile') == 'early-fdt-binding-v1'
     affinity = plan.get('device_profile') == 'cpu-affinity-binding-v1'
     stream = plan.get('device_profile') == 'sha256-stream-state-v1'
-    prior_profile = 'sha256-stream-state-v1' if affinity else 'sha256-kat-builtin-init-v2' if stream else 'sha256-kat-recovery-v1'
-    prior_head = '7e4a8c992f95f01429e824404378fa9271c0eb8e' if affinity else '149cb74c3f7640f2e26dfdcd1d775ec99f6c02ac' if stream else '9bfe108e7fd7a063bacce9418be46d269cb872d9'
-    prior_host = '7e4a8c992f95f01429e824404378fa9271c0eb8e' if affinity else '149cb74c3f7640f2e26dfdcd1d775ec99f6c02ac' if stream else '5e233aa5f08473d716ca2e9b3d8937c1821d513f'
+    prior_profile = 'cpu-affinity-binding-v1' if fdt else 'sha256-stream-state-v1' if affinity else 'sha256-kat-builtin-init-v2' if stream else 'sha256-kat-recovery-v1'
+    prior_head = '24f0fb9c4680517d6b0411a9985847c42b692376' if fdt else '7e4a8c992f95f01429e824404378fa9271c0eb8e' if affinity else '149cb74c3f7640f2e26dfdcd1d775ec99f6c02ac' if stream else '9bfe108e7fd7a063bacce9418be46d269cb872d9'
+    prior_host = 'a0674c29eaa2bc8938023fc2be590b9a4a84374e' if fdt else '7e4a8c992f95f01429e824404378fa9271c0eb8e' if affinity else '149cb74c3f7640f2e26dfdcd1d775ec99f6c02ac' if stream else '5e233aa5f08473d716ca2e9b3d8937c1821d513f'
     require(pair.get('device_profile') == prior_profile and
             pair.get('source_head') == prior_head and
             pair.get('host_profile_source_head') == prior_host and

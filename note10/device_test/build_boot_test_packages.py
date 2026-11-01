@@ -53,7 +53,7 @@ sum() { sha256sum "$1" | awk '{print $1}'; }
 case "$(getprop ro.product.device)" in d2x|d2xks) ;; *) abort "Expected d2x" ;; esac
 '''
     script+='[ "$(getprop ro.bootloader)" = "'+bootloader+'" ] || abort "Bootloader differs from paired backup"\n'
-    script+='ui "'+(('Temporary Linux CPU affinity diagnostic; not iOS/XNU.' if device_profile=='cpu-affinity-binding-v1' else 'Temporary Linux SHA256 diagnostic; not iOS/XNU.' if kat else 'Temporary Linux CPU diagnostic; not iOS/XNU.') if mode=='diagnostic' else 'Restore the paired Android BOOT backup.')+'"\n'
+    script+='ui "'+(('Temporary Linux early FDT snapshot diagnostic; not iOS/XNU.' if device_profile=='early-fdt-binding-v1' else 'Temporary Linux CPU affinity diagnostic; not iOS/XNU.' if device_profile=='cpu-affinity-binding-v1' else 'Temporary Linux SHA256 diagnostic; not iOS/XNU.' if kat else 'Temporary Linux CPU diagnostic; not iOS/XNU.') if mode=='diagnostic' else 'Restore the paired Android BOOT backup.')+'"\n'
     script+='ui "Writes BOOT only. No automatic reboot."\n'
     if mode=='diagnostic' and reservation:
         script+='ui "RAM reservation test with built-in idle init: no TWRP UI or ADB after System boot."\n'
@@ -373,7 +373,7 @@ def build(backup,prototype,output,current_packages=None):
         if mode=='diagnostic':metadata.update(runtime_metadata);metadata.update(scratch_metadata)
         if kat:
             metadata.update(kat_fields)
-            metadata['test_purpose']=('cpu-affinity-binding' if kat_fields['device_profile']=='cpu-affinity-binding-v1' else 'sha256-stream-state' if kat_fields['device_profile']=='sha256-stream-state-v1' else 'sha256-kat-builtin-init' if kat_fields['device_profile']=='sha256-kat-builtin-init-v2' else 'sha256-kat-recovery') if mode=='diagnostic' else 'rollback'
+            metadata['test_purpose']=('early-fdt-binding' if kat_fields['device_profile']=='early-fdt-binding-v1' else 'cpu-affinity-binding' if kat_fields['device_profile']=='cpu-affinity-binding-v1' else 'sha256-stream-state' if kat_fields['device_profile']=='sha256-stream-state-v1' else 'sha256-kat-builtin-init' if kat_fields['device_profile']=='sha256-kat-builtin-init-v2' else 'sha256-kat-recovery') if mode=='diagnostic' else 'rollback'
             package_scope(metadata,mode)
         target=output/(('note10-reservation-' if reservation else 'note10-phase2-')+mode+'.zip')
         files={'META-INF/com/google/android/update-binary':script,

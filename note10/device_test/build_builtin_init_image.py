@@ -94,10 +94,11 @@ def retain_route_prerequisites(source, objects, out, compiler_include):
 
 
 def main(kind=None):
-    if kind not in (None, "sha256-stream-state", "cpu-affinity-binding"):
+    if kind not in (None, "sha256-stream-state", "cpu-affinity-binding", "early-fdt-binding"):
         raise ValueError("closed diagnostic task required")
     stream = kind == "sha256-stream-state"
     affinity = kind == "cpu-affinity-binding"
+    fdt = kind == "early-fdt-binding"
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--archive', type=Path)
@@ -120,10 +121,14 @@ def main(kind=None):
              'test_sha256_stream_state.py', 'sha256_stream_fixture.c') if stream else (
              'affinity_binding.py', 'cpu_affinity_binding.c', 'affinity_binding_composition.c',
              'build_cpu_affinity_binding.py', 'test_affinity_binding.py', 'sealed_affinity_artifact.cjs',
-             'bundle_affinity_evidence.py') if affinity else ()
+             'bundle_affinity_evidence.py') if affinity else (
+             'early_fdt_binding.py', 'early_fdt_binding.c', 'early_fdt_composition.c',
+             'build_early_fdt_binding.py', 'test_early_fdt_binding.py', 'early_fdt_fixture.c',
+             'sealed_affinity_artifact.cjs', 'bundle_affinity_evidence.py') if fdt else ()
     names = (*PUBLIC, *INPUTS, *('note10/device_test/'+n for n in extra),
              *(('.github/workflows/note10-sha256-stream-state.yml',) if stream else
-               ('.github/workflows/note10-cpu-affinity-binding.yml',) if affinity else ()))
+               ('.github/workflows/note10-cpu-affinity-binding.yml',) if affinity else
+               ('.github/workflows/note10-early-fdt-binding.yml',) if fdt else ()))
     for name in names:
         data = (ROOT/name).read_bytes()
         manifest[name] = hashlib.sha256(data).hexdigest()
@@ -141,6 +146,8 @@ def main(kind=None):
         from sha256_stream_state import install, API_PINS as extra_kernel_pins
     elif affinity:
         from affinity_binding import install, API_PINS as extra_kernel_pins
+    elif fdt:
+        from early_fdt_binding import install, API_PINS as extra_kernel_pins
     save(out/'source-manifest.json', manifest)
     ci = {name: os.environ.get(name) for name in
           ('GITHUB_SHA', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'GITHUB_JOB')}
@@ -176,8 +183,11 @@ def main(kind=None):
             target = out/'stock-inputs'/name
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source/name, target)
+        # v81 changes fdt.c only AFTER the existing pristine-input preparation.
+        image_prep = prepare_image_inputs(source) if fdt else None
         overlay = install(source, identity)
-        image_prep = prepare_image_inputs(source)
+        if not fdt:
+            image_prep = prepare_image_inputs(source)
         save(out/'overlay.json', {'identity': identity, 'files_sha256': overlay,
                                   'image_preparation_sha256': image_prep,
                                   'default_enabled': False, 'cycle_slot_patched': False})
@@ -218,6 +228,9 @@ def main(kind=None):
         elif affinity:
             settings.update(NOTE10_CPU_AFFINITY_BINDING='y', NOTE10_SHA256_STREAM_STATE='n',
                             SMP='y', LOCALVERSION='"-v78-cpu-affinity"')
+        elif fdt:
+            settings.update(NOTE10_EARLY_FDT_BINDING='y', NOTE10_CPU_AFFINITY_BINDING='n',
+                            NOTE10_SHA256_STREAM_STATE='n', LOCALVERSION='"-v81-early-fdt"')
         run([*make, DEFCONFIG], 'build/01-defconfig.log')
         shutil.copyfile(objects/'.config', out/'public-baseline.config')
         for index, (name, value) in enumerate(settings.items()):
@@ -242,7 +255,7 @@ def main(kind=None):
         run([*make, 'V=1', '-j'+str(args.jobs), 'Image'], 'build/03-Image.log', timeout=5400)
         capture(source, objects, compiler_include, out)
         retain_route_prerequisites(source, objects, out, compiler_include)
-        run(['aarch64-linux-gnu-nm', '-n', objects/TARGET], 'new-object-symbols.log')
+        run(['aarch64-linux-gnu-nm', *(['-S'] if fdt else []), '-n', objects/TARGET], 'new-object-symbols.log')
         run(['aarch64-linux-gnu-readelf', '-SW', objects/TARGET], 'new-object-sections.log')
         image = objects/'arch/arm64/boot/Image'
         raw = image.read_bytes()
@@ -250,9 +263,9 @@ def main(kind=None):
             raise ValueError('completed ARM64 Image header invalid')
         if raw.count(b'N10_CYCLE_SLOT_UNSET_0123456789A') != 1:
             raise ValueError('exact one unpatched inherited recovery cycle slot required')
-        if any(marker not in raw for marker in (b'N10RET1', b'N10AFF1' if affinity else b'N10SHASTREAM1' if stream else b'N10SHA1', b'N10SHACTL1', b'N10ROUTE2', b'N10INIT2', b'N10MININIT2', b'N10BOOTLINK2', identity.encode())):
+        if any(marker not in raw for marker in (b'N10RET1', b'N10FDT1' if fdt else b'N10AFF1' if affinity else b'N10SHASTREAM1' if stream else b'N10SHA1', b'N10SHACTL1', b'N10ROUTE2', b'N10INIT2', b'N10MININIT2', b'N10BOOTLINK2', identity.encode())):
             raise ValueError('new diagnostic Image identity/markers missing')
-        if (stream and b'N10SHA1' in raw) or (affinity and any(marker in raw for marker in (b'N10SHA1', b'N10SHASTREAM1'))):
+        if (stream and b'N10SHA1' in raw) or ((affinity or fdt) and any(marker in raw for marker in (b'N10SHA1', b'N10SHASTREAM1'))) or (fdt and b'N10AFF1' in raw):
             raise ValueError('old SHA tasks must not be compiled into the new task')
         if raw.count(archive_data) != 1:
             raise ValueError('exact raw builtin CPIO missing/duplicated in actual Image')
@@ -263,7 +276,7 @@ def main(kind=None):
         stable_archive(archive, before)
         if manifest != {name: sha(ROOT/name) for name in manifest}:
             raise ValueError('local first-use inputs changed during build')
-        result = dict(schema=1, version='v78' if affinity else 'v73' if stream else 'v72', diagnostic_kind=kind, passed=True, kernel_commit=COMMIT,
+        result = dict(schema=1, version='v81' if fdt else 'v78' if affinity else 'v73' if stream else 'v72', diagnostic_kind=kind, passed=True, kernel_commit=COMMIT,
                       build_evidence_id=identity, ci_context=ci, source_sha256=manifest,
                       settings=settings, make_target='Image', integration_object=TARGET,
                       bootloader_cmdline_policy=cmdline_policy,
@@ -281,6 +294,13 @@ def main(kind=None):
                       device_authorized=False, deployment_ready=False, device_operations=[])
         if affinity:
             result.update(raw_input_binding=False, original_fdt_digest_unavailable=True)
+        if fdt:
+            from early_fdt_binding import linked_footprint, CAPACITY, BOUNDARY
+            footprint = linked_footprint((objects/'System.map').read_text(),
+                (out/'new-object-symbols.log').read_text(), struct.unpack_from('<Q',raw,16)[0])
+            result.update(raw_input_binding=False, fdt_capture_boundary=BOUNDARY,
+                          fdt_snapshot_capacity_bytes=CAPACITY, fdt_snapshot_footprint=footprint,
+                          physical_placement_review_required=True)
         result['files_sha256'] = {p.relative_to(out).as_posix(): sha(p) for p in out.rglob('*') if p.is_file()}
         save(out/'result.json', result)
     except Exception as error:
