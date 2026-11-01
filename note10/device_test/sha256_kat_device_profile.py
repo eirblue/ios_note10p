@@ -2,6 +2,7 @@
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -164,7 +165,7 @@ def host_binding(source_head):
         'note10/device_test/'+name: sha(Path(__file__).parent/name)
         for name in (*HOST_SOURCES, 'builtin_init_profile.py', 'builtin_init_route.py', 'test_builtin_init_route.py',
                      'sha256_stream_state.py', 'sha256_stream_vectors.json', 'test_sha256_stream_state.py',
-                     'affinity_binding.py', 'test_affinity_binding.py')}
+                     'affinity_binding.py', 'test_affinity_binding.py', 'test_affinity_ci_context.py')}
     return dict(host_profile_source_head=source_head, host_profile_source_sha256=dict(pins))
 
 
@@ -197,6 +198,71 @@ def root_receipt_binding(root, receipt, expected_sha, binding):
     return dict(image_root_receipt_sha256=expected_sha, root_reader_result_sha256=row['root_reader_result_sha256'])
 
 
+def ci_success_receipt(context, context_sha256, binding, producer):
+    """Bind approved CI metadata to the banner already derived by packaging."""
+    keys = {'schema', 'kind', 'accepted', 'producer_source_head', 'ci_result_sha256',
+            'image_sha256', 'image_bytes', 'effective_config_sha256', 'build_evidence_id',
+            'run_id', 'attempt', 'workflow_id', 'job_id', 'artifact_id',
+            'artifact_zip_sha256', 'artifact_zip_bytes'}
+    require(type(context) is dict and set(context) == keys and
+            type(context['schema']) is int and context['schema'] == 1 and
+            context['kind'] == AFFINITY_PROFILE+'-ci-success-context' and
+            context['accepted'] is True and binding.get('device_profile') == AFFINITY_PROFILE,
+            'closed accepted affinity CI-success context required')
+    require(isinstance(context_sha256, str) and re.fullmatch('[0-9a-f]{64}', context_sha256) and
+            all(type(context[k]) is int and context[k] > 0 for k in
+                ('image_bytes', 'run_id', 'attempt', 'workflow_id', 'job_id', 'artifact_id', 'artifact_zip_bytes')) and
+            all(isinstance(context[k], str) and re.fullmatch('[0-9a-f]{64}', context[k]) for k in
+                ('ci_result_sha256', 'image_sha256', 'effective_config_sha256', 'artifact_zip_sha256')) and
+            isinstance(context['producer_source_head'], str) and re.fullmatch('[0-9a-f]{40}', context['producer_source_head']) and
+            isinstance(context['build_evidence_id'], str) and re.fullmatch('[0-9a-f]{32}', context['build_evidence_id']),
+            'CI-success context types/pins differ')
+    ci = producer.get('ci_context', {})
+    require(producer.get('version') == 'v78' and producer.get('diagnostic_kind') == 'cpu-affinity-binding' and
+            producer.get('passed') is True and producer.get('Image_built') is True and
+            context['producer_source_head'] == binding['source_head'] == ci.get('GITHUB_SHA') and
+            str(context['run_id']) == ci.get('GITHUB_RUN_ID') and
+            str(context['attempt']) == ci.get('GITHUB_RUN_ATTEMPT') and
+            ci.get('GITHUB_JOB') == 'cpu-affinity-binding' and
+            context['ci_result_sha256'] == binding['accepted_result_sha256'] and
+            context['image_sha256'] == binding['image_sha256'] == producer.get('image_sha256') and
+            context['image_bytes'] == binding['image_size'] == producer.get('image_bytes') and
+            context['effective_config_sha256'] == binding['effective_config_sha256'] ==
+                producer.get('files_sha256', {}).get('actual-effective.config') and
+            context['build_evidence_id'] == binding['build_evidence_id'] == producer.get('build_evidence_id') and
+            isinstance(binding.get('kernel_banner'), str) and
+            binding['kernel_banner'].startswith('Linux version 4.14.113-v78-cpu-affinity '),
+            'CI-success context/producer/package tuple differs')
+    # No banner is accepted from the context. Workflow/job/artifact IDs originate
+    # in the explicitly hash-approved Root collection record, not Image guesses.
+    return dict(schema=1, kind=AFFINITY_PROFILE+'-accepted-image', accepted=True,
+                root_reader_result_sha256=context_sha256,
+                producer_source_head=context['producer_source_head'],
+                ci_result_sha256=context['ci_result_sha256'], image_sha256=context['image_sha256'],
+                image_bytes=context['image_bytes'], effective_config_sha256=context['effective_config_sha256'],
+                build_evidence_id=context['build_evidence_id'], kernel_banner=binding['kernel_banner'],
+                **{k: context[k] for k in ('run_id', 'attempt', 'workflow_id', 'job_id', 'artifact_id',
+                                         'artifact_zip_sha256', 'artifact_zip_bytes')})
+
+
+def write_ci_success_receipt(output, receipt):
+    """Exclusive atomic receipt publication inside the fresh private template."""
+    output = private(output)
+    require(output.is_dir(), 'private template directory required')
+    target = output/'image-root-receipt.json'
+    require(not target.exists() and not target.is_symlink(), 'fresh image receipt required')
+    data = (json.dumps(receipt, indent=2, sort_keys=True)+'\n').encode('utf8')
+    temporary = output/'.image-root-receipt.json.tmp'
+    with temporary.open('xb') as stream:
+        stream.write(data); stream.flush(); os.fsync(stream.fileno())
+    try:
+        os.link(temporary, target)
+    finally:
+        temporary.unlink()
+    return dict(image_root_receipt_sha256=hashlib.sha256(data).hexdigest(),
+                root_reader_result_sha256=receipt['root_reader_result_sha256'])
+
+
 def common_report(binding, profile_sha):
     extra = dict(builtin_minimal_init_route=True, external_initrd_used_for_PID1=False) if binding['device_profile'] in (BUILTIN_PROFILE, STREAM_PROFILE, AFFINITY_PROFILE) else {}
     return dict(binding, **extra, profile_sha256=profile_sha, build_passed=True,
@@ -207,14 +273,33 @@ def common_report(binding, profile_sha):
                 device_boot_tested=False)
 
 
-def prepare_template(build, output, accepted_result_sha256, source_head, *, root_receipt,
-                     root_receipt_sha256, host_source_head):
+def prepare_template(build, output, accepted_result_sha256, source_head, *, root_receipt=None,
+                     root_receipt_sha256=None, host_source_head, ci_success_context=None,
+                     ci_success_context_sha256=None):
     build, output = private(build), private(output)
     require(not output.exists() and not output.is_relative_to(build) and not build.is_relative_to(output),
             'fresh disjoint template required')
-    root_receipt = private(root_receipt)
+    context_mode = ci_success_context is not None or ci_success_context_sha256 is not None
+    context_bytes = generated_receipt = None
+    if context_mode:
+        require(root_receipt is None and root_receipt_sha256 is None and ci_success_context is not None and
+                isinstance(ci_success_context_sha256, str) and re.fullmatch('[0-9a-f]{64}', ci_success_context_sha256),
+                'exclusive CI-success context and exact SHA required')
+        context_path = private(ci_success_context)
+        require(context_path.is_file() and 0 < context_path.stat().st_size <= 65536, 'bounded CI-success context required')
+        context_bytes = context_path.read_bytes()
+        require(hashlib.sha256(context_bytes).hexdigest() == ci_success_context_sha256, 'approved CI-success context changed')
+        context = json.loads(context_bytes.decode('utf-8-sig'))
+    else:
+        require(root_receipt is not None and root_receipt_sha256 is not None, 'reviewed root receipt and SHA required')
+        root_receipt = private(root_receipt)
     binding = raw_binding(build, accepted_result_sha256, source_head)
-    binding.update(root_receipt_binding(build, root_receipt, root_receipt_sha256, binding))
+    if context_mode:
+        require(binding['device_profile'] == AFFINITY_PROFILE and host_source_head != source_head,
+                'CI-success integration requires affinity and distinct new host publication')
+        generated_receipt = ci_success_receipt(context, ci_success_context_sha256, binding, read(build/'result.json'))
+    else:
+        binding.update(root_receipt_binding(build, root_receipt, root_receipt_sha256, binding))
     require(binding['device_profile'] not in (BUILTIN_PROFILE, STREAM_PROFILE, AFFINITY_PROFILE) or host_source_head != V71_HOST_HEAD,
             'new builtin profile requires its own host publication head')
     require(binding['device_profile'] != STREAM_PROFILE or host_source_head != V72_HOST_HEAD,
@@ -223,7 +308,12 @@ def prepare_template(build, output, accepted_result_sha256, source_head, *, root
             'affinity requires its new host publication')
     binding.update(host_binding(host_source_head))
     shutil.copytree(build, output)
-    shutil.copyfile(root_receipt, output/'image-root-receipt.json')
+    if context_mode:
+        binding.update(write_ci_success_receipt(output, generated_receipt))
+        with (output/'ci-success-context.json').open('xb') as stream:
+            stream.write(context_bytes)
+    else:
+        shutil.copyfile(root_receipt, output/'image-root-receipt.json')
     save(output/'device-profile.json', binding)
     save(output/'build-result.json', common_report(binding, sha(output/'device-profile.json')))
     shutil.copyfile(output/'prerequisites/objects/.config', output/'handoff.config')
@@ -590,10 +680,14 @@ if __name__ == '__main__':
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--accepted-result-sha256', required=True)
     parser.add_argument('--source-head', required=True)
-    parser.add_argument('--root-receipt', type=Path, required=True)
-    parser.add_argument('--root-receipt-sha256', required=True)
+    receipt_mode = parser.add_mutually_exclusive_group(required=True)
+    receipt_mode.add_argument('--root-receipt', type=Path)
+    receipt_mode.add_argument('--ci-success-context', type=Path)
+    parser.add_argument('--root-receipt-sha256')
+    parser.add_argument('--ci-success-context-sha256')
     parser.add_argument('--host-source-head', required=True)
     args = parser.parse_args()
     print(json.dumps(prepare_template(args.build, args.output, args.accepted_result_sha256, args.source_head,
         root_receipt=args.root_receipt, root_receipt_sha256=args.root_receipt_sha256,
-        host_source_head=args.host_source_head), indent=2))
+        host_source_head=args.host_source_head, ci_success_context=args.ci_success_context,
+        ci_success_context_sha256=args.ci_success_context_sha256), indent=2))
