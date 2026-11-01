@@ -1,0 +1,160 @@
+--- a/pexpert/arm/pe_identify_machine.c
++++ b/pexpert/arm/pe_identify_machine.c
+@@ -16,6 +16,10 @@
+ #include <kern/clock.h>
+ #include <kern/locks.h>
+ 
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++#include "note10/early_clock.c"
++#endif
++
+ /* Local declarations */
+ void pe_identify_machine(boot_args * bootArgs);
+ 
+@@ -37,6 +41,11 @@
+ void
+ pe_identify_machine(boot_args * bootArgs)
+ {
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	(void)bootArgs;
++	pe_note10_early_clock_init();
++	return;
++#else
+ 	OpaqueDTEntryIterator iter;
+ 	DTEntry         cpus, cpu;
+ 	void const     *value;
+@@ -160,6 +169,7 @@
+ 	gPEClockFrequencyInfo.bus_to_dec_rate_num = 1;
+ 	gPEClockFrequencyInfo.bus_to_dec_rate_den =
+ 	    gPEClockFrequencyInfo.bus_clock_rate_hz / gPEClockFrequencyInfo.dec_clock_rate_hz;
++#endif
+ }
+ 
+ vm_offset_t
+--- /dev/null
++++ b/pexpert/arm/note10/early_clock.c
+@@ -0,0 +1,124 @@
++/* Included once by pe_identify_machine.c on the Exynos-only path.
++ * Input is an owned, canonical AppleDT supplied by the selected loader.
++ * A running marker is required input, never inferred CPU execution state.
++ */
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++#include <pexpert/pexpert.h>
++#include <pexpert/device_tree.h>
++#include <kern/debug.h>
++#include <libkern/libkern.h>
++
++struct n10_clock_properties {
++    unsigned name, device_type, state, frequency;
++};
++
++static void __attribute__((noreturn))
++n10_clock_fail(const char *reason)
++{
++    panic("Note10 early clock: %s", reason);
++}
++
++static int
++n10_clock_equal(const void *left, const char *right, unsigned size)
++{
++    const unsigned char *p = left;
++    for (unsigned i = 0; i < size; i++) {
++        if (p[i] != (unsigned char)right[i]) return 0;
++    }
++    return 1;
++}
++
++static struct n10_clock_properties
++n10_clock_properties(DTEntry entry)
++{
++    OpaqueDTPropertyIterator iter;
++    struct n10_clock_properties counts = {0};
++    if (SecureDTInitPropertyIterator(entry, &iter) != kSuccess)
++        n10_clock_fail("property iterator unavailable");
++    for (unsigned step = 0; ; step++) {
++        const char *name = NULL;
++        int rc = SecureDTIterateProperties(&iter, &name);
++        if (rc == kIterationDone) break;
++        if (rc != kSuccess || !name || step >= 1024)
++            n10_clock_fail("property iteration limit or error");
++        unsigned length;
++        for (length = 0; length < 32 && name[length]; length++) { }
++        if (length == 32) n10_clock_fail("invalid property name");
++        if (length == 4 && n10_clock_equal(name, "name", 4)) counts.name++;
++        if (length == 11 && n10_clock_equal(name, "device_type", 11)) counts.device_type++;
++        if (length == 5 && n10_clock_equal(name, "state", 5)) counts.state++;
++        if (length == 18 && n10_clock_equal(name, "timebase-frequency", 18)) counts.frequency++;
++    }
++    if (counts.name != 1 || counts.device_type > 1)
++        n10_clock_fail("missing or duplicate node identity");
++    return counts;
++}
++
++static const unsigned char *
++n10_clock_property(DTEntry entry, const char *name, unsigned *size)
++{
++    const void *value = NULL;
++    *size = 0;
++    if (SecureDTGetProperty(entry, name, &value, size) != kSuccess || !value)
++        n10_clock_fail("required property unavailable");
++    return value;
++}
++
++static int
++n10_clock_string(const unsigned char *value, unsigned size)
++{
++    if (!size || size > 32 || value[size - 1] != 0) return 0;
++    for (unsigned i = 0; i + 1 < size; i++) {
++        if (value[i] == 0) return 0;
++    }
++    return 1;
++}
++
++static void
++pe_note10_early_clock_init(void)
++{
++    DTEntry cpus = NULL, cpu = NULL;
++    OpaqueDTEntryIterator iter;
++    unsigned running = 0, cpu_count = 0;
++    uint32_t hz = 0;
++    if (SecureDTLookupEntry(NULL, "/cpus", &cpus) != kSuccess || !cpus)
++        n10_clock_fail("canonical cpus entry required");
++    (void)n10_clock_properties(cpus);
++    if (SecureDTInitEntryIterator(cpus, &iter) != kSuccess)
++        n10_clock_fail("CPU iterator unavailable");
++    for (unsigned step = 0; ; step++) {
++        int rc = SecureDTIterateEntries(&iter, &cpu);
++        if (rc == kIterationDone) break;
++        if (rc != kSuccess || !cpu || step >= 4096)
++            n10_clock_fail("CPU iteration limit or error");
++        struct n10_clock_properties properties = n10_clock_properties(cpu);
++        if (!properties.device_type) continue;
++        unsigned size;
++        const unsigned char *type = n10_clock_property(cpu, "device_type", &size);
++        if (size != 4 || !n10_clock_equal(type, "cpu", 4)) continue;
++        if (++cpu_count > 32 || properties.state > 1 || properties.frequency > 1)
++            n10_clock_fail("CPU count or critical property duplicate");
++        if (!properties.state) continue; /* Unknown execution state is not selected. */
++        const unsigned char *state = n10_clock_property(cpu, "state", &size);
++        if (!n10_clock_string(state, size)) n10_clock_fail("malformed CPU state");
++        if (size != 8 || !n10_clock_equal(state, "running", 8)) continue;
++        if (++running != 1 || properties.frequency != 1)
++            n10_clock_fail("unique running CPU and counter declaration required");
++        const unsigned char *frequency = n10_clock_property(cpu, "timebase-frequency", &size);
++        if (size != 4) n10_clock_fail("LE32 counter declaration required");
++        hz = (uint32_t)frequency[0] | ((uint32_t)frequency[1] << 8) |
++             ((uint32_t)frequency[2] << 16) | ((uint32_t)frequency[3] << 24);
++        /* Existing WFE signed shifts and rtclock microsecond divisor constrain
++         * this admission range; it is not an observed Exynos frequency.
++         */
++        if (hz < 1000000U || hz > 2147483647U)
++            n10_clock_fail("counter declaration outside consumer range");
++    }
++    if (running != 1) n10_clock_fail("one explicitly running CPU required");
++    clock_frequency_info_t local = {0};
++    local.timebase_frequency_hz = hz;
++    local.dec_clock_rate_hz = hz;
++    /* Other fields remain unknown. No bus/CPU default or legacy ratio math. */
++    gPEClockFrequencyInfo = local;
++}
++#endif

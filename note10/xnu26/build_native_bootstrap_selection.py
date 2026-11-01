@@ -169,9 +169,11 @@ def provision(work, output, *, ci=None):
         raise ValueError('exact public source checkout required')
     patches = ROOT / 'note10/xnu26/patches'
     names = (patches / 'series').read_text().splitlines()
-    if names[-1] != PATCH_NAME or len(names) != 10:
-        raise ValueError('closed ten-patch series required')
-    for n, name in enumerate(names[:-1]):
+    clock_patch = '0011-exynos9825-early-counter-clock.patch'
+    if (len(names) not in (10, 11) or names[9] != PATCH_NAME or
+        (len(names) == 11 and names[10] != clock_patch)):
+        raise ValueError('closed native bootstrap series with optional early-clock patch required')
+    for n, name in enumerate(names[:9]):
         run(['git', '-c', 'core.autocrlf=false', 'apply', patches / name],
             source, output / ('patch-' + str(n + 1) + '.log'))
     before = {n: (source / n).read_bytes() for n in PINS}
@@ -180,6 +182,13 @@ def provision(work, output, *, ci=None):
     (work / 'baseline-files.arm64').write_bytes(before['osfmk/conf/files.arm64'])
     run(['git', '-c', 'core.autocrlf=false', 'apply', patches / PATCH_NAME],
         source, output / 'patch-10.log')
+    if len(names) == 11:
+        from prepare_exynos_early_clock import REL as CLOCK_REL, patch_bytes as clock_patch_bytes
+        component = (ROOT / 'note10/xnu26/exynos_early_clock.c').read_bytes()
+        if clock_patch_bytes((source / CLOCK_REL).read_bytes(), component) != (patches / clock_patch).read_bytes():
+            raise ValueError('early-clock kernel patch differs from the tested production component')
+        run(['git', '-c', 'core.autocrlf=false', 'apply', patches / clock_patch],
+            source, output / 'patch-11.log')
     tool, compiler, sdk = build_config_tool(source, work, output)
     context = dict(ci_context=ci, source=str(source), tool=str(tool), compiler=compiler,
                    sdk=sdk, public_source_commit=COMMIT, output=str(output), phase='provisioned',
