@@ -16,6 +16,9 @@ def sha(data):
 
 def template_bytes(root):
     report=read(root/'build-result.json');data=(root/'Image').read_bytes()
+    if report.get('device_profile') is not None:
+        from sha256_kat_device_profile import validate_template
+        validate_template(root)
     if report.get('build_passed') is not True or report.get('auto_return_diagnostic') is not True or report.get('auto_cycle_variant'):
         raise ValueError('Successful unmodified auto-return template required')
     if sha(data)!=report['image_sha256'] or len(data)!=report['image_size'] or data.count(SLOT+b'\0')!=1 or b'N10RET1' not in data:

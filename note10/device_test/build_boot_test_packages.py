@@ -12,11 +12,15 @@ import zipfile
 from prepare_linux_boot import ROOT, read_verified_backup
 
 
-def updater(*, mode, bootloader, partitions, payload_sha, current_boot_sha,reservation=False,window_access=False,xnu_stage=False,cpu_cache=False,pm_timer=False,auto_return=False):
+def updater(*, mode, bootloader, partitions, payload_sha, current_boot_sha,reservation=False,window_access=False,xnu_stage=False,cpu_cache=False,pm_timer=False,auto_return=False,device_profile=None):
     if window_access and not reservation:raise ValueError('RAM access requires the reservation diagnostic')
     if xnu_stage and not window_access:raise ValueError('XNU staging requires the RAM access diagnostic')
     if cpu_cache and not xnu_stage:raise ValueError('CPU/cache roundtrip requires XNU staging')
-    if auto_return and not pm_timer:raise ValueError('Auto return requires PM/timer')
+    from sha256_kat_device_profile import selected
+    kat=selected({'device_profile':device_profile})
+    if kat and any((reservation,window_access,xnu_stage,cpu_cache,pm_timer)):raise ValueError('KAT updater cannot claim legacy scope')
+    if kat and auto_return is not (mode=='diagnostic'):raise ValueError('KAT updater recovery role differs')
+    if auto_return and not pm_timer and not kat:raise ValueError('Auto return requires PM/timer')
     if pm_timer and not cpu_cache:raise ValueError('PM/timer requires CPU/cache batch')
     if mode not in ('diagnostic','rollback') or not re.fullmatch(r'N976N[A-Z0-9]+',bootloader):
         raise ValueError('Unexpected package mode or bootloader')
@@ -49,7 +53,7 @@ sum() { sha256sum "$1" | awk '{print $1}'; }
 case "$(getprop ro.product.device)" in d2x|d2xks) ;; *) abort "Expected d2x" ;; esac
 '''
     script+='[ "$(getprop ro.bootloader)" = "'+bootloader+'" ] || abort "Bootloader differs from paired backup"\n'
-    script+='ui "'+('Temporary Linux CPU diagnostic; not iOS/XNU.' if mode=='diagnostic' else 'Restore the paired Android BOOT backup.')+'"\n'
+    script+='ui "'+(('Temporary Linux SHA256 diagnostic; not iOS/XNU.' if kat else 'Temporary Linux CPU diagnostic; not iOS/XNU.') if mode=='diagnostic' else 'Restore the paired Android BOOT backup.')+'"\n'
     script+='ui "Writes BOOT only. No automatic reboot."\n'
     if mode=='diagnostic' and reservation:
         script+='ui "RAM reservation test with built-in idle init: no TWRP UI or ADB after System boot."\n'
@@ -95,6 +99,10 @@ def build(backup,prototype,output,current_packages=None):
     parts=read_verified_backup(backup)
     manifest=json.loads((backup/'backup-manifest.json').read_text())
     metadata=json.loads(prototype.with_suffix('.json').read_text())
+    from sha256_kat_device_profile import selected,fields,package_scope
+    kat=selected(metadata)
+    kat_fields=fields(metadata) if kat else {}
+    if kat:package_scope(metadata,'diagnostic')
     raw=prototype.read_bytes()
     original=hashlib.sha256(parts['boot']).hexdigest()
     if metadata.get('prototype_created') is not True or metadata.get('kind')!='temporary Linux diagnostic boot; not XNU/iOS':
@@ -227,7 +235,7 @@ def build(backup,prototype,output,current_packages=None):
     screen_log=metadata.get('screen_log_diagnostic') is True
     if screen_log and not auto_return:raise ValueError('Screen log requires auto return')
     cycle=metadata.get('auto_cycle_token')
-    if auto_return and (not pm_timer or not re.fullmatch(r'[0-9a-f]{32}',cycle or '')):raise ValueError('Incomplete auto-return cycle')
+    if auto_return and ((not pm_timer and not kat) or not re.fullmatch(r'[0-9a-f]{32}',cycle or '')):raise ValueError('Incomplete auto-return cycle')
     if pm_timer and not cpu_cache:raise ValueError('PM/timer requires CPU/cache batch')
     if cpu_cache and not xnu_stage:raise ValueError('CPU/cache roundtrip needs XNU staging')
     xnu_sha=metadata.get('xnu_payload_sha256') if xnu_stage else None
@@ -281,6 +289,7 @@ def build(backup,prototype,output,current_packages=None):
             'xnu_payload_sha256':metadata.get('xnu_payload_sha256') if xnu_stage else None,
             'xnu_payload_size':metadata.get('xnu_payload_size') if xnu_stage else None,
             'builder_device_operations':[],'device_boot_tested':False,'deployment_ready':False,'packages':[]}
+    result.update(kat_fields)
     result.update(runtime_metadata)
     result.update(scratch_metadata)
     for mode,payload in (('diagnostic',padded),('rollback',parts['boot'])):
@@ -288,7 +297,7 @@ def build(backup,prototype,output,current_packages=None):
         script=updater(mode=mode,bootloader=manifest['bootloader'],partitions=manifest['partitions'],
                        payload_sha=digest,current_boot_sha=current_boot,reservation=reservation,
                        window_access=window_access,xnu_stage=xnu_stage and mode=='diagnostic',
-                       cpu_cache=cpu_cache and mode=='diagnostic',pm_timer=pm_timer and mode=='diagnostic',auto_return=auto_return and mode=='diagnostic')
+                       cpu_cache=cpu_cache and mode=='diagnostic',pm_timer=pm_timer and mode=='diagnostic',auto_return=auto_return and mode=='diagnostic',device_profile=kat_fields.get('device_profile'))
         metadata={'mode':mode,'writes':['boot'],'payload_sha256':digest,'payload_size':len(payload),
                   'updater_sha256':hashlib.sha256(script).hexdigest(),
                   'preserves_on_disk':['recovery','dtb','dtbo','vbmeta'],'automatic_reboot':False,
@@ -362,6 +371,10 @@ def build(backup,prototype,output,current_packages=None):
         metadata['xnu_payload_sha256']=xnu_sha if xnu_stage and mode=='diagnostic' else None
         metadata['xnu_payload_size']=xnu_size if xnu_stage and mode=='diagnostic' else None
         if mode=='diagnostic':metadata.update(runtime_metadata);metadata.update(scratch_metadata)
+        if kat:
+            metadata.update(kat_fields)
+            metadata['test_purpose']='sha256-kat-recovery' if mode=='diagnostic' else 'rollback'
+            package_scope(metadata,mode)
         target=output/(('note10-reservation-' if reservation else 'note10-phase2-')+mode+'.zip')
         files={'META-INF/com/google/android/update-binary':script,
                'META-INF/com/google/android/updater-script':b'# BOOT-only manual test/rollback\n',

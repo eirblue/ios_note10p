@@ -64,6 +64,9 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output,auto_cycle_token=None):
     parts=read_verified_backup(backup)
     if not parts['recovery'].startswith(official):raise ValueError('Existing recovery does not match reference TWRP')
     build=json.loads((kernel_build/'build-result.json').read_text())
+    from sha256_kat_device_profile import selected,pack
+    if selected(build):
+        return pack(backup,kernel_build,official,mkbootimg,output,parts,auto_cycle_token)
     if build.get('build_passed') is not True or build.get('builtin_cpu_diagnostic') is not True:
         raise ValueError('Successful CPU-diagnostic Linux build required')
     if build.get('diagnostic_preserves_external_initramfs') is not True:
@@ -148,9 +151,18 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output,auto_cycle_token=None):
     if (roundtrip_marker in data) is not roundtrip_scope:raise ValueError('CPU PM roundtrip Image scope differs')
     from pm_irq_binding import validate_model as validate_irq
     validate_irq(kernel_build,build)
+    return pack_verified(backup,kernel_build,official,mkbootimg,output,parts,build,config,auto_cycle_token,
+                         roundtrip_scope=roundtrip_scope,notifier_counts_scope=notifier_counts_scope,notifier_trace_scope=notifier_trace_scope)
+
+
+def pack_verified(backup,kernel_build,official,mkbootimg,output,parts,build,config,auto_cycle_token,*,
+                  roundtrip_scope=False,notifier_counts_scope=False,notifier_trace_scope=False,kat_profile=False):
+    kernel=kernel_build/'Image';data=kernel.read_bytes()
+    auto_return=build.get('auto_return_diagnostic') is True
     if hashlib.sha256(config).hexdigest()!=build['effective_config_sha256']:
         raise ValueError('Config differs from kernel build report')
     required={'CONFIG_BLK_DEV_INITRD=y','CONFIG_RD_LZMA=y','CONFIG_KEXEC=y','CONFIG_KEXEC_CORE=y','CONFIG_ARM64_4K_PAGES=y'}
+    if kat_profile:required-={'CONFIG_KEXEC=y','CONFIG_KEXEC_CORE=y'}
     if not required.issubset(config.decode().splitlines()):
         raise ValueError('Kernel lacks required ramdisk/kexec/page configuration')
     builtin=build.get('builtin_idle_init') is True
@@ -309,8 +321,14 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output,auto_cycle_token=None):
             'deployment_ready':False,'partition_writes':False,'device_operations':[],
             'scope':'PC format/size validation only; Samsung runtime DT selection and boot behavior remain unverified',
             'command':command}
-    report.update(runtime_fields(build))
-    report.update(scratch_fields(build))
+    if kat_profile:
+        from sha256_kat_device_profile import fields
+        report.update(fields(build))
+    else:
+        from xnu_runtime_observation_binding import metadata_fields as runtime_fields
+        from xnu_runtime_scratch_binding import metadata_fields as scratch_fields
+        report.update(runtime_fields(build))
+        report.update(scratch_fields(build))
     output.with_suffix('.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
     return report
 

@@ -33,6 +33,9 @@ def prepare_plan(*,kernel_build,backup,twrp,mkbootimg,current_packages,output,cy
     if output.exists() or not 1<=cycles<=5:raise ValueError('Fresh output and 1..5 cycles required')
     kernel_build=private(kernel_build);backup=private(backup);current_packages=private(current_packages)
     result=read(kernel_build/'build-result.json')
+    from sha256_kat_device_profile import selected,prepare_plan as prepare_kat_plan
+    if selected(result):
+        return prepare_kat_plan(kernel_build,backup,twrp,mkbootimg,current_packages,output,cycles)
     if result.get('build_passed') is not True or result.get('auto_return_diagnostic') is not True:raise ValueError('Compiled opt-in auto-return kernel required; v7 cannot auto-return')
     verify_packages(current_packages)
     output.mkdir(parents=True)
@@ -59,6 +62,8 @@ def validate_plan(path,expected):
     path=private(path)
     if not re.fullmatch('[0-9a-f]{64}',expected or '') or sha(path)!=expected:raise ValueError('Exact reviewed plan SHA256 required')
     plan=read(path)
+    from sha256_kat_device_profile import selected,validate_plan as validate_kat_plan
+    if selected(plan):return validate_kat_plan(path,expected)
     if plan.get('schema')!=1 or plan.get('kind')!='note10-bounded-auto-cycle' or plan.get('minimum_battery')!=MINIMUM_INSTALL_BATTERY or plan.get('return_timeout_seconds')!=240:raise ValueError('Unsupported cycle policy')
     stages=plan.get('stages',[])
     if not 1<=len(stages)<=5 or len({s['cycle'] for s in stages})!=len(stages):raise ValueError('Invalid cycle count or reused token')
@@ -147,7 +152,10 @@ def run_plan(path,expected,output,*,execute=False,limit=1,adb=None,verified_roun
             if item['index']>1 and not journal['completed'][-1]['passed']:raise ValueError('Previous cycle did not pass')
             packages=Path(item['packages']);records=verify_packages(packages);diag=next(r for r in records if r['mode']=='diagnostic')
             staged=stage(packages,adb)
-            ready=check(packages,Path(item['kernel_build']),Path(plan['backup']),Path(plan['core_model']),Path(plan['gate_model']),Path(plan['init_model']),adb)
+            from sha256_kat_device_profile import selected,precheck as check_kat,collect as collect_kat
+            kat=selected(plan)
+            ready=(check_kat(packages,Path(item['kernel_build']),Path(plan['backup']),adb,staged) if kat else
+                   check(packages,Path(item['kernel_build']),Path(plan['backup']),Path(plan['core_model']),Path(plan['gate_model']),Path(plan['init_model']),adb))
             if ready.get('ready_for_manual_access_test') is not True:raise ValueError('Readiness did not pass')
             before=boot_id(adb)
             if adb.text('shell','command','-v','twrp')!='/sbin/twrp':raise ValueError('Expected TWRP CLI unavailable')
@@ -160,7 +168,7 @@ def run_plan(path,expected,output,*,execute=False,limit=1,adb=None,verified_roun
             after=wait_recovery(adb,before,plan['return_timeout_seconds'])
             if preflight(adb)['twrp_version']!=initial['twrp_version']:raise ValueError('Recovery version changed')
             # Preserve diagnostic logs immediately after return, even when tests failed.
-            captured=collect(packages,Path(item['kernel_build']),adb)
+            captured=(collect_kat if kat else collect)(packages,Path(item['kernel_build']),adb)
             verify_partitions(adb,plan['backup'],diag['payload_sha256'])
             return_observation=None
             for name,selection in captured.get('log_selections',{}).items():
