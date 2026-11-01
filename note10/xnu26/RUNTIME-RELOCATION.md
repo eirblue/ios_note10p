@@ -1,5 +1,16 @@
 # Runtime relocation metadata and PC data trials
 
+## v72 builtin minimal Linux PID1 and SHA256 physical result
+
+Source `149cb74c3f7640f2e26dfdcd1d775ec99f6c02ac` passed [CI 41307031423](https://github.com/eirblue/ios_note10p/actions/runs/41307031423). Its 46,413,836-byte Image has SHA-256 `fa655a1aeca9e6c8820d91e1f53d7f64f321a0f8a930c4d5a879a8582cd3de69`. A forced builtin minimal `/init`, a default-off guarded route, and `rdinit=/init` with CMDLINE_EXTEND prevent the diagnostic from falling back to Android block-root while retaining bounded bootloader argument append.
+
+One BOOT write and one host reboot attempt completed. The strict device capture passed the minimal PID1-start and SHA256 diagnostic, with 16 arm and 16 recovery-request frames. The host observed a changed boot ID in the same bound root TWRP; pre/post five-partition checks completed without mismatch. The single allowed v72 cycle is consumed and must not be replayed.
+
+Recovery polling included repeated sideload-not-shell errors before a later normal recovery transport. Hardware boot events were not independently counted. The decoder's constant hardware-reentry=false states that log frames alone cannot prove hardware reentry; it is separate from the host's observed recovery. No exact clean boot count, XNU execution, or iOS boot is claimed.
+
+The 37 new tests passed once under the original source. Header and configuration dependency corrections used build-only continuations, without replaying those tests. Per the user's latest workflow, successful CI proceeded directly to necessary packaging and the device test; no separate post-build Image reader ran. Unnecessary repeated verification is omitted throughout subsequent cycles, while fresh installation safety checks and the per-build single-use limit remain.
+
+
 ## v71 diagnostic Image passed; device attempt failed with four reported boots
 
 Source `9bfe108e7fd7a063bacce9418be46d269cb872d9` passed [CI 41290669542](https://github.com/eirblue/ios_note10p/actions/runs/41290669542), attempt 1. The first actual Image target produced 46,348,300 bytes, SHA-256 `2d8c7f82a939817e73c7dfb059b36e198eb3b441f5d0f69ee5e4220d239821eb`. The compiled code keeps the KAT callback outside freed init memory and queues it separately after the existing recovery arm and `SYSTEM_RUNNING`; the physical boot route remains unverified.

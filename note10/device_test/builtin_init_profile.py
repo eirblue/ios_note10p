@@ -15,9 +15,13 @@ LOGS = (('last_kmsg.txt', '/proc/last_kmsg'),
 def current_boot_binding(plan, pair, diagnostic):
     # Device-specific payload pins belong to the private reviewed plan, never
     # public source constants. The live common precheck still checks the bytes.
-    require(pair.get('device_profile') == 'sha256-kat-recovery-v1' and
-            pair.get('source_head') == '9bfe108e7fd7a063bacce9418be46d269cb872d9' and
-            pair.get('host_profile_source_head') == '5e233aa5f08473d716ca2e9b3d8937c1821d513f' and
+    stream = plan.get('device_profile') == 'sha256-stream-state-v1'
+    prior_profile = 'sha256-kat-builtin-init-v2' if stream else 'sha256-kat-recovery-v1'
+    prior_head = '149cb74c3f7640f2e26dfdcd1d775ec99f6c02ac' if stream else '9bfe108e7fd7a063bacce9418be46d269cb872d9'
+    prior_host = '149cb74c3f7640f2e26dfdcd1d775ec99f6c02ac' if stream else '5e233aa5f08473d716ca2e9b3d8937c1821d513f'
+    require(pair.get('device_profile') == prior_profile and
+            pair.get('source_head') == prior_head and
+            pair.get('host_profile_source_head') == prior_host and
             re.fullmatch('[0-9a-f]{64}', plan.get('current_boot_payload_sha256', '')) and
             plan['current_boot_payload_sha256'] == diagnostic['payload_sha256'],
             'v72 requires a reviewed current v71 BOOT chain')
@@ -75,11 +79,11 @@ def boot_identity_strings(data, identity, cycle):
     return {m[1].decode() for m in re.finditer(pattern, data)}
 
 
-def decode(data, banner, identity, cycle):
+def decode(data, banner, identity, cycle, *, digest_decoder=None, digest_marker=b'N10SHA1'):
     from sha256_kat_device_profile import decode_selected
     require(len(boot_identity_strings(data, identity, cycle)) == 1,
             'ambiguous/multiple retained boot identities for one current cycle')
-    clipped, observation = decode_selected(data, banner, identity, cycle)
+    clipped, observation = decode_selected(data, banner, identity, cycle, digest_decoder=digest_decoder)
     start = observation['boot_byte_start']
     boot = data[start:]
     route = list(re.finditer(rb'N10ROUTE2 id=([0-9a-f]{32}) boot=([0-9a-f]{32}) cycle=([0-9a-f]{32}) route=builtin exec_attempt=1(?=\r?\n)', boot))
@@ -92,13 +96,13 @@ def decode(data, banner, identity, cycle):
             'builtin route/startup identity or order differs')
     frame_lines = []
     for line in boot.splitlines():
-        current_sha = b'N10SHA1 id='+identity.encode() in line
+        current_sha = digest_marker+b' id='+identity.encode() in line
         current_ret = b'N10RET1 id='+identity.encode()+b' cycle='+cycle.encode() in line
         if current_sha or current_ret:
             require(b'N10BOOTLINK2 boot='+token+b' N10' in line,
                     'KAT/return frame lacks same boot association')
             frame_lines.append(line)
-    require(frame_lines and boot.find(b'N10SHA1 id='+identity.encode()) > init[0].end(),
+    require(frame_lines and boot.find(digest_marker+b' id='+identity.encode()) > init[0].end(),
             'KAT must follow actual minimal PID1 startup')
     # All current records in a file must be associated. Decoders keep their
     # original checksums/order semantics; this prefix is not authentication.
@@ -124,9 +128,11 @@ def probe(adb, remote, out, index):
     return normalized
 
 
-def snapshot(adb, out, bound, cycle):
+def snapshot(adb, out, bound, cycle, *, decode_fn=None):
     """All three fixed sources, once each, before evaluation; no raw merge."""
     out = Path(out)
+    decode_fn = decode_fn or decode
+    profile_name = bound.get('device_profile', PROFILE)
     rows, snapshots, selections, observations = [], {}, {}, []
     for index, (name, remote) in enumerate(LOGS):
         from sha256_kat_device_profile import log_probe_command
@@ -147,14 +153,14 @@ def snapshot(adb, out, bound, cycle):
             # sources, never retry or turn this failure into a successful run.
             row.update(status='error', error_type=type(error).__name__, error=str(error)[:2048])
         rows.append(row)
-        save(out/'capture-index.json', {'device_profile': PROFILE, 'sources': rows,
+        save(out/'capture-index.json', {'device_profile': profile_name, 'sources': rows,
              'logs_sha256': {n: hashlib.sha256(v).hexdigest() for n, v in snapshots.items()}})
     errors = [r['name']+': '+r.get('error', '') for r in rows if r['status'] == 'error']
     for name, data in snapshots.items():
         if cycle.encode() not in data:
             continue
         try:
-            clipped, observation = decode(data, bound['kernel_banner'], bound['build_evidence_id'], cycle)
+            clipped, observation = decode_fn(data, bound['kernel_banner'], bound['build_evidence_id'], cycle)
             selection = raw_file(out/('selected-'+name), clipped)
             selections[name] = dict(selected_file=selection['file'], selected_sha256=selection['sha256'])
             observations.append(observation)
@@ -171,7 +177,7 @@ def snapshot(adb, out, bound, cycle):
     elif not same:
         errors.append('independent current-cycle observations disagree')
     passed = not errors and same
-    result = dict(directory=str(out), device_profile=PROFILE, diagnostic_passed=passed,
+    result = dict(directory=str(out), device_profile=profile_name, diagnostic_passed=passed,
                   log_selections=selections, observations=observations, errors=errors,
                   logs_sha256={n: hashlib.sha256(v).hexdigest() for n, v in snapshots.items()},
                   snapshot_sources=rows, partition_writes=False, rebooted=False, xnu_executed=False,

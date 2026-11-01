@@ -93,7 +93,10 @@ def retain_route_prerequisites(source, objects, out, compiler_include):
     save(out/'route-dependencies.json', {'files_sha256': records, 'optional_absent': sorted(absent)})
 
 
-def main():
+def main(kind=None):
+    if kind not in (None, "sha256-stream-state"):
+        raise ValueError("closed diagnostic task required")
+    stream = kind == "sha256-stream-state"
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--archive', type=Path)
@@ -111,7 +114,12 @@ def main():
     out.mkdir(parents=True)
     # Bind all local first-use input bytes before importing any local helper.
     manifest = {}
-    for name in (*PUBLIC, *INPUTS):
+    extra = ('sha256_stream_state.py', 'sha256_stream_state.c', 'sha256_stream_composition.c',
+             'sha256_stream_vectors.json', 'build_sha256_stream_state.py',
+             'test_sha256_stream_state.py', 'sha256_stream_fixture.c') if stream else ()
+    names = (*PUBLIC, *INPUTS, *('note10/device_test/'+n for n in extra),
+             *(('.github/workflows/note10-sha256-stream-state.yml',) if stream else ()))
+    for name in names:
         data = (ROOT/name).read_bytes()
         manifest[name] = hashlib.sha256(data).hexdigest()
         target = out/'source'/name
@@ -123,6 +131,9 @@ def main():
     from prepare_sha256_kat_recovery import TARGET, KERNEL_PINS
     from builtin_init_route import install, API_PINS, elf_manifest, cpio, builtin_cmdline_policy
     from build_sha256_kat_recovery import BUILD_INPUT_PINS, prepare_image_inputs
+    extra_kernel_pins = {}
+    if stream:
+        from sha256_stream_state import install, API_PINS as extra_kernel_pins
     save(out/'source-manifest.json', manifest)
     ci = {name: os.environ.get(name) for name in
           ('GITHUB_SHA', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'GITHUB_JOB')}
@@ -154,7 +165,7 @@ def main():
         objects = workspace/'objects'
         objects.mkdir()
         # Keep the unchanged reboot/init/crypto sources as current build inputs.
-        for name in (*KERNEL_PINS, *BUILD_INPUT_PINS, *API_PINS, "usr/Kconfig", "include/linux/sched.h"):
+        for name in (*KERNEL_PINS, *BUILD_INPUT_PINS, *API_PINS, *extra_kernel_pins, "usr/Kconfig", "include/linux/sched.h"):
             target = out/'stock-inputs'/name
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source/name, target)
@@ -195,6 +206,8 @@ def main():
              'cpio_bytes': len(archive_data),
              'members': ['dev', 'dev/console', 'dev/kmsg', 'init', 'TRAILER!!!']})
         settings = dict(SETTINGS, INITRAMFS_SOURCE='"'+str(out/'initramfs.cpio')+'"')
+        if stream:
+            settings.update(NOTE10_SHA256_STREAM_STATE='y', LOCALVERSION='"-v73-sha256-stream"')
         run([*make, DEFCONFIG], 'build/01-defconfig.log')
         shutil.copyfile(objects/'.config', out/'public-baseline.config')
         for index, (name, value) in enumerate(settings.items()):
@@ -227,8 +240,10 @@ def main():
             raise ValueError('completed ARM64 Image header invalid')
         if raw.count(b'N10_CYCLE_SLOT_UNSET_0123456789A') != 1:
             raise ValueError('exact one unpatched inherited recovery cycle slot required')
-        if any(marker not in raw for marker in (b'N10RET1', b'N10SHA1', b'N10SHACTL1', b'N10ROUTE2', b'N10INIT2', b'N10MININIT2', b'N10BOOTLINK2', identity.encode())):
+        if any(marker not in raw for marker in (b'N10RET1', b'N10SHASTREAM1' if stream else b'N10SHA1', b'N10SHACTL1', b'N10ROUTE2', b'N10INIT2', b'N10MININIT2', b'N10BOOTLINK2', identity.encode())):
             raise ValueError('new diagnostic Image identity/markers missing')
+        if stream and b'N10SHA1' in raw:
+            raise ValueError('old abc KAT must not be compiled into the new task')
         if raw.count(archive_data) != 1:
             raise ValueError('exact raw builtin CPIO missing/duplicated in actual Image')
         shutil.copyfile(objects/'init/.main.o.cmd', out/'actual-init-main.cmd')
@@ -238,7 +253,7 @@ def main():
         stable_archive(archive, before)
         if manifest != {name: sha(ROOT/name) for name in manifest}:
             raise ValueError('local first-use inputs changed during build')
-        result = dict(schema=1, version='v72', passed=True, kernel_commit=COMMIT,
+        result = dict(schema=1, version='v73' if stream else 'v72', diagnostic_kind=kind, passed=True, kernel_commit=COMMIT,
                       build_evidence_id=identity, ci_context=ci, source_sha256=manifest,
                       settings=settings, make_target='Image', integration_object=TARGET,
                       bootloader_cmdline_policy=cmdline_policy,

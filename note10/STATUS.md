@@ -1,5 +1,13 @@
 # 작업 상태 (2026-11-01, Asia/Seoul)
 
+## 2026-11-01: v72 내장 최소 init·SHA256 실기기 통과
+
+- 소스 `149cb74c3f7640f2e26dfdcd1d775ec99f6c02ac`의 [CI 41307031423](https://github.com/eirblue/ios_note10p/actions/runs/41307031423) 성공 후 BOOT 기록·호스트 재부팅 명령 각 1회 수행. 최소 Linux PID1 시작, SHA256 진단, 복귀 요청 프레임, 변경된 boot ID의 같은 root TWRP 및 사후 5개 파티션 무결성 확인. v72 회차 1/1 소진, 재실행 금지.
+- 첫 CI의 새 시험 37개는 원래 소스에서 한 번 통과. 이후 헤더 의존성과 내장 init 설정 의존성만 수정해 빌드 전용 실행, 기존 시험 재생 없음. 강제 내장 `/init`와 `rdinit=/init`·CMDLINE_EXTEND로 Android block-root 경로를 피하고 부트로더 인자를 기존 길이 한도 안에서 유지.
+- 복귀 대기 중 sideload가 shell 모드가 아닌 관측이 반복된 뒤 정상 recovery 전송으로 복귀. 실제 하드웨어 부팅 횟수는 별도 계수하지 않음. 로그 decoder의 정적 hardware-reentry=false는 로그 단독 증명의 한계이며 실제 호스트 복귀 관측과 구분. XNU/iOS 실행 결과가 아님.
+- 작업은 설계→코딩→검증→빌드→기기 테스트. 전체 단계에서 불필요한 중복 검증 생략, 빌드 성공 후 별도 Image 재검증 없이 기기 테스트. 설치 안전 조건과 빌드당 1회 한도 유지.
+
+
 ## 2026-11-01: v71 진단 Image 빌드 통과·실기기 회차 실패
 
 - **빌드:** 소스 `9bfe108e7fd7a063bacce9418be46d269cb872d9`; [CI 41290669542](https://github.com/eirblue/ios_note10p/actions/runs/41290669542), 시도 1 성공. 첫 실제 Image 대상 1회, 46,348,300바이트·SHA-256 `2d8c7f82a939817e73c7dfb059b36e198eb3b441f5d0f69ee5e4220d239821eb`.

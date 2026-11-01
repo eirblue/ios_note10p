@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "recipe": "byte[i]=(37*i+11)&255",
+  "vectors": [
+    {
+      "case": 0,
+      "length": 55,
+      "split": 55,
+      "digest": "2900465fcb533e05a158fd2b3be0e5e3b03740d83060aa3580e0d98a96bf2384"
+    },
+    {
+      "case": 1,
+      "length": 56,
+      "split": 55,
+      "digest": "31454ff48ef36af2f08fd511bdc37d9d5855ac23e992e5ff5445cb6b7674a674"
+    },
+    {
+      "case": 2,
+      "length": 63,
+      "split": 55,
+      "digest": "5f6401b96532c36de4e65beec0409b69b1d181864c8009b7a04f43e5d56350d1"
+    },
+    {
+      "case": 3,
+      "length": 64,
+      "split": 55,
+      "digest": "94eb5de4943613fd048dc93393ab06877405faa39c11f53e9386083339833e7e"
+    },
+    {
+      "case": 4,
+      "length": 65,
+      "split": 55,
+      "digest": "fc518669b6eb4b4dd91827ecacef86689c725bd5bab888fd3b26dbb196eec954"
+    },
+    {
+      "case": 5,
+      "length": 129,
+      "split": 65,
+      "digest": "4f1757ae4bffbae86d775b831765b75af154d52f7deaa46dd378051a2d3ad57f"
+    }
+  ]
+}
