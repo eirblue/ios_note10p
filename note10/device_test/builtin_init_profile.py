@@ -48,7 +48,7 @@ def raw_file(path, data):
                 ctime_ns=int(s.st_ctime_ns))
 
 
-def input_binding(root, result, image, lines):
+def input_binding(root, result, image, lines, *, fdt_owned_route=False):
     from builtin_init_route import cpio, elf_manifest, sha, builtin_cmdline_policy
     root = Path(root)
     require(result.get('builtin_init_route') is True, 'builtin route result required')
@@ -70,6 +70,9 @@ def input_binding(root, result, image, lines):
               'builtin_init_manifest_sha256': sha((root/'minimal-init.json').read_bytes()),
               'guarded_init_main_sha256': sha((root/'overlay/init/main.c').read_bytes())}
     require(all(result.get(k) == v for k, v in inputs.items()), 'actual builtin route pins differ')
+    if fdt_owned_route:
+        from early_fdt_binding import input_binding as fdt_binding
+        inputs.update(fdt_binding(result,lines,elf=elf,archive=archive,raw_inputs=inputs))
     return inputs
 
 

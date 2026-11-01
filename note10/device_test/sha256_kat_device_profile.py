@@ -138,13 +138,12 @@ def raw_binding(root, expected_result, expected_source):
     extra = {}
     if builtin:
         from builtin_init_profile import input_binding
-        extra = input_binding(root, result, image, lines)
+        extra = input_binding(root, result, image, lines, fdt_owned_route=fdt)
     if affinity:
         from affinity_binding import input_binding as affinity_input_binding
         extra.update(affinity_input_binding(result, lines))
     if fdt:
-        from early_fdt_binding import input_binding as fdt_input_binding, linked_footprint
-        extra.update(fdt_input_binding(result, lines))
+        from early_fdt_binding import linked_footprint
         import struct
         measured_footprint = linked_footprint((root/'System.map').read_text(),
             (root/'new-object-symbols.log').read_text(), struct.unpack_from('<Q',image,16)[0],
@@ -176,14 +175,19 @@ V78_HOST_HEAD = 'a0674c29eaa2bc8938023fc2be590b9a4a84374e'
 V78_HOST_PINS = {'note10/device_test/affinity_binding.py': '6d5b16d54a803c95bdd391a38efbd2bac5ef36baffe199f86cd83f878bf10678', 'note10/device_test/auto_cycle.py': 'e69be83bf1ac709173679f0476de7ad84b17ea3b737e34f47223d974f4ea36ee', 'note10/device_test/build_boot_test_packages.py': 'e7d34e08c15eed674af7d4467bb5b615ee3492f3798f4ebd7f0d21cc1c707b97', 'note10/device_test/builtin_init_profile.py': '6df07ee89a3dc7e46506a8dbec1013ea57511d72336c16daabbf9442e8aa2b62', 'note10/device_test/builtin_init_route.py': '46b100dc95f11e344c11b8cb3fba5d34d17b2884385923426a42246699fda43d', 'note10/device_test/materialize_auto_cycle.py': '87ef3da2e0ddbbb40b02bc9334c59deb8c590692352f099cb2b3ae99b749f960', 'note10/device_test/prepare_linux_boot.py': '4f599c7c667e3dc18a5afccfd682c47f705ed714daa916b4c0557db9f7f78c70', 'note10/device_test/sha256_kat_device_profile.py': '41a01209338e25ea72b8f2f8e9d07cd5900135fd7bd819346be5d1a4b979a3d1', 'note10/device_test/sha256_stream_state.py': '55de2735fb830ae8047bb4a8fa74325f51b766b1e885c482dbbc5ebabe3ea437', 'note10/device_test/sha256_stream_vectors.json': '5c379d1ef41a40b9a1262c985476e9dc0ba88dae7b1586f949bbe79686f2165f', 'note10/device_test/stage_phase2.py': '1ecc741d7517fc15a6043b1329b726e420791f06e712bfd1aaf901a7747db433', 'note10/device_test/test_affinity_binding.py': 'bf602887c4437e0096473392789da33e3ef502297d8c060faf7d9da9ecd3eb89', 'note10/device_test/test_affinity_ci_context.py': '71aad30ab105a45efe2703fd7b222233836d6e7514560834daa71bfdd351dea9', 'note10/device_test/test_builtin_init_route.py': '9fa63dd55114472a748062447dd95c17bf4d4d7e743117f69f0bb6a7aca6ea42', 'note10/device_test/test_sha256_kat_device_profile.py': 'c48400d5573695d217101806b8481e39aec38fd5382e64b85f999b4cee42c498', 'note10/device_test/test_sha256_stream_state.py': '088881f92037a9895b7947eb44692f51ecba1eb602a02dacc02ff3b94a836db8'}
 
 
+# Frozen code-only a77 Image-era host closure; never relabelled as current host.
+V81_IMAGE_HEAD = 'a77f1eca32d1888f3266f49412dda9f0129f8719'
+V81_IMAGE_HOST_PINS = {'note10/device_test/sha256_kat_device_profile.py': 'a60c1cd0cfeaf89b21524d6b634f66fb3e9518184ea086938e4697866db18bc5', 'note10/device_test/test_sha256_kat_device_profile.py': 'c48400d5573695d217101806b8481e39aec38fd5382e64b85f999b4cee42c498', 'note10/device_test/materialize_auto_cycle.py': '87ef3da2e0ddbbb40b02bc9334c59deb8c590692352f099cb2b3ae99b749f960', 'note10/device_test/prepare_linux_boot.py': '4f599c7c667e3dc18a5afccfd682c47f705ed714daa916b4c0557db9f7f78c70', 'note10/device_test/build_boot_test_packages.py': '774d978651cbbc75a29e377860f0b100933137af217a81d301ce68bb33a6d3a4', 'note10/device_test/stage_phase2.py': '1ecc741d7517fc15a6043b1329b726e420791f06e712bfd1aaf901a7747db433', 'note10/device_test/auto_cycle.py': '36793ff1964331b3a77b530fc1be5923d1807a3752ab0f7d4f68a51adde12812', 'note10/device_test/builtin_init_profile.py': 'c9246e6acc22d6666109f90d17368c71e4c61273ebfd1f8bb11f93971119dfa9', 'note10/device_test/builtin_init_route.py': '46b100dc95f11e344c11b8cb3fba5d34d17b2884385923426a42246699fda43d', 'note10/device_test/test_builtin_init_route.py': '9fa63dd55114472a748062447dd95c17bf4d4d7e743117f69f0bb6a7aca6ea42', 'note10/device_test/sha256_stream_state.py': '55de2735fb830ae8047bb4a8fa74325f51b766b1e885c482dbbc5ebabe3ea437', 'note10/device_test/sha256_stream_vectors.json': '5c379d1ef41a40b9a1262c985476e9dc0ba88dae7b1586f949bbe79686f2165f', 'note10/device_test/test_sha256_stream_state.py': '088881f92037a9895b7947eb44692f51ecba1eb602a02dacc02ff3b94a836db8', 'note10/device_test/affinity_binding.py': '6d5b16d54a803c95bdd391a38efbd2bac5ef36baffe199f86cd83f878bf10678', 'note10/device_test/test_affinity_binding.py': 'bf602887c4437e0096473392789da33e3ef502297d8c060faf7d9da9ecd3eb89', 'note10/device_test/test_affinity_ci_context.py': '71aad30ab105a45efe2703fd7b222233836d6e7514560834daa71bfdd351dea9', 'note10/device_test/test_partition_gate_evidence.py': 'b7dd52aa5c7747489a2713f805dbe15a6318f3d3776a8043700549e9383bcc72', 'note10/device_test/early_fdt_binding.py': '51a3dce472787ffe739c2458ad0505bad0eb43964ef031e3ff78a0a70beec5f9', 'note10/device_test/test_early_fdt_binding.py': '2444d3d20b7cc42e705cb89c1d04de72599f7da2a5d1b9282636f3b9990ce1fa'}
+
+
 def host_binding(source_head):
     require(re.fullmatch('[0-9a-f]{40}', source_head or ''), 'exact host-profile publication source pin required')
-    pins = V71_HOST_PINS if source_head == V71_HOST_HEAD else V72_HOST_PINS if source_head == V72_HOST_HEAD else V73_HOST_PINS if source_head == V73_HOST_HEAD else V78_HOST_PINS if source_head == V78_HOST_HEAD else {
+    pins = V71_HOST_PINS if source_head == V71_HOST_HEAD else V72_HOST_PINS if source_head == V72_HOST_HEAD else V73_HOST_PINS if source_head == V73_HOST_HEAD else V78_HOST_PINS if source_head == V78_HOST_HEAD else V81_IMAGE_HOST_PINS if source_head == V81_IMAGE_HEAD else {
         'note10/device_test/'+name: sha(Path(__file__).parent/name)
         for name in (*HOST_SOURCES, 'builtin_init_profile.py', 'builtin_init_route.py', 'test_builtin_init_route.py',
                      'sha256_stream_state.py', 'sha256_stream_vectors.json', 'test_sha256_stream_state.py',
                      'affinity_binding.py', 'test_affinity_binding.py', 'test_affinity_ci_context.py',
-                     'test_partition_gate_evidence.py', 'early_fdt_binding.py', 'test_early_fdt_binding.py')}
+                     'test_partition_gate_evidence.py', 'early_fdt_binding.py', 'test_early_fdt_binding.py', 'test_early_fdt_host_route.py')}
     return dict(host_profile_source_head=source_head, host_profile_source_sha256=dict(pins))
 
 
@@ -315,7 +319,7 @@ def prepare_template(build, output, accepted_result_sha256, source_head, *, root
     binding = raw_binding(build, accepted_result_sha256, source_head)
     if context_mode:
         require(binding['device_profile'] in (AFFINITY_PROFILE,FDT_PROFILE) and
-                (binding['device_profile']==FDT_PROFILE or host_source_head != source_head),
+                host_source_head != source_head,
                 'CI-success integration requires a supported new diagnostic/host publication')
         generated_receipt = ci_success_receipt(context, ci_success_context_sha256, binding, read(build/'result.json'))
     else:
@@ -327,7 +331,8 @@ def prepare_template(build, output, accepted_result_sha256, source_head, *, root
     require(binding['device_profile'] != AFFINITY_PROFILE or host_source_head not in (V71_HOST_HEAD, V72_HOST_HEAD, V73_HOST_HEAD),
             'affinity requires its new host publication')
     require(binding['device_profile'] != FDT_PROFILE or host_source_head not in
-            (V71_HOST_HEAD,V72_HOST_HEAD,V73_HOST_HEAD,V78_HOST_HEAD), 'FDT requires its new host publication')
+            (V71_HOST_HEAD,V72_HOST_HEAD,V73_HOST_HEAD,V78_HOST_HEAD,V81_IMAGE_HEAD) and
+            (binding['device_profile'] != FDT_PROFILE or host_source_head != source_head), 'FDT requires separate new host publication')
     binding.update(host_binding(host_source_head))
     shutil.copytree(build, output)
     if context_mode:
@@ -409,7 +414,13 @@ def package_scope(row, mode=None):
                 type(row.get('fdt_snapshot_capacity_bytes')) is int and row['fdt_snapshot_capacity_bytes'] == CAPACITY and
                 type(row.get('fdt_capture_revision')) is int and row['fdt_capture_revision'] == REVISION and
                 row.get('fdt_allocation_form') == ALLOCATION and
-                row.get('fdt_relative_placement_admitted') is True,
+                row.get('fdt_relative_placement_admitted') is True and row.get('source_head') == V81_IMAGE_HEAD and
+                row.get('host_profile_source_head') not in (V81_IMAGE_HEAD,row.get('source_head')) and
+                type(row.get('fdt_effective_host_admission')) is dict and
+                row['fdt_effective_host_admission'].get('kind') == 'v81-revision2-effective-host-admission' and
+                row['fdt_effective_host_admission'].get('eligible') is True and
+                row['fdt_effective_host_admission'].get('producer_reported_eligible') is False and
+                row['fdt_effective_host_admission'].get('image_source_head') == V81_IMAGE_HEAD,
                 'FDT source/boundary/cap/nonclaim differs')
     if mode is None or mode in ('diagnostic', 'rollback'):
         diagnostic = mode in (None, 'diagnostic')

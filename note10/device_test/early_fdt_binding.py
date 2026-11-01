@@ -11,7 +11,8 @@ REVISION = 1
 ALLOCATION = 'memblock-owned'
 CAPACITY = 524288
 FIELDS = ('fdt_capture_boundary', 'fdt_snapshot_capacity_bytes', 'raw_input_binding',
-          'fdt_capture_revision', 'fdt_allocation_form', 'fdt_relative_placement_admitted')
+          'fdt_capture_revision', 'fdt_allocation_form', 'fdt_relative_placement_admitted',
+          'fdt_effective_host_admission')
 SOURCES = ('early_fdt_binding.py', 'early_fdt_binding.c', 'early_fdt_composition.c',
            'build_early_fdt_binding.py', 'test_early_fdt_binding.py', 'early_fdt_fixture.c')
 API_PINS = {
@@ -25,6 +26,18 @@ API_PINS = {
     'crypto/sha256_generic.c': 'c85f77c45bc469f402311c9bf2a0ea4c456c64675ecf60fafa0421db25cad96f',
 }
 
+
+# Exact a77 Image source closure, independent from newly published host code.
+IMAGE_SOURCE_HEAD = 'a77f1eca32d1888f3266f49412dda9f0129f8719'
+IMAGE_SHA256 = '845b98c9ce2ad9d2aa9866e8f858a11e85337f2a48581d6f57ab481f8141f9e4'
+IMAGE_SOURCE_PINS = {'note10/device_test/early_fdt_binding.py': '51a3dce472787ffe739c2458ad0505bad0eb43964ef031e3ff78a0a70beec5f9', 'note10/device_test/early_fdt_binding.c': 'dbf817822ef3f08b1c82eef95b6ff7f34f4b202f132b0163886df6eaf2ce269d', 'note10/device_test/early_fdt_composition.c': 'a8641ee893b9a93acbc68343b3b3edb55787562f7d186d323d54214e7bcd712e', 'note10/device_test/build_early_fdt_binding.py': '7a3c6182ff7d452c419fdea833a0b51f94ed726b7d06d1db1bd12c11bc3cd058', 'note10/device_test/test_early_fdt_binding.py': '2444d3d20b7cc42e705cb89c1d04de72599f7da2a5d1b9282636f3b9990ce1fa', 'note10/device_test/early_fdt_fixture.c': 'b58eb61da8570d60c8f8836447097fcdeb5ab8d295d3e740e50c3360f30a40f4'}
+ELF_BYTES = 1216
+CPIO_BYTES = 2048
+TEMP_NAME_OFFSET = 785
+TEMP_NAME_BYTES = 10
+INIT_PAYLOAD_OFFSET = 476
+ELF_CANONICAL_SHA256 = 'bb3f12a24c65d8c8787244404fea2e1a37ecb2e600ea47214ebd810f8a5d42be'
+CPIO_CANONICAL_SHA256 = '1bb2f915f08a17eec5116626acecb2dfc4e4956ed40bf626b6586a271c4ca98c'
 
 def require(value, message):
     if not value:
@@ -150,26 +163,68 @@ def relative_placement_admission(result, lines, footprint):
                 observed_runtime_base=False,absolute_FDT_extent_known=False,global_RAM_ownership=False)
 
 
-def input_binding(result, lines):
-    require(result.get('version') == 'v81' and result.get('diagnostic_kind') == KIND and
-            result.get('raw_input_binding') is False and result.get('fdt_capture_boundary') == BOUNDARY and
-            result.get('fdt_snapshot_capacity_bytes') == CAPACITY and
-            type(result.get('fdt_capture_revision')) is int and result['fdt_capture_revision'] == REVISION and
-            result.get('fdt_allocation_form') == ALLOCATION,
-            'closed revised FDT result scope required')
+def fixed_route_relation(elf, archive, result, raw_inputs):
+    """Fixed supported layout only; normalize this one nonloadable filename in RAM."""
+    require(type(elf) is bytes and len(elf)==ELF_BYTES and type(archive) is bytes and len(archive)==CPIO_BYTES,
+            'exact tiny route layout required')
+    require(type(raw_inputs) is dict, 'same-buffer raw route measurements required')
+    stop=TEMP_NAME_OFFSET+TEMP_NAME_BYTES
+    name=elf[TEMP_NAME_OFFSET:stop]
+    require(re.fullmatch(rb'cc[A-Za-z0-9]{6}\.o',name) and elf[stop:stop+1]==b'\0',
+            'one fixed temporary STT_FILE name required')
+    require(archive[INIT_PAYLOAD_OFFSET:INIT_PAYLOAD_OFFSET+ELF_BYTES]==elf,
+            'current CPIO init payload differs from exact current ELF')
+    normalized=bytearray(elf);normalized[TEMP_NAME_OFFSET:stop]=bytes(TEMP_NAME_BYTES)
+    require(hashlib.sha256(normalized).hexdigest()==ELF_CANONICAL_SHA256,
+            'ELF bytes outside the sole nonloadable filename changed')
+    normalized=bytearray(archive)
+    normalized[INIT_PAYLOAD_OFFSET+TEMP_NAME_OFFSET:INIT_PAYLOAD_OFFSET+stop]=bytes(TEMP_NAME_BYTES)
+    require(hashlib.sha256(normalized).hexdigest()==CPIO_CANONICAL_SHA256,
+            'CPIO layout/metadata/padding/current payload changed')
+    # These same-buffer measurements already come from intrinsic PID1 binding.
+    for key,file_key in (('minimal_init_elf_sha256','minimal-init.elf'),('initramfs_cpio_sha256','initramfs.cpio')):
+        actual=raw_inputs.get(key)
+        require(isinstance(actual,str) and re.fullmatch('[0-9a-f]{64}',actual) and
+                result.get(key)==actual==result.get('files_sha256',{}).get(file_key),
+                'exact current raw route hashes differ')
+    return dict(kind='fixed-nonloadable-STT_FILE-relation-v1',elf_canonical_sha256=ELF_CANONICAL_SHA256,
+                cpio_canonical_sha256=CPIO_CANONICAL_SHA256,
+                current_elf_sha256=raw_inputs['minimal_init_elf_sha256'],
+                current_cpio_sha256=raw_inputs['initramfs_cpio_sha256'],raw_artifact_equality_claimed=False)
+
+
+def input_binding(result, lines, *, elf, archive, raw_inputs):
+    require(result.get('version')=='v81' and result.get('diagnostic_kind')==KIND and
+            result.get('raw_input_binding') is False and result.get('fdt_capture_boundary')==BOUNDARY and
+            result.get('fdt_snapshot_capacity_bytes')==CAPACITY and
+            type(result.get('fdt_capture_revision')) is int and result['fdt_capture_revision']==REVISION and
+            result.get('fdt_allocation_form')==ALLOCATION, 'closed revised FDT scope required')
+    require(result.get('ci_context',{}).get('GITHUB_SHA')==IMAGE_SOURCE_HEAD and
+            result.get('image_sha256')==IMAGE_SHA256 and result.get('passed') is True and result.get('Image_built') is True,
+            'exact successful a77 memblock Image required')
     require('CONFIG_NOTE10_EARLY_FDT_BINDING=y' in lines and
             not {'CONFIG_NOTE10_CPU_AFFINITY_BINDING=y','CONFIG_NOTE10_SHA256_STREAM_STATE=y'} & set(lines),
             'closed FDT configuration required')
-    for name in SOURCES:
-        require(result.get('source_sha256',{}).get('note10/device_test/'+name) == hashlib.sha256((HERE/name).read_bytes()).hexdigest(),
-                'new FDT producer source differs: '+name)
-    footprint = result.get('fdt_snapshot_footprint')
-    require(type(footprint) is dict and footprint.get('snapshot_capacity_bytes') == CAPACITY,
+    require(all(result.get('source_sha256',{}).get(k)==v for k,v in IMAGE_SOURCE_PINS.items()),
+            'frozen Image-producing FDT source closure differs')
+    footprint=result.get('fdt_snapshot_footprint')
+    require(type(footprint) is dict and footprint.get('snapshot_capacity_bytes')==CAPACITY,
             'linked FDT footprint missing')
-    admission=relative_placement_admission(result,lines,footprint)
-    require(result.get('fdt_relative_placement')==admission and admission['eligible'], 'relative Image placement continuity unresolved')
-    return dict(fdt_capture_boundary=BOUNDARY, fdt_snapshot_capacity_bytes=CAPACITY, raw_input_binding=False,
-                fdt_capture_revision=REVISION,fdt_allocation_form=ALLOCATION,fdt_relative_placement_admitted=True)
+    producer_admission=relative_placement_admission(result,lines,footprint)
+    require(result.get('fdt_relative_placement')==producer_admission, 'immutable producer admission changed')
+    relation=fixed_route_relation(elf,archive,result,raw_inputs)
+    core_route=all(result.get('source_sha256',{}).get(k)==v for k,v in ACCEPTED_BASELINE['route_sources'].items()) and \
+        result.get('guarded_init_main_sha256')==ACCEPTED_BASELINE['route_artifacts']['guarded_init_main_sha256']
+    checks=dict(producer_admission['checks'])
+    checks['same_builtin_recovery_route']=core_route  # Fixed relation above protects remaining route bytes.
+    require(all(checks.values()), 'effective host relative placement continuity unresolved')
+    effective=dict(kind='v81-revision2-effective-host-admission',eligible=True,
+        image_source_head=IMAGE_SOURCE_HEAD,producer_reported_eligible=producer_admission['eligible'],
+        checks=checks,route_relation=relation,observed_runtime_base=False,absolute_FDT_extent_known=False,
+        global_RAM_ownership=False)
+    return dict(fdt_capture_boundary=BOUNDARY,fdt_snapshot_capacity_bytes=CAPACITY,raw_input_binding=False,
+                fdt_capture_revision=REVISION,fdt_allocation_form=ALLOCATION,
+                fdt_relative_placement_admitted=True,fdt_effective_host_admission=effective)
 
 
 def decode(text, identity, cycle):
