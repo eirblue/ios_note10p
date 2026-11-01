@@ -1,0 +1,78 @@
+name: Note10 v78 Linux affinity binding private Image
+on:
+  workflow_dispatch:
+    inputs:
+      recipient_public_key_b64:
+        description: Fresh RSA3072 public recipient key only; private key stays local
+        required: true
+        type: string
+      new_cases_json:
+        description: Empty array for first full NEW batch; explicit changed or unexecuted names after partial failure
+        default: '[]'
+        type: string
+      build_only:
+        description: Only after this exact new batch already passed
+        default: false
+        type: boolean
+permissions:
+  contents: read
+jobs:
+  cpu-affinity-binding:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 110
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate public recipient only
+        env:
+          N10_RECIPIENT_PUBLIC_KEY_B64: ${{ inputs.recipient_public_key_b64 }}
+        run: node note10/device_test/sealed_affinity_artifact.cjs recipient
+      - name: Install Kbuild tools
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          packages=(clang-14 gcc gcc-aarch64-linux-gnu libc6-dev-arm64-cross gcc-arm-linux-gnueabi make bc bison flex libssl-dev libelf-dev)
+          missing=()
+          for package in "${packages[@]}"; do
+            if [ "$(dpkg-query -W -f='${Status}' "$package" 2>/dev/null || true)" != "install ok installed" ]; then
+              missing+=("$package")
+            fi
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            if [ -f /etc/apt/apt-mirrors.txt ]; then
+              printf 'https://archive.ubuntu.com/ubuntu/\tpriority:1\nhttps://security.ubuntu.com/ubuntu/\tpriority:2\n' | sudo -n tee /etc/apt/apt-mirrors.txt >/dev/null
+            fi
+            sudo -n env DEBIAN_FRONTEND=noninteractive timeout --kill-after=30s 180s apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
+            sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a timeout --kill-after=30s 480s apt-get -o Dpkg::Use-Pty=0 -o DPkg::Lock::Timeout=60 -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install --no-install-recommends -y "${missing[@]}"
+          fi
+      - name: One NEW affinity and sealed-transport batch
+        if: ${{ !inputs.build_only }}
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+          N10_NEW_CASES_JSON: ${{ inputs.new_cases_json }}
+        run: python -B note10/device_test/test_affinity_binding.py --output note10/private/v78-ci-new-tests
+      - name: Compile minimal Linux PID1 and build one new diagnostic Image
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python -B note10/device_test/build_cpu_affinity_binding.py --output note10/private/v78-ci-affinity-binding --jobs 4
+      - name: Bundle and seal private producer evidence including failures
+        if: always()
+        env:
+          N10_RECIPIENT_PUBLIC_KEY_B64: ${{ inputs.recipient_public_key_b64 }}
+        run: |
+          python -B note10/device_test/bundle_affinity_evidence.py --tests note10/private/v78-ci-new-tests --build note10/private/v78-ci-affinity-binding --output note10/private/v78-evidence.zip --source "$GITHUB_SHA"
+          node note10/device_test/sealed_affinity_artifact.cjs seal note10/private/v78-evidence.zip note10/private/v78-sealed-evidence.n10sealed "$GITHUB_SHA"
+      - name: Upload ciphertext only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: note10-v78-sealed-evidence
+          if-no-files-found: error
+          retention-days: 7
+          path: note10/private/v78-sealed-evidence.n10sealed

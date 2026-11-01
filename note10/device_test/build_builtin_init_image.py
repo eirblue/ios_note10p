@@ -94,9 +94,10 @@ def retain_route_prerequisites(source, objects, out, compiler_include):
 
 
 def main(kind=None):
-    if kind not in (None, "sha256-stream-state"):
+    if kind not in (None, "sha256-stream-state", "cpu-affinity-binding"):
         raise ValueError("closed diagnostic task required")
     stream = kind == "sha256-stream-state"
+    affinity = kind == "cpu-affinity-binding"
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--archive', type=Path)
@@ -116,9 +117,13 @@ def main(kind=None):
     manifest = {}
     extra = ('sha256_stream_state.py', 'sha256_stream_state.c', 'sha256_stream_composition.c',
              'sha256_stream_vectors.json', 'build_sha256_stream_state.py',
-             'test_sha256_stream_state.py', 'sha256_stream_fixture.c') if stream else ()
+             'test_sha256_stream_state.py', 'sha256_stream_fixture.c') if stream else (
+             'affinity_binding.py', 'cpu_affinity_binding.c', 'affinity_binding_composition.c',
+             'build_cpu_affinity_binding.py', 'test_affinity_binding.py', 'sealed_affinity_artifact.cjs',
+             'bundle_affinity_evidence.py') if affinity else ()
     names = (*PUBLIC, *INPUTS, *('note10/device_test/'+n for n in extra),
-             *(('.github/workflows/note10-sha256-stream-state.yml',) if stream else ()))
+             *(('.github/workflows/note10-sha256-stream-state.yml',) if stream else
+               ('.github/workflows/note10-cpu-affinity-binding.yml',) if affinity else ()))
     for name in names:
         data = (ROOT/name).read_bytes()
         manifest[name] = hashlib.sha256(data).hexdigest()
@@ -134,6 +139,8 @@ def main(kind=None):
     extra_kernel_pins = {}
     if stream:
         from sha256_stream_state import install, API_PINS as extra_kernel_pins
+    elif affinity:
+        from affinity_binding import install, API_PINS as extra_kernel_pins
     save(out/'source-manifest.json', manifest)
     ci = {name: os.environ.get(name) for name in
           ('GITHUB_SHA', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'GITHUB_JOB')}
@@ -208,6 +215,9 @@ def main(kind=None):
         settings = dict(SETTINGS, INITRAMFS_SOURCE='"'+str(out/'initramfs.cpio')+'"')
         if stream:
             settings.update(NOTE10_SHA256_STREAM_STATE='y', LOCALVERSION='"-v73-sha256-stream"')
+        elif affinity:
+            settings.update(NOTE10_CPU_AFFINITY_BINDING='y', NOTE10_SHA256_STREAM_STATE='n',
+                            SMP='y', LOCALVERSION='"-v78-cpu-affinity"')
         run([*make, DEFCONFIG], 'build/01-defconfig.log')
         shutil.copyfile(objects/'.config', out/'public-baseline.config')
         for index, (name, value) in enumerate(settings.items()):
@@ -240,10 +250,10 @@ def main(kind=None):
             raise ValueError('completed ARM64 Image header invalid')
         if raw.count(b'N10_CYCLE_SLOT_UNSET_0123456789A') != 1:
             raise ValueError('exact one unpatched inherited recovery cycle slot required')
-        if any(marker not in raw for marker in (b'N10RET1', b'N10SHASTREAM1' if stream else b'N10SHA1', b'N10SHACTL1', b'N10ROUTE2', b'N10INIT2', b'N10MININIT2', b'N10BOOTLINK2', identity.encode())):
+        if any(marker not in raw for marker in (b'N10RET1', b'N10AFF1' if affinity else b'N10SHASTREAM1' if stream else b'N10SHA1', b'N10SHACTL1', b'N10ROUTE2', b'N10INIT2', b'N10MININIT2', b'N10BOOTLINK2', identity.encode())):
             raise ValueError('new diagnostic Image identity/markers missing')
-        if stream and b'N10SHA1' in raw:
-            raise ValueError('old abc KAT must not be compiled into the new task')
+        if (stream and b'N10SHA1' in raw) or (affinity and any(marker in raw for marker in (b'N10SHA1', b'N10SHASTREAM1'))):
+            raise ValueError('old SHA tasks must not be compiled into the new task')
         if raw.count(archive_data) != 1:
             raise ValueError('exact raw builtin CPIO missing/duplicated in actual Image')
         shutil.copyfile(objects/'init/.main.o.cmd', out/'actual-init-main.cmd')
@@ -253,7 +263,7 @@ def main(kind=None):
         stable_archive(archive, before)
         if manifest != {name: sha(ROOT/name) for name in manifest}:
             raise ValueError('local first-use inputs changed during build')
-        result = dict(schema=1, version='v73' if stream else 'v72', diagnostic_kind=kind, passed=True, kernel_commit=COMMIT,
+        result = dict(schema=1, version='v78' if affinity else 'v73' if stream else 'v72', diagnostic_kind=kind, passed=True, kernel_commit=COMMIT,
                       build_evidence_id=identity, ci_context=ci, source_sha256=manifest,
                       settings=settings, make_target='Image', integration_object=TARGET,
                       bootloader_cmdline_policy=cmdline_policy,
@@ -269,6 +279,8 @@ def main(kind=None):
                       recovery_runtime_verified=False, hard_cancellation_proven=False,
                       private_boot_ramdisk_DTB_inputs_used=False,
                       device_authorized=False, deployment_ready=False, device_operations=[])
+        if affinity:
+            result.update(raw_input_binding=False, original_fdt_digest_unavailable=True)
         result['files_sha256'] = {p.relative_to(out).as_posix(): sha(p) for p in out.rglob('*') if p.is_file()}
         save(out/'result.json', result)
     except Exception as error:

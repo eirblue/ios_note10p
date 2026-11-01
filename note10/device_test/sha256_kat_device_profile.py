@@ -12,6 +12,7 @@ import uuid
 PROFILE = 'sha256-kat-recovery-v1'
 BUILTIN_PROFILE = 'sha256-kat-builtin-init-v2'
 STREAM_PROFILE = 'sha256-stream-state-v1'
+AFFINITY_PROFILE = 'cpu-affinity-binding-v1'
 ROOT = Path(__file__).resolve().parents[2]
 SLOT = b'N10_CYCLE_SLOT_UNSET_0123456789A'
 FIELDS = ('device_profile', 'profile_sha256', 'build_evidence_id', 'kernel_banner', 'accepted_result_sha256',
@@ -58,8 +59,8 @@ def private(path):
 
 def selected(row):
     marker = row.get('device_profile')
-    require(marker in (None, PROFILE, BUILTIN_PROFILE, STREAM_PROFILE), 'unknown device profile')
-    return marker in (PROFILE, BUILTIN_PROFILE, STREAM_PROFILE)
+    require(marker in (None, PROFILE, BUILTIN_PROFILE, STREAM_PROFILE, AFFINITY_PROFILE), 'unknown device profile')
+    return marker in (PROFILE, BUILTIN_PROFILE, STREAM_PROFILE, AFFINITY_PROFILE)
 
 
 def no_legacy(row):
@@ -76,9 +77,10 @@ def raw_binding(root, expected_result, expected_source):
     require(sha(root/'result.json') == expected_result, 'accepted CI result changed')
     result = read(root/'result.json')
     stream = result.get('version') == 'v73'
-    builtin = result.get('version') in ('v72', 'v73')
-    marker = STREAM_PROFILE if stream else BUILTIN_PROFILE if builtin else PROFILE
-    require(result.get('version') in ('v71', 'v72', 'v73') and result.get('passed') is True and
+    affinity = result.get('version') == 'v78'
+    builtin = result.get('version') in ('v72', 'v73', 'v78')
+    marker = AFFINITY_PROFILE if affinity else STREAM_PROFILE if stream else BUILTIN_PROFILE if builtin else PROFILE
+    require(result.get('version') in ('v71', 'v72', 'v73', 'v78') and result.get('passed') is True and
             result.get('Image_built') is True and result.get('BOOT_built') is False and
             result.get('cycle_slot_patched') is False and result.get('kernel_or_provider_executed') is False and
             result.get('ci_context', {}).get('GITHUB_SHA') == expected_source and
@@ -87,6 +89,7 @@ def raw_binding(root, expected_result, expected_source):
             result.get('integration_object') == 'drivers/misc/note10_sha256_kat.o',
             'accepted new Image result scope differs')
     require(not stream or result.get('diagnostic_kind') == 'sha256-stream-state', 'new stream task required')
+    require(not affinity or result.get('diagnostic_kind') == 'cpu-affinity-binding', 'new affinity task required')
     for name, digest in result['files_sha256'].items():
         path = root/name
         require(not Path(name).is_absolute() and '..' not in Path(name).parts and
@@ -101,9 +104,10 @@ def raw_binding(root, expected_result, expected_source):
             image[56:60] == b'ARM\x64' and image.count(SLOT+b'\0') == 1, 'Image/unique unarmed cycle slot differs')
     identity = result['build_evidence_id']
     require(re.fullmatch('[0-9a-f]{32}', identity or '') and identity.encode() in image and
-            all(x in image for x in (b'N10RET1', b'N10SHASTREAM1' if stream else b'N10SHA1')) and
-            (not stream or b'N10SHA1' not in image), 'Image evidence identity differs')
-    banners = re.findall((rb'Linux version 4\.14\.113-v73-sha256-stream [^\x00\r\n]+' if stream else rb'Linux version 4\.14\.113-v72-builtin-init [^\x00\r\n]+' if builtin else rb'Linux version 4\.14\.113-v71-sha256-recovery [^\x00\r\n]+'), image)
+            all(x in image for x in (b'N10RET1', b'N10AFF1' if affinity else b'N10SHASTREAM1' if stream else b'N10SHA1')) and
+            (not stream or b'N10SHA1' not in image) and
+            (not affinity or not any(marker in image for marker in (b'N10SHA1', b'N10SHASTREAM1'))), 'Image evidence identity differs')
+    banners = re.findall((rb'Linux version 4\.14\.113-v78-cpu-affinity [^\x00\r\n]+' if affinity else rb'Linux version 4\.14\.113-v73-sha256-stream [^\x00\r\n]+' if stream else rb'Linux version 4\.14\.113-v72-builtin-init [^\x00\r\n]+' if builtin else rb'Linux version 4\.14\.113-v71-sha256-recovery [^\x00\r\n]+'), image)
     require(len(banners) == 1, 'unique actual profile kernel banner required')
     config = root/'prerequisites/objects/.config'
     required = {'CONFIG_NOTE10_SHA256_KAT_RECOVERY=y', 'CONFIG_CRYPTO=y', 'CONFIG_CRYPTO_HASH=y',
@@ -130,6 +134,9 @@ def raw_binding(root, expected_result, expected_source):
     if builtin:
         from builtin_init_profile import input_binding
         extra = input_binding(root, result, image, lines)
+    if affinity:
+        from affinity_binding import input_binding as affinity_input_binding
+        extra.update(affinity_input_binding(result, lines))
     return dict(device_profile=marker, **extra, accepted_result_sha256=expected_result,
                 source_head=expected_source, image_sha256=result['image_sha256'], image_size=len(image),
                 effective_config_sha256=sha(config), build_evidence_id=identity,
@@ -146,12 +153,18 @@ V72_HOST_HEAD = '149cb74c3f7640f2e26dfdcd1d775ec99f6c02ac'
 V72_HOST_PINS = {'note10/device_test/auto_cycle.py': 'e69be83bf1ac709173679f0476de7ad84b17ea3b737e34f47223d974f4ea36ee', 'note10/device_test/build_boot_test_packages.py': 'f829b2c7482b76231bc19dcd6f383efca999147e2bfaedf7e5f89bd2dcea0c18', 'note10/device_test/builtin_init_profile.py': 'b9cb4ed6c9e7c555932392be5a95990db2b0d5a1d0b523be9c5c92a2ba454099', 'note10/device_test/builtin_init_route.py': '46b100dc95f11e344c11b8cb3fba5d34d17b2884385923426a42246699fda43d', 'note10/device_test/materialize_auto_cycle.py': '87ef3da2e0ddbbb40b02bc9334c59deb8c590692352f099cb2b3ae99b749f960', 'note10/device_test/prepare_linux_boot.py': '4f599c7c667e3dc18a5afccfd682c47f705ed714daa916b4c0557db9f7f78c70', 'note10/device_test/sha256_kat_device_profile.py': 'f18e6f159eb2f98e2fcf8340985c9c44923b0c6a6b028fe362258d9a49c2f80d', 'note10/device_test/stage_phase2.py': '1ecc741d7517fc15a6043b1329b726e420791f06e712bfd1aaf901a7747db433', 'note10/device_test/test_builtin_init_route.py': '9fa63dd55114472a748062447dd95c17bf4d4d7e743117f69f0bb6a7aca6ea42', 'note10/device_test/test_sha256_kat_device_profile.py': 'c48400d5573695d217101806b8481e39aec38fd5382e64b85f999b4cee42c498'}
 
 
+# Exact accepted current-BOOT host closure; carried pins, never current source.
+V73_HOST_HEAD = '7e4a8c992f95f01429e824404378fa9271c0eb8e'
+V73_HOST_PINS = {'note10/device_test/auto_cycle.py': 'e69be83bf1ac709173679f0476de7ad84b17ea3b737e34f47223d974f4ea36ee', 'note10/device_test/build_boot_test_packages.py': '0d5b06bcf7d0cca1f2da2490cb283b7d191e5f8192fa8cef9eac557e47259396', 'note10/device_test/builtin_init_profile.py': 'bf411a8b2b58e9ba0c8e30aca44eef5952aea3137e288bf8927f2c6555e61809', 'note10/device_test/builtin_init_route.py': '46b100dc95f11e344c11b8cb3fba5d34d17b2884385923426a42246699fda43d', 'note10/device_test/materialize_auto_cycle.py': '87ef3da2e0ddbbb40b02bc9334c59deb8c590692352f099cb2b3ae99b749f960', 'note10/device_test/prepare_linux_boot.py': '4f599c7c667e3dc18a5afccfd682c47f705ed714daa916b4c0557db9f7f78c70', 'note10/device_test/sha256_kat_device_profile.py': 'fa8c2632cf8e3826925539a35b793c8f99e32e97dbd305822da6c32cce7c1d21', 'note10/device_test/sha256_stream_state.py': '55de2735fb830ae8047bb4a8fa74325f51b766b1e885c482dbbc5ebabe3ea437', 'note10/device_test/sha256_stream_vectors.json': '5c379d1ef41a40b9a1262c985476e9dc0ba88dae7b1586f949bbe79686f2165f', 'note10/device_test/stage_phase2.py': '1ecc741d7517fc15a6043b1329b726e420791f06e712bfd1aaf901a7747db433', 'note10/device_test/test_builtin_init_route.py': '9fa63dd55114472a748062447dd95c17bf4d4d7e743117f69f0bb6a7aca6ea42', 'note10/device_test/test_sha256_kat_device_profile.py': 'c48400d5573695d217101806b8481e39aec38fd5382e64b85f999b4cee42c498', 'note10/device_test/test_sha256_stream_state.py': '088881f92037a9895b7947eb44692f51ecba1eb602a02dacc02ff3b94a836db8'}
+
+
 def host_binding(source_head):
     require(re.fullmatch('[0-9a-f]{40}', source_head or ''), 'exact host-profile publication source pin required')
-    pins = V71_HOST_PINS if source_head == V71_HOST_HEAD else V72_HOST_PINS if source_head == V72_HOST_HEAD else {
+    pins = V71_HOST_PINS if source_head == V71_HOST_HEAD else V72_HOST_PINS if source_head == V72_HOST_HEAD else V73_HOST_PINS if source_head == V73_HOST_HEAD else {
         'note10/device_test/'+name: sha(Path(__file__).parent/name)
         for name in (*HOST_SOURCES, 'builtin_init_profile.py', 'builtin_init_route.py', 'test_builtin_init_route.py',
-                     'sha256_stream_state.py', 'sha256_stream_vectors.json', 'test_sha256_stream_state.py')}
+                     'sha256_stream_state.py', 'sha256_stream_vectors.json', 'test_sha256_stream_state.py',
+                     'affinity_binding.py', 'test_affinity_binding.py')}
     return dict(host_profile_source_head=source_head, host_profile_source_sha256=dict(pins))
 
 
@@ -185,7 +198,7 @@ def root_receipt_binding(root, receipt, expected_sha, binding):
 
 
 def common_report(binding, profile_sha):
-    extra = dict(builtin_minimal_init_route=True, external_initrd_used_for_PID1=False) if binding['device_profile'] in (BUILTIN_PROFILE, STREAM_PROFILE) else {}
+    extra = dict(builtin_minimal_init_route=True, external_initrd_used_for_PID1=False) if binding['device_profile'] in (BUILTIN_PROFILE, STREAM_PROFILE, AFFINITY_PROFILE) else {}
     return dict(binding, **extra, profile_sha256=profile_sha, build_passed=True,
                 auto_return_diagnostic=True, auto_return_evidence_version=1,
                 auto_cycle_slot=SLOT.decode(), diagnostic_preserves_external_initramfs=True,
@@ -202,10 +215,12 @@ def prepare_template(build, output, accepted_result_sha256, source_head, *, root
     root_receipt = private(root_receipt)
     binding = raw_binding(build, accepted_result_sha256, source_head)
     binding.update(root_receipt_binding(build, root_receipt, root_receipt_sha256, binding))
-    require(binding['device_profile'] not in (BUILTIN_PROFILE, STREAM_PROFILE) or host_source_head != V71_HOST_HEAD,
+    require(binding['device_profile'] not in (BUILTIN_PROFILE, STREAM_PROFILE, AFFINITY_PROFILE) or host_source_head != V71_HOST_HEAD,
             'new builtin profile requires its own host publication head')
     require(binding['device_profile'] != STREAM_PROFILE or host_source_head != V72_HOST_HEAD,
             'stream task requires a new host publication head')
+    require(binding['device_profile'] != AFFINITY_PROFILE or host_source_head not in (V71_HOST_HEAD, V72_HOST_HEAD, V73_HOST_HEAD),
+            'affinity requires its new host publication')
     binding.update(host_binding(host_source_head))
     shutil.copytree(build, output)
     shutil.copyfile(root_receipt, output/'image-root-receipt.json')
@@ -244,7 +259,10 @@ def fields(row):
     no_legacy(row)
     # New bindings are carried through every pair/record/meta comparison.
     from builtin_init_profile import EXTRA_FIELDS
-    keys = (*FIELDS, *EXTRA_FIELDS) if row['device_profile'] in (BUILTIN_PROFILE, STREAM_PROFILE) else FIELDS
+    keys = (*FIELDS, *EXTRA_FIELDS) if row['device_profile'] in (BUILTIN_PROFILE, STREAM_PROFILE, AFFINITY_PROFILE) else FIELDS
+    if row['device_profile'] == AFFINITY_PROFILE:
+        from affinity_binding import EXTRA_FIELDS as affinity_fields
+        keys = (*keys, *affinity_fields)
     return {key: row[key] for key in keys}
 
 
@@ -254,17 +272,21 @@ def package_scope(row, mode=None):
     for key in ('profile_sha256', 'accepted_result_sha256', 'image_root_receipt_sha256', 'root_reader_result_sha256'):
         require(re.fullmatch('[0-9a-f]{64}', row.get(key, '')), 'KAT package result/profile pin missing')
     require(re.fullmatch('[0-9a-f]{32}', row.get('build_evidence_id', '')) and
-            row.get('kernel_banner', '').startswith('Linux version 4.14.113-v73-sha256-stream ' if row['device_profile'] == STREAM_PROFILE else 'Linux version 4.14.113-v72-builtin-init ' if row['device_profile'] == BUILTIN_PROFILE else 'Linux version 4.14.113-v71-sha256-recovery '),
+            row.get('kernel_banner', '').startswith('Linux version 4.14.113-v78-cpu-affinity ' if row['device_profile'] == AFFINITY_PROFILE else 'Linux version 4.14.113-v73-sha256-stream ' if row['device_profile'] == STREAM_PROFILE else 'Linux version 4.14.113-v72-builtin-init ' if row['device_profile'] == BUILTIN_PROFILE else 'Linux version 4.14.113-v71-sha256-recovery '),
             'KAT package identity missing')
     require(re.fullmatch('[0-9a-f]{40}', row.get('source_head', '')) and
             re.fullmatch('[0-9a-f]{40}', row.get('host_profile_source_head', '')) and
             row.get('host_profile_source_sha256') == host_binding(row['host_profile_source_head'])['host_profile_source_sha256'],
             'host-profile code identity differs')
-    if row['device_profile'] in (BUILTIN_PROFILE, STREAM_PROFILE):
+    if row['device_profile'] in (BUILTIN_PROFILE, STREAM_PROFILE, AFFINITY_PROFILE):
         require(row.get('host_profile_source_head') != V71_HOST_HEAD, 'new profile cannot claim historical host head')
         require(row['device_profile'] != STREAM_PROFILE or row.get('host_profile_source_head') != V72_HOST_HEAD, 'stream task cannot claim old host publication')
         from builtin_init_profile import EXTRA_FIELDS
         require(all(re.fullmatch('[0-9a-f]{64}', row.get(k, '')) for k in EXTRA_FIELDS), 'minimal init pins missing')
+    if row['device_profile'] == AFFINITY_PROFILE:
+        require(row.get('host_profile_source_head') not in (V71_HOST_HEAD, V72_HOST_HEAD, V73_HOST_HEAD) and
+                row.get('raw_input_binding') is False and row.get('original_fdt_digest_unavailable') is True,
+                'affinity host/FDT non-claim binding differs')
     if mode is None or mode in ('diagnostic', 'rollback'):
         diagnostic = mode in (None, 'diagnostic')
         require(row.get('auto_return_diagnostic') is diagnostic and
@@ -272,7 +294,7 @@ def package_scope(row, mode=None):
                  else row.get('auto_cycle_token') is None), 'KAT package role/cycle differs')
         if 'mode' in row:
             require(row['mode'] == mode and row.get('test_purpose') ==
-                    (('sha256-stream-state' if row['device_profile'] == STREAM_PROFILE else 'sha256-kat-builtin-init' if row['device_profile'] == BUILTIN_PROFILE else 'sha256-kat-recovery') if diagnostic else 'rollback'), 'KAT package purpose differs')
+                    (('cpu-affinity-binding' if row['device_profile'] == AFFINITY_PROFILE else 'sha256-stream-state' if row['device_profile'] == STREAM_PROFILE else 'sha256-kat-builtin-init' if row['device_profile'] == BUILTIN_PROFILE else 'sha256-kat-recovery') if diagnostic else 'rollback'), 'KAT package purpose differs')
     else:
         raise ValueError('closed KAT package role required')
 
@@ -316,7 +338,7 @@ def prepare_plan(kernel_build, backup, twrp, mkbootimg, current_packages, output
                 current_package_result_sha256=sha(Path(current_packages)/'package-result.json'),
                 reference_twrp=str(Path(twrp).resolve()), mkbootimg=str(Path(mkbootimg).resolve()), minimum_battery=10,
                 return_timeout_seconds=240, stages=[stage])
-    if template['device_profile'] in (BUILTIN_PROFILE, STREAM_PROFILE):
+    if template['device_profile'] in (BUILTIN_PROFILE, STREAM_PROFILE, AFFINITY_PROFILE):
         plan['current_boot_payload_sha256'] = current_diagnostic['payload_sha256']
     save(output/'plan.json', plan)
     validate_plan(output/'plan.json', sha(output/'plan.json'))
@@ -331,7 +353,7 @@ def validate_plan(path, expected):
     path = private(path)
     require(re.fullmatch('[0-9a-f]{64}', expected or '') and sha(path) == expected, 'reviewed KAT plan SHA required')
     plan = read(path)
-    require(set(plan) == (PLAN_KEYS | {'current_boot_payload_sha256'} if plan.get('device_profile') in (BUILTIN_PROFILE, STREAM_PROFILE) else PLAN_KEYS) and selected(plan) and plan.get('kind') == 'note10-bounded-auto-cycle' and
+    require(set(plan) == (PLAN_KEYS | {'current_boot_payload_sha256'} if plan.get('device_profile') in (BUILTIN_PROFILE, STREAM_PROFILE, AFFINITY_PROFILE) else PLAN_KEYS) and selected(plan) and plan.get('kind') == 'note10-bounded-auto-cycle' and
             type(plan.get('schema')) is int and plan['schema'] == 1 and
             type(plan.get('minimum_battery')) is int and type(plan.get('return_timeout_seconds')) is int and
             plan.get('minimum_battery') == 10 and plan.get('return_timeout_seconds') == 240 and
@@ -361,7 +383,7 @@ def validate_plan(path, expected):
             'current BOOT package chain changed')
     previous_records = verify_packages(previous)
     prior = next(r for r in previous_records if r['mode'] == 'diagnostic')
-    if plan['device_profile'] in (BUILTIN_PROFILE, STREAM_PROFILE):
+    if plan['device_profile'] in (BUILTIN_PROFILE, STREAM_PROFILE, AFFINITY_PROFILE):
         prior_pair = read(previous/'package-result.json')
         from builtin_init_profile import current_boot_binding
         current_boot_binding(plan, prior_pair, prior)
@@ -516,11 +538,13 @@ def _collect_into(packages, kernel_build, adb, out):
     bound = variant(private(kernel_build), pair['auto_cycle_token'])
     require(all(pair.get(k) == bound[k] for k in fields(bound)), 'collection profile binding differs')
     preflight(adb)
-    if bound['device_profile'] in (BUILTIN_PROFILE, STREAM_PROFILE):
+    if bound['device_profile'] in (BUILTIN_PROFILE, STREAM_PROFILE, AFFINITY_PROFILE):
         from builtin_init_profile import snapshot
         decode_fn = None
         if bound['device_profile'] == STREAM_PROFILE:
             from sha256_stream_state import decode_selected as decode_fn
+        elif bound['device_profile'] == AFFINITY_PROFILE:
+            from affinity_binding import decode_selected as decode_fn
         return snapshot(adb, out, bound, pair['auto_cycle_token'], decode_fn=decode_fn)
     selections, observations, raw_hashes = {}, [], {}
     for name, remote in (('last_kmsg.txt', '/proc/last_kmsg'),
