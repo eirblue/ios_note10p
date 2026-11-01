@@ -1,5 +1,17 @@
 # Runtime relocation metadata and PC data trials
 
+## v78 bounded Linux CPU mapping observation and physical result
+
+Source `24f0fb9c4680517d6b0411a9985847c42b692376` passed twelve new host methods and one Image build in [CI 41326613515](https://github.com/eirblue/ios_note10p/actions/runs/41326613515). Host-only input integration `a0674c29eaa2bc8938023fc2be590b9a4a84374e` passed two additional new methods once. Old methods and the Image build were not replayed. Only recipient-encrypted evidence was uploaded; the actual recipient private key, plaintext Image and device data remain private.
+
+One bounded Linux-online observation captured eight logical CPU/table-MPIDR/CNTFRQ tuples. Five Linux-map versus masked-raw-MPIDR comparisons differed. Full raw values were distinct across eight rows, while their low-16-bit projection contained only seven distinct values. The records are preserved without ID repair or a new mask. Sampled counter-register agreement does not prove physical clock accuracy, a firmware boot ID or stability after shutdown. CPU topology remains unverified.
+
+The single physical cycle passed the minimal PID1 and diagnostic capture, retained 16 arm plus 16 recovery-request frames, and returned to the same bound root TWRP with a changed boot ID. One BOOT write and one host reboot attempt consumed the v78 allowance 1/1; never replay it. There were 72 recovery polling observations, and hardware boot events were not independently counted. The log-only decoder's hardware-reentry flag is not substituted for the host return observation.
+
+The post-return integrity gate completed without mismatch, but individual partition node/hash rows were not retained. The exact post-return installed BOOT digest is unknown; pre-cycle expectations, package-payload hashes and a staged kernel Image digest are not installed-state readbacks. No extra device query was made to reconstruct those rows.
+
+Successful CI proceeded to necessary package input binding and one self-validating plan, with no standalone post-build Image reader. The legacy root_reader_result_sha256 receipt field names the approved CI-success context in this path. No original FDT digest/raw-input binding, future CPU shutdown state, exact target ABI, RAM/IRQ ownership, XNU execution or complete handoff readiness is established. A source-backed injective identity contract is still required before admitting the observed CPUs to XNU local/reset lookup.
+
 ## v75 CPU fragment result and v76/v77 firmware timebase correction
 
 The v75 source commit `2350f040e5f9b8dfcd65ddf73c271f2131757f6c` passed seven new local methods once and converted the preserved input once into eight CPU descriptions. It retains whole-tree duplicate rejection and the 128-property budget on retained CPU paths, while bounding unrelated scans by input size. The passed seven methods are not replayed in CI, and the older 34 are not rerun.
