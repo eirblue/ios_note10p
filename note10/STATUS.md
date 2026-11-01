@@ -1,5 +1,11 @@
 # 작업 상태 (2026-11-01, Asia/Seoul)
 
+## 2026-11-01: v70 기본 비활성 SHA256 관측 컴포넌트 CI·엄격 판독 통과
+
+- **소스·결과:** `8d569c4c7c69c14c26f7c0b41040c5f15a783d65`; [CI 41284756768](https://github.com/eirblue/ios_note10p/actions/runs/41284756768), 시도 1 성공. 부모 엄격 판독 실제 종료 코드 0. 새 AArch64 재배치 가능 객체 `drivers/misc/note10_sha256_kat.o` 18,056바이트 결속.
+- **새 범위·시험:** 기본 비활성 late-init `sha256-generic` SHA256(abc) 관측 코드의 실제 커널 헤더·설정 컴파일. 정확한 드라이버 확인, descriptor 4,096바이트 상한·정리 경로, 빌드 ID·체크섬 프레임·엄격 decoder 추가. 같은 CI에서 새 unittest 메서드 6개(그 안의 canonical C stub 시나리오 10개 포함)가 한 번씩 통과한 뒤 새 커널 객체만 빌드. 네이티브 fixture 컴파일 1회이며 16개 독립 시험으로 합산하지 않음. 로컬 재실행·기존 통과 시험 재생 없음.
+- 실제 실행은 호스트 stub뿐이며 커널 객체·실제 제공자는 실행하지 않음. 실제 커널 SHA256 결과·실행 시 가용성·복귀 안전성·Image/BOOT·XNU/iOS·기기 준비 완료는 미검증. 동기 crypto 호출의 강제 취소·시간 상한이나 체크섬 인증을 주장하지 않음. 실기기·BOOT·재부팅 0회, 기기 승인·배포 준비 false. [결과와 제한](xnu26/RUNTIME-RELOCATION.md).
+
 ## 2026-11-01: v69 cra_u 새 union 본문 한정 관계 CI·엄격 판독 통과
 
 - **소스·결과:** `693ebea876130431f90f1632f4183a6bc0494f95`; [CI 41280546185](https://github.com/eirblue/ios_note10p/actions/runs/41280546185), 시도 1 성공. 부모 엄격 판독 실제 종료 코드 0. 원본 ZIP 5,042,425바이트·전체 28개 파일·확장 5,758,074바이트 결속.

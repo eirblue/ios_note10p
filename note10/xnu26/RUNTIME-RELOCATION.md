@@ -1,5 +1,17 @@
 # Runtime relocation metadata and PC data trials
 
+## v70 default-off SHA256 runtime observation component (PC only)
+
+Source `8d569c4c7c69c14c26f7c0b41040c5f15a783d65` passed [CI 41284756768](https://github.com/eirblue/ios_note10p/actions/runs/41284756768), attempt 1 (workflow 403362451, job 124783698203, artifact 13073739663). The parent strict reader completed with observed exit code zero; result SHA-256 `eeefdc07b7af17273982cb1e8999697f290251859dcca14b51067972bcb37d04`.
+
+The default-off late-init SHA256(abc) observation component compiles against the pinned kernel headers and effective configuration. It checks the exact requested/returned `sha256-generic` driver, bounds descriptor allocation to 4,096 bytes, cleans up resources and emits two build-ID/checksummed frames for strict decoding. After standard Kbuild preparation, the sole new kernel target was `drivers/misc/note10_sha256_kat.o`: an 18,056-byte AArch64 ET_REL object, SHA-256 `456c1ce5e0dec89ef005954d745c353b4617446995193d47f73dc2ff198a93d9`. Build evidence ID: `e96961c529993911f0152475acbd8ba9`.
+
+Six new unittest methods passed once in that same CI, including ten canonical-C stub scenarios for success, rejection, callback failure, descriptor boundaries and resource cleanup. The native fixture compiled once before the new kernel object build. These are six methods containing ten stub scenarios, not 16 independent tests. No local rerun or replay of passed unchanged tests occurred. Only host stubs ran; neither the real kernel object nor the actual crypto provider was executed.
+
+The canonical ZIP is 755,731 bytes, SHA-256 `926c69a3c0886d12d00a7ab2b4808d5657075637b3e3a96bbe300458cc82603c`; all 515 members and 2,325,852 expanded bytes are bound. The reader bound 11 source records (seven new and four inherited), 438 actual compiler prerequisite file hashes and 16 recorded commands. Its fresh authenticated metadata/log reads reused the canonical collection without another ZIP download or extraction.
+
+This is a compile/control-flow prerequisite, with no true kernel SHA256 result, runtime provider availability, recovery integration, Image/BOOT, XNU/iOS execution or device readiness claim. Synchronous crypto allocation/digest have no established hard cancellation or local time bound; frame checksums detect damage and do not authenticate a boot. Device/BOOT/reboot operations are zero; device authorization and deployment readiness remain false.
+
 ## v69 finite parser-observed cra_u body relation
 
 Source `693ebea876130431f90f1632f4183a6bc0494f95` passed [CI 41280546185](https://github.com/eirblue/ios_note10p/actions/runs/41280546185), attempt 1 (workflow 403333091, job 124771405231, artifact 13073400790). The parent reader completed with observed exit code zero. Its result SHA-256 is `b6be4d340ecaccb244f918b7a1cc09d74a67b21f11cdb354995d6347b4e882d5`.
