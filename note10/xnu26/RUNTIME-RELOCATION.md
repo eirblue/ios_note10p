@@ -1,5 +1,17 @@
 # Runtime relocation metadata and PC data trials
 
+## v71 diagnostic Image passed; device attempt failed with four reported boots
+
+Source `9bfe108e7fd7a063bacce9418be46d269cb872d9` passed [CI 41290669542](https://github.com/eirblue/ios_note10p/actions/runs/41290669542), attempt 1. The first actual Image target produced 46,348,300 bytes, SHA-256 `2d8c7f82a939817e73c7dfb059b36e198eb3b441f5d0f69ee5e4220d239821eb`. The compiled code keeps the KAT callback outside freed init memory and queues it separately after the existing recovery arm and `SYSTEM_RUNNING`; the physical boot route remains unverified.
+
+The earlier [CI 41288159718](https://github.com/eirblue/ios_note10p/actions/runs/41288159718) failed configuration validation before any Image target. Its four worker integration methods, including 11 C-stub scenarios, passed once and were carried without replay. The corrected CI's four new configuration-policy methods and the separate 13 host-profile methods each passed once. Host source `5e233aa5f08473d716ca2e9b3d8937c1821d513f` is distinct from the Image-producing commit.
+
+The host issued one BOOT write and one reboot-command attempt, consuming the build's single authorized cycle. The user reported four observed boots: three carrier-logo appearances before 90 seconds and a final TWRP screen. Carrier logos do not prove completed Android boot; the intended diagnostic TWRP/external-ramdisk route and the repeated boot sequence require diagnosis. The original run failed after 240 seconds without verifying a changed boot ID. Later read-only observation verified the same bound device in normal root TWRP 3.7.0_9-1 and all five partition integrity checks. The pre-reboot ID was not persisted, so automatic recovery, an ID change and return within the deadline remain unproved. No additional host flash/reboot command was issued; the failed journal is unchanged and v71 will not be replayed.
+
+A subsequent raw capture was preserved unchanged but rejected by the strict profile: it lacks the zero-time, self-contained boot boundary, and the full producer banner occurs only in panic context. It reports a fatal-exception panic in the bootchecker context at about 54 seconds, before the existing nominal 90-second recovery-request delay. This observation does not establish root cause. Candidate KAT/arm entries were not accepted as runtime proof, and no request-phase evidence was accepted. No frame repair, log merging or acceptance bypass was used.
+
+No accepted KAT/provider or automatic-return proof, XNU/iOS execution or deployment readiness is established. Synchronous crypto has no hard cancellation guarantee; frame checksums do not authenticate a boot.
+
 ## v70 default-off SHA256 runtime observation component (PC only)
 
 Source `8d569c4c7c69c14c26f7c0b41040c5f15a783d65` passed [CI 41284756768](https://github.com/eirblue/ios_note10p/actions/runs/41284756768), attempt 1 (workflow 403362451, job 124783698203, artifact 13073739663). The parent strict reader completed with observed exit code zero; result SHA-256 `eeefdc07b7af17273982cb1e8999697f290251859dcca14b51067972bcb37d04`.
