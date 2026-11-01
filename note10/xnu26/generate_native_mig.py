@@ -54,22 +54,32 @@ def main():
     modes = [('export', 'MIG_UUHDRS', False, []), ('export', 'MIG_USHDRS', True, []),
              ('kernel', 'MIG_KUHDRS', False, ['-DMACH_KERNEL_PRIVATE', '-DKERNEL_USER=1', '-DEXC_SERVER_AUDITTOKEN=1', '-DMACH_EXC_SERVER_AUDITTOKEN=1', '-maxonstack', '1024']),
              ('kernel', 'MIG_KSHDRS', True, ['-DMACH_KERNEL_PRIVATE', '-DKERNEL_SERVER=1', '-mach_msg2'])]
-    for mode, variable, server, extra in modes:
-        directory = base / mode / 'osfmk/mach'; directory.mkdir(parents=True, exist_ok=True)
-        for name in header_list(rules, variable):
-            stem = name.removesuffix('_server.h') if server else name.removesuffix('.h')
-            definition = source / 'osfmk/mach' / (stem + '.defs')
-            out = directory / name
-            command = [*common, *extra, '-user', '/dev/null', '-server', '/dev/null',
-                       '-header', '/dev/null' if server else str(out),
-                       '-sheader', str(out) if server else '/dev/null', str(definition)]
-            result = subprocess.run(command, capture_output=True, text=True, timeout=30)
-            log = base / (mode + '-' + name + '.log')
-            log.write_text(result.stdout + result.stderr)
-            passed = result.returncode == 0 and out.is_file()
-            rows.append({'mode': mode, 'header': name, 'passed': passed, 'command': command,
-                         'definition_sha256': hashlib.sha256(definition.read_bytes()).hexdigest(),
-                         'header_sha256': hashlib.sha256(out.read_bytes()).hexdigest() if passed else None})
+    und_makefile = source / 'osfmk/UserNotification/Makefile'
+    und_rules = und_makefile.read_text()
+    if (header_list(und_rules, 'MIG_KUHDRS') != ['UNDRequest.h'] or
+        header_list(und_rules, 'MIG_KSHDRS') != ['UNDReplyServer.h']):
+        raise ValueError('Pinned UserNotification header lists changed')
+    # Upstream UserNotification uses %Server.c: %.defs, unlike mach *_server.h.
+    # Only its required headers are added; no unselected client/server C inputs.
+    groups = [('mach', rules, modes), ('UserNotification', und_rules, modes[2:])]
+    for subdir, group_rules, group_modes in groups:
+        for mode, variable, server, extra in group_modes:
+            directory = base / mode / 'osfmk' / subdir; directory.mkdir(parents=True, exist_ok=True)
+            for name in header_list(group_rules, variable):
+                stem = (name.removesuffix('Server.h') if subdir == 'UserNotification' and server
+                        else name.removesuffix('_server.h') if server else name.removesuffix('.h'))
+                definition = source / 'osfmk' / subdir / (stem + '.defs')
+                out = directory / name
+                command = [*common, *extra, '-user', '/dev/null', '-server', '/dev/null',
+                           '-header', '/dev/null' if server else str(out),
+                           '-sheader', str(out) if server else '/dev/null', str(definition)]
+                result = subprocess.run(command, capture_output=True, text=True, timeout=30)
+                log = base / (mode + '-' + subdir + '-' + name + '.log')
+                log.write_text(result.stdout + result.stderr)
+                passed = result.returncode == 0 and out.is_file()
+                rows.append({'mode': mode, 'directory': subdir, 'header': name, 'passed': passed, 'command': command,
+                             'definition_sha256': hashlib.sha256(definition.read_bytes()).hexdigest(),
+                             'header_sha256': hashlib.sha256(out.read_bytes()).hexdigest() if passed else None})
     selected = re.search(r'^CFILES=(.*)$', text.replace('\\\n', ' '), re.M).group(1).split()
     for token in selected:
         if not token.startswith('./'):continue
@@ -103,10 +113,11 @@ def main():
                                   'source_sha256': hashlib.sha256(out.read_bytes()).hexdigest() if passed else None,
                                   'definition_sha256': hashlib.sha256(definition.read_bytes()).hexdigest()})
     for row in rows:
-        path = base / row['mode'] / 'osfmk/mach' / row['header']
+        path = base / row['mode'] / 'osfmk' / row['directory'] / row['header']
         if row['passed']:row['header_sha256'] = hashlib.sha256(path.read_bytes()).hexdigest()
     report = {'interfaces': rows, 'all_passed': all(r['passed'] for r in rows),
               'source_makefile_sha256': hashlib.sha256(makefile.read_bytes()).hexdigest(),
+              'additional_source_makefiles_sha256': {'osfmk/UserNotification/Makefile': hashlib.sha256(und_makefile.read_bytes()).hexdigest()},
               'scope': 'Mach export/kernel headers and selected Mach C sources; BSD/IOKit interfaces still borrowed',
               'generated_sources': generated_sources,
               'generated_c_compilation_in_separate_audit': True, 'synthetic_board_inputs': True, 'whole_kernel_build': False}

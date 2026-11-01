@@ -90,8 +90,22 @@ def main(current=None, current_language=None):
             native_mig = private / 'native-mig'
             if hashlib.sha256((source / 'osfmk/mach/Makefile').read_bytes()).hexdigest() != candidate['source_makefile_sha256']:
                 raise ValueError('Native MIG source Makefile changed')
+            additional = candidate.get('additional_source_makefiles_sha256', {})
+            if set(additional) - {'osfmk/UserNotification/Makefile'}:
+                raise ValueError('Unexpected native MIG header Makefile')
+            for relative, expected in additional.items():
+                if hashlib.sha256((source / relative).read_bytes()).hexdigest() != expected:
+                    raise ValueError('Native UserNotification Makefile changed')
             for item in candidate['interfaces']:
-                header = native_mig / item['mode'] / 'osfmk/mach' / item['header']
+                directory = item.get('directory', 'mach')
+                if (directory not in ('mach', 'UserNotification') or item['mode'] not in ('export', 'kernel') or
+                    not re.fullmatch(r'[a-zA-Z0-9_]+\.h', item['header'])):
+                    raise ValueError('Closed native MIG header path required')
+                if directory == 'UserNotification' and (item['mode'] != 'kernel' or
+                    item['header'] not in ('UNDRequest.h', 'UNDReplyServer.h') or
+                    'osfmk/UserNotification/Makefile' not in additional):
+                    raise ValueError('Closed UserNotification kernel header required')
+                header = native_mig / item['mode'] / 'osfmk' / directory / item['header']
                 if hashlib.sha256(header.read_bytes()).hexdigest() != item['header_sha256']:
                     raise ValueError('Native MIG header changed')
             for item in candidate.get('generated_sources', []):
