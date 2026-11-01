@@ -1,5 +1,17 @@
 # Runtime relocation metadata and PC data trials
 
+## v69 finite parser-observed cra_u body relation
+
+Source `693ebea876130431f90f1632f4183a6bc0494f95` passed [CI 41280546185](https://github.com/eirblue/ios_note10p/actions/runs/41280546185), attempt 1 (workflow 403333091, job 124771405231, artifact 13073400790). The parent reader completed with observed exit code zero. Its result SHA-256 is `b6be4d340ecaccb244f918b7a1cc09d74a67b21f11cdb354995d6347b4e882d5`.
+
+The new finite relation covers only 78 newly reported provider/core union-body nodes, 39 per role: 54 members, eight structures and 16 pointer records. Each union has four direct members. Closure binds 54 child edges, 16 inherited contexts and 16 opaque pointer contexts; the reader recomputed 39 paired comparisons, with zero unsupported or unresolved records. The exact accepted v68 scalar pair is a premise, without re-extracting its type graph. Disjointness from the old 210 IDs remains an accepted raw-query label, not a new measurement. The sole raw query is consumed; actual CI and reader perform byte/slice binding and the new data relation, with no ELF/DWARF query or old proof replay.
+
+The canonical ZIP is 5,042,425 bytes, SHA-256 `3d1ac0ecb90fe875ec044a559358dd6b63231b3499c1b0dcfc6f2f8a64b57869`; its complete 28-member map contains 5,758,074 expanded bytes. Source-first gates cover seven public blobs in CI and 11 local source records. Producer and stager perform eight bounded read-only local Git source-provenance reads each. The fresh collector performs six authenticated requests including one ZIP download/extraction; the root reader independently refreshes four current metadata endpoints and its exact job plaintext log, with no ZIP GET or extraction. Current private log validation accepts only bounded exact SGR tokens while preserving original raw bytes and digests; identity comes from authenticated API tuples and required steps, not log captions. The successful CI and public sources were not rerun or changed for that private adaptation.
+
+Public 24 cases passed once under CP1, private eight under CP2, and the three new SGR cases under CP3; the schema audit passed once under CP1. These are source-attributed histories, not a combined CP3 rerun of all 35 cases. The earlier zero-completed Windows mock failure, strict-log failure before ZIP retrieval and zero-case preimport review-key failure remain preserved. No completed case, schema audit or query was replayed.
+
+This parser-observation-level relation supplies no independent lexical DIE-boundary certificate, pointer width, pointee or signature equivalence, alignment, member storage extent, whole ABI or runtime guarantee. It does not establish Image/BOOT integration, XNU/iOS execution or device readiness. Device/BOOT/reboot operations are zero; device authorization and deployment readiness remain false.
+
 ## v68 verified reported provider/core metadata relation
 
 Source `a8f44533e1253344dfa12d9bad4326306262f2c0` passed [CI 41270579838](https://github.com/eirblue/ios_note10p/actions/runs/41270579838), attempt 1: workflow `403262274`, job `124742348929`, artifact `13068584319`. Independent actual-result review accepted only the finite reported metadata relation. The parent strict reader ran once with observed exit code zero and all 70 recorded guards stable. Accepted result digest: `73379d106ca76515330e33ab21b2213b1dfaca0484f38d3321d76ea252d3eefc`.
