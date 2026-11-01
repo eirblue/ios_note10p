@@ -1,0 +1,28 @@
+name: Note10 v75 PC-only FDT property budgets
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  new-property-budget-cases:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: One NEW v75 property-budget batch only
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python -B note10/xnu26/test_linux_cpu_adt_budgets.py --output note10/private/v75-ci-new-cases
+      - name: Upload synthetic outcomes only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: note10-v75-fdt-property-budget-new-cases
+          if-no-files-found: error
+          retention-days: 7
+          path: note10/private/v75-ci-new-cases/result.json

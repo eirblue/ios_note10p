@@ -1,5 +1,13 @@
 # Runtime relocation metadata and PC data trials
 
+## v74 real-input stop and v75 bounded-property scan design
+
+Source `7c652372d2acbc4b5995f146d520fa73fd252d60` passed 34 new synthetic methods once in [CI 41319014723](https://github.com/eirblue/ios_note10p/actions/runs/41319014723). The first preserved-input conversion exited 1 at the combined duplicate/property-count guard, producing neither fragment nor manifest. The input and failure remain preserved; the unchanged converter was not retried.
+
+A data-only inventory distinguished an artificial 128-property ceiling on unrelated nodes from an actual duplicate. The v75 design retains the 128-property budget for /cpus and its direct children and rejects duplicate names throughout the tree, while bounding the other property scan by the existing input size and minimum property-header size. Only new directly affected cases are selected; the passed 34 methods are not replayed.
+
+This is PC-only incomplete CPU-description conversion, with no new Image or device action and no replay of the consumed v73 cycle. The nearby XNU reference is not an exact target ABI. CPU execution state, platform compatibility, complete boot-tree readiness and XNU execution are not established. Raw data and live-derived fragments stay private.
+
 ## v73 SHA256 incremental input and same-transform state-copy result
 
 Source `7e4a8c992f95f01429e824404378fa9271c0eb8e` passed [CI 41312767945](https://github.com/eirblue/ios_note10p/actions/runs/41312767945). The new Linux diagnostic uses six patterned messages of 55, 56, 63, 64, 65 and 129 bytes. Each checks incremental update/final and export/import into a distinct descriptor on the same transform. Descriptor/state allocations are bounded and no opaque state bytes are logged. This is not a portable state ABI or an XNU execution result.

@@ -18,6 +18,10 @@ MAX_CPUS = 32
 MAX_DEPTH = 32
 MAX_NODES = 4096
 MAX_PROPS = 128
+# Each FDT_PROP consumes a token, value length and name offset (12 bytes),
+# even for an empty value. The input-size cap therefore bounds total scanning
+# and duplicate-name bookkeeping without restricting unrelated wide nodes.
+MAX_PROPERTY_TOKENS = MAX_FDT // 12
 MAX_FRAGMENT = 16 * 1024
 REFERENCE = {
     'tag': 'xnu-12377.121.6',
@@ -66,7 +70,7 @@ def _cpu_nodes(raw):
             break
     cursor, end = so, so + size
     stack = []
-    roots = nodes = 0
+    roots = nodes = property_tokens = 0
     cpus = None
     children = []
     while cursor < end:
@@ -110,6 +114,9 @@ def _cpu_nodes(raw):
         elif token == 3:
             if not stack or stack[-1]['has_child'] or cursor + 8 > end:
                 raise ValueError('FDT property placement/extent')
+            property_tokens += 1
+            if property_tokens > MAX_PROPERTY_TOKENS:
+                raise ValueError('FDT total property token budget')
             length, nameoff = struct.unpack_from('>II', raw, cursor)
             cursor += 8
             if nameoff >= strings_size or cursor + length > end:
@@ -119,10 +126,13 @@ def _cpu_nodes(raw):
                 raise ValueError('FDT unterminated property name')
             name = _name(raw[sto + nameoff:stop])
             entry = stack[-1]
-            if name in entry['properties'] or len(entry['properties']) >= MAX_PROPS:
-                raise ValueError('FDT duplicate/property count')
+            if name in entry['properties']:
+                raise ValueError('FDT duplicate property name')
+            retain = entry['path'] == ('cpus',) or (len(entry['path']) == 2 and entry['path'][0] == 'cpus')
+            if retain and len(entry['properties']) >= MAX_PROPS:
+                raise ValueError('FDT CPU property count')
             entry['properties'].add(name)
-            if entry['path'] == ('cpus',) or (len(entry['path']) == 2 and entry['path'][0] == 'cpus'):
+            if retain:
                 entry['values'][name] = raw[cursor:cursor + length]
             cursor = (cursor + length + 3) & ~3
             if cursor > end:
