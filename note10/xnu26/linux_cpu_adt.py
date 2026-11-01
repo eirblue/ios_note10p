@@ -33,6 +33,10 @@ REFERENCE = {
 POLICY = 'linux-fdt-cpu-affinity-description-v1'
 TIMEBASE_POLICY = 'linux-fdt-cpu-firmware-timebase-description-v1'
 PRIVATE_ROOT = Path(__file__).resolve().parents[1] / 'private'
+MEMORY_PROPERTY_NAMES = frozenset((
+    '#address-cells', '#size-cells', 'device_type', 'reg', 'linux,usable-memory',
+    'status', 'ranges', 'size', 'alignment', 'alloc-ranges', 'no-map', 'reusable',
+    'no-ship', 'hotpluggable', 'linux,cma-default', 'linux,dma-default'))
 
 
 def _name(raw, allow_empty=False):
@@ -43,7 +47,7 @@ def _name(raw, allow_empty=False):
     return raw.decode('ascii')
 
 
-def _cpu_nodes(raw, *, include_firmware_timebase=False):
+def _cpu_nodes(raw, *, include_firmware_timebase=False, include_memory_declarations=False):
     """Validate once; optionally retain compatible/status/frequency for timers."""
     if not isinstance(raw, bytes) or not 40 <= len(raw) <= MAX_FDT:
         raise ValueError('FDT size/type')
@@ -59,6 +63,8 @@ def _cpu_nodes(raw, *, include_firmware_timebase=False):
         raise ValueError('FDT overlapping blocks')
     if ro < 40 or ro + 16 > total:
         raise ValueError('FDT reserve map extent')
+    memory = (dict(root=None, memory_nodes=[], reserved_root=None, reserved_nodes=[],
+                   header_reservations=[]) if include_memory_declarations else None)
     rp = ro
     while True:
         if rp + 16 > total or (rp - ro) // 16 >= MAX_NODES:
@@ -69,6 +75,8 @@ def _cpu_nodes(raw, *, include_firmware_timebase=False):
         rp += 16
         if address == length == 0:
             break
+        if include_memory_declarations:
+            memory['header_reservations'].append((address, length))
     cursor, end = so, so + size
     stack = []
     roots = nodes = property_tokens = 0
@@ -106,6 +114,8 @@ def _cpu_nodes(raw, *, include_firmware_timebase=False):
             entry = dict(path=path, children=set(), properties=set(), has_child=False, values={})
             if include_firmware_timebase:
                 entry['timer_values'] = {}
+            if include_memory_declarations and (len(path) <= 1 or path[:1] == ('reserved-memory',)):
+                entry['memory_values'] = {}
             stack.append(entry)
             if path == ('cpus',):
                 cpus = entry['values']
@@ -117,6 +127,18 @@ def _cpu_nodes(raw, *, include_firmware_timebase=False):
             entry = stack.pop()
             if include_firmware_timebase and 'compatible' in entry['timer_values']:
                 timer_descriptions.append(entry['timer_values'])
+            if include_memory_declarations and 'memory_values' in entry:
+                values = entry['memory_values']
+                path = entry['path']
+                record = dict(path=path, properties=values)
+                if not path:
+                    memory['root'] = values
+                elif path == ('reserved-memory',):
+                    memory['reserved_root'] = values
+                elif path[:1] == ('reserved-memory',):
+                    memory['reserved_nodes'].append(record)
+                elif len(path) == 1 and values.get('device_type') == b'memory\0':
+                    memory['memory_nodes'].append(record)
         elif token == 3:
             if not stack or stack[-1]['has_child'] or cursor + 8 > end:
                 raise ValueError('FDT property placement/extent')
@@ -142,6 +164,9 @@ def _cpu_nodes(raw, *, include_firmware_timebase=False):
                 entry['values'][name] = raw[cursor:cursor + length]
             if include_firmware_timebase and name in ('compatible', 'clock-frequency', 'status'):
                 entry['timer_values'][name] = raw[cursor:cursor + length]
+            if (include_memory_declarations and 'memory_values' in entry and
+                    name in MEMORY_PROPERTY_NAMES):
+                entry['memory_values'][name] = raw[cursor:cursor + length]
             cursor = (cursor + length + 3) & ~3
             if cursor > end:
                 raise ValueError('FDT property padding extent')
@@ -152,10 +177,21 @@ def _cpu_nodes(raw, *, include_firmware_timebase=False):
                 raise ValueError('FDT end/root/trailing structure')
             if cpus is None:
                 raise ValueError('FDT /cpus missing')
+            if include_memory_declarations:
+                return cpus, children, timer_descriptions, memory
             return cpus, children, timer_descriptions
         else:
             raise ValueError('FDT unknown token')
     raise ValueError('FDT end token missing')
+
+
+def memory_fields(raw):
+    """Selected memory fields from the same bounded pass; /cpus remains required.
+
+    Raw fields are declarations only. No CPU/timebase translation or ownership
+    interpretation is performed; live-derived return values must remain private.
+    """
+    return _cpu_nodes(raw, include_memory_declarations=True)[3]
 
 
 def _firmware_counter_frequency(descriptions):
