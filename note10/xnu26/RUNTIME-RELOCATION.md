@@ -1,5 +1,19 @@
 # Runtime relocation metadata and PC data trials
 
+## v66 verified provider/core declared interface and metadata edge
+
+Source `2697cb0d48b42c9e0ab5d01509ada82e5c0d94f7` passed [CI 41254506469](https://github.com/eirblue/ios_note10p/actions/runs/41254506469), attempt 1. The parent strict reader ran once with an observed final exit code of zero; independent result review accepted the bounded result. Result digest: `bd76c1601856844cb5cdb287b75b0287ef7234e19b7bba501c7e63793f11823e`.
+
+This data-only result joins the accepted v63 provider's `sha256_generic_mod_init` CALL26 reference to the accepted v65 `crypto_register_shashes` definition. The undefined provider GLOBAL/NOTYPE symbol and defined core GLOBAL/FUNC symbol are bound as one exact contextual pair; no general symbol-type relaxation follows. New raw table relocation coordinates bind eight callback entries to the original accepted provider definitions. No callback was executed.
+
+The declared input profile binds the exact `int crypto_register_shashes(struct shash_alg *algs, int count);` prototype, 351 common source/include headers, and three generated configuration files whose only differences are the frozen LOCALVERSION physical lines. Provider/core complete header sets remain distinct. Saved compiler arguments each contain 89 tokens, with 84 identical tokens and three exact role-specific blocks. Retained Clang/resource and other recorded tool observations are checked; unavailable v65 external GCC and both external assembler identities remain explicit gaps. Provider layout labels belong only to original v63 evidence: they are not an independently measured v65 layout, paired DIE equivalence, emitted binary ABI, whole-toolchain or runtime compatibility proof.
+
+The complete current ZIP is 289,046 bytes, SHA-256 `7f4322654a01fb1c9d75a45557e2569636fcead7e3c5a19b11e784bc89a061ce`; all 33 ordinary members and 1,023,685 expanded bytes match the canonical extraction map. Authenticated current run/job/three required steps/artifact/plaintext-log records, 12 local sources, eight exact published blobs and both immutable accepted original ZIP/private-result identities are bound to fresh collection and separate reader pins. Each original extraction is checked against the same complete authenticated original ZIP inventory before producer labels are parsed; the provider-only `independent-verification.json` is opaque bytes, with no invented direct control-member digest or semantic interpretation.
+
+Fixture history remains attributed to original checkpoints: CP2 public 42/private 12 passed outputs, CP3 three new cases and a separate schema audit, CP4 ten new cases and a separate namespace audit. The CP2 private process-wrapper metadata was lost: observed exit code remains null despite the historical reported zero. CP4-R2 changes only the fixture's final CRLF to LF; no fixture or audit was rerun under that revision. These are not a combined current-source regression pass. The two earlier actual CI failures remain permanently unaccepted. No prior semantic checker, compiler, linker, model or probe was replayed.
+
+The two objects have not been linked together. Registration, allocation success, runtime provider availability, callback execution, full Image/BOOT, XNU execution, iOS boot and deployment readiness remain unproved. Device/BOOT/reboot operations are zero; the consumed v57 cycle remains 1/1 with no journal replay.
+
 ## v65 verified crypto hash composite origin
 
 Source `8d9678bcc0fb4046093e637ed8d8c61d523b79f2` passed [CI 41242201836](https://github.com/eirblue/ios_note10p/actions/runs/41242201836), attempt 1. The root strict reader ran once and exited 0; independent actual-result review accepted the static PC-only scope. Immutable private result digest: `174deddddbd6de3d3e0f8fb12384053bdcd7d197b536bede2254cb071d99c233`.
