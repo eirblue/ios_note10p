@@ -1,5 +1,14 @@
 # 작업 상태 (2026-11-02, Asia/Seoul)
 
+## v82: Native Linux memory-scan argument observation
+
+A default-off observer retained already-decoded nonzero arguments immediately before the existing architecture memory-add call, without another FDT scan. Late frames reported eight rows with no dropped rows and a completed native walk at root close. This reports arguments before architecture normalization; it does not establish successful memory insertion, complete FDT validity, free RAM, allocation ownership or an Apple memory map.
+
+The single diagnostic BOOT-write/reboot cycle passed, with changed recovery boot identity and all five post-return partition hash checks passing. Recovery-request frames were observed; they do not prove hardware recovery re-entry or the hardware boot count. The cycle is consumed and is not replayed. XNU execution and handoff readiness remain unverified.
+
+Validation: the initial CI passed eight new methods and failed four because the synthetic callback trace omitted its entry event. A one-line synthetic-only correction passed those four methods; the eight earlier passes were carried without replay. One Image was built successfully and used for the diagnostic cycle. Source `b42228737b77f4ce1b24aa8333f03cf31190f026`; [successful CI](https://github.com/eirblue/ios_note10p/actions/runs/41352669011).
+
+
 ## v81: Owned FDT snapshot and retained post-return integrity
 
 The Linux diagnostic captured a bounded FDT snapshot in reservation-aware owned memory after paging, then hashed only that snapshot after the existing recovery path was armed. The observed input differs from the historical saved FDT, so no prior declaration or CPU result is joined to it. No XNU execution or deployment/handoff readiness is claimed.
