@@ -1,5 +1,14 @@
 # 작업 상태 (2026-11-02, Asia/Seoul)
 
+## v83: Native Exynos bootstrap source selection
+
+Added an Exynos-only bootstrap option and alternative native configuration rules for fifteen existing architecture sources. Original Apple/PPL/SPTM rules remain unchanged. Real configuration-tool tests confirmed one selected owner per source, preserved existing selection behavior, and rejected duplicate or mixed candidate ownership.
+
+Three new methods passed once, followed by one compile-only build of the fifteen selected DEVELOPMENT sources. Inputs came from actual generated configuration membership; the old forced candidate archive and kernel link were not used. [CI](https://github.com/eirblue/ios_note10p/actions/runs/41357185047) completed successfully from project source `8b12ef0c0a849d10e2370d866aefda0b52f2ce1f`. The underlying public Apple XNU reference commit is a separate source identity.
+
+This establishes source-selection and compilation integration only. It does not establish a complete current object set, a full upstream Make build, platform hardware support, exact target ABI compatibility or deployment/handoff readiness. No Image, BOOT write, reboot, device call or XNU execution; the previous diagnostic cycle remains consumed.
+
+
 ## v82: Native Linux memory-scan argument observation
 
 A default-off observer retained already-decoded nonzero arguments immediately before the existing architecture memory-add call, without another FDT scan. Late frames reported eight rows with no dropped rows and a completed native walk at root close. This reports arguments before architecture normalization; it does not establish successful memory insertion, complete FDT validity, free RAM, allocation ownership or an Apple memory map.
