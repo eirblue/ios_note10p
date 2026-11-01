@@ -18,6 +18,7 @@ PUBLIC = (
     'note10/device_test/build_sha256_kat_recovery.py',
     'note10/device_test/test_sha256_kat_recovery.py',
     'note10/device_test/sha256_kat_recovery_fixture.c',
+    'note10/device_test/test_sha256_kat_cmdline_policy.py',
     '.github/workflows/note10-sha256-kat-recovery.yml',
 )
 INPUTS = (
@@ -36,8 +37,7 @@ SETTINGS = {
     'CRYPTO': 'y', 'CRYPTO_HASH': 'y', 'CRYPTO_SHA256': 'y',
     'EXYNOS_REBOOT': 'y', 'SEC_REBOOT': 'y', 'BLK_DEV_INITRD': 'y',
     'INITRAMFS_SOURCE': '""', 'INITRAMFS_FORCE': 'n',
-    'CMDLINE': '""', 'CMDLINE_FORCE': 'n', 'CMDLINE_FROM_BOOTLOADER': 'n',
-    'CMDLINE_EXTEND': 'y', 'LOG_BUF_SHIFT': '21',
+    'CMDLINE': '""', 'CMDLINE_FORCE': 'n', 'CMDLINE_EXTEND': 'n', 'LOG_BUF_SHIFT': '21',
     'LTO': 'n', 'LTO_CLANG': 'n', 'FTRACE_MCOUNT_RECORD': 'n',
     'STACK_VALIDATION': 'n', 'LOCALVERSION_AUTO': 'n',
     'LOCALVERSION': '"-v71-sha256-recovery"',
@@ -45,7 +45,36 @@ SETTINGS = {
 BUILD_INPUT_PINS = {
     'firmware/Makefile': 'd25d7ed1b358b79841dab8ce18fc03d799e9bac4609b6ef37e4c32bec8f6a47c',
     'init/initramfs.c': '1a9af19668584dc664c28c640e02b6a03cc37a2fa5ecd1900d818bb67c775806',
+    'arch/arm64/Kconfig': '127273290ce9e8d337b0f186b576dac0ff3792bcbebffeea2ae49b9c5e99afc6',
+    'arch/arm64/kernel/setup.c': 'f80fd02832b12c48eba11b3e3148c59c6ad87d9ea2328c8c37492d107fd141d7',
+    'drivers/of/fdt.c': 'e655d0f3902e4559932a8c262177a74623468caeda04b338c2de81d992593b34',
 }
+
+
+def bootloader_cmdline_policy(config):
+    """Pinned FDT default branch reads DT bootargs without concat/overwrite.
+
+    ARM64 Kconfig hides its choice for an empty builtin string; a missing choice
+    symbol is valid. FORCE or EXTEND changes that branch and is rejected.
+    """
+    values = {}
+    names = ('CMDLINE', 'CMDLINE_FORCE', 'CMDLINE_EXTEND', 'CMDLINE_FROM_BOOTLOADER')
+    for line in config.splitlines():
+        for name in names:
+            key = 'CONFIG_'+name
+            value = line[len(key)+1:] if line.startswith(key+'=') else 'n' if line == '# '+key+' is not set' else None
+            if value is not None:
+                if name in values:
+                    raise ValueError('duplicate actual command-line setting: '+name)
+                values[name] = value
+    if values.get('CMDLINE') != '""':
+        raise ValueError('builtin CMDLINE must be empty; preserve bootloader arguments')
+    if any(values.get(name, 'n') != 'n' for name in ('CMDLINE_FORCE', 'CMDLINE_EXTEND')):
+        raise ValueError('command-line overwrite/concatenation is not permitted')
+    if values.get('CMDLINE_FROM_BOOTLOADER', 'n') not in ('y', 'n'):
+        raise ValueError('invalid actual bootloader choice value')
+    return {'builtin_cmdline_empty': True, 'bootloader_arguments_preserved': True,
+            'pinned_fdt_branch': 'read-DT-bootargs-without-concat-or-overwrite'}
 
 
 def prepare_image_inputs(source):
@@ -165,7 +194,10 @@ def main():
                 action = ['--set-val', name, value]
             run([source/'scripts/config', '--file', objects/'.config', *action], f'build/settings/{index:02}.log')
         run([*make, 'olddefconfig'], 'build/02-olddefconfig.log')
+        # Preserve the actual effective bytes before any validation can fail.
+        shutil.copyfile(objects/'.config', out/'actual-effective.config')
         config = (objects/'.config').read_text().splitlines()
+        cmdline_policy = bootloader_cmdline_policy('\n'.join(config))
         for name, value in SETTINGS.items():
             wanted = '# CONFIG_'+name+' is not set' if value == 'n' else 'CONFIG_'+name+'='+value
             if wanted not in config and not (value == 'n' and not any(x.startswith('CONFIG_'+name+'=') for x in config)):
@@ -192,6 +224,7 @@ def main():
         result = dict(schema=1, version='v71', passed=True, kernel_commit=COMMIT,
                       build_evidence_id=identity, ci_context=ci, source_sha256=manifest,
                       settings=SETTINGS, make_target='Image', integration_object=TARGET,
+                      bootloader_cmdline_policy=cmdline_policy,
                       image_sha256=sha(image), image_bytes=len(raw), archive_input=before,
                       historical_suites_invoked=0, historical_evaluations_carried_as_executed=0,
                       native_fixture_commands_in_builder=0, kernel_or_provider_executed=False,

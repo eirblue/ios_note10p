@@ -31,11 +31,10 @@ jobs:
             sudo -n env DEBIAN_FRONTEND=noninteractive timeout --kill-after=30s 180s apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
             sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a timeout --kill-after=30s 480s apt-get -o Dpkg::Use-Pty=0 -o DPkg::Lock::Timeout=60 -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install --no-install-recommends -y "${missing[@]}"
           fi
-      - name: Run only the new recovery-connection batch once
+      - name: Run only the new command-line policy batch
         env:
           PYTHONDONTWRITEBYTECODE: '1'
-          CC: gcc
-        run: python -B note10/device_test/test_sha256_kat_recovery.py --output note10/private/v71-ci-connection-tests
+        run: python -B note10/device_test/test_sha256_kat_cmdline_policy.py --output note10/private/v71-ci-cmdline-tests
       - name: Build the new diagnostic Image without historical suites
         env:
           PYTHONDONTWRITEBYTECODE: '1'
@@ -49,5 +48,5 @@ jobs:
           if-no-files-found: error
           retention-days: 7
           path: |
-            note10/private/v71-ci-connection-tests/
+            note10/private/v71-ci-cmdline-tests/
             note10/private/v71-ci-recovery/
