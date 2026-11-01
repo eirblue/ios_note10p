@@ -148,10 +148,10 @@ def build_config_tool(source, work, output):
     return tool, compiler, sdk
 
 
-def provision(work, output):
+def provision(work, output, *, ci=None):
     if sys.platform != 'darwin' or os.environ.get('GITHUB_ACTIONS') != 'true':
         raise ValueError('fresh macOS CI only')
-    ci = ci_context()
+    ci = ci_context() if ci is None else ci
     if subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT).decode().strip() != ci['GITHUB_SHA']:
         raise ValueError('checkout/head mismatch')
     work.mkdir(parents=True, exist_ok=False)

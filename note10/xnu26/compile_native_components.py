@@ -29,7 +29,10 @@ PLATFORM_ASM = tuple('osfmk/arm64/' + n + '.s' for n in
                      ('caches_asm', 'locore', 'cswitch', 'machine_routines_asm', 'start'))
 
 
-def main():
+def main(current=None, current_language=None):
+    if current is not None:
+        import current_native_kernel as native_current
+        native_current.check_context(current)
     private = ROOT / 'note10/private/windows-xnu'
     configured = json.loads((private / 'configure-result.json').read_text())
     source = ROOT / configured['source_directory']
@@ -48,6 +51,9 @@ def main():
     deployment_target = 'arm64-apple-ios' + target['version']
     compiler = os.environ.get('N10_CC') or str(LLVM / 'clang-23.exe')
     sdk = os.environ.get('N10_SDKROOT')
+    if current is not None and (compiler != current['producer']['toolchain']['compiler'] or
+                                sdk != current['producer']['toolchain']['sdk']):
+        raise ValueError('current native compiler/SDK binding required')
     mig = ROOT / target['research_directory'] / 'generated-headers-vmapple/RELEASE_ARM64_VMAPPLE'
     exported = private / 'exports'
     # Export only the KDK KernelSupport declarations this target actually uses.
@@ -97,7 +103,7 @@ def main():
                     raise ValueError('Generated MIG source changed')
                 generated_mig[item['selected_name']] = generated_path
     mig_hashes = {}
-    for component in ('osfmk', 'bsd', 'iokit'):
+    for component in (() if current is not None else ('osfmk', 'bsd', 'iokit')):
         directory = mig / component / 'RELEASE'
         for header in directory.rglob('*.h'):
             relative = header.relative_to(directory)
@@ -126,6 +132,10 @@ def main():
              '--platform-c': ('PLATFORM_C', 'C', 'platform-c'),
              '--platform-asm': ('PLATFORM_ASM', 'assembly', 'platform-asm')}
     mode = modes.get(sys.argv[1]) if len(sys.argv) == 2 else None
+    if current is not None:
+        mode = {'C': ('CFILES', 'C', 'current-c'),
+                'C++': ('CXXFILES', 'C++', 'current-cxx'),
+                'assembly': ('SFILES', 'assembly', 'current-asm')}[current_language]
     audit = mode is not None
     skipped = []
     units = list(sys.argv[1:]) or list(UNITS)
@@ -140,7 +150,7 @@ def main():
                 if token.startswith('$(SOURCE_DIR)/'):
                     name = token[len('$(SOURCE_DIR)/'):]
                     if (source / name).is_file():
-                        if name in owners and owners[name] != component:
+                        if name in owners and (current is not None or owners[name] != component):
                             raise ValueError('Source selected by multiple components: ' + name)
                         owners[name] = component
                         units.append(name)
@@ -156,7 +166,9 @@ def main():
                     input_files[name] = generated_extra[(component, token)]
                     units.append(name)
                 else:skipped.append({'source': token, 'component': component, 'reason': 'generated source not yet built'})
-        units = sorted(set(units))
+        if current is not None:
+            native_current.admit_compile(current, units, owners, input_files, source, mode[1])
+        units = sorted(units) if current is not None else sorted(set(units))
         if mode[0].startswith('PLATFORM_'):
             units = list(PLATFORM_C if mode[0] == 'PLATFORM_C' else PLATFORM_ASM)
     private_flags = {
@@ -205,8 +217,9 @@ def main():
         if component == 'osfmk':
             includes.append(source / 'osfmk/libsa')  # Template's libsa include; keep BSD machine headers first.
             includes.append(source / 'EXTERNAL_HEADERS/corecrypto')
-        includes.extend(borrowed_mig / c for c in ('osfmk', 'bsd', 'iokit'))
-        includes.extend(mig / c for c in ('osfmk', 'bsd', 'iokit', 'libkern'))
+        if current is None:
+            includes.extend(borrowed_mig / c for c in ('osfmk', 'bsd', 'iokit'))
+            includes.extend(mig / c for c in ('osfmk', 'bsd', 'iokit', 'libkern'))
         includes.append(ROOT / 'host-tools/kdk/headers/KDK_SDK.pkg/System/Library/Frameworks/Kernel.framework/Versions/A/PrivateHeaders/platform')
         includes.append(support_export)
         if sdk:
@@ -264,6 +277,9 @@ def main():
                         'source_sha256': hashlib.sha256(original.read_bytes()).hexdigest(),
                         'object_sha256': hashlib.sha256(object_file.read_bytes()).hexdigest() if passed else None,
                         'diagnostics': diagnostics}
+        if current is not None:
+            native_current.stamp(current, row, 'native')
+            row['object_path'] = str(object_file)
         if not audit:
             print(name + ': ' + ('compiled' if passed else 'blocked'), flush=True)
             if not passed:print(diagnostics[-6000:], flush=True)
@@ -289,10 +305,17 @@ def main():
     report['skipped_generated_sources'] = skipped
     report['architecture_candidates_not_selected_in_native_config'] = bool(mode and mode[0].startswith('PLATFORM_'))
     report['scope'] = (mode[1] if mode else 'C') + ' compiler audit with component-private flags; not a full Make build or per-file instrumentation reproduction'
+    if current is not None:
+        report.update(producer_id=current['producer_id'], input_binding=current['input_binding'],
+                      foreign_mig_version_headers=False,
+                      scope='Current native-selected payload object production; not full upstream Make')
     (output / (mode[2] + '-result.json' if audit else 'compile-result.json')).write_text(json.dumps(report, indent=2))
     print(json.dumps({'compiled': sum(r['passed'] for r in results), 'attempted': len(results),
                       'whole_kernel_build': False}))
     if not audit and not all(r['passed'] for r in results):raise SystemExit(1)
+    if current is not None and (skipped or not all(r['passed'] for r in results)):
+        raise RuntimeError('current native payload inputs did not all compile')
+    return report
 
 
 if __name__ == '__main__':

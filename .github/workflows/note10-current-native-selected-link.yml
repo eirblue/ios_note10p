@@ -1,0 +1,67 @@
+name: Note10 v84 current native selected kernel link
+on:
+  workflow_dispatch:
+    inputs:
+      recipient_public_key_b64:
+        description: Public RSA3072 recipient only; private key stays local
+        required: true
+        type: string
+      ci_case_json:
+        description: Empty array selects the three NEW cases once; later only changed or unexecuted IDs
+        default: '[]'
+        type: string
+      build_only:
+        description: Skip unchanged tests only with a Root-bound retained actual PASS context
+        default: false
+        type: boolean
+      passed_batch_context_b64:
+        description: Root-authored source-bound actual PASS context required only for build_only
+        default: ''
+        type: string
+permissions:
+  contents: read
+jobs:
+  current-native-selected-link:
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate public recipient only
+        env:
+          N10_RECIPIENT_PUBLIC_KEY_B64: ${{ inputs.recipient_public_key_b64 }}
+        run: node note10/device_test/sealed_affinity_artifact.cjs recipient
+      - name: One NEW current input and direct link batch
+        if: ${{ !inputs.build_only }}
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+          N10_CI_CASE_JSON: ${{ inputs.ci_case_json }}
+        run: python -B note10/xnu26/test_current_native_kernel.py --output note10/private/v84-ci-new-tests
+      - name: Produce complete current objects and link one new research payload
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+          N10_BUILD_ONLY: ${{ inputs.build_only }}
+          N10_PASSED_BATCH_CONTEXT_B64: ${{ inputs.passed_batch_context_b64 }}
+        run: python -B note10/xnu26/build_current_native_kernel.py --work note10/private/v84-ci-work --output note10/private/v84-ci-build
+      - name: Seal new objects kernel and diagnostics including failures
+        if: always()
+        env:
+          N10_RECIPIENT_PUBLIC_KEY_B64: ${{ inputs.recipient_public_key_b64 }}
+        run: |
+          python -B note10/device_test/bundle_affinity_evidence.py --tests note10/private/v84-ci-new-tests --build note10/private/v84-ci-build --output note10/private/v84-evidence.zip --source "$GITHUB_SHA"
+          node note10/device_test/sealed_affinity_artifact.cjs seal note10/private/v84-evidence.zip note10/private/v84-sealed-evidence.n10sealed "$GITHUB_SHA"
+      - name: Upload ciphertext only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: note10-v84-sealed-evidence
+          if-no-files-found: error
+          retention-days: 7
+          path: note10/private/v84-sealed-evidence.n10sealed

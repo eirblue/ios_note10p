@@ -12,15 +12,16 @@ import sys
 from prepare_build_selection import ROOT
 
 
-def main():
+def main(current=None, base_command=None):
     private = ROOT / 'note10/private/windows-xnu'
     config = json.loads((private / 'configure-result.json').read_text())
     source = ROOT / config['source_directory']
-    audit = json.loads((private / 'objects/DEVELOPMENT/all-c-result.json').read_text())
-    unit = next(r for r in audit['units'] if r['source'] == 'osfmk/arm64/machine_routines.c')
+    if current is None:
+        audit = json.loads((private / 'objects/DEVELOPMENT/all-c-result.json').read_text())
+        base_command = next(r for r in audit['units'] if r['source'] == 'osfmk/arm64/machine_routines.c')['command']
     directory = private / 'configured/DEVELOPMENT/osfmk'
     assembly = directory / 'genassym.S'
-    command = list(unit['command'])
+    command = list(base_command)
     command[command.index('-c')] = '-S'
     command[command.index('-o') + 1] = str(assembly)
     command[command.index('-S') + 1] = str(source / 'osfmk/arm64/genassym.c')
@@ -28,6 +29,23 @@ def main():
     result = subprocess.run(command, cwd=ROOT, capture_output=True, timeout=60)
     (private / 'genassym.log').write_bytes(result.stdout + result.stderr)
     passed = result.returncode == 0
+    if current is not None:
+        from current_native_kernel import check_context, file_sha
+        check_context(current)
+        if not passed:
+            raise RuntimeError('current native assembly-offset generation failed')
+        template = (source / 'osfmk/conf/Makefile.template').read_text()
+        rule = next(s for s in template.splitlines() if 'sed -e' in s and 'DEFINITION__define__' in s)
+        recipe = rule.split('$(_v)', 1)[1].split(' > $@')[0].replace('genassym.o', '"$1"').replace('$$', '$')
+        data = subprocess.check_output(['/bin/sh', '-c', recipe, 'current-genassym', str(assembly)])
+        if not data:
+            raise ValueError('empty current assembly offsets')
+        (directory / 'assym.s').write_bytes(data)
+        report = dict(passed=True, producer_id=current['producer_id'], command=command,
+                      source_sha256=file_sha(source / 'osfmk/arm64/genassym.c'),
+                      assym_sha256=file_sha(directory / 'assym.s'), upstream_rule_used=True)
+        (private / 'current-genassym-result.json').write_text(json.dumps(report, indent=2))
+        return report
     constants = {}
     sed_matched = False
     if passed:
