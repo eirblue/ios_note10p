@@ -12,10 +12,24 @@
 #define __init
 #define __aligned(n) __attribute__((aligned(n)))
 #define GFP_KERNEL 0
+#define PAGE_SIZE 4096U
+#define PAGE_ALIGN(n) (((n)+PAGE_SIZE-1U)&~(PAGE_SIZE-1U))
 #define N10_SHA256_KAT_ID "11111111111111111111111111111111"
 static const char n10_cycle[] = "22222222222222222222222222222222";
 static int early = 1, allocations, hashes, copies, crc_calls, fail_mode;
 static unsigned long expected_sum;
+static int setup_order, memblock_calls;
+static unsigned int memblock_bytes;
+static unsigned char *owned;
+static int memblock_failure;
+static void *memblock_virt_alloc_nopanic(unsigned int n, unsigned int alignment)
+{
+    assert(early && setup_order==2 && alignment==PAGE_SIZE && !owned);
+    assert(n && n<=512U*1024U && !(n&(PAGE_SIZE-1U)));
+    ++memblock_calls; memblock_bytes=n;
+    if(memblock_failure) return NULL;
+    owned=malloc(n); assert(owned); memset(owned,0x7e,n); return owned;
+}
 static size_t allocated_size;
 static struct crypto_shash { int placeholder; } provider;
 struct shash_desc { struct crypto_shash *tfm; unsigned int flags; };
@@ -36,7 +50,7 @@ static unsigned int crypto_shash_descsize(struct crypto_shash *tfm)
 static void *kzalloc(size_t n, int flags)
 { assert(!early && !flags && n<=4096); allocated_size=n; return fail_mode==5 ? NULL : calloc(1,n); }
 static void kfree(void *p)
-{ size_t i; for(i=0;i<allocated_size;++i) assert(!((unsigned char *)p)[i]); free(p); }
+{ size_t i; assert(p!=owned); for(i=0;i<allocated_size;++i) assert(!((unsigned char *)p)[i]); free(p); }
 static void crypto_free_shash(struct crypto_shash *tfm) { assert(tfm==&provider); }
 static int crypto_shash_digest(struct shash_desc *desc, const unsigned char *data,
                                unsigned int length, unsigned char *out)
@@ -66,14 +80,16 @@ static uint32_t n10_frame_checksum(const char *p, unsigned int n)
 #include "early_fdt_binding.c"
 #undef memcpy
 static void *initial_boot_params;
-static uint32_t of_fdt_crc32;
 static unsigned int declared_length;
-static int header_invalid;
-static int fdt_check_header(void *p) { (void)p; return header_invalid; }
-static unsigned int fdt_totalsize(void *p) { (void)p; return declared_length; }
-static uint32_t crc32_be(uint32_t seed, void *p, unsigned int length)
-{ (void)p; assert(seed==~0U && length==declared_length); ++crc_calls; return 123; }
-#include "test-verifier.c"
+static int early_init_dt_verify(void *params, int bad_header)
+{
+    if (!params || bad_header) return 0;
+    initial_boot_params=params; ++crc_calls; return 1;
+}
+int of_get_flat_dt_size(void) { return (int)declared_length; }
+static void arm64_memblock_init(void) { assert(!setup_order); setup_order=1; }
+static void paging_init(void) { assert(setup_order==1); setup_order=2; }
+#include "test-setup.c"
 
 int main(int argc, char **argv)
 {
@@ -86,20 +102,22 @@ int main(int argc, char **argv)
     if (!strcmp(argv[1],"oversized")) length=N10_FDT_CAPACITY+1;
     input=malloc(length); assert(input); memset(input,7,length);
     expected_sum=7UL*length; declared_length=length;
-    if (!strcmp(argv[1],"invalid-header")) header_invalid=1;
+    if (!strcmp(argv[1],"memblock-failure")) memblock_failure=1;
     if (strncmp(argv[1],"hash-failure-",13)==0) fail_mode=atoi(argv[1]+13);
     if (strcmp(argv[1],"unavailable"))
-        verified=early_init_dt_verify(!strcmp(argv[1],"null") ? NULL : input);
-    assert(!allocations && !hashes); /* No early provider/allocator dependency. */
+        verified=early_init_dt_verify(!strcmp(argv[1],"null") ? NULL : input,
+            !strcmp(argv[1],"invalid-header"));
+    if(verified==1) setup_arch(NULL);
+    assert(!allocations && !hashes); /* No early crypto/provider allocation. */
     if (!strcmp(argv[1],"repeat")) {
-        memset(input,9,length); early_init_dt_verify(input);
+        memset(input,9,length); setup_order=0; setup_arch(NULL);
         assert(n10_fdt_snapshot[0]==7); /* First capture never overwritten. */
     }
     memset(input,0xee,length); /* Caller is mutable after the boundary. */
     early=0;
     n10_fdt_binding_init();
-    for(i=0;i<N10_FDT_CAPACITY;++i) if(n10_fdt_snapshot[i]) cleared=0;
-    printf("{\"copies\":%d,\"allocations\":%d,\"hashes\":%d,\"verified\":%d,\"crc_calls\":%d,\"cleared\":%d}\n",
-           copies,allocations,hashes,verified,crc_calls,cleared);
-    free(input);return 0;
+    if(owned) for(i=0;i<memblock_bytes;++i) if(owned[i]) cleared=0;
+    printf("{\"copies\":%d,\"allocations\":%d,\"hashes\":%d,\"verified\":%d,\"crc_calls\":%d,\"cleared\":%d,\"memblock_calls\":%d,\"memblock_bytes\":%u,\"setup_order\":%d}\n",
+           copies,allocations,hashes,verified,crc_calls,cleared,memblock_calls,memblock_bytes,setup_order);
+    free(input);free(owned);return 0;
 }

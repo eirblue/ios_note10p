@@ -147,7 +147,8 @@ def raw_binding(root, expected_result, expected_source):
         extra.update(fdt_input_binding(result, lines))
         import struct
         measured_footprint = linked_footprint((root/'System.map').read_text(),
-            (root/'new-object-symbols.log').read_text(), struct.unpack_from('<Q',image,16)[0])
+            (root/'new-object-symbols.log').read_text(), struct.unpack_from('<Q',image,16)[0],
+            struct.unpack_from('<Q',image,8)[0],struct.unpack_from('<Q',image,24)[0])
         require(result.get('fdt_snapshot_footprint') == measured_footprint, 'linked FDT footprint changed')
     return dict(device_profile=marker, **extra, accepted_result_sha256=expected_result,
                 source_head=expected_source, image_sha256=result['image_sha256'], image_size=len(image),
@@ -402,10 +403,13 @@ def package_scope(row, mode=None):
                 row.get('raw_input_binding') is False and row.get('original_fdt_digest_unavailable') is True,
                 'affinity host/FDT non-claim binding differs')
     if row['device_profile'] == FDT_PROFILE:
-        from early_fdt_binding import BOUNDARY, CAPACITY
+        from early_fdt_binding import BOUNDARY, CAPACITY, REVISION, ALLOCATION
         require(row.get('host_profile_source_head') not in (V71_HOST_HEAD,V72_HOST_HEAD,V73_HOST_HEAD,V78_HOST_HEAD) and
                 row.get('raw_input_binding') is False and row.get('fdt_capture_boundary') == BOUNDARY and
-                type(row.get('fdt_snapshot_capacity_bytes')) is int and row['fdt_snapshot_capacity_bytes'] == CAPACITY,
+                type(row.get('fdt_snapshot_capacity_bytes')) is int and row['fdt_snapshot_capacity_bytes'] == CAPACITY and
+                type(row.get('fdt_capture_revision')) is int and row['fdt_capture_revision'] == REVISION and
+                row.get('fdt_allocation_form') == ALLOCATION and
+                row.get('fdt_relative_placement_admitted') is True,
                 'FDT source/boundary/cap/nonclaim differs')
     if mode is None or mode in ('diagnostic', 'rollback'):
         diagnostic = mode in (None, 'diagnostic')
@@ -422,12 +426,6 @@ def package_scope(row, mode=None):
 def pack(backup, kernel_build, official, mkbootimg, output, parts, token):
     from prepare_linux_boot import pack_verified
     build = variant(kernel_build, token)
-    if build['device_profile'] == FDT_PROFILE:
-        from early_fdt_binding import placement_admission
-        from prepare_linux_boot import boot_header
-        header, recovery = boot_header(parts['boot']), boot_header(official)
-        placement_admission(read(Path(build['auto_cycle_template'])/'result.json')['fdt_snapshot_footprint'],
-            header['kernel_addr'], recovery['ramdisk_addr'], recovery['ramdisk_size'])
     return pack_verified(backup, kernel_build, official, mkbootimg, output, parts, build,
                          (kernel_build/'handoff.config').read_bytes(), token, kat_profile=True)
 

@@ -1,7 +1,9 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* Post-architecture, post-existing-CRC snapshot; never pristine firmware. */
+/* Current flat bytes after paging/reservations; never pristine firmware. */
 #ifndef N10_FDT_HOST_TEST
 #include <crypto/hash.h>
+#include <linux/bootmem.h>
+#include <linux/mm.h>
 #include <linux/err.h>
 #include <linux/errno.h>
 #include <linux/init.h>
@@ -10,13 +12,13 @@
 #endif
 #define N10_FDT_CAPACITY (512U * 1024U)
 #define N10_FDT_HEADER 40U
-/* Private, permanently owned BSS. No source pointer survives the init hook. */
-static unsigned char n10_fdt_snapshot[N10_FDT_CAPACITY] __aligned(8);
-static unsigned int n10_fdt_length, n10_fdt_attempted;
+/* Owned memblock pages stay reserved through reboot; only tiny state in BSS. */
+static unsigned char *n10_fdt_snapshot;
+static unsigned int n10_fdt_length, n10_fdt_allocated, n10_fdt_attempted;
 static const char *n10_fdt_status = "unavailable";
 
-void __init n10_early_fdt_capture(const void *params, unsigned int length);
-void __init n10_early_fdt_capture(const void *params, unsigned int length)
+void __init n10_post_paging_fdt_capture(const void *params, unsigned int length);
+void __init n10_post_paging_fdt_capture(const void *params, unsigned int length)
 {
     if (n10_fdt_attempted) {
         n10_fdt_status = "ambiguous";
@@ -27,7 +29,14 @@ void __init n10_early_fdt_capture(const void *params, unsigned int length)
         n10_fdt_status = "refused";
         return;
     }
-    /* Boot init thread only, before later OF scans; no allocation or hashing. */
+    /* Supported pre-slab boundary: kernel/initrd/FDT reservations and mappings
+     * already exist. Ordinary allocation failure affects this diagnostic only. */
+    n10_fdt_allocated = PAGE_ALIGN(length);
+    n10_fdt_snapshot = memblock_virt_alloc_nopanic(n10_fdt_allocated, PAGE_SIZE);
+    if (!n10_fdt_snapshot) {
+        n10_fdt_allocated = 0;
+        return; /* Keep unavailable; never alter Linux admission. */
+    }
     memcpy(n10_fdt_snapshot, params, length);
     n10_fdt_length = length;
     n10_fdt_status = "captured";
@@ -73,8 +82,9 @@ failed:
 emit:
     if (desc) { memzero_explicit(desc, sizeof(*desc) + descsize); kfree(desc); }
     if (tfm) crypto_free_shash(tfm);
-    /* Exact owned copied extent only; refusal has length zero. */
-    memzero_explicit(n10_fdt_snapshot, n10_fdt_length);
+    /* Clear padding too. Memblock pages remain reserved; NEVER kfree here. */
+    if (n10_fdt_snapshot)
+        memzero_explicit(n10_fdt_snapshot, n10_fdt_allocated);
     n10_fdt_length = 0;
     n10_fdt_status = "unavailable";
     if (length) {
@@ -87,7 +97,7 @@ emit:
         memcpy(hex, "none", 5);
     }
     count = scnprintf(frame, sizeof(frame),
-        "id=%s cycle=%s boundary=post_arch_crc status=%s error=%d length=%u sha256=%s raw_binding=0",
+        "id=%s cycle=%s boundary=post_paging_reservations status=%s error=%d length=%u sha256=%s raw_binding=0",
         N10_SHA256_KAT_ID, (const char *)n10_cycle, status, error, length, hex);
     pr_info("N10FDT1 %s checksum=%08x\n", frame, n10_frame_checksum(frame, count));
     memzero_explicit(digest, sizeof(digest));

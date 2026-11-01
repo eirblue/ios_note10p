@@ -183,7 +183,7 @@ def main(kind=None):
             target = out/'stock-inputs'/name
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source/name, target)
-        # v81 changes fdt.c only AFTER the existing pristine-input preparation.
+        # v81 changes setup.c only AFTER the existing pristine-input preparation.
         image_prep = prepare_image_inputs(source) if fdt else None
         overlay = install(source, identity)
         if not fdt:
@@ -230,7 +230,8 @@ def main(kind=None):
                             SMP='y', LOCALVERSION='"-v78-cpu-affinity"')
         elif fdt:
             settings.update(NOTE10_EARLY_FDT_BINDING='y', NOTE10_CPU_AFFINITY_BINDING='n',
-                            NOTE10_SHA256_STREAM_STATE='n', LOCALVERSION='"-v81-early-fdt"')
+                            NOTE10_SHA256_STREAM_STATE='n', HAVE_MEMBLOCK='y', NO_BOOTMEM='y',
+                            SMP='y', LOCALVERSION='"-v81-early-fdt"')
         run([*make, DEFCONFIG], 'build/01-defconfig.log')
         shutil.copyfile(objects/'.config', out/'public-baseline.config')
         for index, (name, value) in enumerate(settings.items()):
@@ -295,12 +296,15 @@ def main(kind=None):
         if affinity:
             result.update(raw_input_binding=False, original_fdt_digest_unavailable=True)
         if fdt:
-            from early_fdt_binding import linked_footprint, CAPACITY, BOUNDARY
+            from early_fdt_binding import linked_footprint, relative_placement_admission, CAPACITY, BOUNDARY, REVISION, ALLOCATION
             footprint = linked_footprint((objects/'System.map').read_text(),
-                (out/'new-object-symbols.log').read_text(), struct.unpack_from('<Q',raw,16)[0])
+                (out/'new-object-symbols.log').read_text(), struct.unpack_from('<Q',raw,16)[0],
+                struct.unpack_from('<Q',raw,8)[0],struct.unpack_from('<Q',raw,24)[0])
             result.update(raw_input_binding=False, fdt_capture_boundary=BOUNDARY,
                           fdt_snapshot_capacity_bytes=CAPACITY, fdt_snapshot_footprint=footprint,
+                          fdt_capture_revision=REVISION,fdt_allocation_form=ALLOCATION,
                           physical_placement_review_required=True)
+            result['fdt_relative_placement']=relative_placement_admission(result,config,footprint)
         result['files_sha256'] = {p.relative_to(out).as_posix(): sha(p) for p in out.rglob('*') if p.is_file()}
         save(out/'result.json', result)
     except Exception as error:

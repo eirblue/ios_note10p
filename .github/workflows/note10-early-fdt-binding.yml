@@ -7,8 +7,8 @@ on:
         required: true
         type: string
       new_cases_json:
-        description: Empty array for first full NEW batch; explicit changed or unexecuted names after partial failure
-        default: '[]'
+        description: Revision1 changed/new IDs only; select changed/unexecuted IDs after partial failure
+        default: '["test_owned_snapshot_late_hash_and_clear","test_capture_header_cap_and_oversize_refusal_preserve_admission","test_post_paging_overlay_invalid_input_and_default_off_admission","test_repeat_ambiguous_retains_first_then_clears_without_hash","test_late_provider_alloc_and_hash_failures_clear_snapshot","test_new_producer_kind_config_source_and_boundary_binding","test_tiny_linked_state_and_retained_baseline_extent","test_new_package_scope_label_and_exact_v78_predecessor","test_memblock_exhaustion_unavailable_without_hash_or_release","test_relative_load_config_header_and_route_mismatch_block"]'
         type: string
       build_only:
         description: Only after this exact new batch already passed
@@ -51,7 +51,7 @@ jobs:
             sudo -n env DEBIAN_FRONTEND=noninteractive timeout --kill-after=30s 180s apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
             sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a timeout --kill-after=30s 480s apt-get -o Dpkg::Use-Pty=0 -o DPkg::Lock::Timeout=60 -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install --no-install-recommends -y "${missing[@]}"
           fi
-      - name: One NEW owned FDT snapshot batch
+      - name: One revision1 changed/new memblock snapshot batch
         if: ${{ !inputs.build_only }}
         env:
           PYTHONDONTWRITEBYTECODE: '1'
