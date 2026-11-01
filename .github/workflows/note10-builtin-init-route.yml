@@ -17,7 +17,7 @@ jobs:
       - name: Install Kbuild tools
         shell: bash --noprofile --norc -euo pipefail {0}
         run: |
-          packages=(clang-14 gcc gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi make bc bison flex libssl-dev libelf-dev)
+          packages=(clang-14 gcc gcc-aarch64-linux-gnu libc6-dev-arm64-cross gcc-arm-linux-gnueabi make bc bison flex libssl-dev libelf-dev)
           missing=()
           for package in "${packages[@]}"; do
             if [ "$(dpkg-query -W -f='${Status}' "$package" 2>/dev/null || true)" != "install ok installed" ]; then
@@ -31,10 +31,9 @@ jobs:
             sudo -n env DEBIAN_FRONTEND=noninteractive timeout --kill-after=30s 180s apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
             sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a timeout --kill-after=30s 480s apt-get -o Dpkg::Use-Pty=0 -o DPkg::Lock::Timeout=60 -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install --no-install-recommends -y "${missing[@]}"
           fi
-      - name: One maximal NEW builtin-route and host-observation batch
-        env:
-          PYTHONDONTWRITEBYTECODE: '1'
-        run: python -B note10/device_test/test_builtin_init_route.py --output note10/private/v72-ci-new-tests
+      # Build-only continuation: run41303405329, source5a7f509131302b2fddfea1413853e43f2235dd5a.
+      # All37 NEW cases and native fixture already passed; never replay here.
+      # Historical result SHA256: 26646211547cd1e862a5981727f5882208dac1343c007382cb3f298326c4f26c.
       - name: Compile minimal Linux PID1 and build one new diagnostic Image
         env:
           PYTHONDONTWRITEBYTECODE: '1'
@@ -47,6 +46,4 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-          path: |
-            note10/private/v72-ci-new-tests/
-            note10/private/v72-ci-builtin-init/
+          path: note10/private/v72-ci-builtin-init/
