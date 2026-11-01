@@ -1,0 +1,1515 @@
+{
+  "accepted_v66": {
+    "ZIP": {
+      "bytes": 289046,
+      "ordinary_expanded_bytes": 1023685,
+      "ordinary_members": 33,
+      "root": "v66-ci-interface",
+      "sha256": "7f4322654a01fb1c9d75a45557e2569636fcead7e3c5a19b11e784bc89a061ce"
+    },
+    "accepted_private_result": {
+      "sha256": "bd76c1601856844cb5cdb287b75b0287ef7234e19b7bba501c7e63793f11823e"
+    },
+    "accepted_reader_result_sha256": "5113636e8a69c635f2444fbf542128f9ee7ca4c20f25243194d9b74c94242f1b",
+    "artifact_id": 13061729275,
+    "artifact_name": "note10-provider-core-interface-pc-only",
+    "complete_collector": {
+      "sha256": "a81f7b23965e7a988f4faf89557e3f6bde4ec4c270989b8182b0559d64e31523"
+    },
+    "complete_original_member_map": {
+      "v66-ci-interface/evidence/core.o": {
+        "bytes": 449664,
+        "sha256": "485b20e7075dc356325a0d33049b664ef7cc9f3c11a29838c0fc5221267b4edf"
+      },
+      "v66-ci-interface/evidence/provider.o": {
+        "bytes": 242256,
+        "sha256": "1aedfcee29e1f5c9511c8886f19aacd4e538f8a7142a8b47adb7039848834723"
+      },
+      "v66-ci-interface/inputs/core/ZIP.stderr.txt": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "v66-ci-interface/inputs/core/artifact.json": {
+        "bytes": 703,
+        "sha256": "3fbacc23cc4df03992594184c2532458b06c1f6414ee9b87157e6b7345612998"
+      },
+      "v66-ci-interface/inputs/core/artifact.stderr.txt": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "v66-ci-interface/inputs/core/artifacts.json": {
+        "bytes": 735,
+        "sha256": "bf0e683c2e4625b78e300af6e89b209a3c55798c5818f58220fd3174f36d3c7f"
+      },
+      "v66-ci-interface/inputs/core/artifacts.stderr.txt": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "v66-ci-interface/inputs/core/jobs.json": {
+        "bytes": 2818,
+        "sha256": "54a497f3bcf59e4ae3e60578f59c046070b161d29e2a4091860034c4bce9ecf8"
+      },
+      "v66-ci-interface/inputs/core/jobs.stderr.txt": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "v66-ci-interface/inputs/core/retrieval.json": {
+        "bytes": 3149,
+        "sha256": "fead796dc1f255aa64e96504b3900c26b50351987ce332adc6e6cdfe51ba1039"
+      },
+      "v66-ci-interface/inputs/core/run.json": {
+        "bytes": 12017,
+        "sha256": "094046f45573834d9f223878a5b8076a42fc3a507ee85897ec6172bdd242769f"
+      },
+      "v66-ci-interface/inputs/core/run.stderr.txt": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "v66-ci-interface/inputs/provider/ZIP.stderr.txt": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "v66-ci-interface/inputs/provider/artifact.json": {
+        "bytes": 697,
+        "sha256": "57435dd3a8a62afed29dc59bf94b61fd3136aaac0ea8edadc7367f3b6fb0aeee"
+      },
+      "v66-ci-interface/inputs/provider/artifact.stderr.txt": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "v66-ci-interface/inputs/provider/artifacts.json": {
+        "bytes": 729,
+        "sha256": "d3d39bd96742a5eaff63d49eddf946ee92cc7585939406a19ccaf6308b42550f"
+      },
+      "v66-ci-interface/inputs/provider/artifacts.stderr.txt": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "v66-ci-interface/inputs/provider/jobs.json": {
+        "bytes": 2812,
+        "sha256": "a7a5d1df4899bec9335f3f346e81504f76f1d4672a211191ee35b4a6a7f32140"
+      },
+      "v66-ci-interface/inputs/provider/jobs.stderr.txt": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "v66-ci-interface/inputs/provider/retrieval.json": {
+        "bytes": 3153,
+        "sha256": "f2d4ea1f57fbd738ff817fae16a3b22e3be3b01b3c3ed0d58afe1f39e64b84ca"
+      },
+      "v66-ci-interface/inputs/provider/run.json": {
+        "bytes": 12025,
+        "sha256": "6de9589b0c3bb0c97a367c5598a83466ff559f7966b7b9de1b51b96fafa00cd2"
+      },
+      "v66-ci-interface/inputs/provider/run.stderr.txt": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "v66-ci-interface/join.json": {
+        "bytes": 17916,
+        "sha256": "bf58781884f0f276df2bf20d2361135d0ea385187d7d366a5b815d0b9b0f4564"
+      },
+      "v66-ci-interface/result.json": {
+        "bytes": 8262,
+        "sha256": "97f0ebd93152ea059535702fd10620154e34247b6c24b3e9fc8bf030b98ddcf0"
+      },
+      "v66-ci-interface/source-manifest.json": {
+        "bytes": 992,
+        "sha256": "3da1741ee437cab4ecdc52c8d64fc484bce64aec9dcd27fc2e541d03b2227b04"
+      },
+      "v66-ci-interface/source/.github/workflows/note10-provider-core-interface.yml": {
+        "bytes": 1639,
+        "sha256": "daaab18f5078d728132ea53cfb0c3041af3506334110c7aae82d1f1f56f0c704"
+      },
+      "v66-ci-interface/source/note10/device_test/build_provider_core_interface.py": {
+        "bytes": 4115,
+        "sha256": "17540284b81fc508924a783c652d5a417ec241dabcc41dd04809126a29261a41"
+      },
+      "v66-ci-interface/source/note10/device_test/crypto_hash_composite.py": {
+        "bytes": 13976,
+        "sha256": "881c01a5ff6e00d91337c2190a516da094e28f186f36bfc996f68b651a382de2"
+      },
+      "v66-ci-interface/source/note10/device_test/provider_core_input_contract.py": {
+        "bytes": 44386,
+        "sha256": "f74206708f30a06f83907a3ede4b8b8fc059f1aeff4773b726fdc1a06dba2fc8"
+      },
+      "v66-ci-interface/source/note10/device_test/provider_core_interface.py": {
+        "bytes": 18708,
+        "sha256": "dc27c8f7da6a08794956bc45a91556bced0abd0557a680bb4d04b1436fb716c7"
+      },
+      "v66-ci-interface/source/note10/device_test/provider_core_interface_control.json": {
+        "bytes": 149720,
+        "sha256": "66b416b662a91c3e90e6d7ece9cfeb93bdd3c73fe0a11ab0fc979a41aafa059e"
+      },
+      "v66-ci-interface/source/note10/device_test/stage_provider_core_interface.py": {
+        "bytes": 1431,
+        "sha256": "343b1e00963aa747328fa993246e4e991f433b1504abe61c50e3d025085bbfb5"
+      },
+      "v66-ci-interface/source/note10/device_test/test_provider_core_interface.py": {
+        "bytes": 31782,
+        "sha256": "51ad4744d37f0f1e203c73d6f91f86ab7591365f86b9de67d54b66f935e6d915"
+      }
+    },
+    "independent_actual_review_sha256": "854b20a699cb797f5a405019b6575684aab74a98f93362c68d446b570cfb80e0",
+    "job_id": 124694707038,
+    "members": {
+      "core": {
+        "bytes": 449664,
+        "member": "v66-ci-interface/evidence/core.o",
+        "sha256": "485b20e7075dc356325a0d33049b664ef7cc9f3c11a29838c0fc5221267b4edf"
+      },
+      "join": {
+        "bytes": 17916,
+        "member": "v66-ci-interface/join.json",
+        "sha256": "bf58781884f0f276df2bf20d2361135d0ea385187d7d366a5b815d0b9b0f4564"
+      },
+      "producer_result": {
+        "bytes": 8262,
+        "member": "v66-ci-interface/result.json",
+        "sha256": "97f0ebd93152ea059535702fd10620154e34247b6c24b3e9fc8bf030b98ddcf0"
+      },
+      "provider": {
+        "bytes": 242256,
+        "member": "v66-ci-interface/evidence/provider.o",
+        "sha256": "1aedfcee29e1f5c9511c8886f19aacd4e538f8a7142a8b47adb7039848834723"
+      },
+      "retained_tool_control": {
+        "bytes": 149720,
+        "member": "v66-ci-interface/source/note10/device_test/provider_core_interface_control.json",
+        "sha256": "66b416b662a91c3e90e6d7ece9cfeb93bdd3c73fe0a11ab0fc979a41aafa059e"
+      },
+      "source_manifest": {
+        "bytes": 992,
+        "member": "v66-ci-interface/source-manifest.json",
+        "sha256": "3da1741ee437cab4ecdc52c8d64fc484bce64aec9dcd27fc2e541d03b2227b04"
+      }
+    },
+    "profile": "accepted-v66-interface-ZIP-v1",
+    "repository": "eirblue/ios_note10p",
+    "run_attempt": 1,
+    "run_id": 41254506469,
+    "source_commit": "2697cb0d48b42c9e0ab5d01509ada82e5c0d94f7",
+    "use": "Whole authenticated artifact and all33 ordinary members, exact original source manifest/context/producer membership. Selected objects are immutable accepted inputs, not freshly compiled outputs. Parent private RESULT identity is bound separately and is not presumed inside ZIP.",
+    "workflow_id": 403110121
+  },
+  "caps": {
+    "API_total_seconds": 180,
+    "ELF": 16777216,
+    "ELF_RELA": 131072,
+    "ELF_sections": 4096,
+    "ELF_symbols": 65536,
+    "JSON_text": 8388608,
+    "command_stderr": 8388608,
+    "command_stdout": 8388608,
+    "command_total_seconds": 180,
+    "evidence": 67108864,
+    "expanded": 67108864,
+    "members": 4096,
+    "old_ZIP": 16777216,
+    "tool_binary": 33554432
+  },
+  "frozen_input_profile": {
+    "attribution": {
+      "accepted_query_result_sha256": "c869b8ac43b16228ba022d2f0b70e68a4c0d54ade6565db2499d150eeffa08cb",
+      "accepted_query_review_sha256": "4841c1e6ea3d4a2bdbf12b2857814686f30b79546e22b894424e4c430ad71e9a",
+      "accepted_v66_result_sha256": "bd76c1601856844cb5cdb287b75b0287ef7234e19b7bba501c7e63793f11823e",
+      "new_query_facts": "Raw ownership, complete selected RELA and one-hop definition metadata observed once on these exact whole objects; no linker was run by the query.",
+      "provider_labels": "Historical accepted v66 labels; no new semantic proof.",
+      "query_checkpoint_sha256": "0418be01ec771c50cdb99ef22ca857b23132117c5dea20f0d71847aa68ae26ca",
+      "query_pins_sha256": "393c4b63aabe63a64f4060324aafd1ea9c000f6d5acb799abb939459e606da5a",
+      "query_source_sha256": "390129a1517873c03a78411f6f07a65806145d1c9e185a2355c0deeb5bb9282a"
+    },
+    "direct_named_definition_candidates": [
+      {
+        "definitions": [
+          {
+            "eligible_strong_normal_definition": true,
+            "object_sha256": "485b20e7075dc356325a0d33049b664ef7cc9f3c11a29838c0fc5221267b4edf",
+            "raw_symbol": {
+              "index": 447,
+              "info": 18,
+              "name": "crypto_register_shash",
+              "other": 0,
+              "section": 127,
+              "size": 64,
+              "value": 0
+            },
+            "role": "core"
+          }
+        ],
+        "name": "crypto_register_shash"
+      },
+      {
+        "definitions": [
+          {
+            "eligible_strong_normal_definition": true,
+            "object_sha256": "485b20e7075dc356325a0d33049b664ef7cc9f3c11a29838c0fc5221267b4edf",
+            "raw_symbol": {
+              "index": 454,
+              "info": 18,
+              "name": "crypto_register_shashes",
+              "other": 0,
+              "section": 133,
+              "size": 128,
+              "value": 0
+            },
+            "role": "core"
+          }
+        ],
+        "name": "crypto_register_shashes"
+      },
+      {
+        "definitions": [
+          {
+            "eligible_strong_normal_definition": true,
+            "object_sha256": "1aedfcee29e1f5c9511c8886f19aacd4e538f8a7142a8b47adb7039848834723",
+            "raw_symbol": {
+              "index": 80,
+              "info": 18,
+              "name": "crypto_sha256_finup",
+              "other": 0,
+              "section": 6,
+              "size": 248,
+              "value": 0
+            },
+            "role": "provider"
+          }
+        ],
+        "name": "crypto_sha256_finup"
+      },
+      {
+        "definitions": [
+          {
+            "eligible_strong_normal_definition": true,
+            "object_sha256": "1aedfcee29e1f5c9511c8886f19aacd4e538f8a7142a8b47adb7039848834723",
+            "raw_symbol": {
+              "index": 83,
+              "info": 18,
+              "name": "crypto_sha256_update",
+              "other": 0,
+              "section": 2,
+              "size": 224,
+              "value": 0
+            },
+            "role": "provider"
+          }
+        ],
+        "name": "crypto_sha256_update"
+      },
+      {
+        "definitions": [
+          {
+            "eligible_strong_normal_definition": true,
+            "object_sha256": "485b20e7075dc356325a0d33049b664ef7cc9f3c11a29838c0fc5221267b4edf",
+            "raw_symbol": {
+              "index": 452,
+              "info": 18,
+              "name": "crypto_unregister_shash",
+              "other": 0,
+              "section": 131,
+              "size": 24,
+              "value": 0
+            },
+            "role": "core"
+          }
+        ],
+        "name": "crypto_unregister_shash"
+      }
+    ],
+    "direct_only_span_count": 7,
+    "global_collision_summary": {
+      "finite_uniqueness": "The ten selected/direct spans each have unique qualified input ownership and no merge/group flags, accepted as immutable reviewed query facts under the exact whole-object/result/review hashes. No production input reparse or query replay.",
+      "same_name_groups": 21,
+      "scope": "The reviewed query observed21 global same-name groups. Their expanded members and all unselected headers are private query evidence only, omitted from public control. Those unrelated groups may merge; no global disjointness or global zero-collision claim."
+    },
+    "global_same_name_group_count": 21,
+    "object_records": {
+      "core": {
+        "bytes": 449664,
+        "member": "v66-ci-interface/evidence/core.o",
+        "sha256": "485b20e7075dc356325a0d33049b664ef7cc9f3c11a29838c0fc5221267b4edf"
+      },
+      "provider": {
+        "bytes": 242256,
+        "member": "v66-ci-interface/evidence/provider.o",
+        "sha256": "1aedfcee29e1f5c9511c8886f19aacd4e538f8a7142a8b47adb7039848834723"
+      }
+    },
+    "relocation_destinations_and_allowed_forms": [
+      {
+        "allowed_output_forms": [
+          "anonymous_local_section_symbol_only"
+        ],
+        "coordinate_definition_candidates": [
+          {
+            "index": 46,
+            "info": 1,
+            "name": "sha256_algs",
+            "other": 0,
+            "section": 38,
+            "size": 1536,
+            "value": 0
+          }
+        ],
+        "destination_coordinate": 0,
+        "destination_role": "provider",
+        "destination_section_name": ".data.sha256_algs",
+        "origin_role": "provider",
+        "raw_target_symbol": {
+          "index": 23,
+          "info": 3,
+          "name": "",
+          "other": 0,
+          "section": 38,
+          "size": 0,
+          "value": 0
+        },
+        "relocation": {
+          "addend": 0,
+          "entry": 0,
+          "offset": 8,
+          "relocation_section": 13,
+          "section": 12,
+          "symbol": 23,
+          "type": 275
+        },
+        "selected_purpose": "init",
+        "target_coordinate": 0
+      },
+      {
+        "allowed_output_forms": [
+          "anonymous_local_section_symbol_only"
+        ],
+        "coordinate_definition_candidates": [
+          {
+            "index": 46,
+            "info": 1,
+            "name": "sha256_algs",
+            "other": 0,
+            "section": 38,
+            "size": 1536,
+            "value": 0
+          }
+        ],
+        "destination_coordinate": 0,
+        "destination_role": "provider",
+        "destination_section_name": ".data.sha256_algs",
+        "origin_role": "provider",
+        "raw_target_symbol": {
+          "index": 23,
+          "info": 3,
+          "name": "",
+          "other": 0,
+          "section": 38,
+          "size": 0,
+          "value": 0
+        },
+        "relocation": {
+          "addend": 0,
+          "entry": 1,
+          "offset": 16,
+          "relocation_section": 13,
+          "section": 12,
+          "symbol": 23,
+          "type": 277
+        },
+        "selected_purpose": "init",
+        "target_coordinate": 0
+      },
+      {
+        "allowed_output_forms": [
+          "named_defined_registration_target_only"
+        ],
+        "destination_coordinate": 0,
+        "destination_role": "core",
+        "destination_section_name": ".text.crypto_register_shashes",
+        "origin_role": "provider",
+        "raw_target_symbol": {
+          "index": 79,
+          "info": 16,
+          "name": "crypto_register_shashes",
+          "other": 0,
+          "section": 0,
+          "size": 0,
+          "value": 0
+        },
+        "relocation": {
+          "addend": 0,
+          "entry": 2,
+          "offset": 20,
+          "relocation_section": 13,
+          "section": 12,
+          "symbol": 79,
+          "type": 283
+        },
+        "required_definition": {
+          "index": 454,
+          "info": 18,
+          "name": "crypto_register_shashes",
+          "other": 0,
+          "section": 133,
+          "size": 128,
+          "value": 0
+        },
+        "selected_purpose": "init"
+      },
+      {
+        "allowed_output_forms": [
+          "anonymous_local_section_symbol_only"
+        ],
+        "coordinate_definition_candidates": [
+          {
+            "index": 51,
+            "info": 2,
+            "name": "sha256_base_init",
+            "other": 0,
+            "section": 16,
+            "size": 88,
+            "value": 0
+          }
+        ],
+        "destination_coordinate": 0,
+        "destination_role": "provider",
+        "destination_section_name": ".text.sha256_base_init",
+        "origin_role": "provider",
+        "raw_target_symbol": {
+          "index": 9,
+          "info": 3,
+          "name": "",
+          "other": 0,
+          "section": 16,
+          "size": 0,
+          "value": 0
+        },
+        "relocation": {
+          "addend": 0,
+          "entry": 0,
+          "offset": 0,
+          "relocation_section": 39,
+          "section": 38,
+          "symbol": 9,
+          "type": 257
+        },
+        "selected_purpose": "table",
+        "target_coordinate": 0
+      },
+      {
+        "allowed_output_forms": [
+          "same_named_definition",
+          "anonymous_local_section_symbol_with_exact_coordinate_rebase"
+        ],
+        "coordinate_definition_candidates": [
+          {
+            "index": 83,
+            "info": 18,
+            "name": "crypto_sha256_update",
+            "other": 0,
+            "section": 2,
+            "size": 224,
+            "value": 0
+          }
+        ],
+        "destination_coordinate": 0,
+        "destination_role": "provider",
+        "destination_section_name": ".text.crypto_sha256_update",
+        "origin_role": "provider",
+        "raw_target_symbol": {
+          "index": 83,
+          "info": 18,
+          "name": "crypto_sha256_update",
+          "other": 0,
+          "section": 2,
+          "size": 224,
+          "value": 0
+        },
+        "relocation": {
+          "addend": 0,
+          "entry": 1,
+          "offset": 8,
+          "relocation_section": 39,
+          "section": 38,
+          "symbol": 83,
+          "type": 257
+        },
+        "selected_purpose": "table",
+        "target_coordinate": 0
+      },
+      {
+        "allowed_output_forms": [
+          "anonymous_local_section_symbol_only"
+        ],
+        "coordinate_definition_candidates": [
+          {
+            "index": 42,
+            "info": 2,
+            "name": "sha256_final",
+            "other": 0,
+            "section": 8,
+            "size": 228,
+            "value": 0
+          }
+        ],
+        "destination_coordinate": 0,
+        "destination_role": "provider",
+        "destination_section_name": ".text.sha256_final",
+        "origin_role": "provider",
+        "raw_target_symbol": {
+          "index": 5,
+          "info": 3,
+          "name": "",
+          "other": 0,
+          "section": 8,
+          "size": 0,
+          "value": 0
+        },
+        "relocation": {
+          "addend": 0,
+          "entry": 2,
+          "offset": 16,
+          "relocation_section": 39,
+          "section": 38,
+          "symbol": 5,
+          "type": 257
+        },
+        "selected_purpose": "table",
+        "target_coordinate": 0
+      },
+      {
+        "allowed_output_forms": [
+          "same_named_definition",
+          "anonymous_local_section_symbol_with_exact_coordinate_rebase"
+        ],
+        "coordinate_definition_candidates": [
+          {
+            "index": 80,
+            "info": 18,
+            "name": "crypto_sha256_finup",
+            "other": 0,
+            "section": 6,
+            "size": 248,
+            "value": 0
+          }
+        ],
+        "destination_coordinate": 0,
+        "destination_role": "provider",
+        "destination_section_name": ".text.crypto_sha256_finup",
+        "origin_role": "provider",
+        "raw_target_symbol": {
+          "index": 80,
+          "info": 18,
+          "name": "crypto_sha256_finup",
+          "other": 0,
+          "section": 6,
+          "size": 248,
+          "value": 0
+        },
+        "relocation": {
+          "addend": 0,
+          "entry": 3,
+          "offset": 24,
+          "relocation_section": 39,
+          "section": 38,
+          "symbol": 80,
+          "type": 257
+        },
+        "selected_purpose": "table",
+        "target_coordinate": 0
+      },
+      {
+        "allowed_output_forms": [
+          "anonymous_local_section_symbol_only"
+        ],
+        "coordinate_definition_candidates": [
+          {
+            "index": 53,
+            "info": 2,
+            "name": "sha224_base_init",
+            "other": 0,
+            "section": 17,
+            "size": 88,
+            "value": 0
+          }
+        ],
+        "destination_coordinate": 0,
+        "destination_role": "provider",
+        "destination_section_name": ".text.sha224_base_init",
+        "origin_role": "provider",
+        "raw_target_symbol": {
+          "index": 10,
+          "info": 3,
+          "name": "",
+          "other": 0,
+          "section": 17,
+          "size": 0,
+          "value": 0
+        },
+        "relocation": {
+          "addend": 0,
+          "entry": 4,
+          "offset": 768,
+          "relocation_section": 39,
+          "section": 38,
+          "symbol": 10,
+          "type": 257
+        },
+        "selected_purpose": "table",
+        "target_coordinate": 0
+      },
+      {
+        "allowed_output_forms": [
+          "same_named_definition",
+          "anonymous_local_section_symbol_with_exact_coordinate_rebase"
+        ],
+        "coordinate_definition_candidates": [
+          {
+            "index": 83,
+            "info": 18,
+            "name": "crypto_sha256_update",
+            "other": 0,
+            "section": 2,
+            "size": 224,
+            "value": 0
+          }
+        ],
+        "destination_coordinate": 0,
+        "destination_role": "provider",
+        "destination_section_name": ".text.crypto_sha256_update",
+        "origin_role": "provider",
+        "raw_target_symbol": {
+          "index": 83,
+          "info": 18,
+          "name": "crypto_sha256_update",
+          "other": 0,
+          "section": 2,
+          "size": 224,
+          "value": 0
+        },
+        "relocation": {
+          "addend": 0,
+          "entry": 5,
+          "offset": 776,
+          "relocation_section": 39,
+          "section": 38,
+          "symbol": 83,
+          "type": 257
+        },
+        "selected_purpose": "table",
+        "target_coordinate": 0
+      },
+      {
+        "allowed_output_forms": [
+          "anonymous_local_section_symbol_only"
+        ],
+        "coordinate_definition_candidates": [
+          {
+            "index": 42,
+            "info": 2,
+            "name": "sha256_final",
+            "other": 0,
+            "section": 8,
+            "size": 228,
+            "value": 0
+          }
+        ],
+        "destination_coordinate": 0,
+        "destination_role": "provider",
+        "destination_section_name": ".text.sha256_final",
+        "origin_role": "provider",
+        "raw_target_symbol": {
+          "index": 5,
+          "info": 3,
+          "name": "",
+          "other": 0,
+          "section": 8,
+          "size": 0,
+          "value": 0
+        },
+        "relocation": {
+          "addend": 0,
+          "entry": 6,
+          "offset": 784,
+          "relocation_section": 39,
+          "section": 38,
+          "symbol": 5,
+          "type": 257
+        },
+        "selected_purpose": "table",
+        "target_coordinate": 0
+      },
+      {
+        "allowed_output_forms": [
+          "same_named_definition",
+          "anonymous_local_section_symbol_with_exact_coordinate_rebase"
+        ],
+        "coordinate_definition_candidates": [
+          {
+            "index": 80,
+            "info": 18,
+            "name": "crypto_sha256_finup",
+            "other": 0,
+            "section": 6,
+            "size": 248,
+            "value": 0
+          }
+        ],
+        "destination_coordinate": 0,
+        "destination_role": "provider",
+        "destination_section_name": ".text.crypto_sha256_finup",
+        "origin_role": "provider",
+        "raw_target_symbol": {
+          "index": 80,
+          "info": 18,
+          "name": "crypto_sha256_finup",
+          "other": 0,
+          "section": 6,
+          "size": 248,
+          "value": 0
+        },
+        "relocation": {
+          "addend": 0,
+          "entry": 7,
+          "offset": 792,
+          "relocation_section": 39,
+          "section": 38,
+          "symbol": 80,
+          "type": 257
+        },
+        "selected_purpose": "table",
+        "target_coordinate": 0
+      },
+      {
+        "allowed_output_forms": [
+          "same_named_definition",
+          "anonymous_local_section_symbol_with_exact_coordinate_rebase"
+        ],
+        "coordinate_definition_candidates": [
+          {
+            "index": 447,
+            "info": 18,
+            "name": "crypto_register_shash",
+            "other": 0,
+            "section": 127,
+            "size": 64,
+            "value": 0
+          }
+        ],
+        "destination_coordinate": 0,
+        "destination_role": "core",
+        "destination_section_name": ".text.crypto_register_shash",
+        "origin_role": "core",
+        "raw_target_symbol": {
+          "index": 447,
+          "info": 18,
+          "name": "crypto_register_shash",
+          "other": 0,
+          "section": 127,
+          "size": 64,
+          "value": 0
+        },
+        "relocation": {
+          "addend": 0,
+          "entry": 0,
+          "offset": 52,
+          "relocation_section": 134,
+          "section": 133,
+          "symbol": 447,
+          "type": 283
+        },
+        "selected_purpose": "registration_target",
+        "target_coordinate": 0
+      },
+      {
+        "allowed_output_forms": [
+          "same_named_definition",
+          "anonymous_local_section_symbol_with_exact_coordinate_rebase"
+        ],
+        "coordinate_definition_candidates": [
+          {
+            "index": 452,
+            "info": 18,
+            "name": "crypto_unregister_shash",
+            "other": 0,
+            "section": 131,
+            "size": 24,
+            "value": 0
+          }
+        ],
+        "destination_coordinate": 0,
+        "destination_role": "core",
+        "destination_section_name": ".text.crypto_unregister_shash",
+        "origin_role": "core",
+        "raw_target_symbol": {
+          "index": 452,
+          "info": 18,
+          "name": "crypto_unregister_shash",
+          "other": 0,
+          "section": 131,
+          "size": 24,
+          "value": 0
+        },
+        "relocation": {
+          "addend": 0,
+          "entry": 1,
+          "offset": 120,
+          "relocation_section": 134,
+          "section": 133,
+          "symbol": 452,
+          "type": 283
+        },
+        "selected_purpose": "registration_target",
+        "target_coordinate": 0
+      }
+    ],
+    "selected_RELA_count": 13,
+    "selected_RELA_kind_counts": {
+      "257": 8,
+      "275": 1,
+      "277": 1,
+      "283": 3
+    },
+    "selected_RELA_width_bytes": {
+      "257": 8,
+      "275": 4,
+      "277": 4,
+      "283": 4
+    },
+    "selected_complete_RELA": [
+      {
+        "accepted_label": {
+          "index": 48,
+          "info": 2,
+          "name": "sha256_generic_mod_init",
+          "other": 0,
+          "section": 12,
+          "size": 32,
+          "value": 0
+        },
+        "full_section_extent": true,
+        "purpose": "init",
+        "raw_complete_section_RELA": [
+          {
+            "addend": 0,
+            "entry": 0,
+            "offset": 8,
+            "relocation_section": 13,
+            "section": 12,
+            "symbol": 23,
+            "type": 275
+          },
+          {
+            "addend": 0,
+            "entry": 1,
+            "offset": 16,
+            "relocation_section": 13,
+            "section": 12,
+            "symbol": 23,
+            "type": 277
+          },
+          {
+            "addend": 0,
+            "entry": 2,
+            "offset": 20,
+            "relocation_section": 13,
+            "section": 12,
+            "symbol": 79,
+            "type": 283
+          }
+        ],
+        "raw_symbol": {
+          "index": 48,
+          "info": 2,
+          "name": "sha256_generic_mod_init",
+          "other": 0,
+          "section": 12,
+          "size": 32,
+          "value": 0
+        },
+        "role": "provider"
+      },
+      {
+        "accepted_label": {
+          "index": 46,
+          "info": 1,
+          "name": "sha256_algs",
+          "other": 0,
+          "section": 38,
+          "size": 1536,
+          "value": 0
+        },
+        "full_section_extent": true,
+        "purpose": "table",
+        "raw_complete_section_RELA": [
+          {
+            "addend": 0,
+            "entry": 0,
+            "offset": 0,
+            "relocation_section": 39,
+            "section": 38,
+            "symbol": 9,
+            "type": 257
+          },
+          {
+            "addend": 0,
+            "entry": 1,
+            "offset": 8,
+            "relocation_section": 39,
+            "section": 38,
+            "symbol": 83,
+            "type": 257
+          },
+          {
+            "addend": 0,
+            "entry": 2,
+            "offset": 16,
+            "relocation_section": 39,
+            "section": 38,
+            "symbol": 5,
+            "type": 257
+          },
+          {
+            "addend": 0,
+            "entry": 3,
+            "offset": 24,
+            "relocation_section": 39,
+            "section": 38,
+            "symbol": 80,
+            "type": 257
+          },
+          {
+            "addend": 0,
+            "entry": 4,
+            "offset": 768,
+            "relocation_section": 39,
+            "section": 38,
+            "symbol": 10,
+            "type": 257
+          },
+          {
+            "addend": 0,
+            "entry": 5,
+            "offset": 776,
+            "relocation_section": 39,
+            "section": 38,
+            "symbol": 83,
+            "type": 257
+          },
+          {
+            "addend": 0,
+            "entry": 6,
+            "offset": 784,
+            "relocation_section": 39,
+            "section": 38,
+            "symbol": 5,
+            "type": 257
+          },
+          {
+            "addend": 0,
+            "entry": 7,
+            "offset": 792,
+            "relocation_section": 39,
+            "section": 38,
+            "symbol": 80,
+            "type": 257
+          }
+        ],
+        "raw_symbol": {
+          "index": 46,
+          "info": 1,
+          "name": "sha256_algs",
+          "other": 0,
+          "section": 38,
+          "size": 1536,
+          "value": 0
+        },
+        "role": "provider"
+      },
+      {
+        "accepted_label": {
+          "index": 454,
+          "info": 18,
+          "name": "crypto_register_shashes",
+          "other": 0,
+          "section": 133,
+          "size": 128,
+          "value": 0
+        },
+        "full_section_extent": true,
+        "purpose": "registration_target",
+        "raw_complete_section_RELA": [
+          {
+            "addend": 0,
+            "entry": 0,
+            "offset": 52,
+            "relocation_section": 134,
+            "section": 133,
+            "symbol": 447,
+            "type": 283
+          },
+          {
+            "addend": 0,
+            "entry": 1,
+            "offset": 120,
+            "relocation_section": 134,
+            "section": 133,
+            "symbol": 452,
+            "type": 283
+          }
+        ],
+        "raw_symbol": {
+          "index": 454,
+          "info": 18,
+          "name": "crypto_register_shashes",
+          "other": 0,
+          "section": 133,
+          "size": 128,
+          "value": 0
+        },
+        "role": "core"
+      }
+    ],
+    "selected_direct_spans": [
+      {
+        "all_same_name_contributions": [
+          {
+            "alignment": 4,
+            "entsize": 0,
+            "flags": 6,
+            "index": 12,
+            "info": 0,
+            "link": 0,
+            "name": ".init.text",
+            "name_offset": 170,
+            "object_sha256": "1aedfcee29e1f5c9511c8886f19aacd4e538f8a7142a8b47adb7039848834723",
+            "offset": 868,
+            "role": "provider",
+            "size": 32,
+            "type": 1
+          }
+        ],
+        "object_sha256": "1aedfcee29e1f5c9511c8886f19aacd4e538f8a7142a8b47adb7039848834723",
+        "reasons": [
+          "selected init"
+        ],
+        "role": "provider",
+        "section": {
+          "alignment": 4,
+          "entsize": 0,
+          "flags": 6,
+          "index": 12,
+          "info": 0,
+          "link": 0,
+          "name": ".init.text",
+          "name_offset": 170,
+          "offset": 868,
+          "size": 32,
+          "type": 1
+        },
+        "section_bytes_sha256": "87fe51bf5e8b908483c49e360b56de4a0dde93141dc113f9004baf9eb7f6f385"
+      },
+      {
+        "all_same_name_contributions": [
+          {
+            "alignment": 128,
+            "entsize": 0,
+            "flags": 3,
+            "index": 38,
+            "info": 0,
+            "link": 0,
+            "name": ".data.sha256_algs",
+            "name_offset": 676,
+            "object_sha256": "1aedfcee29e1f5c9511c8886f19aacd4e538f8a7142a8b47adb7039848834723",
+            "offset": 7424,
+            "role": "provider",
+            "size": 1536,
+            "type": 1
+          }
+        ],
+        "object_sha256": "1aedfcee29e1f5c9511c8886f19aacd4e538f8a7142a8b47adb7039848834723",
+        "reasons": [
+          "direct target of init",
+          "direct target of init",
+          "selected table"
+        ],
+        "role": "provider",
+        "section": {
+          "alignment": 128,
+          "entsize": 0,
+          "flags": 3,
+          "index": 38,
+          "info": 0,
+          "link": 0,
+          "name": ".data.sha256_algs",
+          "name_offset": 676,
+          "offset": 7424,
+          "size": 1536,
+          "type": 1
+        },
+        "section_bytes_sha256": "4011b40862893a426a9deab7e15a921f455c00d9fff62534e9b6dfbd106155cc"
+      },
+      {
+        "all_same_name_contributions": [
+          {
+            "alignment": 4,
+            "entsize": 0,
+            "flags": 6,
+            "index": 16,
+            "info": 0,
+            "link": 0,
+            "name": ".text.sha256_base_init",
+            "name_offset": 209,
+            "object_sha256": "1aedfcee29e1f5c9511c8886f19aacd4e538f8a7142a8b47adb7039848834723",
+            "offset": 6900,
+            "role": "provider",
+            "size": 88,
+            "type": 1
+          }
+        ],
+        "object_sha256": "1aedfcee29e1f5c9511c8886f19aacd4e538f8a7142a8b47adb7039848834723",
+        "reasons": [
+          "direct target of table"
+        ],
+        "role": "provider",
+        "section": {
+          "alignment": 4,
+          "entsize": 0,
+          "flags": 6,
+          "index": 16,
+          "info": 0,
+          "link": 0,
+          "name": ".text.sha256_base_init",
+          "name_offset": 209,
+          "offset": 6900,
+          "size": 88,
+          "type": 1
+        },
+        "section_bytes_sha256": "807ec69b8eff68622ee3cf5acbc6f412eb9441713d4379a1e706053211eb1e2c"
+      },
+      {
+        "all_same_name_contributions": [
+          {
+            "alignment": 4,
+            "entsize": 0,
+            "flags": 6,
+            "index": 2,
+            "info": 0,
+            "link": 0,
+            "name": ".text.crypto_sha256_update",
+            "name_offset": 32,
+            "object_sha256": "1aedfcee29e1f5c9511c8886f19aacd4e538f8a7142a8b47adb7039848834723",
+            "offset": 64,
+            "role": "provider",
+            "size": 224,
+            "type": 1
+          }
+        ],
+        "object_sha256": "1aedfcee29e1f5c9511c8886f19aacd4e538f8a7142a8b47adb7039848834723",
+        "reasons": [
+          "direct target of table",
+          "direct target of table",
+          "named direct strong-definition candidate crypto_sha256_update"
+        ],
+        "role": "provider",
+        "section": {
+          "alignment": 4,
+          "entsize": 0,
+          "flags": 6,
+          "index": 2,
+          "info": 0,
+          "link": 0,
+          "name": ".text.crypto_sha256_update",
+          "name_offset": 32,
+          "offset": 64,
+          "size": 224,
+          "type": 1
+        },
+        "section_bytes_sha256": "bf7026343bd4543d5ebab1a0a36ceea577b55fa475760b9e07656583a1b68158"
+      },
+      {
+        "all_same_name_contributions": [
+          {
+            "alignment": 4,
+            "entsize": 0,
+            "flags": 6,
+            "index": 8,
+            "info": 0,
+            "link": 0,
+            "name": ".text.sha256_final",
+            "name_offset": 130,
+            "object_sha256": "1aedfcee29e1f5c9511c8886f19aacd4e538f8a7142a8b47adb7039848834723",
+            "offset": 608,
+            "role": "provider",
+            "size": 228,
+            "type": 1
+          }
+        ],
+        "object_sha256": "1aedfcee29e1f5c9511c8886f19aacd4e538f8a7142a8b47adb7039848834723",
+        "reasons": [
+          "direct target of table",
+          "direct target of table"
+        ],
+        "role": "provider",
+        "section": {
+          "alignment": 4,
+          "entsize": 0,
+          "flags": 6,
+          "index": 8,
+          "info": 0,
+          "link": 0,
+          "name": ".text.sha256_final",
+          "name_offset": 130,
+          "offset": 608,
+          "size": 228,
+          "type": 1
+        },
+        "section_bytes_sha256": "1694b46266677596b31a97590dc281ba200f875a5e406832cda1c03a56be638e"
+      },
+      {
+        "all_same_name_contributions": [
+          {
+            "alignment": 4,
+            "entsize": 0,
+            "flags": 6,
+            "index": 6,
+            "info": 0,
+            "link": 0,
+            "name": ".text.crypto_sha256_finup",
+            "name_offset": 99,
+            "object_sha256": "1aedfcee29e1f5c9511c8886f19aacd4e538f8a7142a8b47adb7039848834723",
+            "offset": 360,
+            "role": "provider",
+            "size": 248,
+            "type": 1
+          }
+        ],
+        "object_sha256": "1aedfcee29e1f5c9511c8886f19aacd4e538f8a7142a8b47adb7039848834723",
+        "reasons": [
+          "direct target of table",
+          "direct target of table",
+          "named direct strong-definition candidate crypto_sha256_finup"
+        ],
+        "role": "provider",
+        "section": {
+          "alignment": 4,
+          "entsize": 0,
+          "flags": 6,
+          "index": 6,
+          "info": 0,
+          "link": 0,
+          "name": ".text.crypto_sha256_finup",
+          "name_offset": 99,
+          "offset": 360,
+          "size": 248,
+          "type": 1
+        },
+        "section_bytes_sha256": "37a1463dee0014159b552a2933e48360b163574b15091de1987401526cdacb56"
+      },
+      {
+        "all_same_name_contributions": [
+          {
+            "alignment": 4,
+            "entsize": 0,
+            "flags": 6,
+            "index": 17,
+            "info": 0,
+            "link": 0,
+            "name": ".text.sha224_base_init",
+            "name_offset": 232,
+            "object_sha256": "1aedfcee29e1f5c9511c8886f19aacd4e538f8a7142a8b47adb7039848834723",
+            "offset": 6988,
+            "role": "provider",
+            "size": 88,
+            "type": 1
+          }
+        ],
+        "object_sha256": "1aedfcee29e1f5c9511c8886f19aacd4e538f8a7142a8b47adb7039848834723",
+        "reasons": [
+          "direct target of table"
+        ],
+        "role": "provider",
+        "section": {
+          "alignment": 4,
+          "entsize": 0,
+          "flags": 6,
+          "index": 17,
+          "info": 0,
+          "link": 0,
+          "name": ".text.sha224_base_init",
+          "name_offset": 232,
+          "offset": 6988,
+          "size": 88,
+          "type": 1
+        },
+        "section_bytes_sha256": "281d7dde21f9dc4fbae50d6164767def9ad9f2e8766c5727cdffc6c39ab7ca66"
+      },
+      {
+        "all_same_name_contributions": [
+          {
+            "alignment": 4,
+            "entsize": 0,
+            "flags": 6,
+            "index": 133,
+            "info": 0,
+            "link": 0,
+            "name": ".text.crypto_register_shashes",
+            "name_offset": 2162,
+            "object_sha256": "485b20e7075dc356325a0d33049b664ef7cc9f3c11a29838c0fc5221267b4edf",
+            "offset": 6348,
+            "role": "core",
+            "size": 128,
+            "type": 1
+          }
+        ],
+        "object_sha256": "485b20e7075dc356325a0d33049b664ef7cc9f3c11a29838c0fc5221267b4edf",
+        "reasons": [
+          "selected registration_target",
+          "named direct strong-definition candidate crypto_register_shashes"
+        ],
+        "role": "core",
+        "section": {
+          "alignment": 4,
+          "entsize": 0,
+          "flags": 6,
+          "index": 133,
+          "info": 0,
+          "link": 0,
+          "name": ".text.crypto_register_shashes",
+          "name_offset": 2162,
+          "offset": 6348,
+          "size": 128,
+          "type": 1
+        },
+        "section_bytes_sha256": "68174f0d9aa43dd8306fa1b9067c1515d495d04367d86a141042be79208815e7"
+      },
+      {
+        "all_same_name_contributions": [
+          {
+            "alignment": 4,
+            "entsize": 0,
+            "flags": 6,
+            "index": 127,
+            "info": 0,
+            "link": 0,
+            "name": ".text.crypto_register_shash",
+            "name_offset": 2065,
+            "object_sha256": "485b20e7075dc356325a0d33049b664ef7cc9f3c11a29838c0fc5221267b4edf",
+            "offset": 6080,
+            "role": "core",
+            "size": 64,
+            "type": 1
+          }
+        ],
+        "object_sha256": "485b20e7075dc356325a0d33049b664ef7cc9f3c11a29838c0fc5221267b4edf",
+        "reasons": [
+          "direct target of registration_target",
+          "named direct strong-definition candidate crypto_register_shash"
+        ],
+        "role": "core",
+        "section": {
+          "alignment": 4,
+          "entsize": 0,
+          "flags": 6,
+          "index": 127,
+          "info": 0,
+          "link": 0,
+          "name": ".text.crypto_register_shash",
+          "name_offset": 2065,
+          "offset": 6080,
+          "size": 64,
+          "type": 1
+        },
+        "section_bytes_sha256": "753e73f7c6df626ab96abe710fe37aed4c43316d70eb67bce0735225a03dc0a7"
+      },
+      {
+        "all_same_name_contributions": [
+          {
+            "alignment": 4,
+            "entsize": 0,
+            "flags": 6,
+            "index": 131,
+            "info": 0,
+            "link": 0,
+            "name": ".text.crypto_unregister_shash",
+            "name_offset": 2127,
+            "object_sha256": "485b20e7075dc356325a0d33049b664ef7cc9f3c11a29838c0fc5221267b4edf",
+            "offset": 6324,
+            "role": "core",
+            "size": 24,
+            "type": 1
+          }
+        ],
+        "object_sha256": "485b20e7075dc356325a0d33049b664ef7cc9f3c11a29838c0fc5221267b4edf",
+        "reasons": [
+          "direct target of registration_target",
+          "named direct strong-definition candidate crypto_unregister_shash"
+        ],
+        "role": "core",
+        "section": {
+          "alignment": 4,
+          "entsize": 0,
+          "flags": 6,
+          "index": 131,
+          "info": 0,
+          "link": 0,
+          "name": ".text.crypto_unregister_shash",
+          "name_offset": 2127,
+          "offset": 6324,
+          "size": 24,
+          "type": 1
+        },
+        "section_bytes_sha256": "b2e8dba8e3b880702b2ccfe2a1784d52395d6c7353220cc37bb9f45326ddfc8b"
+      }
+    ],
+    "selected_span_count": 3,
+    "unique_owned_span_count": 10,
+    "unsupported_observed": []
+  },
+  "link_profile": {
+    "exact_argv": [
+      "<pinned-resolved-GNU-ld>",
+      "-m",
+      "aarch64linux",
+      "--no-relax",
+      "-r",
+      "-o",
+      "paired/provider-core-pair.o",
+      "inputs/provider.o",
+      "inputs/core.o"
+    ],
+    "input_order": [
+      "provider.o",
+      "core.o"
+    ],
+    "link_count": 1,
+    "tool": {
+      "path": "/usr/bin/aarch64-linux-gnu-ld.bfd",
+      "role": "aarch64-linux-gnu-ld",
+      "sha256": "6aa8c5d92ba970c8415b18f412e5dca910e31d57b9ac126aae5d2e11928c474d",
+      "version": "GNU ld (GNU Binutils for Ubuntu) 2.38\nCopyright (C) 2022 Free Software Foundation, Inc.\nThis program is free software; you may redistribute it under the terms of\nthe GNU General Public License version 3 or (at your option) a later version.\nThis program has absolutely no warranty.\n"
+    },
+    "version_argv": [
+      "<same-pinned-resolved-GNU-ld>",
+      "--version"
+    ],
+    "version_count": 1
+  },
+  "nonclaims": {
+    "Image_BOOT_XNU_iOS_execution_or_readiness": false,
+    "SHA_correctness_reproved": false,
+    "allocation_success": false,
+    "core_recompiled": false,
+    "deployment_ready": false,
+    "device_authorized": false,
+    "generated_or_whole_binary_ABI_proven": false,
+    "independent_core_layout_or_paired_DIE_proven": false,
+    "note": "Unlike historical v66, a future accepted v67 may honestly record one new GNU link executed; do not copy an old compiler_or_linker_run=false flag as a v67 fact.",
+    "old_semantic_origin_model_or_fixture_replay": false,
+    "physical_BOOT_reboot": 0,
+    "provider_recompiled": false,
+    "provider_runtime_available": false,
+    "registration_or_callback_execution": false,
+    "runtime_or_vermagic_compatibility_proven": false,
+    "whole_stack_bound_or_full_Image": false,
+    "whole_toolchain_identity_proven": false
+  },
+  "schema": "provider-core-pair-control-v1"
+}
