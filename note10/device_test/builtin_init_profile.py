@@ -43,8 +43,7 @@ def raw_file(path, data):
 
 
 def input_binding(root, result, image, lines):
-    from builtin_init_route import cpio, elf_manifest, sha
-    from build_sha256_kat_recovery import bootloader_cmdline_policy
+    from builtin_init_route import cpio, elf_manifest, sha, builtin_cmdline_policy
     root = Path(root)
     require(result.get('builtin_init_route') is True, 'builtin route result required')
     required = {'CONFIG_NOTE10_BUILTIN_INIT_ROUTE=y', 'CONFIG_INITRAMFS_FORCE=y',
@@ -53,7 +52,7 @@ def input_binding(root, result, image, lines):
     values = [l.partition('=')[2] for l in lines if l.startswith('CONFIG_INITRAMFS_SOURCE=')]
     require(len(values) == 1 and values[0].startswith('"/') and values[0].endswith('/initramfs.cpio"'),
             'actual generated builtin archive input required')
-    bootloader_cmdline_policy('\n'.join(lines))
+    builtin_cmdline_policy('\n'.join(lines))
     elf, archive = (root/'minimal-init.elf').read_bytes(), (root/'initramfs.cpio').read_bytes()
     manifest = json.loads((root/'minimal-init.json').read_text(encoding='utf8'))
     require(manifest == {'elf': elf_manifest(elf), 'cpio_sha256': sha(archive),

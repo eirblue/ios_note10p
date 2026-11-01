@@ -114,8 +114,9 @@ def raw_binding(root, expected_result, expected_source):
     policy_source = 'note10/device_test/build_sha256_kat_recovery.py'
     require(sha(ROOT/policy_source) == result['source_sha256'].get(policy_source),
             'live command-line policy helper differs from Image-producing source')
-    from build_sha256_kat_recovery import bootloader_cmdline_policy
-    bootloader_cmdline_policy('\n'.join(lines))
+    if not builtin:
+        from build_sha256_kat_recovery import bootloader_cmdline_policy
+        bootloader_cmdline_policy('\n'.join(lines))
     extra = {}
     if builtin:
         from builtin_init_profile import input_binding

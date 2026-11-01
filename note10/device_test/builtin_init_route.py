@@ -17,6 +17,32 @@ API_PINS = {
 OPTION = 'NOTE10_BUILTIN_INIT_ROUTE'
 
 
+def builtin_cmdline_policy(config):
+    """Stock INITRAMFS_FORCE needs EXTEND/FORCE; choose bounded DT append.
+
+    A nonempty CMDLINE makes the ARM64 choice visible. Keep FORCE disabled:
+    pinned FDT appends bootloader arguments after this sole builtin argument.
+    The independent main.c guard still overrides any later rdinit selection.
+    """
+    names = ('CMDLINE', 'CMDLINE_FORCE', 'CMDLINE_EXTEND', 'CMDLINE_FROM_BOOTLOADER')
+    values = {}
+    for line in config.splitlines():
+        for name in names:
+            key = 'CONFIG_'+name
+            value = line[len(key)+1:] if line.startswith(key+'=') else 'n' if line == '# '+key+' is not set' else None
+            if value is not None:
+                if name in values:
+                    raise ValueError('duplicate actual builtin-route setting: '+name)
+                values[name] = value
+    if (values.get('CMDLINE') != '"rdinit=/init"' or values.get('CMDLINE_EXTEND') != 'y' or
+            any(values.get(name, 'n') != 'n' for name in ('CMDLINE_FORCE', 'CMDLINE_FROM_BOOTLOADER'))):
+        raise ValueError('builtin route requires only rdinit=/init, EXTEND=y and no FORCE/alternate choice')
+    return dict(builtin_cmdline='rdinit=/init', builtin_cmdline_empty=False,
+                bootloader_arguments_overwritten=False, bootloader_arguments_appended=True,
+                pinned_fdt_branch='builtin-prefix-then-DT-bootargs',
+                append_bound='existing COMMAND_LINE_SIZE; no unbounded preservation claim')
+
+
 def sha(data):
     return hashlib.sha256(data).hexdigest()
 

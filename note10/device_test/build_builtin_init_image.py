@@ -52,7 +52,8 @@ SETTINGS = {
     'INITRAMFS_COMPRESSION_GZIP': 'n', 'INITRAMFS_COMPRESSION_BZIP2': 'n',
     'INITRAMFS_COMPRESSION_LZMA': 'n', 'INITRAMFS_COMPRESSION_XZ': 'n',
     'INITRAMFS_COMPRESSION_LZO': 'n', 'INITRAMFS_COMPRESSION_LZ4': 'n',
-    'CMDLINE': '""', 'CMDLINE_FORCE': 'n', 'CMDLINE_EXTEND': 'n', 'LOG_BUF_SHIFT': '21',
+    'CMDLINE': '"rdinit=/init"', 'CMDLINE_FORCE': 'n', 'CMDLINE_EXTEND': 'y',
+    'CMDLINE_FROM_BOOTLOADER': 'n', 'LOG_BUF_SHIFT': '21',
     'LTO': 'n', 'LTO_CLANG': 'n', 'FTRACE_MCOUNT_RECORD': 'n',
     'STACK_VALIDATION': 'n', 'LOCALVERSION_AUTO': 'n',
     'LOCALVERSION': '"-v72-builtin-init"',
@@ -120,8 +121,8 @@ def main():
     from build_xnu_runtime_plan_component import acquire, extract, COMMIT, DEFCONFIG
     from pre_pm_archive_contract import archive_identity, stable_archive
     from prepare_sha256_kat_recovery import TARGET, KERNEL_PINS
-    from builtin_init_route import install, API_PINS, elf_manifest, cpio
-    from build_sha256_kat_recovery import BUILD_INPUT_PINS, bootloader_cmdline_policy, prepare_image_inputs
+    from builtin_init_route import install, API_PINS, elf_manifest, cpio, builtin_cmdline_policy
+    from build_sha256_kat_recovery import BUILD_INPUT_PINS, prepare_image_inputs
     save(out/'source-manifest.json', manifest)
     ci = {name: os.environ.get(name) for name in
           ('GITHUB_SHA', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'GITHUB_JOB')}
@@ -208,7 +209,7 @@ def main():
         # Preserve the actual effective bytes before any validation can fail.
         shutil.copyfile(objects/'.config', out/'actual-effective.config')
         config = (objects/'.config').read_text().splitlines()
-        cmdline_policy = bootloader_cmdline_policy('\n'.join(config))
+        cmdline_policy = builtin_cmdline_policy('\n'.join(config))
         for name, value in settings.items():
             wanted = '# CONFIG_'+name+' is not set' if value == 'n' else 'CONFIG_'+name+'='+value
             if wanted not in config and not (value == 'n' and not any(x.startswith('CONFIG_'+name+'=') for x in config)):
