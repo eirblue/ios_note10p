@@ -105,7 +105,7 @@ def verify_partitions(adb,backup,boot_sha):
         if adb.text('shell','sha256sum',row['block_node']).split()[0]!=expected:raise ValueError('Partition differs: '+row['partition'])
 
 
-def wait_recovery(adb,previous_id,seconds,monotonic=time.monotonic,sleep=time.sleep):
+def wait_recovery(adb,previous_id,seconds,monotonic=time.monotonic,sleep=time.sleep,observe=None):
     deadline=monotonic()+seconds
     original=adb.call
     def bounded_call(*args,**kwargs):
@@ -116,11 +116,16 @@ def wait_recovery(adb,previous_id,seconds,monotonic=time.monotonic,sleep=time.sl
     adb.call=bounded_call
     try:
         while monotonic()<deadline:
+            row=dict(monotonic=monotonic(),remaining_seconds=max(0,deadline-monotonic()))
             try:
-                preflight(adb)
-                current=boot_id(adb)
+                row['preflight']=preflight(adb)
+                current=boot_id(adb);row['observed_boot_id']=current
+                row['changed']=current!=previous_id
+                if observe:observe(row)
                 if current!=previous_id:return current
-            except (RuntimeError,ValueError,subprocess.TimeoutExpired):pass
+            except (RuntimeError,ValueError,subprocess.TimeoutExpired) as error:
+                row.update(error_type=type(error).__name__,error=str(error)[:2048])
+                if observe:observe(row)
             sleep(min(2,max(0,deadline-monotonic())))
         raise TimeoutError('Recovery did not return with a new boot ID; stop, do not flash or reboot again')
     finally:
@@ -158,14 +163,41 @@ def run_plan(path,expected,output,*,execute=False,limit=1,adb=None,verified_roun
                    check(packages,Path(item['kernel_build']),Path(plan['backup']),Path(plan['core_model']),Path(plan['gate_model']),Path(plan['init_model']),adb))
             if ready.get('ready_for_manual_access_test') is not True:raise ValueError('Readiness did not pass')
             before=boot_id(adb)
+            journal.update(pre_reboot_boot_id=before,stage_kernel_build=str(item['kernel_build']),
+                           stage_image_sha256=item['image_sha256'],active_cycle=item['cycle'],
+                           pre_attempt_monotonic=time.monotonic(),recovery_polls=[])
+            persist()
             if adb.text('shell','command','-v','twrp')!='/sbin/twrp':raise ValueError('Expected TWRP CLI unavailable')
             journal['active_cycle']=item['cycle'];journal['partition_writes_attempted']=True;persist()
             adb.call('shell','twrp','install',staged['ram_directory']+'/'+diag['file'],timeout=180)
             preflight(adb);verify_partitions(adb,plan['backup'],diag['payload_sha256'])
             journal['reboots_attempted']=True;persist()
-            try:adb.call('shell','twrp','reboot',timeout=30)
-            except RuntimeError:pass  # adbd may close as reboot starts; never resend.
-            after=wait_recovery(adb,before,plan['return_timeout_seconds'])
+            journal['reboot_observation']=dict(start_monotonic=time.monotonic(),command=['shell','twrp','reboot'])
+            persist()
+            try:
+                reply=adb.call('shell','twrp','reboot',timeout=30)
+                observation=journal['reboot_observation']
+                observation.update(returned=True,raw_bytes=len(reply),raw_sha256=hashlib.sha256(reply).hexdigest(),
+                                   end_monotonic=time.monotonic(),process_exit_code=None,
+                                   process_exit_code_not_exposed_by_Adb_call=True)
+                if len(reply)<=65536:
+                    (output/'reboot-return.bin').write_bytes(reply)
+                    observation['raw_file']='reboot-return.bin'
+                else:observation['raw_file_omitted_due_to_bound']=True
+                persist()
+            except Exception as error:
+                journal['reboot_observation'].update(returned=False,error_type=type(error).__name__,
+                    error=str(error)[:2048],end_monotonic=time.monotonic(),process_exit_code=None)
+                persist()
+                if not isinstance(error,RuntimeError):raise
+                # adbd may close as reboot starts; never resend or infer success.
+            def observe_poll(row):
+                journal['recovery_poll_count']=journal.get('recovery_poll_count',0)+1
+                if len(journal['recovery_polls'])<128:journal['recovery_polls'].append(row)
+                else:journal['last_recovery_poll']=row
+                persist()
+            after=wait_recovery(adb,before,plan['return_timeout_seconds'],observe=observe_poll)
+            journal['observed_return_boot_id']=after;persist()
             if preflight(adb)['twrp_version']!=initial['twrp_version']:raise ValueError('Recovery version changed')
             # Preserve diagnostic logs immediately after return, even when tests failed.
             captured=(collect_kat if kat else collect)(packages,Path(item['kernel_build']),adb)

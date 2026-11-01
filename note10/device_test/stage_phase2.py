@@ -11,7 +11,7 @@ from run_probe import Adb,ROOT,preflight
 
 def verify_packages(directory):
     result=json.loads((directory/'package-result.json').read_text())
-    from sha256_kat_device_profile import selected,package_scope,FIELDS
+    from sha256_kat_device_profile import selected,package_scope,fields
     kat=selected(result)
     if kat:package_scope(result)
     from ehld_irqsave_binding import package_scope as irqsave_package_scope
@@ -42,7 +42,7 @@ def verify_packages(directory):
             meta=json.loads(archive.read('manifest.json'))
             if kat:
                 package_scope(record,record.get('mode'));package_scope(meta,record.get('mode'))
-                if any(record.get(k)!=result.get(k) or meta.get(k)!=result.get(k) for k in FIELDS):raise ValueError('KAT package profile differs')
+                if any(record.get(k)!=result.get(k) or meta.get(k)!=result.get(k) for k in fields(result)):raise ValueError('KAT package profile differs')
             elif selected(record) or selected(meta):raise ValueError('Unselected KAT package profile')
             for feature in ('gic_roundtrip','dma_pm_audit','ufs_pm_audit','iommu_pm_audit','abox_pm_audit','abox_pmu_audit','pm_noirq','pmu_settle','pm_cpus','pm_post_arch','pm_edge_inventory','pm_irq','pm_callbacks'):
                 flag=feature+'_diagnostic';version=feature+'_evidence_version'

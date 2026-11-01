@@ -10,6 +10,7 @@ import sys
 import uuid
 
 PROFILE = 'sha256-kat-recovery-v1'
+BUILTIN_PROFILE = 'sha256-kat-builtin-init-v2'
 ROOT = Path(__file__).resolve().parents[2]
 SLOT = b'N10_CYCLE_SLOT_UNSET_0123456789A'
 FIELDS = ('device_profile', 'profile_sha256', 'build_evidence_id', 'kernel_banner', 'accepted_result_sha256',
@@ -56,8 +57,8 @@ def private(path):
 
 def selected(row):
     marker = row.get('device_profile')
-    require(marker in (None, PROFILE), 'unknown device profile')
-    return marker == PROFILE
+    require(marker in (None, PROFILE, BUILTIN_PROFILE), 'unknown device profile')
+    return marker in (PROFILE, BUILTIN_PROFILE)
 
 
 def no_legacy(row):
@@ -73,7 +74,9 @@ def raw_binding(root, expected_result, expected_source):
             re.fullmatch('[0-9a-f]{40}', expected_source or ''), 'exact accepted result/source pins required')
     require(sha(root/'result.json') == expected_result, 'accepted CI result changed')
     result = read(root/'result.json')
-    require(result.get('version') == 'v71' and result.get('passed') is True and
+    builtin = result.get('version') == 'v72'
+    marker = BUILTIN_PROFILE if builtin else PROFILE
+    require(result.get('version') in ('v71', 'v72') and result.get('passed') is True and
             result.get('Image_built') is True and result.get('BOOT_built') is False and
             result.get('cycle_slot_patched') is False and result.get('kernel_or_provider_executed') is False and
             result.get('ci_context', {}).get('GITHUB_SHA') == expected_source and
@@ -96,31 +99,45 @@ def raw_binding(root, expected_result, expected_source):
     identity = result['build_evidence_id']
     require(re.fullmatch('[0-9a-f]{32}', identity or '') and identity.encode() in image and
             all(x in image for x in (b'N10RET1', b'N10SHA1')), 'Image evidence identity differs')
-    banners = re.findall(rb'Linux version 4\.14\.113-v71-sha256-recovery [^\x00\r\n]+', image)
-    require(len(banners) == 1, 'unique actual v71 kernel banner required')
+    banners = re.findall((rb'Linux version 4\.14\.113-v72-builtin-init [^\x00\r\n]+' if builtin else rb'Linux version 4\.14\.113-v71-sha256-recovery [^\x00\r\n]+'), image)
+    require(len(banners) == 1, 'unique actual profile kernel banner required')
     config = root/'prerequisites/objects/.config'
     required = {'CONFIG_NOTE10_SHA256_KAT_RECOVERY=y', 'CONFIG_CRYPTO=y', 'CONFIG_CRYPTO_HASH=y',
                 'CONFIG_CRYPTO_SHA256=y', 'CONFIG_EXYNOS_REBOOT=y', 'CONFIG_SEC_REBOOT=y',
                 'CONFIG_BLK_DEV_INITRD=y', 'CONFIG_RD_LZMA=y', 'CONFIG_ARM64_4K_PAGES=y',
-                'CONFIG_INITRAMFS_SOURCE=""'}
+                }
+    if not builtin:
+        required.add('CONFIG_INITRAMFS_SOURCE=""')
     lines = config.read_text().splitlines()
-    require(required.issubset(lines) and 'CONFIG_INITRAMFS_FORCE=y' not in lines and
+    require(required.issubset(lines) and (builtin or 'CONFIG_INITRAMFS_FORCE=y' not in lines) and
             'CONFIG_CMDLINE_FORCE=y' not in lines, 'external TWRP ramdisk/recovery configuration differs')
     policy_source = 'note10/device_test/build_sha256_kat_recovery.py'
     require(sha(ROOT/policy_source) == result['source_sha256'].get(policy_source),
             'live command-line policy helper differs from Image-producing source')
     from build_sha256_kat_recovery import bootloader_cmdline_policy
     bootloader_cmdline_policy('\n'.join(lines))
-    return dict(device_profile=PROFILE, accepted_result_sha256=expected_result,
+    extra = {}
+    if builtin:
+        from builtin_init_profile import input_binding
+        extra = input_binding(root, result, image, lines)
+    return dict(device_profile=marker, **extra, accepted_result_sha256=expected_result,
                 source_head=expected_source, image_sha256=result['image_sha256'], image_size=len(image),
                 effective_config_sha256=sha(config), build_evidence_id=identity,
                 kernel_banner=banners[0].decode('ascii'))
 
 
+# Exact previously accepted host7: used only to validate the immutable v71
+# current-BOOT pair after v72 changes. Never relabel it as current source.
+V71_HOST_HEAD = '5e233aa5f08473d716ca2e9b3d8937c1821d513f'
+V71_HOST_PINS = {'note10/device_test/sha256_kat_device_profile.py': '76111d416db9646271a7de9ae7ab55288e23aa5304ad6601b94bedc900832ea5', 'note10/device_test/test_sha256_kat_device_profile.py': 'c48400d5573695d217101806b8481e39aec38fd5382e64b85f999b4cee42c498', 'note10/device_test/materialize_auto_cycle.py': '87ef3da2e0ddbbb40b02bc9334c59deb8c590692352f099cb2b3ae99b749f960', 'note10/device_test/prepare_linux_boot.py': '4f599c7c667e3dc18a5afccfd682c47f705ed714daa916b4c0557db9f7f78c70', 'note10/device_test/build_boot_test_packages.py': 'afbf2d7352ce4722ce6d7cb6d2430bb06962f5a5b1fa570fbd68f182faf4fdda', 'note10/device_test/stage_phase2.py': '9e340ba0d6244ef5c2673317b01dfdec4433959241f6318669b8d27f01ce319b', 'note10/device_test/auto_cycle.py': '0118d152452434b76fc77ad6089165a601abca3838699c5dd7f28d8f371e3950'}
+
+
 def host_binding(source_head):
     require(re.fullmatch('[0-9a-f]{40}', source_head or ''), 'exact host-profile publication source pin required')
-    return dict(host_profile_source_head=source_head, host_profile_source_sha256={
-        'note10/device_test/'+name: sha(Path(__file__).parent/name) for name in HOST_SOURCES})
+    pins = V71_HOST_PINS if source_head == V71_HOST_HEAD else {
+        'note10/device_test/'+name: sha(Path(__file__).parent/name)
+        for name in (*HOST_SOURCES, 'builtin_init_profile.py', 'builtin_init_route.py', 'test_builtin_init_route.py')}
+    return dict(host_profile_source_head=source_head, host_profile_source_sha256=dict(pins))
 
 
 def root_receipt_binding(root, receipt, expected_sha, binding):
@@ -131,7 +148,7 @@ def root_receipt_binding(root, receipt, expected_sha, binding):
             'ci_result_sha256', 'image_sha256', 'image_bytes', 'effective_config_sha256',
             'build_evidence_id', 'kernel_banner', 'run_id', 'attempt', 'workflow_id', 'job_id',
             'artifact_id', 'artifact_zip_sha256', 'artifact_zip_bytes'}
-    require(set(row) == keys and row['schema'] == 1 and row['kind'] == PROFILE+'-accepted-image' and
+    require(set(row) == keys and row['schema'] == 1 and row['kind'] == binding['device_profile']+'-accepted-image' and
             row['accepted'] is True, 'closed accepted Image-root receipt required')
     require(all(type(row[k]) is int and row[k] > 0 for k in
                 ('image_bytes', 'run_id', 'attempt', 'workflow_id', 'job_id', 'artifact_id', 'artifact_zip_bytes')) and
@@ -152,7 +169,8 @@ def root_receipt_binding(root, receipt, expected_sha, binding):
 
 
 def common_report(binding, profile_sha):
-    return dict(binding, profile_sha256=profile_sha, build_passed=True,
+    extra = dict(builtin_minimal_init_route=True, external_initrd_used_for_PID1=False) if binding['device_profile'] == BUILTIN_PROFILE else {}
+    return dict(binding, **extra, profile_sha256=profile_sha, build_passed=True,
                 auto_return_diagnostic=True, auto_return_evidence_version=1,
                 auto_cycle_slot=SLOT.decode(), diagnostic_preserves_external_initramfs=True,
                 source_commit='55f042627bb7030c93550faafa117674d32b21d1',
@@ -168,6 +186,8 @@ def prepare_template(build, output, accepted_result_sha256, source_head, *, root
     root_receipt = private(root_receipt)
     binding = raw_binding(build, accepted_result_sha256, source_head)
     binding.update(root_receipt_binding(build, root_receipt, root_receipt_sha256, binding))
+    require(binding['device_profile'] != BUILTIN_PROFILE or host_source_head != V71_HOST_HEAD,
+            'new builtin profile requires its own host publication head')
     binding.update(host_binding(host_source_head))
     shutil.copytree(build, output)
     shutil.copyfile(root_receipt, output/'image-root-receipt.json')
@@ -175,7 +195,7 @@ def prepare_template(build, output, accepted_result_sha256, source_head, *, root
     save(output/'build-result.json', common_report(binding, sha(output/'device-profile.json')))
     shutil.copyfile(output/'prerequisites/objects/.config', output/'handoff.config')
     validate_template(output)
-    return dict(template=str(output), profile=PROFILE, build_result_sha256=sha(output/'build-result.json'),
+    return dict(template=str(output), profile=binding['device_profile'], build_result_sha256=sha(output/'build-result.json'),
                 device_operations=[], deployment_ready=False)
 
 
@@ -204,7 +224,10 @@ def variant(root, token):
 def fields(row):
     require(selected(row), 'closed KAT profile required')
     no_legacy(row)
-    return {key: row[key] for key in FIELDS}
+    # New bindings are carried through every pair/record/meta comparison.
+    from builtin_init_profile import EXTRA_FIELDS
+    keys = (*FIELDS, *EXTRA_FIELDS) if row['device_profile'] == BUILTIN_PROFILE else FIELDS
+    return {key: row[key] for key in keys}
 
 
 def package_scope(row, mode=None):
@@ -213,12 +236,16 @@ def package_scope(row, mode=None):
     for key in ('profile_sha256', 'accepted_result_sha256', 'image_root_receipt_sha256', 'root_reader_result_sha256'):
         require(re.fullmatch('[0-9a-f]{64}', row.get(key, '')), 'KAT package result/profile pin missing')
     require(re.fullmatch('[0-9a-f]{32}', row.get('build_evidence_id', '')) and
-            row.get('kernel_banner', '').startswith('Linux version 4.14.113-v71-sha256-recovery '),
+            row.get('kernel_banner', '').startswith('Linux version 4.14.113-v72-builtin-init ' if row['device_profile'] == BUILTIN_PROFILE else 'Linux version 4.14.113-v71-sha256-recovery '),
             'KAT package identity missing')
     require(re.fullmatch('[0-9a-f]{40}', row.get('source_head', '')) and
             re.fullmatch('[0-9a-f]{40}', row.get('host_profile_source_head', '')) and
             row.get('host_profile_source_sha256') == host_binding(row['host_profile_source_head'])['host_profile_source_sha256'],
             'host-profile code identity differs')
+    if row['device_profile'] == BUILTIN_PROFILE:
+        require(row.get('host_profile_source_head') != V71_HOST_HEAD, 'new profile cannot claim historical host head')
+        from builtin_init_profile import EXTRA_FIELDS
+        require(all(re.fullmatch('[0-9a-f]{64}', row.get(k, '')) for k in EXTRA_FIELDS), 'minimal init pins missing')
     if mode is None or mode in ('diagnostic', 'rollback'):
         diagnostic = mode in (None, 'diagnostic')
         require(row.get('auto_return_diagnostic') is diagnostic and
@@ -226,7 +253,7 @@ def package_scope(row, mode=None):
                  else row.get('auto_cycle_token') is None), 'KAT package role/cycle differs')
         if 'mode' in row:
             require(row['mode'] == mode and row.get('test_purpose') ==
-                    ('sha256-kat-recovery' if diagnostic else 'rollback'), 'KAT package purpose differs')
+                    (('sha256-kat-builtin-init' if row['device_profile'] == BUILTIN_PROFILE else 'sha256-kat-recovery') if diagnostic else 'rollback'), 'KAT package purpose differs')
     else:
         raise ValueError('closed KAT package role required')
 
@@ -246,7 +273,8 @@ def prepare_plan(kernel_build, backup, twrp, mkbootimg, current_packages, output
     require(cycles == 1, 'KAT profile permits exactly one cycle')
     kernel_build, backup, output = private(kernel_build), private(backup), private(output)
     template = validate_template(kernel_build)
-    verify_packages(private(current_packages))
+    current_records = verify_packages(private(current_packages))
+    current_diagnostic = next(r for r in current_records if r['mode'] == 'diagnostic')
     require(not output.exists(), 'fresh KAT plan required')
     output.mkdir(parents=True)
     cycle = uuid.uuid4().hex
@@ -261,7 +289,7 @@ def prepare_plan(kernel_build, backup, twrp, mkbootimg, current_packages, output
     stage = dict(index=1, cycle=cycle, kernel_build=str(target), image_sha256=bound['image_sha256'],
                  build_result_sha256=sha(target/'build-result.json'), packages=str(packages),
                  package_result_sha256=sha(packages/'package-result.json'))
-    plan = dict(schema=1, kind='note10-bounded-auto-cycle', device_profile=PROFILE,
+    plan = dict(schema=1, kind='note10-bounded-auto-cycle', device_profile=template['device_profile'],
                 kernel_build=str(kernel_build), backup=str(backup),
                 backup_manifest_sha256=sha(backup/'backup-manifest.json'),
                 build_result_sha256=sha(kernel_build/'build-result.json'), image_sha256=template['image_sha256'],
@@ -269,6 +297,8 @@ def prepare_plan(kernel_build, backup, twrp, mkbootimg, current_packages, output
                 current_package_result_sha256=sha(Path(current_packages)/'package-result.json'),
                 reference_twrp=str(Path(twrp).resolve()), mkbootimg=str(Path(mkbootimg).resolve()), minimum_battery=10,
                 return_timeout_seconds=240, stages=[stage])
+    if template['device_profile'] == BUILTIN_PROFILE:
+        plan['current_boot_payload_sha256'] = current_diagnostic['payload_sha256']
     save(output/'plan.json', plan)
     validate_plan(output/'plan.json', sha(output/'plan.json'))
     return dict(plan=str(output/'plan.json'), plan_sha256=sha(output/'plan.json'), cycles=1, device_operations=[])
@@ -282,7 +312,7 @@ def validate_plan(path, expected):
     path = private(path)
     require(re.fullmatch('[0-9a-f]{64}', expected or '') and sha(path) == expected, 'reviewed KAT plan SHA required')
     plan = read(path)
-    require(set(plan) == PLAN_KEYS and selected(plan) and plan.get('kind') == 'note10-bounded-auto-cycle' and
+    require(set(plan) == (PLAN_KEYS | {'current_boot_payload_sha256'} if plan.get('device_profile') == BUILTIN_PROFILE else PLAN_KEYS) and selected(plan) and plan.get('kind') == 'note10-bounded-auto-cycle' and
             type(plan.get('schema')) is int and plan['schema'] == 1 and
             type(plan.get('minimum_battery')) is int and type(plan.get('return_timeout_seconds')) is int and
             plan.get('minimum_battery') == 10 and plan.get('return_timeout_seconds') == 240 and
@@ -303,7 +333,7 @@ def validate_plan(path, expected):
     records = verify_packages(packages)
     pair = read(packages/'package-result.json')
     package_scope(pair)
-    require(all(pair.get(k) == bound[k] for k in FIELDS) and pair['auto_cycle_token'] == item['cycle'] and
+    require(all(pair.get(k) == bound[k] for k in fields(bound)) and pair['auto_cycle_token'] == item['cycle'] and
             pair['backup_manifest_sha256'] == plan['backup_manifest_sha256'] and
             pair['kernel_image_sha256'] == bound['image_sha256'], 'KAT pair/image/backup binding differs')
     previous = private(plan['current_packages'])
@@ -312,6 +342,10 @@ def validate_plan(path, expected):
             'current BOOT package chain changed')
     previous_records = verify_packages(previous)
     prior = next(r for r in previous_records if r['mode'] == 'diagnostic')
+    if plan['device_profile'] == BUILTIN_PROFILE:
+        prior_pair = read(previous/'package-result.json')
+        from builtin_init_profile import current_boot_binding
+        current_boot_binding(plan, prior_pair, prior)
     parts = read_verified_backup(backup)
     require(sha(plan['reference_twrp']) == TWRP_SHA256 and sha(plan['mkbootimg']) == MKBOOTIMG_SHA256,
             'private reference TWRP/mkbootimg input changed')
@@ -331,7 +365,7 @@ def validate_plan(path, expected):
         expected_writer = updater(mode=record['mode'], bootloader=baseline['bootloader'],
                                   partitions=baseline['partitions'], payload_sha=record['payload_sha256'],
                                   current_boot_sha=pair['expected_current_boot_sha256'],
-                                  auto_return=record['mode'] == 'diagnostic', device_profile=PROFILE)
+                                  auto_return=record['mode'] == 'diagnostic', device_profile=plan['device_profile'])
         with zipfile.ZipFile(packages/record['file']) as archive:
             require(archive.read('META-INF/com/google/android/update-binary') == expected_writer,
                     'package differs from unchanged common BOOT writer')
@@ -368,7 +402,7 @@ def precheck(packages, kernel_build, backup, adb, staged):
     from prepare_linux_boot import boot_header
     import zipfile
     packages, kernel_build, backup = private(packages), private(kernel_build), private(backup)
-    report = dict(ready_for_manual_access_test=False, device_profile=PROFILE,
+    report = dict(ready_for_manual_access_test=False, device_profile=read(packages/'package-result.json').get('device_profile'),
                   partition_writes=False, rebooted=False)
     save(packages/'PREINSTALL-CHECK.json', report)
     try:
@@ -376,7 +410,7 @@ def precheck(packages, kernel_build, backup, adb, staged):
         pair = read(packages/'package-result.json')
         package_scope(pair)
         bound = variant(kernel_build, pair['auto_cycle_token'])
-        require(all(pair.get(k) == bound[k] for k in FIELDS) and
+        require(all(pair.get(k) == bound[k] for k in fields(bound)) and
                 pair['kernel_image_sha256'] == bound['image_sha256'] and
                 pair['backup_manifest_sha256'] == sha(backup/'backup-manifest.json'), 'preinstall KAT binding differs')
         read_verified_backup(backup)
@@ -446,7 +480,7 @@ def collect(packages, kernel_build, adb, capture_parent=None):
         return _collect_into(packages, kernel_build, adb, out)
     except Exception as error:
         index = read(out/'capture-index.json') if (out/'capture-index.json').is_file() else {}
-        failed = dict(directory=str(out), device_profile=PROFILE, diagnostic_passed=False,
+        failed = dict(directory=str(out), device_profile=read(Path(packages)/'package-result.json').get('device_profile'), diagnostic_passed=False,
                       log_selections={}, logs_sha256=index.get('logs_sha256', {}), error=str(error),
                       partition_writes=False, rebooted=False, xnu_executed=False,
                       legacy_evaluations_claimed=False, hardware_return_proven_by_frames=False)
@@ -460,8 +494,11 @@ def _collect_into(packages, kernel_build, adb, out):
     verify_packages(private(packages))
     pair = read(Path(packages)/'package-result.json')
     bound = variant(private(kernel_build), pair['auto_cycle_token'])
-    require(all(pair.get(k) == bound[k] for k in FIELDS), 'collection profile binding differs')
+    require(all(pair.get(k) == bound[k] for k in fields(bound)), 'collection profile binding differs')
     preflight(adb)
+    if bound['device_profile'] == BUILTIN_PROFILE:
+        from builtin_init_profile import snapshot
+        return snapshot(adb, out, bound, pair['auto_cycle_token'])
     selections, observations, raw_hashes = {}, [], {}
     for name, remote in (('last_kmsg.txt', '/proc/last_kmsg'),
                          ('console-ramoops-0', '/sys/fs/pstore/console-ramoops-0'),

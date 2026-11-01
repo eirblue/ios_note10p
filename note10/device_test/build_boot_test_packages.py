@@ -373,7 +373,7 @@ def build(backup,prototype,output,current_packages=None):
         if mode=='diagnostic':metadata.update(runtime_metadata);metadata.update(scratch_metadata)
         if kat:
             metadata.update(kat_fields)
-            metadata['test_purpose']='sha256-kat-recovery' if mode=='diagnostic' else 'rollback'
+            metadata['test_purpose']=('sha256-kat-builtin-init' if kat_fields['device_profile']=='sha256-kat-builtin-init-v2' else 'sha256-kat-recovery') if mode=='diagnostic' else 'rollback'
             package_scope(metadata,mode)
         target=output/(('note10-reservation-' if reservation else 'note10-phase2-')+mode+'.zip')
         files={'META-INF/com/google/android/update-binary':script,
