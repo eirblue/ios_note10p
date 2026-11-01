@@ -29,11 +29,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CONTROL_SHA256: ${{ inputs.control_sha256 }}
-        run: >-
-          python -B note10/device_test/build_provider_core_pair.py
-          --control-sha256 "$CONTROL_SHA256"
-          --output note10/private/v67-ci-pair
-          --workspace note10/private/v67-ci-pair-workspace
+        run: |
+          python -c "from pathlib import Path; Path('note10/private').mkdir(parents=True, exist_ok=True)"
+          python -B note10/device_test/build_provider_core_pair.py --control-sha256 "$CONTROL_SHA256" --output note10/private/v67-ci-pair --workspace note10/private/v67-ci-pair-workspace
       - name: Stage complete evidence
         if: always()
         run: >-
