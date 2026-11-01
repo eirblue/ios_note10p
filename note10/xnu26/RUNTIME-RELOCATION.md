@@ -1,5 +1,15 @@
 # Runtime relocation metadata and PC data trials
 
+## v75 CPU fragment result and v76/v77 firmware timebase correction
+
+The v75 source commit `2350f040e5f9b8dfcd65ddf73c271f2131757f6c` passed seven new local methods once and converted the preserved input once into eight CPU descriptions. It retains whole-tree duplicate rejection and the 128-property budget on retained CPU paths, while bounding unrelated scans by input size. The passed seven methods are not replayed in CI, and the older 34 are not rerun.
+
+The v76 opt-in firmware timebase path passed twelve new methods, then its first real conversion failed while checking compatible-list grammar on an unrelated node. No fragment or manifest was produced. The original input, failed source and result are preserved without an unchanged retry.
+
+The v77 correction first selects exact NUL-delimited architected-timer tokens, then retains strict grammar, availability, unique-candidate and nonzero BE32 frequency requirements on candidates. One directly affected method was changed to the new scoped policy and two regression methods were added; this selected batch passed 3/3 once. One changed opt-in conversion of the preserved input then succeeded. The unchanged eleven v76 methods and older passed cases were not replayed. The explicit `--include-firmware-timebase` option serializes the same-FDT global system-counter declaration as LE32 timebase-frequency on CPU descriptions; the default path stays unchanged.
+
+This is firmware-declared Hz, not a measured CNTFRQ or clock-accuracy result. A separate historical CNTFRQ capture was not joined because explicit same-device binding was insufficient. No CPU execution state or boot CPU is inferred. The nearby XNU reference is not an exact target ABI; IRQ/GIC ownership, RAM ownership, full boot-tree readiness and XNU execution remain unproved. No new Image or device action occurred; raw inputs, real frequency declarations and live-derived fragments stay private.
+
 ## v74 real-input stop and v75 bounded-property scan design
 
 Source `7c652372d2acbc4b5995f146d520fa73fd252d60` passed 34 new synthetic methods once in [CI 41319014723](https://github.com/eirblue/ios_note10p/actions/runs/41319014723). The first preserved-input conversion exited 1 at the combined duplicate/property-count guard, producing neither fragment nor manifest. The input and failure remain preserved; the unchanged converter was not retried.

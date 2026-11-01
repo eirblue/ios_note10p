@@ -31,6 +31,7 @@ REFERENCE = {
     'exact_target_abi_claim': False,
 }
 POLICY = 'linux-fdt-cpu-affinity-description-v1'
+TIMEBASE_POLICY = 'linux-fdt-cpu-firmware-timebase-description-v1'
 PRIVATE_ROOT = Path(__file__).resolve().parents[1] / 'private'
 
 
@@ -42,8 +43,8 @@ def _name(raw, allow_empty=False):
     return raw.decode('ascii')
 
 
-def _cpu_nodes(raw):
-    """Validate one bounded FDT, retaining only /cpus and direct children."""
+def _cpu_nodes(raw, *, include_firmware_timebase=False):
+    """Validate once; optionally retain compatible/status/frequency for timers."""
     if not isinstance(raw, bytes) or not 40 <= len(raw) <= MAX_FDT:
         raise ValueError('FDT size/type')
     magic, total, so, sto, ro, version, compatible, _, strings_size, size = struct.unpack_from('>10I', raw)
@@ -73,6 +74,7 @@ def _cpu_nodes(raw):
     roots = nodes = property_tokens = 0
     cpus = None
     children = []
+    timer_descriptions = []
     while cursor < end:
         if cursor + 4 > end:
             raise ValueError('FDT truncated token')
@@ -102,6 +104,8 @@ def _cpu_nodes(raw):
             if nodes > MAX_NODES:
                 raise ValueError('FDT node count')
             entry = dict(path=path, children=set(), properties=set(), has_child=False, values={})
+            if include_firmware_timebase:
+                entry['timer_values'] = {}
             stack.append(entry)
             if path == ('cpus',):
                 cpus = entry['values']
@@ -110,7 +114,9 @@ def _cpu_nodes(raw):
         elif token == 2:
             if not stack:
                 raise ValueError('FDT unbalanced end-node')
-            stack.pop()
+            entry = stack.pop()
+            if include_firmware_timebase and 'compatible' in entry['timer_values']:
+                timer_descriptions.append(entry['timer_values'])
         elif token == 3:
             if not stack or stack[-1]['has_child'] or cursor + 8 > end:
                 raise ValueError('FDT property placement/extent')
@@ -134,6 +140,8 @@ def _cpu_nodes(raw):
             entry['properties'].add(name)
             if retain:
                 entry['values'][name] = raw[cursor:cursor + length]
+            if include_firmware_timebase and name in ('compatible', 'clock-frequency', 'status'):
+                entry['timer_values'][name] = raw[cursor:cursor + length]
             cursor = (cursor + length + 3) & ~3
             if cursor > end:
                 raise ValueError('FDT property padding extent')
@@ -144,17 +152,48 @@ def _cpu_nodes(raw):
                 raise ValueError('FDT end/root/trailing structure')
             if cpus is None:
                 raise ValueError('FDT /cpus missing')
-            return cpus, children
+            return cpus, children, timer_descriptions
         else:
             raise ValueError('FDT unknown token')
     raise ValueError('FDT end token missing')
 
 
-def translate(raw, *, require_full_handoff=False):
+def _firmware_counter_frequency(descriptions):
+    """Select one explicit same-FDT declaration, never a CNTFRQ observation."""
+    candidates = []
+    for properties in descriptions:
+        compatible = properties['compatible']
+        # Only exact NUL-delimited supported tokens enter timer semantics.
+        # Unrelated strings remain subject to the unchanged FDT structure checks.
+        if not any(name in (b'arm,armv7-timer', b'arm,armv8-timer')
+                   for name in compatible.split(b'\0')):
+            continue
+        if not compatible or not compatible.endswith(b'\0'):
+            raise ValueError('FDT compatible string list')
+        names = compatible[:-1].split(b'\0')
+        if (any(not name or any(c < 33 or c > 126 for c in name) for name in names)
+                or len(names) != len(set(names))):
+            raise ValueError('FDT compatible string list')
+        if b'arm,armv7-timer-mem' in names or b'arm,armv8-timer-mem' in names:
+            raise ValueError('FDT ambiguous architected timer kind')
+        candidates.append(properties)
+    if len(candidates) != 1:
+        raise ValueError('FDT requires one architected system timer declaration')
+    timer = candidates[0]
+    if timer.get('status', b'okay\0') not in (b'okay\0', b'ok\0'):
+        raise ValueError('FDT architected timer unavailable or malformed status')
+    frequency = timer.get('clock-frequency')
+    if frequency is None or len(frequency) != 4 or frequency == bytes(4):
+        raise ValueError('FDT explicit nonzero BE32 timer clock-frequency required')
+    return int.from_bytes(frequency, 'big')
+
+
+def translate(raw, *, require_full_handoff=False, include_firmware_timebase=False):
     """Return fragment bytes and nonidentifying policy metadata; no file writes."""
     if require_full_handoff:
         raise ValueError('Full handoff unsupported: missing CPU execution-state/platform provenance and exact target contract')
-    cpus, children = _cpu_nodes(raw)
+    cpus, children, timer_descriptions = _cpu_nodes(raw, include_firmware_timebase=include_firmware_timebase)
+    frequency = _firmware_counter_frequency(timer_descriptions) if include_firmware_timebase else None
     address = cpus.get('#address-cells')
     if address not in (b'\0\0\0\1', b'\0\0\0\2') or cpus.get('#size-cells') != bytes(4):
         raise ValueError('Explicit CPU address-cells 1/2 and size-cells 0 required')
@@ -174,8 +213,12 @@ def translate(raw, *, require_full_handoff=False):
             raise ValueError('CPU count exceeds 32')
     if not affinities:
         raise ValueError('No explicit CPU descriptions')
-    descriptions = [Node(f'cpu@{value:x}', {'device_type': b'cpu\0', 'reg': struct.pack('<I', value)})
-                    for value in sorted(affinities)]
+    descriptions = []
+    for value in sorted(affinities):
+        properties = {'device_type': b'cpu\0', 'reg': struct.pack('<I', value)}
+        if frequency is not None:
+            properties['timebase-frequency'] = struct.pack('<I', frequency)
+        descriptions.append(Node(f'cpu@{value:x}', properties))
     fragment = encode(Node('device-tree', children=[Node('cpus', children=descriptions)]))
     if len(fragment) > MAX_FRAGMENT:
         raise ValueError('ADT fragment size')
@@ -183,6 +226,13 @@ def translate(raw, *, require_full_handoff=False):
                     complete_boot_tree=False, handoff_ready=False, cpu_execution_state_known=False,
                     memory_ownership=False, xnu_executed=False,
                     missing=['CPU execution-state provenance', 'platform contract', 'exact target consumer contract'])
+    if include_firmware_timebase:
+        metadata['policy'] = TIMEBASE_POLICY
+        metadata['firmware_timebase'] = dict(
+            source='same-input-fdt-architected-system-timer-clock-frequency',
+            frequency_hz=frequency, declaration='firmware-declared global architected counter rate',
+            encoding='LE32 on each CPU description; no Linux logical-index mapping',
+            measured=False, cntfrq_observed=False, cross_capture_join=False)
     return fragment, metadata
 
 
@@ -190,7 +240,7 @@ def _file_identity(st):
     return st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_nlink
 
 
-def build(input_path, input_sha256, output, *, require_full_handoff=False):
+def build(input_path, input_sha256, output, *, require_full_handoff=False, include_firmware_timebase=False):
     """Build private metadata from one explicitly pinned saved input, once."""
     source, destination = Path(input_path), Path(output).resolve()
     if destination == PRIVATE_ROOT or not destination.is_relative_to(PRIVATE_ROOT):
@@ -209,7 +259,8 @@ def build(input_path, input_sha256, output, *, require_full_handoff=False):
         raise ValueError('Input changed during read')
     if hashlib.sha256(raw).hexdigest() != input_sha256:
         raise ValueError('Input SHA256 differs')
-    fragment, metadata = translate(raw, require_full_handoff=require_full_handoff)
+    fragment, metadata = translate(raw, require_full_handoff=require_full_handoff,
+                                   include_firmware_timebase=include_firmware_timebase)
     metadata.update(input_sha256=input_sha256, input_bytes=len(raw), fragment_bytes=len(fragment),
                     fragment_sha256=hashlib.sha256(fragment).hexdigest(), private_output=True)
     # All semantic rejection precedes output creation. Fresh directory only;
@@ -232,8 +283,11 @@ def main():
     parser.add_argument('--input-sha256', required=True)
     parser.add_argument('--output', required=True, help='Fresh PRIVATE directory with an existing parent')
     parser.add_argument('--require-full-handoff', action='store_true', help='Always rejects: incomplete contract')
+    parser.add_argument('--include-firmware-timebase', action='store_true',
+                        help='Include one explicit same-FDT firmware-declared counter frequency; not a CNTFRQ observation')
     args = parser.parse_args()
-    metadata = build(args.input, args.input_sha256, args.output, require_full_handoff=args.require_full_handoff)
+    metadata = build(args.input, args.input_sha256, args.output, require_full_handoff=args.require_full_handoff,
+                     include_firmware_timebase=args.include_firmware_timebase)
     # Do not print live input digest, path, affinity values or fragment bytes.
     print(json.dumps({key: metadata[key] for key in ('policy', 'cpu_count', 'handoff_ready')}))
 
