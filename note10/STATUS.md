@@ -1,5 +1,14 @@
 # 작업 상태 (2026-11-02, Asia/Seoul)
 
+## v81: Owned FDT snapshot and retained post-return integrity
+
+The Linux diagnostic captured a bounded FDT snapshot in reservation-aware owned memory after paging, then hashed only that snapshot after the existing recovery path was armed. The observed input differs from the historical saved FDT, so no prior declaration or CPU result is joined to it. No XNU execution or deployment/handoff readiness is claimed.
+
+The one BOOT-write/reboot cycle completed. All five post-return partition hash checks passed and their actual observations were retained. Changed boot identity and recovery-request frames were observed; frames do not prove hardware re-entry or the number of hardware boots. This cycle is consumed and is not replayed.
+
+Validation: ten revised/new CI methods and three new host-only methods passed once; four unchanged passed methods were excluded. The successful Image was retained through the narrow non-loadable PID1 filename binding correction, without rebuilding it. The initial fixed-BSS Image remained PC-only.
+
+
 ## v80: Existing partition-gate evidence retention
 
 Host-only change: retain values already returned by mandatory partition checks, including partial failures, in private preinstall and cycle records. Command order, short-circuit behavior and actuation remain unchanged. Hash-only phases leave fresh node resolution and size explicitly unobserved; expected metadata remains separate. The accepted historical host-source binding remains immutable.
