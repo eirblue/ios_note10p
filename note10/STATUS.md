@@ -1,5 +1,13 @@
 # 작업 상태 (2026-11-01, Asia/Seoul)
 
+## 2026-11-01: v73 SHA256 분할 입력·상태 복원 실기기 통과
+
+- 소스 `7e4a8c992f95f01429e824404378fa9271c0eb8e`의 [CI 41312767945](https://github.com/eirblue/ios_note10p/actions/runs/41312767945) 및 새 기기 시험 1회 통과. 새 패턴 메시지 55·56·63·64·65·129바이트 각각 분할 입력과 같은 transform의 별도 descriptor로 상태 export/import 후 완료한 결과가 일치. 최소 PID1 시작·복귀 요청과 변경된 boot ID의 같은 root TWRP 관측. BOOT 기록·호스트 재부팅 시도 각 1회, v73 회차 1/1 소진.
+- 새 호스트 시험 메서드 12개 통과(그 안의 새 C fixture 컴파일 1회·시나리오 5개 포함). 이전 abc KAT·기존 통과 시험 재실행 없음. 빌드 성공 후 별도 Image reader·중복 검토 없이 설치 준비·기기 테스트로 직접 진행.
+- 복귀 대기 71개 관측 중 70개는 sideload/shell 전송 오류였고 이후 정상 recovery 전송 관측. 실제 하드웨어 부팅 횟수는 별도 계수하지 않음. 설치기의 사전·사후 5개 파티션 검사는 불일치 없이 완료했으나 개별 node/hash 행은 저장되지 않았고 중복 기기 조회도 수행하지 않음.
+- 상태 복원은 같은 제공자·transform·boot 안의 한정 결과이며 이식 가능한 상태 ABI·XNU/iOS 실행 결과가 아님. 전체 사이클의 불필요한 중복 검증 생략과 설치 안전 조건·빌드당 1회 한도 유지.
+
+
 ## 2026-11-01: v72 내장 최소 init·SHA256 실기기 통과
 
 - 소스 `149cb74c3f7640f2e26dfdcd1d775ec99f6c02ac`의 [CI 41307031423](https://github.com/eirblue/ios_note10p/actions/runs/41307031423) 성공 후 BOOT 기록·호스트 재부팅 명령 각 1회 수행. 최소 Linux PID1 시작, SHA256 진단, 복귀 요청 프레임, 변경된 boot ID의 같은 root TWRP 및 사후 5개 파티션 무결성 확인. v72 회차 1/1 소진, 재실행 금지.

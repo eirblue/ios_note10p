@@ -1,5 +1,16 @@
 # Runtime relocation metadata and PC data trials
 
+## v73 SHA256 incremental input and same-transform state-copy result
+
+Source `7e4a8c992f95f01429e824404378fa9271c0eb8e` passed [CI 41312767945](https://github.com/eirblue/ios_note10p/actions/runs/41312767945). The new Linux diagnostic uses six patterned messages of 55, 56, 63, 64, 65 and 129 bytes. Each checks incremental update/final and export/import into a distinct descriptor on the same transform. Descriptor/state allocations are bounded and no opaque state bytes are logged. This is not a portable state ABI or an XNU execution result.
+
+Twelve new host methods passed once, including one new native fixture compile and five scenarios. These are not 17 independent methods. The old abc KAT and passed historical suites were not replayed. Successful CI proceeded directly to necessary packaging and one physical cycle; no separate post-build reader or second source review ran.
+
+The actual device capture passed the six new cases and minimal PID1 observation. It retained 16 arm and 16 recovery-request frames; the host observed a changed boot ID and the same bound root TWRP. One BOOT write and one host reboot attempt consumed the v73 cycle, which must not be replayed. Seventy of 71 recovery polling observations reported transport errors before normal recovery appeared; hardware boot events were not independently counted. The log decoder's static hardware-reentry=false is kept separate from the host observation.
+
+The installer's pre/post five-partition checks completed without mismatch, but individual node/hash rows were not persisted. No duplicate follow-up device reads were added. XNU execution, physical ownership transfer and iOS boot remain outside this result.
+
+
 ## v72 builtin minimal Linux PID1 and SHA256 physical result
 
 Source `149cb74c3f7640f2e26dfdcd1d775ec99f6c02ac` passed [CI 41307031423](https://github.com/eirblue/ios_note10p/actions/runs/41307031423). Its 46,413,836-byte Image has SHA-256 `fa655a1aeca9e6c8820d91e1f53d7f64f321a0f8a930c4d5a879a8582cd3de69`. A forced builtin minimal `/init`, a default-off guarded route, and `rdinit=/init` with CMDLINE_EXTEND prevent the diagnostic from falling back to Android block-root while retaining bounded bootloader argument append.
