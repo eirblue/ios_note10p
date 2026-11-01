@@ -159,13 +159,19 @@ V73_HOST_HEAD = '7e4a8c992f95f01429e824404378fa9271c0eb8e'
 V73_HOST_PINS = {'note10/device_test/auto_cycle.py': 'e69be83bf1ac709173679f0476de7ad84b17ea3b737e34f47223d974f4ea36ee', 'note10/device_test/build_boot_test_packages.py': '0d5b06bcf7d0cca1f2da2490cb283b7d191e5f8192fa8cef9eac557e47259396', 'note10/device_test/builtin_init_profile.py': 'bf411a8b2b58e9ba0c8e30aca44eef5952aea3137e288bf8927f2c6555e61809', 'note10/device_test/builtin_init_route.py': '46b100dc95f11e344c11b8cb3fba5d34d17b2884385923426a42246699fda43d', 'note10/device_test/materialize_auto_cycle.py': '87ef3da2e0ddbbb40b02bc9334c59deb8c590692352f099cb2b3ae99b749f960', 'note10/device_test/prepare_linux_boot.py': '4f599c7c667e3dc18a5afccfd682c47f705ed714daa916b4c0557db9f7f78c70', 'note10/device_test/sha256_kat_device_profile.py': 'fa8c2632cf8e3826925539a35b793c8f99e32e97dbd305822da6c32cce7c1d21', 'note10/device_test/sha256_stream_state.py': '55de2735fb830ae8047bb4a8fa74325f51b766b1e885c482dbbc5ebabe3ea437', 'note10/device_test/sha256_stream_vectors.json': '5c379d1ef41a40b9a1262c985476e9dc0ba88dae7b1586f949bbe79686f2165f', 'note10/device_test/stage_phase2.py': '1ecc741d7517fc15a6043b1329b726e420791f06e712bfd1aaf901a7747db433', 'note10/device_test/test_builtin_init_route.py': '9fa63dd55114472a748062447dd95c17bf4d4d7e743117f69f0bb6a7aca6ea42', 'note10/device_test/test_sha256_kat_device_profile.py': 'c48400d5573695d217101806b8481e39aec38fd5382e64b85f999b4cee42c498', 'note10/device_test/test_sha256_stream_state.py': '088881f92037a9895b7947eb44692f51ecba1eb602a02dacc02ff3b94a836db8'}
 
 
+# Exact accepted v78 host closure; current package lineage must remain immutable.
+V78_HOST_HEAD = 'a0674c29eaa2bc8938023fc2be590b9a4a84374e'
+V78_HOST_PINS = {'note10/device_test/affinity_binding.py': '6d5b16d54a803c95bdd391a38efbd2bac5ef36baffe199f86cd83f878bf10678', 'note10/device_test/auto_cycle.py': 'e69be83bf1ac709173679f0476de7ad84b17ea3b737e34f47223d974f4ea36ee', 'note10/device_test/build_boot_test_packages.py': 'e7d34e08c15eed674af7d4467bb5b615ee3492f3798f4ebd7f0d21cc1c707b97', 'note10/device_test/builtin_init_profile.py': '6df07ee89a3dc7e46506a8dbec1013ea57511d72336c16daabbf9442e8aa2b62', 'note10/device_test/builtin_init_route.py': '46b100dc95f11e344c11b8cb3fba5d34d17b2884385923426a42246699fda43d', 'note10/device_test/materialize_auto_cycle.py': '87ef3da2e0ddbbb40b02bc9334c59deb8c590692352f099cb2b3ae99b749f960', 'note10/device_test/prepare_linux_boot.py': '4f599c7c667e3dc18a5afccfd682c47f705ed714daa916b4c0557db9f7f78c70', 'note10/device_test/sha256_kat_device_profile.py': '41a01209338e25ea72b8f2f8e9d07cd5900135fd7bd819346be5d1a4b979a3d1', 'note10/device_test/sha256_stream_state.py': '55de2735fb830ae8047bb4a8fa74325f51b766b1e885c482dbbc5ebabe3ea437', 'note10/device_test/sha256_stream_vectors.json': '5c379d1ef41a40b9a1262c985476e9dc0ba88dae7b1586f949bbe79686f2165f', 'note10/device_test/stage_phase2.py': '1ecc741d7517fc15a6043b1329b726e420791f06e712bfd1aaf901a7747db433', 'note10/device_test/test_affinity_binding.py': 'bf602887c4437e0096473392789da33e3ef502297d8c060faf7d9da9ecd3eb89', 'note10/device_test/test_affinity_ci_context.py': '71aad30ab105a45efe2703fd7b222233836d6e7514560834daa71bfdd351dea9', 'note10/device_test/test_builtin_init_route.py': '9fa63dd55114472a748062447dd95c17bf4d4d7e743117f69f0bb6a7aca6ea42', 'note10/device_test/test_sha256_kat_device_profile.py': 'c48400d5573695d217101806b8481e39aec38fd5382e64b85f999b4cee42c498', 'note10/device_test/test_sha256_stream_state.py': '088881f92037a9895b7947eb44692f51ecba1eb602a02dacc02ff3b94a836db8'}
+
+
 def host_binding(source_head):
     require(re.fullmatch('[0-9a-f]{40}', source_head or ''), 'exact host-profile publication source pin required')
-    pins = V71_HOST_PINS if source_head == V71_HOST_HEAD else V72_HOST_PINS if source_head == V72_HOST_HEAD else V73_HOST_PINS if source_head == V73_HOST_HEAD else {
+    pins = V71_HOST_PINS if source_head == V71_HOST_HEAD else V72_HOST_PINS if source_head == V72_HOST_HEAD else V73_HOST_PINS if source_head == V73_HOST_HEAD else V78_HOST_PINS if source_head == V78_HOST_HEAD else {
         'note10/device_test/'+name: sha(Path(__file__).parent/name)
         for name in (*HOST_SOURCES, 'builtin_init_profile.py', 'builtin_init_route.py', 'test_builtin_init_route.py',
                      'sha256_stream_state.py', 'sha256_stream_vectors.json', 'test_sha256_stream_state.py',
-                     'affinity_binding.py', 'test_affinity_binding.py', 'test_affinity_ci_context.py')}
+                     'affinity_binding.py', 'test_affinity_binding.py', 'test_affinity_ci_context.py',
+                     'test_partition_gate_evidence.py')}
     return dict(host_profile_source_head=source_head, host_profile_source_sha256=dict(pins))
 
 
@@ -534,7 +540,9 @@ def precheck(packages, kernel_build, backup, adb, staged):
     import zipfile
     packages, kernel_build, backup = private(packages), private(kernel_build), private(backup)
     report = dict(ready_for_manual_access_test=False, device_profile=read(packages/'package-result.json').get('device_profile'),
-                  partition_writes=False, rebooted=False)
+                  partition_writes=False, rebooted=False,
+                  partition_evidence=dict(phase='preinstall',status='not-started',node_size_rows=[]))
+    active_node=None
     save(packages/'PREINSTALL-CHECK.json', report)
     try:
         records = verify_packages(packages)
@@ -554,10 +562,23 @@ def precheck(packages, kernel_build, backup, adb, staged):
         require(re.fullmatch('/tmp/note10-phase2-[0-9a-f]{8}', remote), 'bounded current RAM stage required')
         baseline = read(backup/'backup-manifest.json')
         for part in baseline['partitions']:
-            require(adb.text('shell', 'readlink', '-f', '/dev/block/by-name/'+part['partition']) == part['block_node'] and
-                    adb.text('shell', 'blockdev', '--getsize64', part['block_node']) == str(part['size']),
-                    'paired partition node/size changed')
-        verify_partitions(adb, backup, pair['expected_current_boot_sha256'])
+            active_node=dict(partition=part.get('partition'),expected_canonical_node=part.get('block_node'),
+                expected_size_bytes=part.get('size'),observed_canonical_node=None,observed_size_bytes=None,
+                observed_size_text=None,status='reading-node')
+            report['partition_evidence']['node_size_rows'].append(active_node)
+            observed_node=adb.text('shell', 'readlink', '-f', '/dev/block/by-name/'+part['partition'])
+            active_node.update(observed_canonical_node=observed_node[:256],node_observation_complete=len(observed_node)<=256)
+            matched=observed_node==part['block_node']
+            if matched:
+                active_node['status']='reading-size'
+                observed_size=adb.text('shell', 'blockdev', '--getsize64', part['block_node'])
+                active_node.update(observed_size_text=observed_size[:128],size_observation_complete=len(observed_size)<=128,
+                    observed_size_bytes=int(observed_size) if observed_size.isascii() and observed_size.isdecimal() and len(observed_size)<=20 else None)
+                matched=observed_size==str(part['size'])
+            active_node['status']='passed' if matched else 'mismatch'
+            require(matched, 'paired partition node/size changed')
+            active_node=None
+        verify_partitions(adb, backup, pair['expected_current_boot_sha256'],evidence=report['partition_evidence'])
         for record in records:
             with zipfile.ZipFile(packages/record['file']) as archive:
                 script = archive.read('META-INF/com/google/android/update-binary')
@@ -572,6 +593,13 @@ def precheck(packages, kernel_build, backup, adb, staged):
         report.update(ready_for_manual_access_test=True, current_device_checks_pending=False,
                       battery_percent=battery, twrp_version=state['twrp_version'], ram_directory=remote)
         return report
+    except BaseException as error:
+        if active_node is not None:
+            if active_node['status']!='mismatch':active_node['status']='error'
+            active_node['error_type']=type(error).__name__
+            report['partition_evidence']['status']=active_node['status']
+        report['partition_evidence']['precheck_error_type']=type(error).__name__
+        raise
     finally:
         save(packages/'PREINSTALL-CHECK.json', report)
 

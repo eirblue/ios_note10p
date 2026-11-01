@@ -1,5 +1,12 @@
 # 작업 상태 (2026-11-02, Asia/Seoul)
 
+## v80: Existing partition-gate evidence retention
+
+Host-only change: retain values already returned by mandatory partition checks, including partial failures, in private preinstall and cycle records. Command order, short-circuit behavior and actuation remain unchanged. Hash-only phases leave fresh node resolution and size explicitly unobserved; expected metadata remains separate. The accepted historical host-source binding remains immutable.
+
+Validation: eight new controlled-return tests passed once. No old tests, production device gate, CI, Image build, BOOT write or reboot. The previous diagnostic cycle remains consumed; its missing post-return BOOT hash remains unknown.
+
+
 ## 2026-11-02: v79 FDT 메모리 선언 목록 변환
 
 - 신규 메모리 경로 시험 12개 한 번 통과 후 보존된 FDT의 선언 목록을 1회 생성. 메모리 은행 8개·직접 고정 예약 선언 15개와 동적 3개·중첩 13개·빈 컨테이너 1개·조건부 1개의 미해결 기록을 보존. 원본·실제 주소·노드 경로·산출물은 비공개이며 과거 CPU/배치/모델 시험은 재실행하지 않음.

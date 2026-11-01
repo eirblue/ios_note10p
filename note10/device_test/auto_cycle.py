@@ -95,14 +95,49 @@ def boot_id(adb):
     return value
 
 
-def verify_partitions(adb,backup,boot_sha):
-    manifest=read(Path(backup)/'backup-manifest.json')
-    if adb.text('shell','getprop','ro.bootloader')!=manifest['bootloader']:raise ValueError('Bootloader changed')
-    if {p['partition'] for p in manifest['partitions']}!={'boot','recovery','dtb','dtbo','vbmeta'}:raise ValueError('Five partition baseline required')
-    for row in manifest['partitions']:
-        if not re.fullmatch('/dev/block/sd[a-z][0-9]+',row['block_node']):raise ValueError('Invalid block path')
-        expected=boot_sha if row['partition']=='boot' else row['sha256']
-        if adb.text('shell','sha256sum',row['block_node']).split()[0]!=expected:raise ValueError('Partition differs: '+row['partition'])
+def verify_partitions(adb,backup,boot_sha,evidence=None):
+    # Optional caller-owned state survives exceptions; commands and checks below
+    # retain their original order and arguments. No additional device read.
+    active=None
+    if evidence is not None:evidence.update(status='started',hash_rows=[])
+    try:
+        manifest=read(Path(backup)/'backup-manifest.json')
+        if evidence is not None:
+            active=dict(expected=manifest.get('bootloader') if isinstance(manifest,dict) else None,observed=None,status='pending')
+            evidence['bootloader']=active
+        observed=adb.text('shell','getprop','ro.bootloader')
+        if active is not None:active.update(observed=observed[:256],observation_complete=len(observed)<=256,status='passed' if observed==manifest['bootloader'] else 'mismatch')
+        if observed!=manifest['bootloader']:raise ValueError('Bootloader changed')
+        active=None
+        if {p['partition'] for p in manifest['partitions']}!={'boot','recovery','dtb','dtbo','vbmeta'}:raise ValueError('Five partition baseline required')
+        for row in manifest['partitions']:
+            if evidence is not None:
+                active=dict(partition=row.get('partition'),hashed_node_argument=row.get('block_node'),
+                    hash_byte_domain='entire-block-device-stream-to-EOF',expected_size_bytes=row.get('size'),
+                    observed_size_bytes=None,observed_canonical_node=None,node_and_size_not_read_in_this_hash_gate=True,
+                    expected_sha256=None,observed_sha256=None,status='pending',command_completed=False,
+                    process_exit_code=None,process_exit_code_not_exposed_by_Adb_text=True)
+                evidence['hash_rows'].append(active)
+            if not re.fullmatch('/dev/block/sd[a-z][0-9]+',row['block_node']):raise ValueError('Invalid block path')
+            expected=boot_sha if row['partition']=='boot' else row['sha256']
+            if active is not None:active['expected_sha256']=expected
+            returned=adb.text('shell','sha256sum',row['block_node'])
+            if active is not None:active['command_completed']=True
+            observed=returned.split()[0]
+            if active is not None:
+                active.update(observed_sha256=observed[:128],observed_digest_complete=len(observed)<=128,
+                              status='passed' if observed==expected else 'mismatch')
+            if observed!=expected:raise ValueError('Partition differs: '+row['partition'])
+            active=None
+        if evidence is not None:evidence['status']='passed'
+    except BaseException as error:
+        if evidence is not None:
+            if active is not None:
+                if active['status']!='mismatch':active['status']='error'
+                active['error_type']=type(error).__name__
+            evidence.update(status='mismatch' if active is not None and active['status']=='mismatch' else 'error',
+                            error_type=type(error).__name__,error=str(error)[:2048])
+        raise
 
 
 def wait_recovery(adb,previous_id,seconds,monotonic=time.monotonic,sleep=time.sleep,observe=None):
@@ -146,7 +181,7 @@ def run_plan(path,expected,output,*,execute=False,limit=1,adb=None,verified_roun
     output=private(output)
     if output.exists():raise ValueError('Fresh journal directory required')
     output.mkdir(parents=True)
-    journal=dict(plan_sha256=expected,kernel_image_sha256=plan['image_sha256'],backup_manifest_sha256=plan['backup_manifest_sha256'],single_cycle_verified=False,status='started',completed=[],partition_writes_attempted=False,reboots_attempted=False)
+    journal=dict(plan_sha256=expected,kernel_image_sha256=plan['image_sha256'],backup_manifest_sha256=plan['backup_manifest_sha256'],single_cycle_verified=False,status='started',completed=[],partition_writes_attempted=False,reboots_attempted=False,partition_gate_evidence=[])
     def persist():save(output/'journal.json',journal)
     persist()
     try:
@@ -159,8 +194,14 @@ def run_plan(path,expected,output,*,execute=False,limit=1,adb=None,verified_roun
             staged=stage(packages,adb)
             from sha256_kat_device_profile import selected,precheck as check_kat,collect as collect_kat
             kat=selected(plan)
+            preinstall_evidence=None
+            if kat:
+                preinstall_evidence=dict(phase='preinstall',index=item['index'],cycle=item['cycle'],
+                    receipt_path=str(packages/'PREINSTALL-CHECK.json'),evidence=None)
+                journal['partition_gate_evidence'].append(preinstall_evidence)
             ready=(check_kat(packages,Path(item['kernel_build']),Path(plan['backup']),adb,staged) if kat else
                    check(packages,Path(item['kernel_build']),Path(plan['backup']),Path(plan['core_model']),Path(plan['gate_model']),Path(plan['init_model']),adb))
+            if preinstall_evidence is not None:preinstall_evidence['evidence']=ready.get('partition_evidence')
             if ready.get('ready_for_manual_access_test') is not True:raise ValueError('Readiness did not pass')
             before=boot_id(adb)
             journal.update(pre_reboot_boot_id=before,stage_kernel_build=str(item['kernel_build']),
@@ -170,7 +211,11 @@ def run_plan(path,expected,output,*,execute=False,limit=1,adb=None,verified_roun
             if adb.text('shell','command','-v','twrp')!='/sbin/twrp':raise ValueError('Expected TWRP CLI unavailable')
             journal['active_cycle']=item['cycle'];journal['partition_writes_attempted']=True;persist()
             adb.call('shell','twrp','install',staged['ram_directory']+'/'+diag['file'],timeout=180)
-            preflight(adb);verify_partitions(adb,plan['backup'],diag['payload_sha256'])
+            preflight(adb)
+            postinstall_evidence=dict(phase='postinstall-before-reboot',index=item['index'],cycle=item['cycle'])
+            journal['partition_gate_evidence'].append(postinstall_evidence)
+            try:verify_partitions(adb,plan['backup'],diag['payload_sha256'],evidence=postinstall_evidence)
+            finally:persist()
             journal['reboots_attempted']=True;persist()
             journal['reboot_observation']=dict(start_monotonic=time.monotonic(),command=['shell','twrp','reboot'])
             persist()
@@ -201,7 +246,10 @@ def run_plan(path,expected,output,*,execute=False,limit=1,adb=None,verified_roun
             if preflight(adb)['twrp_version']!=initial['twrp_version']:raise ValueError('Recovery version changed')
             # Preserve diagnostic logs immediately after return, even when tests failed.
             captured=(collect_kat if kat else collect)(packages,Path(item['kernel_build']),adb)
-            verify_partitions(adb,plan['backup'],diag['payload_sha256'])
+            postreturn_evidence=dict(phase='postreturn',index=item['index'],cycle=item['cycle'])
+            journal['partition_gate_evidence'].append(postreturn_evidence)
+            try:verify_partitions(adb,plan['backup'],diag['payload_sha256'],evidence=postreturn_evidence)
+            finally:persist()
             return_observation=None
             for name,selection in captured.get('log_selections',{}).items():
                 selected=Path(captured['directory'])/selection.get('selected_file',name)
