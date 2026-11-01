@@ -47,6 +47,7 @@ int __init early_init_dt_scan_memory(unsigned long node, const char *uname,
 \tunsigned int i;
 \tbool hotpluggable;
 \t(void)uname; (void)depth; (void)data;
+\tevent('C');
 \treg = of_get_flat_dt_prop(node, "linux,usable-memory", &l);
 \tif (reg == NULL)
 \t\treg = of_get_flat_dt_prop(node, "reg", &l);
