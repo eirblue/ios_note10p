@@ -1,0 +1,65 @@
+name: Note10 v83 native bootstrap source selection
+on:
+  workflow_dispatch:
+    inputs:
+      recipient_public_key_b64:
+        description: RSA3072 public recipient key only; private key stays local
+        required: true
+        type: string
+      ci_case_json:
+        description: Empty array selects the three NEW cases once; later only changed or unexecuted names
+        default: '[]'
+        type: string
+      build_only:
+        description: Skip the unchanged batch only after its retained PASS
+        default: false
+        type: boolean
+permissions:
+  contents: read
+jobs:
+  native-bootstrap-selection:
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate public recipient only
+        env:
+          N10_RECIPIENT_PUBLIC_KEY_B64: ${{ inputs.recipient_public_key_b64 }}
+        run: node note10/device_test/sealed_affinity_artifact.cjs recipient
+      - name: Prepare exact public source and actual config tool
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python -B note10/xnu26/build_native_bootstrap_selection.py provision --work note10/private/v83-ci-work --output note10/private/v83-ci-build
+      - name: One NEW source selection batch
+        if: ${{ !inputs.build_only }}
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+          N10_CI_CASE_JSON: ${{ inputs.ci_case_json }}
+        run: python -B note10/xnu26/test_native_bootstrap_selection.py --work note10/private/v83-ci-work --output note10/private/v83-ci-new-tests
+      - name: Compile only the fifteen newly configured sources
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python -B note10/xnu26/build_native_bootstrap_selection.py build --work note10/private/v83-ci-work --output note10/private/v83-ci-build
+      - name: Bundle and seal new diagnostics and objects including failures
+        if: always()
+        env:
+          N10_RECIPIENT_PUBLIC_KEY_B64: ${{ inputs.recipient_public_key_b64 }}
+        run: |
+          python -B note10/device_test/bundle_affinity_evidence.py --tests note10/private/v83-ci-new-tests --build note10/private/v83-ci-build --output note10/private/v83-evidence.zip --source "$GITHUB_SHA"
+          node note10/device_test/sealed_affinity_artifact.cjs seal note10/private/v83-evidence.zip note10/private/v83-sealed-evidence.n10sealed "$GITHUB_SHA"
+      - name: Upload ciphertext only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: note10-v83-sealed-evidence
+          if-no-files-found: error
+          retention-days: 7
+          path: note10/private/v83-sealed-evidence.n10sealed
