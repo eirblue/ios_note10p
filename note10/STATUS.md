@@ -1,5 +1,14 @@
 # 작업 상태 (2026-11-02, Asia/Seoul)
 
+## v84: Current native-selected objects linked directly
+
+Built 1,067 objects from the current native configuration and four explicit dependency/metadata objects, then linked all 1,071 directly into one arm64 MH_EXECUTE research kernel. The intrinsic producer result reports zero undefined symbols. The old forced architecture-candidate archive and historical objects were not used. [Successful CI](https://github.com/eirblue/ios_note10p/actions/runs/41362589872), project source `7bc425f4d58b3d4755894bb00e2e72b8a47ee266`.
+
+Three new input/ownership/direct-link methods passed once in the initial CI. That build stopped at a missing native UserNotification MIG header. The two-file fix generated the real upstream headers and bound their directories; it added no prototypes, feature enablement or unselected client/server objects. The successful build carried the unchanged three-case PASS and executed no tests again. Failed inputs, partial objects and diagnostics remain preserved.
+
+This establishes current native source-object production and direct-link integration. Full upstream Make, Samsung hardware support, exact IPSW target ABI compatibility, owned staging memory and execution-state/handoff readiness remain unverified. No Image packaging, BOOT write, reboot, device call or XNU execution. The earlier diagnostic cycle remains consumed.
+
+
 ## v83: Native Exynos bootstrap source selection
 
 Added an Exynos-only bootstrap option and alternative native configuration rules for fifteen existing architecture sources. Original Apple/PPL/SPTM rules remain unchanged. Real configuration-tool tests confirmed one selected owner per source, preserved existing selection behavior, and rejected duplicate or mixed candidate ownership.
