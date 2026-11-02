@@ -1,3 +1,9 @@
+## v97: DATA diagnostic mismatch; automatic return evidence incomplete
+
+- One physical cycle was consumed. The DATA observation ended with `carrier_mismatch`, while its reported carrier status code and reason bits were zero. A complete current-cycle minimal PID1/KAT/return observation was not produced, so this run does not establish a successful DATA diagnostic or an underlying decode failure.
+- The host recorded a recovery boot transition and passed the five post-return partition checks. The journal has no `auto_return` result and no hardware-return-by-frames evidence; these host observations do not establish the native automatic-return diagnostic.
+- Source domains are separate: the v97 host adapter is revision `bdd56f1`; the unchanged generic v91 Linux Image and its CI evidence are from run 41404110966; the current DATA input follows the separate v94/v95 preparation lineage. This v97 physical attempt created no new CI result or Linux Image build.
+- No full XNU execution occurred. The result is limited to this one DATA observation and the separately passed host return checks.
 ## v96: opt-in current-capacity Linux staging passed PC tests and Image build
 
 - Reviewed source: `39fe450c5044eed2c51fc8ed15a8e5fea1eeb284`; [CI run 41457807215](https://github.com/eirblue/ios_note10p/actions/runs/41457807215), attempt 1 succeeded in 15m29s.
