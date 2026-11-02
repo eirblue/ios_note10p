@@ -20,8 +20,11 @@ class CheckedPagesTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.executable=cls.output/'checked-ptpage-fixture'
-        compiler=subprocess.check_output(['xcrun','--find','clang'],text=True).strip()
-        command=[compiler,'-std=c11','-O2','-Wall','-Wextra','-Werror','-I',str(HERE),
+        compiler=subprocess.check_output(['xcrun','--sdk','macosx','--find','clang'],text=True).strip()
+        sdk=subprocess.check_output(['xcrun','--sdk','macosx','--show-sdk-path'],text=True).strip()
+        if not Path(sdk).is_absolute() or not Path(sdk).is_dir():
+            raise RuntimeError('installed macOS SDK required for the native fixture')
+        command=[compiler,'-isysroot',sdk,'-std=c11','-O2','-Wall','-Wextra','-Werror','-I',str(HERE),
                  str(HERE/'exynos_checked_ptpage_fixture.c'),'-o',str(cls.executable)]
         cls.compiles+=1
         result=subprocess.run(command,capture_output=True,text=True)
