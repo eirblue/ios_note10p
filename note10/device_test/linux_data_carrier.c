@@ -66,6 +66,9 @@ static struct {
     unsigned char expected[32];
 } n10_data __used;
 _Static_assert(sizeof(n10_data) <= 128, "bounded permanent DATA metadata");
+#ifdef N10_DATA_CONTIGUOUS
+_Static_assert(sizeof(n10_data)+sizeof(n10_owned) <= 128, "combined permanent DATA/owned metadata");
+#endif
 
 #ifndef N10_DATA_IMAGE_EXPECTATION
 static int __init n10_data_parameter(char *value)
@@ -224,7 +227,16 @@ static void n10_data_run(struct n10_data_outcome *out)
     out->status = "stream_hash";
     if (n10_data_hash(p+128,count,digest) || memcmp(digest,p+48,32)) goto done;
     out->status = "allocation";
+#ifdef N10_DATA_CONTIGUOUS
+    out->status = "owned_output";
+    if (n10_owned.status != N10_OWNED_READY || n10_owned.attempts != 1 ||
+        !n10_owned.output || payload != N10_OWNED_BYTES || n10_owned.capacity != N10_OWNED_BYTES)
+        goto done;
+    output = n10_owned.output;
+#else
     output = n10_data_alloc((size_t)payload);
+#endif
+    out->status = "allocation";
     workspace = n10_data_alloc(N10_LZMA_WORKSPACE);
     if (!output || !workspace) goto done;
     out->status = "decode";
@@ -238,7 +250,12 @@ static void n10_data_run(struct n10_data_outcome *out)
     memcpy(out->digest,digest,32); out->status = "ok";
 done:
     if (workspace) { n10_data_clear(workspace,N10_LZMA_WORKSPACE); n10_data_free(workspace); }
-    if (output) { n10_data_clear(output,(size_t)out->payload); n10_data_free(output); }
+    if (output) {
+        n10_data_clear(output,(size_t)out->payload);
+#ifndef N10_DATA_CONTIGUOUS
+        n10_data_free(output);
+#endif
+    }
     n10_data_clear(digest,sizeof(digest));
     n10_data_clear(expectation,sizeof(expectation));
 }

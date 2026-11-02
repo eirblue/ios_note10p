@@ -14,6 +14,10 @@
 static unsigned long initrd_start, initrd_end, host_first, host_last;
 static unsigned int allocations, frees, cleared = 1, fail_alloc, hashes, fail_hash, core_calls;
 static size_t first_hash_bytes;
+#ifdef N10_OWNED_HOST_TEST
+static unsigned char *owned_buffer;
+static unsigned int owned_decode;
+#endif
 static void *allocated[2];
 static size_t lengths[2];
 #define n10_data_linear(x) ((x) >= host_first && (x) < host_last)
@@ -51,9 +55,28 @@ static int fixture_decode(const uint8_t *input, size_t bytes, uint8_t *output, s
     void *workspace, size_t workspace_bytes, struct n10_lzma_result *result)
 {
     ++core_calls;
+#ifdef N10_OWNED_HOST_TEST
+    if (output==owned_buffer && capacity==19546112u) owned_decode=1;
+#endif
     return n10_lzma_alone_decode(input,bytes,output,capacity,workspace,workspace_bytes,result);
 }
 #define n10_lzma_alone_decode fixture_decode
+#ifdef N10_OWNED_HOST_TEST
+#define N10_DATA_CONTIGUOUS 1
+static unsigned int reserve_calls, reserve_fail, owned_cleared, early_untouched;
+static unsigned int fail_mapping;
+static uint64_t fixture_reserve(size_t bytes,size_t align)
+{
+    ++reserve_calls;
+    if (bytes!=19546112u || align!=16384u) abort();
+    return reserve_fail ? 0 : (uint64_t)(uintptr_t)owned_buffer;
+}
+#define n10_owned_reserve(n,a) fixture_reserve(n,a)
+#define n10_owned_va(p) ((unsigned long)(p))
+#define n10_owned_pa(p) ((uint64_t)(p))
+#define n10_owned_linear(p) (!fail_mapping && (p)>=(unsigned long)owned_buffer && (p)<(unsigned long)owned_buffer+19546112u)
+#include "owned_contiguous_staging.c"
+#endif
 #include "linux_data_carrier.c"
 #undef n10_lzma_alone_decode
 
@@ -107,6 +130,18 @@ int main(int argc,char **argv)
     if (fseek(file,0,SEEK_END) || (size=ftell(file)) <= 128 || size > (long)N10_LZMA_MAX_BYTES || fseek(file,0,SEEK_SET)) return 2;
     data = malloc((size_t)size); if (!data || fread(data,1,(size_t)size,file) != (size_t)size) return 2;
     fclose(file); mode = argv[2];
+#ifdef N10_OWNED_HOST_TEST
+    owned_buffer=aligned_alloc(16384u,19546112u+16384u); if (!owned_buffer) return 2;
+    memset(owned_buffer,0xa7,19546112u+16384u);
+    reserve_fail=!strcmp(mode,"reserve_fail");fail_mapping=!strcmp(mode,"mapping_fail");
+    n10_owned_capture();
+    if (!strcmp(mode,"reserve_repeat")) n10_owned_capture();
+    if (!strcmp(mode,"capacity_changed")) --n10_owned.capacity;
+    early_untouched=1;
+    for (i=0;i<19546112u+16384u;++i) if (owned_buffer[i]!=0xa7) early_untouched=0;
+    if (hashes || allocations || core_calls) abort();
+#endif
+
     initrd_start = host_first = (unsigned long)data;
     initrd_end = host_last = initrd_start+(unsigned long)size;
     if (!strcmp(mode,"reversed")) n10_data_capture(initrd_end,initrd_start);
@@ -135,5 +170,12 @@ int main(int argc,char **argv)
         (unsigned long long)outcome.written,(unsigned long long)outcome.consumed,digest,
         outcome.reasons,outcome.expectations,outcome.captures,outcome.retained,hashes,
         (unsigned long long)outcome.carrier,(unsigned long long)outcome.logical,outcome.carrier_rc,(unsigned long long)first_hash_bytes,(unsigned long long)outcome.stream,(unsigned long long)outcome.payload);
+#ifdef N10_OWNED_HOST_TEST
+    owned_cleared=1;
+    for (i=0;i<19546112u;++i) if (owned_buffer[i]) owned_cleared=0;
+    for (i=19546112u;i<19546112u+16384u;++i) if (owned_buffer[i]!=0xa7) abort();
+    fprintf(stderr,"OWNED reserve=%u status=%u early=%u direct=%u cleared=%u capacity=%u\n",reserve_calls,n10_owned.status,early_untouched,owned_decode,owned_cleared,n10_owned.capacity);
+    free(owned_buffer);
+#endif
     free(data); return 0;
 }
