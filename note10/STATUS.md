@@ -1,3 +1,13 @@
+## v92: PC-only owned contiguous staging tests and Image build passed
+
+- Reviewed source: `d98fc5e46a3c2c55f7ae3f8c7289932be3ebb4a2`; [CI run 41434541862](https://github.com/eirblue/ios_note10p/actions/runs/41434541862), attempt 1 succeeded.
+- Three new methods passed in one batch, with one optimized fixture compilation and one Linux Image build. Earlier methods and suites were not replayed.
+- The default-off candidate reserves exactly 19,546,112 bytes at 16-KiB alignment through the native reserve-only allocator. Early code does not touch payload bytes; late authenticated decoding writes directly to owned output, verifies and clears its bytes, and retains the reservation. These execution results are synthetic PC evidence; native reservation and decoding success remain unknown.
+- Intrinsic producer metadata reports a 46,413,836-byte Image, 55,132,160-byte linked span and 120-byte combined permanent state. Relative placement checks passed; physical readiness remains false and the physical template path rejects this PC-only producer.
+- Artifact download, authenticated decrypt and bounded private extraction each occurred once. Raw artifacts and evidence remain private.
+- The user requested PC tests/builds first and will report device readiness. No device query, template, package, plan, BOOT write or reboot occurred for v92. The last completed physical build remains v90; v91 is unconsumed (0/1), with its prepared plan and frozen host sources preserved.
+- v93 is in development: a separate Exynos-only bounded leaf bootstrap mapper for new PC execution tests and a newly measured XNU build. No XNU execution on hardware, complete handoff, global RAM ownership or iOS boot is claimed. Existing approval scopes and the full execution ledger remain in every private handoff; device execution stays on hold until explicit user readiness.
+
 ## v91: trusted logical extent CI passed; battery gate blocked installation
 
 - Reviewed source: `0696b4dbf157a2d51b68b26e4a5237a7c51daa80`; [CI run 41404110966](https://github.com/eirblue/ios_note10p/actions/runs/41404110966).
