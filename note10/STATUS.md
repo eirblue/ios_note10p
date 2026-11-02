@@ -1,3 +1,13 @@
+## v89: DATA guard reason identified; physical cycle consumed
+
+- Reviewed source: `aebe2bd4f683d9c4bc3d11892ce00fa100b4c22d`; [CI run 41385913122](https://github.com/eirblue/ios_note10p/actions/runs/41385913122).
+- One new guard-reason/wire method passed with one fixture compilation. The prior eight methods were not replayed. One Image build passed all seven existing relative admission checks: 46,413,836-byte Image, 55,132,160-byte linked span and 88-byte state.
+- The single approved BOOT-write/reboot cycle is consumed (1/1), with no replay. Host recovery return/changed boot ID were observed; all five actual post-return partition hash checks passed.
+- DATA refused input before functional decoding: `parameter_missing`, parameter count 0, capture count 1, retained input true. This distinguishes the earlier aggregate unavailable result without claiming why the parameter was missed.
+- No accepted diagnostic observations; `auto_return=null`. Frame-based hardware-return and hardware boot-count proof remain unavailable. No XNU execution or deployment readiness.
+- Raw kernel Image, package-stage Image and full BOOT-partition digest remain distinct domains; raw logs, bootargs, carrier and partition evidence stay private.
+- Next work uses retained command-line/source evidence only. The direct standing approval and full consumption ledger continue into every handoff; all existing fresh gates and one-cycle limits remain.
+
 ## v88: single physical cycle completed; DATA diagnostic failed
 
 - The approved single BOOT-write/reboot cycle is consumed (1/1); it will not be replayed.
