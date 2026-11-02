@@ -1,3 +1,14 @@
+## v94: checked Exynos page allocator passed PC tests and a new selected XNU build
+
+- Final reviewed source: `ad4bc6b8f7cb1e7308de7e34474f25a0ec4bcf26`; [successful CI run 41450171734](https://github.com/eirblue/ios_note10p/actions/runs/41450171734), attempt 1.
+- The [first run 41448599008](https://github.com/eirblue/ios_note10p/actions/runs/41448599008) failed while compiling the host fixture because `stdio.h` was unavailable: zero methods ran and the XNU build was skipped. The narrow launcher fix selects the installed macOS SDK explicitly, without changing production allocator code or weakening warnings. Both runs and their distinct artifacts are preserved.
+- The three new methods then passed once under controlled conversion/panic stubs. There were two fixture compile attempts in total, one successful; no passed test was replayed. Earlier mapper and whole-entry fixtures were not run.
+- The actual Exynos dynamic allocator now preflights raw arithmetic before normalization and checks each whole page against the effective managed range before pointer conversion or cursor commit. The first two allocations do not depend on the later `avail_end` initialization. Existing Apple/static paths remain unchanged. Existing raw starting-address checks are preserved; this adds a full-page/effective-range guarantee, not an observed hardware failure claim.
+- One fresh source-owned selected XNU compile/direct link succeeded with 1,071 objects (1,067 native and four dependencies). The new MH_EXECUTE file is 17,917,304 bytes, memory span 19,136,512 bytes and entry offset 11,039,888. Fresh metadata was used; earlier entry geometry was not transferred. Full upstream Make and complete board support remain unestablished; synthetic board inputs remain.
+- Each distinct CI artifact was downloaded, authenticated-decrypted and privately extracted once. No standalone post-build MachO reader, payload materialization, carrier generation or device package was run.
+- This bounds declared managed memory; it does not establish actual ownership, a sufficient boot budget, complete bootargs/Apple DT/CPU/timebase/DRAM inputs, relocation or control transfer. New C component execution occurred on the PC; whole XNU kernel entry and hardware XNU execution remain false.
+- The PC-first hold remains active: device queries, BOOT writes and reboots are zero. Last completed physical build remains v90; v91 is unconsumed (0/1), with its prepared plan and frozen host sources preserved. Raw evidence stays private; exact standing approvals and the complete execution ledger accompany each private handoff.
+
 ## v93: new Exynos leaf mapper executed on PC; new selected XNU build passed
 
 - Reviewed source: `28f0838bf066d8fb3c7891b1749e5e7ecbf8d1ee`; [CI run 41442808633](https://github.com/eirblue/ios_note10p/actions/runs/41442808633), attempt 1 succeeded.
