@@ -253,7 +253,8 @@ def host_binding(source_head):
                      'affinity_binding.py', 'test_affinity_binding.py', 'test_affinity_ci_context.py',
                      'test_partition_gate_evidence.py', 'early_fdt_binding.py', 'test_early_fdt_binding.py', 'test_early_fdt_host_route.py', 'native_memory_observation.py', 'test_native_memory_observation.py',
                       'linux_data_carrier.py', 'linux_data_carrier.c', 'linux_data_carrier_composition.c',
-                      'test_linux_data_carrier.py', 'linux_data_carrier_fixture.c', 'carrier_lzma.c', 'carrier_lzma.h')}
+                      'test_linux_data_carrier.py', 'linux_data_carrier_fixture.c', 'carrier_lzma.c', 'carrier_lzma.h',
+                      'linux_data_compare_evidence.h', 'linux_data_compare_evidence_fixture.c', 'test_v99_carrier_compare_evidence.py')}
     return dict(host_profile_source_head=source_head, host_profile_source_sha256=dict(pins))
 
 
@@ -481,6 +482,8 @@ def fields(row):
         keys = (*keys, *(LEGACY_FIELDS if row.get('source_head') in (V88_HOST_HEAD,V89_IMAGE_HEAD) else data_fields), *CARRIER_FIELDS)
     if 'data_current_binding_sha256' in row or 'data_host_experiment' in row:
         keys=(*keys,'data_current_binding_sha256','data_host_experiment')
+    if 'data_compare_schema' in row:
+        keys = (*keys, 'data_compare_schema')
     return {key: row[key] for key in keys}
 
 
@@ -528,6 +531,11 @@ def package_scope(row, mode=None):
                 row.get('native_relative_placement_admitted') is True,'native stage/source/nonclaim binding differs')
     if row['device_profile'] == DATA_PROFILE:
         from linux_data_carrier import STAGE, MODE
+        if 'data_compare_schema' in row:
+            from linux_data_carrier import COMPARE_SCHEMA
+            require(row['data_compare_schema'] == COMPARE_SCHEMA and
+                    row.get('source_head') not in (V88_HOST_HEAD,V89_IMAGE_HEAD,V90_IMAGE_HEAD,V91_IMAGE_HEAD),
+                    'new DATA comparison producer binding differs')
         if row.get('source_head') == V90_IMAGE_HEAD:
             require(row.get('data_expectation_mode') == 'image-slot-v1' and row.get('image_expectation_patched') is True, 'historical Image expectation differs')
         elif row.get('source_head') not in (V88_HOST_HEAD,V89_IMAGE_HEAD):

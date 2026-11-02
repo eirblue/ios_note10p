@@ -134,7 +134,7 @@ def main(kind=None):
              'early_fdt_binding.py','sealed_affinity_artifact.cjs','bundle_affinity_evidence.py') if native else (
              'linux_data_carrier.py','linux_data_carrier.c','linux_data_carrier_composition.c',
              'build_linux_data_carrier.py','linux_data_carrier_fixture.c','test_linux_data_carrier.py',
-             'carrier_lzma.c','carrier_lzma.h','early_fdt_binding.py','sealed_affinity_artifact.cjs',
+             'carrier_lzma.c','carrier_lzma.h','linux_data_compare_evidence.h','early_fdt_binding.py','sealed_affinity_artifact.cjs',
              'bundle_affinity_evidence.py') if data_task else ()
     if owned:
         extra=(*extra,'owned_contiguous_staging.py','owned_contiguous_staging.c','owned_contiguous_staging_composition.c',
@@ -275,6 +275,8 @@ def main(kind=None):
             settings.update(NOTE10_OWNED_CONTIGUOUS_STAGING='y',HAVE_MEMBLOCK='y',NO_BOOTMEM='y',LOCALVERSION='"-v92-owned-contiguous-pc"')
         if current_owned:
             settings.update(NOTE10_CURRENT_OWNED_STAGING='y',LOCALVERSION='"-v96-current-owned-pc"')
+        if data_task and not owned:
+            settings.update(NOTE10_OWNED_CONTIGUOUS_STAGING='n', NOTE10_CURRENT_OWNED_STAGING='n')
         run([*make, DEFCONFIG], 'build/01-defconfig.log')
         owned_default_enabled=owned and any(line.startswith('CONFIG_NOTE10_OWNED_CONTIGUOUS_STAGING=') for line in (objects/'.config').read_text().splitlines())
         if owned_default_enabled:
@@ -373,6 +375,9 @@ def main(kind=None):
             slot = slot_metadata(raw,(objects/'System.map').read_text(),(out/'new-object-symbols.log').read_text(),(out/'new-object-sections.log').read_text())
             result.update(raw_input_binding=False,data_carrier_stage=STAGE,data_footprint=footprint,physical_placement_review_required=True,
                           data_expectation_mode=MODE,data_expectation_slot=slot,image_expectation_patched=False)
+            if not owned:
+                from linux_data_carrier import COMPARE_SCHEMA
+                result['data_compare_schema'] = COMPARE_SCHEMA
             result['files_sha256'] = {'minimal-init.elf':result['minimal_init_elf_sha256'],'initramfs.cpio':result['initramfs_cpio_sha256']}
             data_config=[x for x in config if not x.startswith(('CONFIG_NOTE10_OWNED_CONTIGUOUS_STAGING=','CONFIG_NOTE10_CURRENT_OWNED_STAGING=')) and x not in ('# CONFIG_NOTE10_OWNED_CONTIGUOUS_STAGING is not set','# CONFIG_NOTE10_CURRENT_OWNED_STAGING is not set')] if owned else config
             result['data_relative_placement'] = relative_admission(result,data_config,footprint,elf=init,archive=archive_data,

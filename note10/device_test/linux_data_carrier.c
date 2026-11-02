@@ -150,12 +150,24 @@ out:
 }
 #endif
 
+#ifdef N10_DATA_COMPARE_EVIDENCE
+#ifdef N10_DATA_CONTIGUOUS
+#error "comparison evidence requires the late vmalloc DATA path"
+#endif
+#define N10_COMPARE_CLEAR(p,n) n10_data_clear(p,n)
+#include "linux_data_compare_evidence.h"
+#undef N10_COMPARE_CLEAR
+#endif
+
 struct n10_data_outcome {
     const char *status;
     uint64_t carrier, logical, stream, payload, consumed, written;
     int carrier_rc;
     unsigned int decoded, reasons, expectations, captures, retained;
     unsigned char digest[32];
+#ifdef N10_DATA_COMPARE_EVIDENCE
+    struct n10_data_compare_evidence comparison;
+#endif
 };
 
 static void n10_data_run(struct n10_data_outcome *out)
@@ -213,7 +225,13 @@ static void n10_data_run(struct n10_data_outcome *out)
     out->carrier_rc = n10_data_hash(p,(size_t)logical,digest);
     if (out->carrier_rc) goto done;
     out->status = "carrier_mismatch";
+#ifdef N10_DATA_COMPARE_EVIDENCE
+    status = memcmp(digest,expectation,32);
+    n10_data_compare_capture(&out->comparison,digest,expectation,status);
+    if (status) goto done;
+#else
     if (memcmp(digest,expectation,32)) goto done;
+#endif
     out->status = "header";
     if (memcmp(p,"N10DATA1",8) || n10_data_le(p+8,2) != 1 || n10_data_le(p+10,2) != 128 ||
         n10_data_le(p+12,4) || n10_data_le(p+16,8) != logical || n10_data_le(p+24,8) != 128)
@@ -265,6 +283,9 @@ static int n10_data_emit(void)
 {
     struct n10_data_outcome outcome;
     char frame[448], digest[65];
+#ifdef N10_DATA_COMPARE_EVIDENCE
+    char expected[65];
+#endif
     unsigned int i;
     int count;
     static const char digits[] = "0123456789abcdef";
@@ -277,6 +298,15 @@ static int n10_data_emit(void)
         (unsigned long long)outcome.carrier,(unsigned long long)outcome.logical,outcome.carrier_rc,(unsigned long long)outcome.stream,(unsigned long long)outcome.payload,
         (unsigned long long)outcome.consumed,(unsigned long long)outcome.written,outcome.decoded,digest,outcome.reasons,outcome.expectations,outcome.captures,outcome.retained);
     pr_info("N10DATA1 %s checksum=%08x\n",frame,n10_frame_checksum(frame,count));
+#ifdef N10_DATA_COMPARE_EVIDENCE
+    count = n10_data_compare_format(&outcome.comparison,frame,sizeof(frame),digest,expected,
+        N10_SHA256_KAT_ID,(const char *)n10_cycle,(unsigned long long)outcome.logical);
+    if (count)
+        pr_info("N10DATACMP1 %s checksum=%08x\n",frame,n10_frame_checksum(frame,count));
+    n10_data_compare_clear(&outcome.comparison);
+    n10_data_clear(expected,sizeof(expected));
+    n10_data_clear(frame,sizeof(frame));
+#endif
     n10_data_clear(&outcome,sizeof(outcome)); n10_data_clear(digest,sizeof(digest));
     return 0;
 }

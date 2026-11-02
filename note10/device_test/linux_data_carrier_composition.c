@@ -27,6 +27,10 @@ static u32 n10_frame_checksum(const char *text, unsigned int length)
 #include "note10_auto_return.c"
 #include "carrier_lzma.c"
 #define N10_DATA_IMAGE_EXPECTATION 1
+#if defined(CONFIG_NOTE10_OWNED_CONTIGUOUS_STAGING) || defined(CONFIG_NOTE10_CURRENT_OWNED_STAGING)
+#error "normal comparison DATA must not enable early owned staging"
+#endif
+#define N10_DATA_COMPARE_EVIDENCE 1
 #include "linux_data_carrier.c"
 #define n10_sha256_kat_init n10_data_emit
 #include "sha256_kat_recovery_work.c"
