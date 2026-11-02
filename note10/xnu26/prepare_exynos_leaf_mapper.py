@@ -1,0 +1,37 @@
+"""Pinned Exynos-only mapper patch generator; source is read-only here."""
+import argparse
+import difflib
+import hashlib
+from pathlib import Path
+from prepare_native_bootstrap_selection import ROOT
+PATCH_NAME='0012-exynos9825-bounded-leaf-bootstrap.patch'
+PINS={'osfmk/arm64/start.s': '598338693f93de8e56dc634a2bbede2ecb4fc433b8a3eba74e6e934ccc958480', 'osfmk/arm/pmap/pmap.h': 'b2051da961fd020e27c31b3c744504625873c5fa5449c5432472f2e666bc2862', 'osfmk/arm64/arm_vm_init.c': 'f567471c7e202197cecd0acf5147d6566bf0737ec6ffde10bfe88c85e3d8ec2c'}
+COMPONENT_PINS={'osfmk/arm64/note10/exynos_leaf_mapper.h': '8e11dabddd52cd4711b057318fcfc5823447535ce72b5553da3562b3685fc3c9', 'osfmk/arm64/note10/exynos_leaf_mapper.S': '3015de0e39c219d1b11ca30a3c53c027118902a6f341d02700db5f43625bb4a0'}
+PATCH_SHA256='070c3b02cc6f55eaf8458345eab8446da50415e0398df98cb0352de6787d3a43'
+REPLACEMENTS={'osfmk/arm64/start.s': [('#include <arm64/machine_machdep.h>\n', '#include <arm64/machine_machdep.h>\n#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)\n#include "note10/exynos_leaf_mapper.h"\n#endif\n'), ('\t// Invalidate all entries in the bootstrap page tables\n\tmov\t\tx0, #(ARM_TTE_EMPTY)\t\t\t\t// Load invalid entry template\n\tmov\t\tx1, x25\t\t\t\t\t\t\t\t// Start at V=P pagetable root\n\tmov\t\tx2, #(TTE_PGENTRIES)\t\t\t\t// Load number of entries per page\n\tlsl\t\tx2, x2, #2\t\t\t\t\t\t\t// Shift by 2 for num entries on 4 pages\n\nLinvalidate_bootstrap:\t\t\t\t\t\t\t// do {\n\tstr\t\tx0, [x1], #(1 << TTE_SHIFT)\t\t\t//   Invalidate and advance\n\tsubs\tx2, x2, #1\t\t\t\t\t\t\t//   entries--\n\tb.ne\tLinvalidate_bootstrap\t\t\t\t// } while (entries != 0)\n', '#if !defined(ARM64_BOARD_CONFIG_EXYNOS9825)\n\t// Invalidate all entries in the bootstrap page tables\n\tmov\t\tx0, #(ARM_TTE_EMPTY)\t\t\t\t// Load invalid entry template\n\tmov\t\tx1, x25\t\t\t\t\t\t\t\t// Start at V=P pagetable root\n\tmov\t\tx2, #(TTE_PGENTRIES)\t\t\t\t// Load number of entries per page\n\tlsl\t\tx2, x2, #2\t\t\t\t\t\t\t// Shift by 2 for num entries on 4 pages\n\nLinvalidate_bootstrap:\t\t\t\t\t\t\t// do {\n\tstr\t\tx0, [x1], #(1 << TTE_SHIFT)\t\t\t//   Invalidate and advance\n\tsubs\tx2, x2, #1\t\t\t\t\t\t\t//   entries--\n\tb.ne\tLinvalidate_bootstrap\t\t\t\t// } while (entries != 0)\n#endif\n'), ('\t/*\n\t * x0  - V=P virtual cursor\n\t * x4  - V=P physical cursor\n\t * x14 - KVA virtual cursor\n\t * x15 - KVA physical cursor\n\t */\n\tmov\t\tx4, x0\n\tmov\t\tx14, x22\n\tmov\t\tx15, x23\n\n\t/*\n\t * Allocate L1 tables\n\t * x1 - V=P L1 page\n\t * x3 - KVA L1 page\n\t * x2 - free mem pointer from which we allocate a variable number of L2\n\t * pages. The maximum number of bootstrap page table pages is limited to\n\t * BOOTSTRAP_TABLE_SIZE. For a 2G 4k page device, assuming the worst-case\n\t * slide, we need 1xL1 and up to 3xL2 pages (1GB mapped per L1 entry), so\n\t * 8 total pages for V=P and KVA.\n\t */\n\tmov\t\tx1, x25\n\tadd\t\tx3, x1, PGBYTES\n\tmov\t\tx2, x3\n\n\t/*\n\t * Setup the V=P bootstrap mapping\n\t * x5 - total number of L2 entries to allocate\n\t */\n\tlsr\t\tx5,  x24, #(ARM_TT_L2_SHIFT)\n\t/* create_bootstrap_mapping(vbase, pbase, num_ents, L1 table, freeptr) */\n\tcreate_bootstrap_mapping x0,  x4,  x5, x1, x2, x6, x10, x11, x12, x13\n\n\t/* Setup the KVA bootstrap mapping */\n\tlsr\t\tx5,  x24, #(ARM_TT_L2_SHIFT)\n\tcreate_bootstrap_mapping x14, x15, x5, x3, x2, x9, x10, x11, x12, x13\n\n\t/* Ensure TTEs are visible */\n\tdsb\t\tish\n', '#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)\n    mov x19,lr\n    mov x0,x22\n    mov x1,x23\n    mov x2,x24\n    mov x3,x25\n    mov x4,#N10_MAP_POOL_PAGES\n    lsl x4,x4,#14\n    bl EXT(n10_exynos_bootstrap_map)\n    mov lr,x19\n    cbz x0,.Ln10_leaf_ready\n.Ln10_leaf_refused:\n    b .Ln10_leaf_refused\n.Ln10_leaf_ready:\n    dsb ish\n#else\n\t/*\n\t * x0  - V=P virtual cursor\n\t * x4  - V=P physical cursor\n\t * x14 - KVA virtual cursor\n\t * x15 - KVA physical cursor\n\t */\n\tmov\t\tx4, x0\n\tmov\t\tx14, x22\n\tmov\t\tx15, x23\n\n\t/*\n\t * Allocate L1 tables\n\t * x1 - V=P L1 page\n\t * x3 - KVA L1 page\n\t * x2 - free mem pointer from which we allocate a variable number of L2\n\t * pages. The maximum number of bootstrap page table pages is limited to\n\t * BOOTSTRAP_TABLE_SIZE. For a 2G 4k page device, assuming the worst-case\n\t * slide, we need 1xL1 and up to 3xL2 pages (1GB mapped per L1 entry), so\n\t * 8 total pages for V=P and KVA.\n\t */\n\tmov\t\tx1, x25\n\tadd\t\tx3, x1, PGBYTES\n\tmov\t\tx2, x3\n\n\t/*\n\t * Setup the V=P bootstrap mapping\n\t * x5 - total number of L2 entries to allocate\n\t */\n\tlsr\t\tx5,  x24, #(ARM_TT_L2_SHIFT)\n\t/* create_bootstrap_mapping(vbase, pbase, num_ents, L1 table, freeptr) */\n\tcreate_bootstrap_mapping x0,  x4,  x5, x1, x2, x6, x10, x11, x12, x13\n\n\t/* Setup the KVA bootstrap mapping */\n\tlsr\t\tx5,  x24, #(ARM_TT_L2_SHIFT)\n\tcreate_bootstrap_mapping x14, x15, x5, x3, x2, x9, x10, x11, x12, x13\n\n\t/* Ensure TTEs are visible */\n\tdsb\t\tish\n#endif\n'), ('//#include\t"globals_asm.h"\n', '//#include\t"globals_asm.h"\n\n#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)\n#include "note10/exynos_leaf_mapper.S"\n#endif\n')], 'osfmk/arm/pmap/pmap.h': [('#if defined(ARM_LARGE_MEMORY)\n/*\n * 2 L1 tables (Linear KVA and V=P), plus 2*16 L2 tables', '#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)\n#define BOOTSTRAP_TABLE_SIZE (ARM_PGBYTES * 10)\n#elif defined(ARM_LARGE_MEMORY)\n/*\n * 2 L1 tables (Linear KVA and V=P), plus 2*16 L2 tables')], 'osfmk/arm64/arm_vm_init.c': [('SECURITY_READ_ONLY_LATE(uint8_t) bootstrap_pagetables[BOOTSTRAP_TABLE_SIZE] __attribute__((aligned(ARM_PGBYTES)));', '#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)\n#include "note10/exynos_leaf_mapper.h"\nuint8_t bootstrap_pagetables[BOOTSTRAP_TABLE_SIZE]\n    __attribute__((section("__DATA,__n10bt,zerofill"),aligned(ARM_PGBYTES),used));\n_Static_assert(BOOTSTRAP_TABLE_SIZE == N10_MAP_POOL_BYTES, "exact Exynos bootstrap BSS capacity");\n#else\nSECURITY_READ_ONLY_LATE(uint8_t) bootstrap_pagetables[BOOTSTRAP_TABLE_SIZE] __attribute__((aligned(ARM_PGBYTES)));\n#endif')]}
+HERE=Path(__file__).resolve().parent
+
+def patch_bytes(before):
+    if set(before)!=set(PINS) or any(hashlib.sha256(before[n]).hexdigest()!=pin for n,pin in PINS.items()):
+        raise ValueError('exact original bootstrap source required')
+    chunks=[]
+    for name in PINS:
+        text=before[name].decode()
+        for old,new in REPLACEMENTS[name]:
+            if text.count(old)!=1:raise ValueError('unique bootstrap insertion required')
+            text=text.replace(old,new,1)
+        chunks.append(''.join(difflib.unified_diff(before[name].decode().splitlines(True),text.splitlines(True),fromfile='a/'+name,tofile='b/'+name)))
+    for name,pin in COMPONENT_PINS.items():
+        raw=(HERE/Path(name).name).read_bytes()
+        if hashlib.sha256(raw).hexdigest()!=pin:raise ValueError('tested mapper component differs')
+        chunks.append(''.join(difflib.unified_diff([],raw.decode().splitlines(True),fromfile='/dev/null',tofile='b/'+name)))
+    raw=''.join(chunks).encode()
+    if hashlib.sha256(raw).hexdigest()!=PATCH_SHA256:raise ValueError('reviewed literal mapper patch differs')
+    return raw
+
+def main():
+    p=argparse.ArgumentParser(description=__doc__)
+    p.add_argument('--source',type=Path,required=True);p.add_argument('--output',type=Path,required=True)
+    a=p.parse_args();raw=patch_bytes({n:(a.source/n).read_bytes() for n in PINS})
+    with a.output.open('xb') as stream:stream.write(raw)
+if __name__=='__main__':main()

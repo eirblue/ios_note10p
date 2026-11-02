@@ -148,7 +148,7 @@ def build_config_tool(source, work, output):
     return tool, compiler, sdk
 
 
-def provision(work, output, *, ci=None):
+def provision(work, output, *, ci=None, leaf=False):
     if sys.platform != 'darwin' or os.environ.get('GITHUB_ACTIONS') != 'true':
         raise ValueError('fresh macOS CI only')
     ci = ci_context() if ci is None else ci
@@ -170,9 +170,12 @@ def provision(work, output, *, ci=None):
     patches = ROOT / 'note10/xnu26/patches'
     names = (patches / 'series').read_text().splitlines()
     clock_patch = '0011-exynos9825-early-counter-clock.patch'
-    if (len(names) not in (10, 11) or names[9] != PATCH_NAME or
-        (len(names) == 11 and names[10] != clock_patch)):
-        raise ValueError('closed native bootstrap series with optional early-clock patch required')
+    leaf_patch='0012-exynos9825-bounded-leaf-bootstrap.patch'
+    if (len(names) not in (10,11,12) or names[9] != PATCH_NAME or
+        (len(names)>=11 and names[10]!=clock_patch) or
+        (len(names)==12 and names[11]!=leaf_patch) or (leaf and len(names)!=12)):
+        raise ValueError('closed native bootstrap/clock/optional leaf series required')
+    names=names if leaf else names[:11]
     for n, name in enumerate(names[:9]):
         run(['git', '-c', 'core.autocrlf=false', 'apply', patches / name],
             source, output / ('patch-' + str(n + 1) + '.log'))
@@ -182,13 +185,18 @@ def provision(work, output, *, ci=None):
     (work / 'baseline-files.arm64').write_bytes(before['osfmk/conf/files.arm64'])
     run(['git', '-c', 'core.autocrlf=false', 'apply', patches / PATCH_NAME],
         source, output / 'patch-10.log')
-    if len(names) == 11:
+    if len(names) >= 11:
         from prepare_exynos_early_clock import REL as CLOCK_REL, patch_bytes as clock_patch_bytes
         component = (ROOT / 'note10/xnu26/exynos_early_clock.c').read_bytes()
         if clock_patch_bytes((source / CLOCK_REL).read_bytes(), component) != (patches / clock_patch).read_bytes():
             raise ValueError('early-clock kernel patch differs from the tested production component')
         run(['git', '-c', 'core.autocrlf=false', 'apply', patches / clock_patch],
             source, output / 'patch-11.log')
+    if leaf:
+        from prepare_exynos_leaf_mapper import PINS as LEAF_PINS, patch_bytes as leaf_patch_bytes
+        if leaf_patch_bytes({n:(source/n).read_bytes() for n in LEAF_PINS}) != (patches/leaf_patch).read_bytes():
+            raise ValueError('leaf production include differs from the tested component')
+        run(['git','-c','core.autocrlf=false','apply',patches/leaf_patch],source,output/'patch-12.log')
     tool, compiler, sdk = build_config_tool(source, work, output)
     context = dict(ci_context=ci, source=str(source), tool=str(tool), compiler=compiler,
                    sdk=sdk, public_source_commit=COMMIT, output=str(output), phase='provisioned',

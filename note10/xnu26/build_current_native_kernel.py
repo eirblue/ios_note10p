@@ -22,19 +22,20 @@ from prepare_native_bootstrap_selection import ROOT, COMMIT
 PRIVATE = ROOT / 'note10/private'
 JOB = 'current-native-selected-link'
 WORKFLOW = '.github/workflows/note10-current-native-selected-link.yml'
+LEAF_WORKFLOW = '.github/workflows/note10-exynos-leaf-bootstrap-pc.yml'
 LIBDISPATCH = '2361ffb78a76f7ee488cd052eb0bc5c767118bf9'
 CASE_IDS = ('test_current_inventory_resolves_owner_and_generated_identity',
             'test_current_context_rejects_stale_candidate_and_partial_objects',
             'test_direct_native_link_uses_current_filelist_and_reports_failure')
 
 
-def ci_context():
+def ci_context(leaf=False):
     result = {k: os.environ.get(k, '') for k in ('GITHUB_SHA', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT',
         'GITHUB_JOB', 'GITHUB_WORKFLOW_REF', 'GITHUB_WORKFLOW_SHA', 'GITHUB_REPOSITORY')}
     if (not re.fullmatch('[0-9a-f]{40}', result['GITHUB_SHA']) or
         result['GITHUB_WORKFLOW_SHA'] != result['GITHUB_SHA'] or result['GITHUB_JOB'] != JOB or
         result['GITHUB_REPOSITORY'] != 'eirblue/ios_note10p' or
-        not result['GITHUB_WORKFLOW_REF'].startswith('eirblue/ios_note10p/' + WORKFLOW + '@') or
+        not result['GITHUB_WORKFLOW_REF'].startswith('eirblue/ios_note10p/' + (LEAF_WORKFLOW if leaf else WORKFLOW) + '@') or
         any(not re.fullmatch('[1-9][0-9]*', result[k]) for k in ('GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT'))):
         raise ValueError('exact current source/workflow/run/attempt/job required')
     return result
@@ -121,7 +122,7 @@ def aliases_for_current(source, rows, output):
                         generated_aliases_sha256=native.file_sha(result))
 
 
-def intrinsic_kernel_result(path, symbols_text, undefined):
+def intrinsic_kernel_result(path, symbols_text, undefined, *, leaf=False):
     """Collect this producer's new link output once, not a standalone reader."""
     raw = path.read_bytes()
     if len(raw) < 32:
@@ -130,6 +131,7 @@ def intrinsic_kernel_result(path, symbols_text, undefined):
     if (magic, cpu, subtype, kind) != (0xfeedfacf, 0x100000c, 0, 2) or count > 4096 or size > len(raw) - 32:
         raise ValueError('plain arm64 executable link output required')
     offset, entry, segments = 32, None, []
+    pools=[]
     for _ in range(count):
         if offset + 8 > 32 + size:
             raise ValueError('truncated load command')
@@ -147,6 +149,15 @@ def intrinsic_kernel_result(path, symbols_text, undefined):
                 raise ValueError('invalid produced segment')
             segments.append(dict(name=name, virtual_address=va, virtual_size=span,
                                  file_offset=fileoff, file_size=filesize, initial_protection=initial))
+            if leaf:
+                nsects=struct.unpack_from('<I',raw,offset+64)[0]
+                if length!=72+80*nsects:raise ValueError('new kernel section bounds differ')
+                for i in range(nsects):
+                    section=struct.unpack_from('<16s16sQQ8I',raw,offset+72+80*i)
+                    if section[0].rstrip(b'\0')==b'__n10bt':
+                        pools.append(dict(segment=section[1].rstrip(b'\0').decode('ascii'),
+                            address=section[2],bytes=section[3],alignment_log2=section[5],flags=section[8],
+                            segment_start=va,segment_end=va+span,segment_protection=initial,segment_maximum_protection=maximum))
         if cmd == 5:
             if entry is not None or length != 288 or struct.unpack_from('<II', raw, offset + 8) != (6, 68):
                 raise ValueError('unexpected ARM64 thread entry')
@@ -162,17 +173,38 @@ def intrinsic_kernel_result(path, symbols_text, undefined):
         entry is None or symbols['__start'] != entry or
         not any(s['initial_protection'] & 4 and s['virtual_address'] <= entry < s['virtual_address'] + s['file_size'] for s in segments)):
         raise ValueError('current entry/undefined/layout output contract failed')
-    return dict(output_sha256=hashlib.sha256(raw).hexdigest(), output_bytes=len(raw),
+    result=dict(output_sha256=hashlib.sha256(raw).hexdigest(), output_bytes=len(raw),
                 entry_virtual_address=hex(entry), architecture='arm64', mach_o_type='MH_EXECUTE',
                 entry_symbols={n: hex(symbols[n]) for n in required}, segments=segments,
                 undefined_symbols=[], deployment_ready=False)
+    if leaf:
+        if len(pools)!=1:raise ValueError('one actual Exynos zero-fill pool required')
+        pool=pools[0];start=pool['address'];end=start+pool['bytes']
+        selected=[s for s in segments if s['virtual_size']]
+        base=min(s['virtual_address'] for s in selected);limit=max(s['virtual_address']+s['virtual_size'] for s in selected)
+        mapper=symbols.get('_n10_exynos_bootstrap_map')
+        span=(limit-base+16383)&~16383
+        if (not 0<span<=33554432 or base%16384 or pool['segment']!='__DATA' or pool['bytes']!=163840 or start%16384 or pool['alignment_log2']<14 or
+            pool['flags']&255!=1 or pool['segment_protection']!=3 or
+            pool['segment_maximum_protection']&pool['segment_protection'] != pool['segment_protection'] or
+            not pool['segment_start']<=start<end<=pool['segment_end'] or
+            symbols.get('_bootstrap_pagetables')!=start or not base<=start<end<=limit or mapper is None or
+            not any(s['initial_protection']&4 and s['virtual_address']<=mapper<s['virtual_address']+s['file_size'] for s in segments)):
+            raise ValueError('actual new mapper/BSS pool/source payload containment failed')
+        result.update(PC_only=True,physical_ready=False,bootstrap_pool=pool,
+            mapper_virtual_address=hex(mapper),memory_image_span_bytes=span,
+            memory_image_virtual_base=hex(base),entry_offset=entry-base,
+            bootstrap_pool_relative_offset=start-base,physical_reservation_verified=False)
+    return result
 
 
-def build(work, output):
+def build(work, output, *, leaf=False):
     # Reuse only provisioning/configuration primitives; never the v83 tests/build.
-    ci = ci_context()
-    prior_pass = prior_pass_authorization(ci)
-    bootstrap.provision(work, output, ci=ci)
+    ci = ci_context(leaf)
+    if leaf and os.environ.get('N10_BUILD_ONLY','false')!='false':
+        raise ValueError('new leaf scope has no retained-PASS skip gate')
+    prior_pass = None if leaf else prior_pass_authorization(ci)
+    bootstrap.provision(work, output, ci=ci,leaf=leaf)
     provisioned = json.loads((work / 'context.json').read_text())
     source, tool = Path(provisioned['source']), Path(provisioned['tool'])
     private = PRIVATE / 'windows-xnu'
@@ -183,6 +215,7 @@ def build(work, output):
                  ci_context=provisioned['ci_context'], public_source_commit=COMMIT,
                  synthetic_board_inputs=True, full_upstream_make_build=False,
                  deployment_ready=False, hardware_verified=False, device_operations=[])
+    if leaf:state.update(kind='v93-exynos-leaf-bootstrap-pc',PC_only=True,physical_ready=False,whole_XNU_kernel_entry_executed=False,hardware_XNU_executed=False)
     state['build_only_prior_pass'] = prior_pass
     bootstrap.write_json(output / 'result.json', state)
     original_env = dict(os.environ)
@@ -254,6 +287,9 @@ def build(work, output):
             'generate_native_extra.py', 'generate_assym.py', 'generate_link_metadata.py',
             'compile_public_dependencies.py', 'compile_link_metadata.py', 'export_source_headers.py',
             'link_experimental_kernel.py', 'audit_link_inputs.py', 'cloud_compile.py')}
+        if leaf:
+            producer['recipe_sha256'].update({n:native.file_sha(ROOT/'note10/xnu26'/n) for n in
+                ('prepare_exynos_leaf_mapper.py','exynos_leaf_mapper.S','exynos_leaf_mapper.h')})
         binding_files = ('configure-result.json', 'exports-result.json', 'native-mig-result.json',
                          'native-extra-result.json', 'native-link/generate-result.json')
         bindings = {n: native.file_sha(private / n) for n in binding_files}
@@ -292,7 +328,7 @@ def build(work, output):
         kernel = output / 'current-native.macho'
         undefined = bootstrap.run(['xcrun', 'nm', '-u', kernel], ROOT, output / 'kernel-undefined.log').decode()
         symbols = bootstrap.run(['xcrun', 'nm', kernel], ROOT, output / 'kernel-symbols.log').decode()
-        state.update(intrinsic_kernel_result(kernel, symbols, undefined))
+        state.update(intrinsic_kernel_result(kernel, symbols, undefined,leaf=leaf))
         state.update(phase='complete', passed=True, native_objects=len(rows), dependency_objects=4,
                      candidate_archive_used=False, old_suites_executed=0)
     except BaseException as error:
@@ -309,12 +345,13 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--work', required=True)
     p.add_argument('--output', required=True)
+    p.add_argument('--exynos-leaf',action='store_true',help='closed v93 PC-only EXYNOS mapper source candidate')
     args = p.parse_args()
     work, output = bootstrap.private(args.work), bootstrap.private(args.output)
     if work == output or work.is_relative_to(output) or output.is_relative_to(work):
         p.error('disjoint fresh private roots required')
     try:
-        build(work, output)
+        build(work, output,leaf=args.exynos_leaf)
     except BaseException:
         print('current native payload build failed; private evidence retained', file=sys.stderr)
         return 1

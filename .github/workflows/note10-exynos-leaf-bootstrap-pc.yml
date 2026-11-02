@@ -1,0 +1,59 @@
+name: Note10 v93 EXYNOS leaf bootstrap PC candidate
+on:
+  workflow_dispatch:
+    inputs:
+      recipient_public_key_b64:
+        description: Public RSA3072 recipient only; private key stays local
+        required: true
+        type: string
+      ci_case_json:
+        description: Only the three NEW production leaf-mapper cases
+        default: '[]'
+        type: string
+permissions:
+  contents: read
+jobs:
+  current-native-selected-link:
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate public recipient only
+        env:
+          N10_RECIPIENT_PUBLIC_KEY_B64: ${{ inputs.recipient_public_key_b64 }}
+        run: node note10/device_test/sealed_affinity_artifact.cjs recipient
+      - name: Install the bounded ordinary-memory execution dependency
+        run: python -m pip install --disable-pip-version-check unicorn==2.1.4
+      - name: One NEW production assembly fixture compile and three cases
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+          N10_CI_CASE_JSON: ${{ inputs.ci_case_json }}
+        run: python -B note10/xnu26/test_exynos_leaf_mapper.py --output note10/private/v93-ci-new-tests
+      - name: One fresh source-owned XNU compile and direct link
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+          N10_BUILD_ONLY: 'false'
+        run: python -B note10/xnu26/build_current_native_kernel.py --exynos-leaf --work note10/private/v93-ci-work --output note10/private/v93-ci-build
+      - name: Seal new objects payload and diagnostics including failures
+        if: always()
+        env:
+          N10_RECIPIENT_PUBLIC_KEY_B64: ${{ inputs.recipient_public_key_b64 }}
+        run: |
+          python -B note10/device_test/bundle_affinity_evidence.py --tests note10/private/v93-ci-new-tests --build note10/private/v93-ci-build --output note10/private/v93-evidence.zip --source "$GITHUB_SHA"
+          node note10/device_test/sealed_affinity_artifact.cjs seal note10/private/v93-evidence.zip note10/private/v93-sealed-evidence.n10sealed "$GITHUB_SHA"
+      - name: Upload ciphertext only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: note10-v93-sealed-evidence
+          if-no-files-found: error
+          retention-days: 7
+          path: note10/private/v93-sealed-evidence.n10sealed

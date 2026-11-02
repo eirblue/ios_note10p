@@ -1,0 +1,289 @@
+--- a/osfmk/arm64/start.s
++++ b/osfmk/arm64/start.s
+@@ -29,6 +29,9 @@
+ #include <arm64/asm.h>
+ #include <arm64/proc_reg.h>
+ #include <arm64/machine_machdep.h>
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++#include "note10/exynos_leaf_mapper.h"
++#endif
+ #include <arm64/proc_reg.h>
+ #include <pexpert/arm64/board_config.h>
+ #include <mach_assert.h>
+@@ -534,6 +537,7 @@
+ 	 *	Page 4 - KVA L2 table
+ 	 */
+ 
++#if !defined(ARM64_BOARD_CONFIG_EXYNOS9825)
+ 	// Invalidate all entries in the bootstrap page tables
+ 	mov		x0, #(ARM_TTE_EMPTY)				// Load invalid entry template
+ 	mov		x1, x25								// Start at V=P pagetable root
+@@ -544,6 +548,7 @@
+ 	str		x0, [x1], #(1 << TTE_SHIFT)			//   Invalidate and advance
+ 	subs	x2, x2, #1							//   entries--
+ 	b.ne	Linvalidate_bootstrap				// } while (entries != 0)
++#endif
+ 
+ 	/*
+ 	 * In order to reclaim memory on targets where TZ0 (or some other entity)
+@@ -586,6 +591,22 @@
+ 	add		x22, x22, x18
+ 	add		x23, x23, x18
+ 
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++    mov x19,lr
++    mov x0,x22
++    mov x1,x23
++    mov x2,x24
++    mov x3,x25
++    mov x4,#N10_MAP_POOL_PAGES
++    lsl x4,x4,#14
++    bl EXT(n10_exynos_bootstrap_map)
++    mov lr,x19
++    cbz x0,.Ln10_leaf_ready
++.Ln10_leaf_refused:
++    b .Ln10_leaf_refused
++.Ln10_leaf_ready:
++    dsb ish
++#else
+ 	/*
+ 	 * x0  - V=P virtual cursor
+ 	 * x4  - V=P physical cursor
+@@ -624,6 +645,7 @@
+ 
+ 	/* Ensure TTEs are visible */
+ 	dsb		ish
++#endif
+ 
+ 
+ 	b		common_start
+@@ -880,4 +902,8 @@
+ 
+ //#include	"globals_asm.h"
+ 
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++#include "note10/exynos_leaf_mapper.S"
++#endif
++
+ /* vim: set ts=4: */
+--- a/osfmk/arm/pmap/pmap.h
++++ b/osfmk/arm/pmap/pmap.h
+@@ -109,7 +109,9 @@
+ 
+ #if defined(__arm64__)
+ 
+-#if defined(ARM_LARGE_MEMORY)
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++#define BOOTSTRAP_TABLE_SIZE (ARM_PGBYTES * 10)
++#elif defined(ARM_LARGE_MEMORY)
+ /*
+  * 2 L1 tables (Linear KVA and V=P), plus 2*16 L2 tables map up to (16*64GB) 1TB of DRAM
+  * Upper limit on how many pages can be consumed by bootstrap page tables
+--- a/osfmk/arm64/arm_vm_init.c
++++ b/osfmk/arm64/arm_vm_init.c
+@@ -83,7 +83,14 @@
+  * perspective, but it is only modified before we actually switch away from
+  * the bootstrap page tables.
+  */
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++#include "note10/exynos_leaf_mapper.h"
++uint8_t bootstrap_pagetables[BOOTSTRAP_TABLE_SIZE]
++    __attribute__((section("__DATA,__n10bt,zerofill"),aligned(ARM_PGBYTES),used));
++_Static_assert(BOOTSTRAP_TABLE_SIZE == N10_MAP_POOL_BYTES, "exact Exynos bootstrap BSS capacity");
++#else
+ SECURITY_READ_ONLY_LATE(uint8_t) bootstrap_pagetables[BOOTSTRAP_TABLE_SIZE] __attribute__((aligned(ARM_PGBYTES)));
++#endif
+ 
+ /*
+  * Denotes the end of xnu.
+--- /dev/null
++++ b/osfmk/arm64/note10/exynos_leaf_mapper.h
+@@ -0,0 +1,31 @@
++/* SPDX-License-Identifier: BSD-2-Clause */
++#ifndef N10_EXYNOS_LEAF_MAPPER_H
++#define N10_EXYNOS_LEAF_MAPPER_H
++#define N10_MAP_PAGE 16384
++#define N10_MAP_POOL_PAGES 10
++#define N10_MAP_POOL_BYTES (N10_MAP_PAGE * N10_MAP_POOL_PAGES)
++#define N10_MAP_MAX_BYTES 33554432
++#define N10_MAP_TABLE_ATTR 3
++#define N10_MAP_LEAF_ATTR 0x0040000000000603
++#define N10_MAP_PA_LIMIT 0x10000000000
++#ifndef N10_MAPPER_FIXTURE
++#if !defined(ARM64_BOARD_CONFIG_EXYNOS9825) || !defined(__ARM_16K_PG__) || CONFIG_SPTM || XNU_MONITOR || __ARM_KERNEL_PROTECT__
++#error unsupported Exynos leaf bootstrap configuration
++#endif
++#if defined(KERNEL_INTEGRITY_KTRR) || defined(KERNEL_INTEGRITY_CTRR) || defined(KERNEL_INTEGRITY_PV_CTRR)
++#error unsupported bootstrap identity-map replacement policy
++#endif
++#if T0SZ_BOOT != 17 || T1SZ_BOOT != 17 || ARM_TT_L1_SHIFT != 36 || ARM_TT_L2_SHIFT != 25 || ARM_TT_L3_SHIFT != 14
++#error exact three-level 47-bit bootstrap format required
++#endif
++#if TCR_IPS_VALUE != TCR_IPS_40BITS || ARM_TTE_BOOT_TABLE != N10_MAP_TABLE_ATTR
++#error exact 40-bit PA/table format required
++#endif
++#if (((ARM_TTE_BOOT_BLOCK_LOWER | ARM_TTE_BOOT_BLOCK_UPPER) & ~ARM_TTE_TYPE_MASK) | ARM_PTE_TYPE_VALID) != N10_MAP_LEAF_ATTR
++#error leaf attributes differ from source bootstrap policy
++#endif
++#if defined(BOOTSTRAP_TABLE_SIZE) && BOOTSTRAP_TABLE_SIZE != N10_MAP_POOL_BYTES
++#error exact ten-page bootstrap pool required
++#endif
++#endif
++#endif
+--- /dev/null
++++ b/osfmk/arm64/note10/exynos_leaf_mapper.S
+@@ -0,0 +1,154 @@
++/* SPDX-License-Identifier: BSD-2-Clause */
++/* x0=VA,x1=PA,x2=bytes,x3=poolPA,x4=capacity; x0=status,x1=used.
++ * x18-x30/SP preserved. No target-memory reads, stack, BL or sysreg access.
++ */
++#include "exynos_leaf_mapper.h"
++#ifdef N10_MAPPER_FIXTURE
++#define EXT(x) _##x
++#define LEXT(x) _##x:
++#endif
++.text
++.p2align 2
++.globl EXT(n10_exynos_bootstrap_map)
++LEXT(n10_exynos_bootstrap_map)
++    /* Preserve inputs in caller-clobbered registers. */
++    mov x5,x0
++    mov x6,x1
++    mov x7,x2
++    mov x8,x3
++    mov x9,x4
++    cbz x7,.Ln10_args
++    mov x10,#N10_MAP_MAX_BYTES
++    cmp x7,x10
++    b.hi .Ln10_args
++    orr x10,x5,x6
++    orr x10,x10,x7
++    orr x10,x10,x8
++    tst x10,#(N10_MAP_PAGE-1)
++    b.ne .Ln10_args
++    mov x10,#N10_MAP_POOL_PAGES
++    lsl x10,x10,#14
++    cmp x9,x10
++    b.ne .Ln10_capacity
++    /* Physical end and canonical high VA last byte; no wrapping. */
++    adds x11,x6,x7
++    b.cs .Ln10_range
++    mov x10,#N10_MAP_PA_LIMIT
++    cmp x11,x10
++    b.hi .Ln10_range
++    lsr x10,x5,#47
++    mov x12,#0x1ffff
++    cmp x10,x12
++    b.ne .Ln10_range
++    adds x12,x5,x7
++    b.cs .Ln10_range
++    sub x12,x12,#1
++    lsr x10,x12,#47
++    mov x13,#0x1ffff
++    cmp x10,x13
++    b.ne .Ln10_range
++    /* Designated writable pool wholly inside owned physical extent. */
++    cmp x8,x6
++    b.lo .Ln10_pool
++    adds x10,x8,x9
++    b.cs .Ln10_pool
++    cmp x10,x11
++    b.hi .Ln10_pool
++    /* Exact preflight table count for BOTH independent regimes. */
++    sub x10,x7,#1
++    and x11,x5,#0xfffffffff
++    add x11,x11,x10
++    lsr x11,x11,#36
++    add x11,x11,#1
++    and x12,x5,#0x1ffffff
++    add x12,x12,x10
++    lsr x12,x12,#25
++    add x11,x11,x12
++    add x11,x11,#1
++    and x12,x6,#0xfffffffff
++    add x12,x12,x10
++    lsr x12,x12,#36
++    add x11,x11,x12
++    add x11,x11,#1
++    and x12,x6,#0x1ffffff
++    add x12,x12,x10
++    lsr x12,x12,#25
++    add x12,x12,#1  /* physical L3 table count */
++    add x11,x11,x12
++    add x11,x11,#2  /* two independent L1 roots */
++    lsl x11,x11,#14
++    cmp x11,x9
++    b.hi .Ln10_capacity
++    /* First store only after ALL validation/preflight. */
++    mov x0,x8
++    lsr x1,x9,#4
++.Ln10_zero:
++    stp xzr,xzr,[x0],#16
++    subs x1,x1,#1
++    b.ne .Ln10_zero
++    add x10,x8,#8,lsl #12 /* free cursor after two16KiB roots */
++    mov x11,x8
++    mov x12,x6
++    mov x13,x6
++    lsr x14,x7,#14
++    mov x15,#0
++.Ln10_page:
++    ubfx x16,x12,#36,#11
++    add x16,x11,x16,lsl #3
++    ldr x17,[x16]
++    cbnz x17,.Ln10_have_l2
++    mov x0,x10
++    add x10,x10,#4,lsl #12
++    orr x17,x0,#N10_MAP_TABLE_ATTR
++    str x17,[x16]
++    b .Ln10_l2
++.Ln10_have_l2:
++    and x0,x17,#0x0000ffffffffc000
++.Ln10_l2:
++    ubfx x16,x12,#25,#11
++    add x16,x0,x16,lsl #3
++    ldr x17,[x16]
++    cbnz x17,.Ln10_have_l3
++    mov x0,x10
++    add x10,x10,#4,lsl #12
++    orr x17,x0,#N10_MAP_TABLE_ATTR
++    str x17,[x16]
++    b .Ln10_l3
++.Ln10_have_l3:
++    and x0,x17,#0x0000ffffffffc000
++.Ln10_l3:
++    ubfx x16,x12,#14,#11
++    add x16,x0,x16,lsl #3
++    movz x17,#0x0603
++    movk x17,#0x0040,lsl #48
++    orr x17,x13,x17
++    str x17,[x16]
++    add x12,x12,#4,lsl #12
++    add x13,x13,#4,lsl #12
++    subs x14,x14,#1
++    b.ne .Ln10_page
++    cbnz x15,.Ln10_done
++    mov x15,#1
++    add x11,x8,#4,lsl #12
++    mov x12,x5
++    mov x13,x6
++    lsr x14,x7,#14
++    b .Ln10_page
++.Ln10_done:
++    sub x1,x10,x8
++    mov x0,#0
++    ret
++.Ln10_args:
++    mov x0,#1
++    b .Ln10_refused
++.Ln10_range:
++    mov x0,#2
++    b .Ln10_refused
++.Ln10_pool:
++    mov x0,#3
++    b .Ln10_refused
++.Ln10_capacity:
++    mov x0,#4
++.Ln10_refused:
++    mov x1,#0
++    ret
