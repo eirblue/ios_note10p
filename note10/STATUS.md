@@ -1,3 +1,14 @@
+## v90: Image expectation delivered; carrier hash stage failed
+
+- Reviewed source: `59bfd8d9f21047c9d943cd0dd4f4eb96fb5459e9`; [CI run 41395783341](https://github.com/eirblue/ios_note10p/actions/runs/41395783341).
+- Three new slot/variant/profile methods passed with one fixture compilation and one generic Image build. Historical methods were not replayed.
+- Producer admitted the unique 64-byte read-only data slot and all seven existing relative checks. Image size remains 46,413,836 bytes, linked span 55,132,160 bytes, permanent state 88 bytes.
+- Private packaging preserved the generic CI Image and reconstructed exactly two disjoint 32-byte changes: cycle identity and accepted carrier expectation. The original recovery header command line is preserved in the new mode; no actual expectation enters public source or CI.
+- The single approved BOOT-write/reboot cycle is consumed (1/1), with no replay. Host recovery return/changed boot ID were observed; all five actual post-return partition hash checks passed.
+- Runtime reports one expectation from the Image slot, one capture and retained input. It then failed at `carrier_hash`; the specific cause beyond that status is still under analysis. No functional decode success is claimed.
+- No accepted diagnostic observation; `auto_return=null`; hardware return/count are not proved by frames. No XNU execution or deployment readiness. Original Image, private variant and full BOOT digest remain separate; raw device evidence stays private.
+- The direct same-safe-scope standing approval, all fresh gates and complete consumption ledger remain required in every handoff.
+
 ## v89: DATA guard reason identified; physical cycle consumed
 
 - Reviewed source: `aebe2bd4f683d9c4bc3d11892ce00fa100b4c22d`; [CI run 41385913122](https://github.com/eirblue/ios_note10p/actions/runs/41385913122).
