@@ -23,19 +23,20 @@ PRIVATE = ROOT / 'note10/private'
 JOB = 'current-native-selected-link'
 WORKFLOW = '.github/workflows/note10-current-native-selected-link.yml'
 LEAF_WORKFLOW = '.github/workflows/note10-exynos-leaf-bootstrap-pc.yml'
+CHECKED_WORKFLOW = '.github/workflows/note10-exynos-checked-ptpage-pc.yml'
 LIBDISPATCH = '2361ffb78a76f7ee488cd052eb0bc5c767118bf9'
 CASE_IDS = ('test_current_inventory_resolves_owner_and_generated_identity',
             'test_current_context_rejects_stale_candidate_and_partial_objects',
             'test_direct_native_link_uses_current_filelist_and_reports_failure')
 
 
-def ci_context(leaf=False):
+def ci_context(leaf=False, checked=False):
     result = {k: os.environ.get(k, '') for k in ('GITHUB_SHA', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT',
         'GITHUB_JOB', 'GITHUB_WORKFLOW_REF', 'GITHUB_WORKFLOW_SHA', 'GITHUB_REPOSITORY')}
     if (not re.fullmatch('[0-9a-f]{40}', result['GITHUB_SHA']) or
         result['GITHUB_WORKFLOW_SHA'] != result['GITHUB_SHA'] or result['GITHUB_JOB'] != JOB or
         result['GITHUB_REPOSITORY'] != 'eirblue/ios_note10p' or
-        not result['GITHUB_WORKFLOW_REF'].startswith('eirblue/ios_note10p/' + (LEAF_WORKFLOW if leaf else WORKFLOW) + '@') or
+        not result['GITHUB_WORKFLOW_REF'].startswith('eirblue/ios_note10p/' + (CHECKED_WORKFLOW if checked else (LEAF_WORKFLOW if leaf else WORKFLOW)) + '@') or
         any(not re.fullmatch('[1-9][0-9]*', result[k]) for k in ('GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT'))):
         raise ValueError('exact current source/workflow/run/attempt/job required')
     return result
@@ -198,13 +199,14 @@ def intrinsic_kernel_result(path, symbols_text, undefined, *, leaf=False):
     return result
 
 
-def build(work, output, *, leaf=False):
+def build(work, output, *, leaf=False, checked=False):
     # Reuse only provisioning/configuration primitives; never the v83 tests/build.
-    ci = ci_context(leaf)
+    if checked:leaf=True
+    ci = ci_context(leaf,checked)
     if leaf and os.environ.get('N10_BUILD_ONLY','false')!='false':
         raise ValueError('new leaf scope has no retained-PASS skip gate')
     prior_pass = None if leaf else prior_pass_authorization(ci)
-    bootstrap.provision(work, output, ci=ci,leaf=leaf)
+    bootstrap.provision(work, output, ci=ci,leaf=leaf,checked=checked)
     provisioned = json.loads((work / 'context.json').read_text())
     source, tool = Path(provisioned['source']), Path(provisioned['tool'])
     private = PRIVATE / 'windows-xnu'
@@ -216,6 +218,7 @@ def build(work, output, *, leaf=False):
                  synthetic_board_inputs=True, full_upstream_make_build=False,
                  deployment_ready=False, hardware_verified=False, device_operations=[])
     if leaf:state.update(kind='v93-exynos-leaf-bootstrap-pc',PC_only=True,physical_ready=False,whole_XNU_kernel_entry_executed=False,hardware_XNU_executed=False)
+    if checked:state.update(kind='v94-exynos-checked-ptpage-pc')
     state['build_only_prior_pass'] = prior_pass
     bootstrap.write_json(output / 'result.json', state)
     original_env = dict(os.environ)
@@ -290,6 +293,10 @@ def build(work, output, *, leaf=False):
         if leaf:
             producer['recipe_sha256'].update({n:native.file_sha(ROOT/'note10/xnu26'/n) for n in
                 ('prepare_exynos_leaf_mapper.py','exynos_leaf_mapper.S','exynos_leaf_mapper.h')})
+        if checked:
+            producer['candidate_kind']='v94-exynos-checked-ptpage-pc'
+            producer['recipe_sha256'].update({n:native.file_sha(ROOT/'note10/xnu26'/n) for n in
+                ('prepare_exynos_checked_ptpage.py','exynos_checked_ptpage.c')})
         binding_files = ('configure-result.json', 'exports-result.json', 'native-mig-result.json',
                          'native-extra-result.json', 'native-link/generate-result.json')
         bindings = {n: native.file_sha(private / n) for n in binding_files}
@@ -346,12 +353,13 @@ def main():
     p.add_argument('--work', required=True)
     p.add_argument('--output', required=True)
     p.add_argument('--exynos-leaf',action='store_true',help='closed v93 PC-only EXYNOS mapper source candidate')
+    p.add_argument('--exynos-checked-pages',action='store_true',help='closed v94 PC-only checked allocator plus mapper')
     args = p.parse_args()
     work, output = bootstrap.private(args.work), bootstrap.private(args.output)
     if work == output or work.is_relative_to(output) or output.is_relative_to(work):
         p.error('disjoint fresh private roots required')
     try:
-        build(work, output,leaf=args.exynos_leaf)
+        build(work, output,leaf=args.exynos_leaf,checked=args.exynos_checked_pages)
     except BaseException:
         print('current native payload build failed; private evidence retained', file=sys.stderr)
         return 1

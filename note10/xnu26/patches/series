@@ -10,3 +10,4 @@
 0010-exynos9825-native-bootstrap-selection.patch
 0011-exynos9825-early-counter-clock.patch
 0012-exynos9825-bounded-leaf-bootstrap.patch
+0013-exynos9825-checked-dynamic-ptpage.patch

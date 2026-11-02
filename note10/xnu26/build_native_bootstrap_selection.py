@@ -148,7 +148,7 @@ def build_config_tool(source, work, output):
     return tool, compiler, sdk
 
 
-def provision(work, output, *, ci=None, leaf=False):
+def provision(work, output, *, ci=None, leaf=False, checked=False):
     if sys.platform != 'darwin' or os.environ.get('GITHUB_ACTIONS') != 'true':
         raise ValueError('fresh macOS CI only')
     ci = ci_context() if ci is None else ci
@@ -171,11 +171,15 @@ def provision(work, output, *, ci=None, leaf=False):
     names = (patches / 'series').read_text().splitlines()
     clock_patch = '0011-exynos9825-early-counter-clock.patch'
     leaf_patch='0012-exynos9825-bounded-leaf-bootstrap.patch'
-    if (len(names) not in (10,11,12) or names[9] != PATCH_NAME or
+    checked_patch='0013-exynos9825-checked-dynamic-ptpage.patch'
+    if checked and not leaf:raise ValueError('checked allocator requires the selected mapper')
+    if (len(names) not in (10,11,12,13) or names[9] != PATCH_NAME or
         (len(names)>=11 and names[10]!=clock_patch) or
-        (len(names)==12 and names[11]!=leaf_patch) or (leaf and len(names)!=12)):
+        (len(names)>=12 and names[11]!=leaf_patch) or
+        (len(names)==13 and names[12]!=checked_patch) or
+        (leaf and len(names)<12) or (checked and len(names)!=13)):
         raise ValueError('closed native bootstrap/clock/optional leaf series required')
-    names=names if leaf else names[:11]
+    names=names if checked else (names[:12] if leaf else names[:11])
     for n, name in enumerate(names[:9]):
         run(['git', '-c', 'core.autocrlf=false', 'apply', patches / name],
             source, output / ('patch-' + str(n + 1) + '.log'))
@@ -197,6 +201,11 @@ def provision(work, output, *, ci=None, leaf=False):
         if leaf_patch_bytes({n:(source/n).read_bytes() for n in LEAF_PINS}) != (patches/leaf_patch).read_bytes():
             raise ValueError('leaf production include differs from the tested component')
         run(['git','-c','core.autocrlf=false','apply',patches/leaf_patch],source,output/'patch-12.log')
+    if checked:
+        from prepare_exynos_checked_ptpage import REL as CHECKED_REL, patch_bytes as checked_patch_bytes
+        if checked_patch_bytes((source/CHECKED_REL).read_bytes()) != (patches/checked_patch).read_bytes():
+            raise ValueError('checked allocator kernel include differs from tested production component')
+        run(['git','-c','core.autocrlf=false','apply',patches/checked_patch],source,output/'patch-13.log')
     tool, compiler, sdk = build_config_tool(source, work, output)
     context = dict(ci_context=ci, source=str(source), tool=str(tool), compiler=compiler,
                    sdk=sdk, public_source_commit=COMMIT, output=str(output), phase='provisioned',
