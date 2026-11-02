@@ -1,3 +1,14 @@
+## v95: fresh checked XNU payload fits the fixed carrier and decodes once on PC
+
+- Reviewed adapter source: `de5d400ed31fbc243109f702b60c44ae1ceb2bed`. The actual input is the authenticated v94 XNU producer from [CI run 41450171734](https://github.com/eirblue/ios_note10p/actions/runs/41450171734), not an earlier payload or geometry.
+- Three new local synthetic methods passed once, with no fixture compilation, old test replay or CI dispatch. They cover current receipt/context and historical decoder binding, new zero-tail/geometry/capacity relations, fit failure and fresh-output refusal.
+- One actual private transaction read the new MachO once, checked its hash in the same buffer, materialized it once, compressed once and decoded the new stream once using the accepted historical C library. The unchanged formatting/decoder machinery was reused; no old real payload was replayed, old decoder recompiled, separate MachO parser or post-build reader run.
+- The materialized payload is 19,136,512 bytes; the LZMA_ALONE stream is 4,437,203 bytes. It fits the fixed 10,962,166-byte carrier including its 128-byte header and 6,524,835-byte zero padding. The single decoder call verified the expected payload length and digest. Actual payload/carrier data and hashes remain private.
+- Historical decoder compilation evidence is retained as its own source domain; it is not represented as a build against the current kernel-only header. Clarifying receipt notes were preserved without rerunning tests or the transform.
+- The legacy Linux owned-capacity profile remains 19,546,112 bytes and does not match this new payload's exact-size contract. No Linux Image, new XNU, device package or BOOT plan was produced in v95. A separate opt-in current-capacity PC profile is the next implementation.
+- Physical readiness remains false. Host decode/fit does not establish Linux reservation success, global ownership, complete bootargs/Apple DT/free RAM, CPU/control transfer or a complete iOS boot. Whole XNU kernel entry and hardware XNU execution remain false.
+- The user PC-first hold remains active: device queries, BOOT writes and reboots are zero. Last completed physical build is v90; v91 stays unconsumed (0/1), with its plan and frozen host preserved. Exact standing approvals and the complete consumption ledger remain in every private handoff.
+
 ## v94: checked Exynos page allocator passed PC tests and a new selected XNU build
 
 - Final reviewed source: `ad4bc6b8f7cb1e7308de7e34474f25a0ec4bcf26`; [successful CI run 41450171734](https://github.com/eirblue/ios_note10p/actions/runs/41450171734), attempt 1.
