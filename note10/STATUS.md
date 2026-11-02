@@ -1,3 +1,13 @@
+## v88: single physical cycle completed; DATA diagnostic failed
+
+- The approved single BOOT-write/reboot cycle is consumed (1/1); it will not be replayed.
+- Host observations show return to the same bound root TWRP and a changed recovery boot ID. All five actual post-return partition hash checks passed.
+- The DATA diagnostic failed: no accepted current-cycle DATA observation, `auto_return=null`, and the retained decoder reported DATA functional decode failure. Frame-based hardware-return and hardware boot-count proof remain unavailable.
+- Successful CI evidence remains 8/8 new methods, one fixture compile and one Image build. Physical failure is preserved separately from those passes.
+- Current package is v88. Kernel Image and full BOOT-partition digest are distinct domains. Raw device logs, carrier, images and partition evidence remain private.
+- Direct user authorization now includes v88 and subsequent diagnostics within the same existing safe scope: fresh gates, at most one BOOT write/reboot per build, no consumed-cycle replay or XNU execution. This scope and the complete consumption ledger must accompany every handoff.
+- Next work is analysis of the retained new DATA failure evidence, without another device query, decoder replay or cycle.
+
 ## v88: late Linux DATA decoder diagnostic (CI passed)
 
 - Reviewed source: `1b18b5045c0e695e271329505634ccfdddfc808d`; [CI run 41375553719](https://github.com/eirblue/ios_note10p/actions/runs/41375553719).
