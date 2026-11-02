@@ -1,3 +1,14 @@
+## v93: new Exynos leaf mapper executed on PC; new selected XNU build passed
+
+- Reviewed source: `28f0838bf066d8fb3c7891b1749e5e7ecbf8d1ee`; [CI run 41442808633](https://github.com/eirblue/ios_note10p/actions/runs/41442808633), attempt 1 succeeded.
+- Three new methods passed in one batch with one production AArch64 fixture compilation. Unicorn 2.1.4 completed 16 calls to the new routine only: exact owned-page translations, boundary crossings, refusal before table writes, and register/root/pool bounds. Earlier tests and whole-entry emulator fixtures were not replayed.
+- The Exynos-only mapper preflights the complete table budget before its first write and creates 16-KiB leaves within the declared owned extent. The existing Apple path remains unchanged. These are controlled PC-buffer results, not physical ownership or CPU/MMU handoff evidence.
+- One fresh source-owned selected XNU compile/direct link succeeded with 1,071 objects (1,067 native and four dependencies). The new MH_EXECUTE file is 17,916,872 bytes; its measured memory span is 19,136,512 bytes and entry offset 11,035,792. Earlier payload dimensions were not transferred. This is not a full upstream Make build; synthetic board inputs and existing port limitations remain.
+- Intrinsic metadata locates the 163,840-byte, 16-KiB-aligned zero-fill pool in `__DATA,__n10bt`, inside the new payload. Initial and maximum MachO segment protections are RW-NX (3). This does not certify actual runtime page protections or later kernel lifetime on hardware.
+- Artifact download, authenticated decrypt and bounded private extraction each occurred once. No standalone post-build MachO reader, old payload materialization, carrier generation or device package was run.
+- Whole XNU kernel entry and hardware XNU execution remain false. Bootargs/Apple DT/free working RAM, later VM/pmap compatibility, relocation and CPU/control transfer still require work; existing placement guards were not relaxed.
+- The user PC-first hold remains active: v93 device queries, BOOT writes and reboots are zero. The last completed physical build is v90; v91 remains unconsumed (0/1), with its plan and frozen host sources preserved. Raw artifacts stay private, and every private handoff retains exact standing approval scopes and the complete consumption ledger.
+
 ## v92: PC-only owned contiguous staging tests and Image build passed
 
 - Reviewed source: `d98fc5e46a3c2c55f7ae3f8c7289932be3ebb4a2`; [CI run 41434541862](https://github.com/eirblue/ios_note10p/actions/runs/41434541862), attempt 1 succeeded.
