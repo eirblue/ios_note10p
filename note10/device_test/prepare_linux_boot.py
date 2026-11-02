@@ -196,6 +196,13 @@ def pack_verified(backup,kernel_build,official,mkbootimg,output,parts,build,conf
         raise ValueError('Observed verification-disabled vbmeta header required; no vbmeta changes performed')
     start=recovery['ramdisk_file_offset']
     ramdisk=b'' if builtin else official[start:start+recovery['ramdisk_size']]
+    data_mode = build.get('device_profile') == 'linux-data-carrier-v1'
+    data_command_line = None
+    if data_mode:
+        from linux_data_carrier import package_data, bounded_private_read
+        reference_ramdisk = ramdisk
+        ramdisk = bounded_private_read(kernel_build/'carrier.data',64*1024*1024)
+        data_command_line = package_data(build, reference_ramdisk, recovery['cmdline'], ramdisk)
     size=payload_size(len(data),len(ramdisk),boot['page_size'],len(parts['boot']),allow_empty_ramdisk=builtin)
     output.parent.mkdir(exist_ok=True,parents=True)
     rd=output.with_suffix('.ramdisk.lzma')
@@ -205,7 +212,7 @@ def pack_verified(backup,kernel_build,official,mkbootimg,output,parts,build,conf
     partial=output.with_suffix('.partial')
     # Boot uses the backed-up separate DTB/DTBO partitions. No embedded
     # recovery_dtbo is copied; this is an unbooted boot-only prototype.
-    cmdline=recovery['cmdline']
+    cmdline=data_command_line if data_mode else recovery['cmdline']
     if 'n10.cycle=' in cmdline:raise ValueError('Existing cycle argument refused')
     if len(cmdline.encode())>1535:raise ValueError('BOOT command line too long')
     command=[sys.executable,'-X','utf8',str(mkbootimg),'--header_version','1',

@@ -1,0 +1,234 @@
+"""One selected new wrapper/profile batch; never invokes earlier test suites."""
+import argparse
+import json
+import lzma
+import os
+from pathlib import Path
+import struct
+import subprocess
+import unittest
+from unittest.mock import patch
+
+import linux_data_carrier as data
+
+
+class LinuxDataCarrierTests(unittest.TestCase):
+    output = None
+    fixture = None
+    compiles = 0
+    needs_fixture = True
+
+    @classmethod
+    def setUpClass(cls):
+        if not cls.needs_fixture:
+            return
+        cls.fixture = cls.output/'linux-data-carrier-fixture'
+        command = ['gcc', '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror',
+                   str(data.HERE/'linux_data_carrier_fixture.c'), '-lcrypto', '-o', str(cls.fixture)]
+        cls.compiles += 1
+        result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=120)
+        (cls.output/'fixture-compile.log').write_bytes(result.stdout)
+        (cls.output/'fixture-command.json').write_text(json.dumps(command, indent=2)+'\n')
+        if result.returncode:
+            raise RuntimeError('new wrapper fixture compilation failed')
+
+    def setUp(self):
+        self.root = self.output/self._testMethodName
+        self.root.mkdir()
+        self.invocations = 0
+
+    @staticmethod
+    def sample():
+        return bytes(range(128))*7+b'new-linux-DATA'*80
+
+    def container(self, stream=None, payload=None):
+        payload = self.sample() if payload is None else payload
+        if stream is None:
+            original = lzma.compress(payload, format=lzma.FORMAT_ALONE, preset=6)
+            stream = original[:5]+len(payload).to_bytes(8,'little')+original[13:]
+        header = struct.pack('<8sHHI4Q32s32s16s', b'N10DATA1',1,128,0,4096,128,len(stream),len(payload),
+                             bytes.fromhex(data.sha(stream)),bytes.fromhex(data.sha(payload)),bytes(16))
+        return header+stream+bytes(4096-128-len(stream))
+
+    def invoke(self, raw=None, mode='good', parameter=None):
+        raw = self.container() if raw is None else raw
+        self.invocations += 1
+        path = self.root/('synthetic-carrier-%02d.data' % self.invocations)
+        path.write_bytes(raw)
+        result = subprocess.run([str(self.fixture),str(path),mode,parameter if parameter is not None else data.sha(raw)],
+                                stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=30)
+        path.with_suffix('.stdout').write_bytes(result.stdout)
+        path.with_suffix('.stderr').write_bytes(result.stderr)
+        self.assertEqual(result.returncode,0,result.stderr.decode(errors='replace'))
+        return json.loads(result.stdout)
+
+    def test_native_capture_and_private_parameter_refuse_ambiguity(self):
+        for mode in ('missing_parameter','duplicate_parameter','reversed','nonlinear','repeat_capture','changed'):
+            row = self.invoke(mode=mode)
+            self.assertEqual(row['status'],'unavailable',mode)
+            self.assertEqual(row['calls'],0)
+            self.assertEqual(row['allocations'],0)
+        for parameter in ('a'*63,'A'*64,'g'*64,'a'*65):
+            self.assertEqual(self.invoke(parameter=parameter)['status'],'unavailable')
+        for mode in ('unarmed','arm_fail'):
+            row = self.invoke(mode=mode)
+            self.assertEqual(row['status'],'skipped')
+            self.assertEqual(row['calls'],0)
+
+    def test_actual_wrapper_owned_decode_and_cleanup(self):
+        row = self.invoke()
+        self.assertEqual(row['status'],'ok')
+        self.assertEqual(row['calls'],1)
+        self.assertEqual(row['callbacks'],1)
+        self.assertEqual(row['written'],len(self.sample()))
+        self.assertEqual(row['digest'],data.sha(self.sample()))
+        self.assertEqual((row['allocations'],row['frees'],row['cleared']),(2,2,1))
+        repeat = self.invoke(mode='repeat_callback')
+        self.assertEqual(repeat['status'],'unavailable')
+        self.assertEqual(repeat['calls'],1)
+        self.assertEqual(repeat['frees'],2)
+
+    def test_actual_wrapper_hash_header_and_slice_refusals(self):
+        raw = self.container()
+        self.assertEqual(self.invoke(raw,parameter='0'*64)['status'],'carrier_hash')
+        changes = ((0,b'X'),(8,b'\x02'),(10,b'\x7f'),(12,b'\x01'),(24,b'\x81'),
+                   (32,b'\xff'*8),(112,b'X'),(len(raw)-1,b'X'),(128,b'\0'))
+        for offset,value in changes:
+            broken = raw[:offset]+value+raw[offset+len(value):]
+            row = self.invoke(broken)
+            self.assertEqual(row['status'],'header',offset)
+            self.assertEqual(row['allocations'],0)
+        broken = raw[:48]+bytes([raw[48]^1])+raw[49:]
+        self.assertEqual(self.invoke(broken)['status'],'stream_hash')
+
+    def test_actual_wrapper_allocation_and_decoder_failure_cleanup(self):
+        for mode in ('alloc1','alloc2'):
+            row = self.invoke(mode=mode)
+            self.assertEqual(row['status'],'allocation')
+            self.assertEqual((row['calls'],row['frees'],row['cleared']),(0,1,1))
+        for mode,status,calls in (('hash1','carrier_hash',0),('hash2','stream_hash',0),('hash3','payload_hash',1)):
+            row = self.invoke(mode=mode)
+            self.assertEqual((row['status'],row['calls']),(status,calls))
+            self.assertEqual(row['cleared'],1)
+            if calls:
+                self.assertEqual(row['frees'],2)
+        original = lzma.compress(self.sample(),format=lzma.FORMAT_ALONE,preset=6)
+        short = original[:5]+len(self.sample()).to_bytes(8,'little')+original[13:18]
+        row = self.invoke(self.container(stream=short))
+        self.assertEqual((row['status'],row['calls'],row['frees'],row['cleared']),('decode',1,2,1))
+
+    def test_data_profile_private_input_and_cmdline_binding(self):
+        raw = self.container()
+        manifest = dict(purpose='fixed-data-carrier-host-preparation',accepted=True,decoder_calls=1,
+            carrier_admitted=False,deployment_ready=False,device_operations=[],xnu_executed=False,
+            carrier_bytes=len(raw),carrier_sha256=data.sha(raw),payload_bytes=len(self.sample()),
+            decoded_bytes=len(self.sample()),payload_sha256=data.sha(self.sample()),decoded_sha256=data.sha(self.sample()),decode={'status':0})
+        fields = data.private_input_record(json.dumps(manifest).encode(),raw)
+        build = dict(device_profile=data.PROFILE,**fields)
+        cmdline = data.package_data(build,b'R'*len(raw),'synthetic=only',raw)
+        self.assertEqual(cmdline,'synthetic=only n10.data_sha='+data.sha(raw))
+        for base in (cmdline,'n10.data_sha=bad','n10.data_sha'):
+            with self.assertRaises(ValueError):
+                data.data_cmdline(base,data.sha(raw))
+        with self.assertRaises(ValueError):
+            data.data_cmdline('x'*1500,data.sha(raw))
+        for changed in (dict(build,device_profile='native-memory-observation-v1'),dict(build,data_carrier_bytes=len(raw)-1)):
+            with self.assertRaises(ValueError):
+                data.package_data(changed,b'R'*len(raw),'synthetic=only',raw)
+        with self.assertRaises(ValueError):
+            data.private_input_record(json.dumps(dict(manifest,decoded_sha256='f'*64)).encode(),raw)
+
+    def test_new_package_label_and_nonclaim_fields(self):
+        from build_boot_test_packages import updater
+        names = ('boot','recovery','dtb','dtbo','vbmeta')
+        partitions = [dict(partition=name,block_node='/dev/block/sdz'+str(i+1),size=4096,sha256='a'*64)
+                      for i,name in enumerate(names)]
+        result = updater(mode='diagnostic',bootloader='N976NTEST',partitions=partitions,
+            payload_sha='b'*64,current_boot_sha='c'*64,auto_return=True,device_profile=data.PROFILE)
+        self.assertIn(b'Temporary Linux DATA decode diagnostic; not iOS/XNU.',result)
+        self.assertNotIn(b'Temporary Linux SHA256 diagnostic',result)
+        from builtin_init_profile import current_boot_binding
+        pair = dict(device_profile='native-memory-observation-v1',source_head='b42228737b77f4ce1b24aa8333f03cf31190f026',
+                    host_profile_source_head='b42228737b77f4ce1b24aa8333f03cf31190f026')
+        plan = dict(device_profile=data.PROFILE,current_boot_payload_sha256='d'*64)
+        current_boot_binding(plan,pair,{'payload_sha256':'d'*64})
+        with self.assertRaises(ValueError):
+            current_boot_binding(plan,dict(pair,device_profile='early-fdt-binding-v1'),{'payload_sha256':'d'*64})
+
+    def test_new_frame_identity_counts_and_relative_caps(self):
+        from decode_reservation import checksum
+        identity,cycle,boot = 'a'*32,'b'*32,'c'*32
+        body = 'id='+identity+' cycle='+cycle+' kind=result status=ok carrier=4096 stream=200 payload=1000 consumed=193 written=1000 calls=1 digest='+'d'*64+' ownership=0 executed=0'
+        line = 'N10BOOTLINK2 boot='+boot+' N10DATA1 '+body+' checksum=%08x' % checksum(body.encode())
+        self.assertTrue(data.decode(line,identity,cycle)['passed'])
+        with self.assertRaises(ValueError):
+            data.decode(line,identity,'e'*32)
+        with self.assertRaises(ValueError):
+            data.decode(line+'\n'+line,identity,cycle)
+        from early_fdt_binding import ACCEPTED_BASELINE
+        result = dict(data_carrier_stage=data.STAGE,image_bytes=ACCEPTED_BASELINE['image_file_bytes'],
+            source_sha256=ACCEPTED_BASELINE['route_sources'],guarded_init_main_sha256=ACCEPTED_BASELINE['route_artifacts']['guarded_init_main_sha256'])
+        footprint = dict(data_state_bytes=80,linked_kernel_bytes=ACCEPTED_BASELINE['linked_kernel_bytes'],
+                         image_text_offset=524288,image_flags=10)
+        with patch('early_fdt_binding.fixed_route_relation',return_value={'kind':'controlled-new-gate'}), \
+             patch('early_fdt_binding.placement_config_sha256',return_value=ACCEPTED_BASELINE['config_sha256']):
+            self.assertTrue(data.relative_admission(result,['CONFIG_NOTE10_DATA_CARRIER=y'],footprint,
+                elf=b'',archive=b'',raw_inputs={})['eligible'])
+            bad = dict(footprint,linked_kernel_bytes=footprint['linked_kernel_bytes']+1)
+            self.assertFalse(data.relative_admission(result,['CONFIG_NOTE10_DATA_CARRIER=y'],bad,
+                elf=b'',archive=b'',raw_inputs={})['eligible'])
+
+    def test_retained_pass_gate_fails_closed(self):
+        plausible = dict(kind='linux-data-carrier-retained-pass',root_reviewed=True,source_commit='a'*40,
+            run_id=123,attempt=1,result_sha256='b'*64,source_sha256=data.test_source_pins(),passed_case_ids=list(data.CASE_NAMES))
+        for value in (plausible, {}, None):
+            with self.assertRaisesRegex(ValueError,'retained PASS disabled'):
+                data.retained_pass(value)
+
+
+
+class Recorded(unittest.TextTestResult):
+    def __init__(self,*args,**kwargs):
+        super().__init__(*args,**kwargs)
+        self.failed_methods,self.framework_errors = set(),[]
+    def addFailure(self,test,error):
+        self.failed_methods.add(test._testMethodName)
+        super().addFailure(test,error)
+    def addError(self,test,error):
+        name = getattr(test,'_testMethodName',None)
+        if name:
+            self.failed_methods.add(name)
+        else:
+            self.framework_errors.append(test.id())
+        super().addError(test,error)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--output',type=Path,required=True)
+    parser.add_argument('--case',action='append',choices=data.CASE_NAMES)
+    args = parser.parse_args()
+    from sha256_kat_device_profile import private
+    output = private(args.output)
+    output.mkdir(parents=True,exist_ok=False)
+    selected = args.case if args.case is not None else json.loads(os.environ.get('N10_NEW_CASES_JSON','[]'))
+    if type(selected) is not list or any(n not in data.CASE_NAMES for n in selected) or len(selected) != len(set(selected)):
+        parser.error('closed unique new case selection required')
+    selected = selected or list(data.CASE_NAMES)
+    LinuxDataCarrierTests.output = output
+    LinuxDataCarrierTests.needs_fixture = any(n in data.CASE_NAMES[:4] for n in selected)
+    result = unittest.TextTestRunner(verbosity=2,resultclass=Recorded).run(unittest.TestSuite(LinuxDataCarrierTests(n) for n in selected))
+    complete = result.testsRun == len(selected) and not result.framework_errors
+    report = dict(kind='linux-data-carrier-new-tests',selected=selected,
+        passed=[n for n in selected if n not in result.failed_methods] if complete else [],
+        failed=sorted(result.failed_methods),tests_run=result.testsRun,framework_errors=result.framework_errors,
+        success=result.wasSuccessful() and complete and not result.skipped,fixture_compiles=LinuxDataCarrierTests.compiles,
+        source_sha256=data.test_source_pins(),
+        ci_context={k:os.environ.get(k,'') for k in ('GITHUB_SHA','GITHUB_RUN_ID','GITHUB_RUN_ATTEMPT','GITHUB_JOB','GITHUB_WORKFLOW_REF','GITHUB_WORKFLOW_SHA')},
+        synthetic=True,old_suites_executed=0,device_operations=[],xnu_executed=False)
+    (output/'result.json').write_text(json.dumps(report,indent=2)+'\n')
+    return 0 if report['success'] else 1
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

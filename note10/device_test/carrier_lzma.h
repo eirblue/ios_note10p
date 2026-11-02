@@ -1,8 +1,22 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 #ifndef N10_CARRIER_LZMA_H
 #define N10_CARRIER_LZMA_H
+#ifdef __KERNEL__
+#include <linux/types.h>
+#include <linux/stddef.h>
+#ifndef UINTPTR_MAX
+#define UINTPTR_MAX (~(uintptr_t)0)
+#endif
+#ifndef UINT32_MAX
+#define UINT32_MAX (~(uint32_t)0)
+#endif
+#ifndef UINT64_MAX
+#define UINT64_MAX (~(uint64_t)0)
+#endif
+#else
 #include <stddef.h>
 #include <stdint.h>
+#endif
 #ifdef _WIN32
 #define N10_LZMA_API __declspec(dllexport)
 #else

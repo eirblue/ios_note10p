@@ -15,13 +15,14 @@ LOGS = (('last_kmsg.txt', '/proc/last_kmsg'),
 def current_boot_binding(plan, pair, diagnostic):
     # Device-specific payload pins belong to the private reviewed plan, never
     # public source constants. The live common precheck still checks the bytes.
+    data = plan.get('device_profile') == 'linux-data-carrier-v1'
     native = plan.get('device_profile') == 'native-memory-observation-v1'
     fdt = plan.get('device_profile') == 'early-fdt-binding-v1'
     affinity = plan.get('device_profile') == 'cpu-affinity-binding-v1'
     stream = plan.get('device_profile') == 'sha256-stream-state-v1'
-    prior_profile = 'early-fdt-binding-v1' if native else 'cpu-affinity-binding-v1' if fdt else 'sha256-stream-state-v1' if affinity else 'sha256-kat-builtin-init-v2' if stream else 'sha256-kat-recovery-v1'
-    prior_head = 'a77f1eca32d1888f3266f49412dda9f0129f8719' if native else '24f0fb9c4680517d6b0411a9985847c42b692376' if fdt else '7e4a8c992f95f01429e824404378fa9271c0eb8e' if affinity else '149cb74c3f7640f2e26dfdcd1d775ec99f6c02ac' if stream else '9bfe108e7fd7a063bacce9418be46d269cb872d9'
-    prior_host = '7490b4286417a6581be292de0ac1a5c3a6a079aa' if native else 'a0674c29eaa2bc8938023fc2be590b9a4a84374e' if fdt else '7e4a8c992f95f01429e824404378fa9271c0eb8e' if affinity else '149cb74c3f7640f2e26dfdcd1d775ec99f6c02ac' if stream else '5e233aa5f08473d716ca2e9b3d8937c1821d513f'
+    prior_profile = 'native-memory-observation-v1' if data else 'early-fdt-binding-v1' if native else 'cpu-affinity-binding-v1' if fdt else 'sha256-stream-state-v1' if affinity else 'sha256-kat-builtin-init-v2' if stream else 'sha256-kat-recovery-v1'
+    prior_head = 'b42228737b77f4ce1b24aa8333f03cf31190f026' if data else 'a77f1eca32d1888f3266f49412dda9f0129f8719' if native else '24f0fb9c4680517d6b0411a9985847c42b692376' if fdt else '7e4a8c992f95f01429e824404378fa9271c0eb8e' if affinity else '149cb74c3f7640f2e26dfdcd1d775ec99f6c02ac' if stream else '9bfe108e7fd7a063bacce9418be46d269cb872d9'
+    prior_host = 'b42228737b77f4ce1b24aa8333f03cf31190f026' if data else '7490b4286417a6581be292de0ac1a5c3a6a079aa' if native else 'a0674c29eaa2bc8938023fc2be590b9a4a84374e' if fdt else '7e4a8c992f95f01429e824404378fa9271c0eb8e' if affinity else '149cb74c3f7640f2e26dfdcd1d775ec99f6c02ac' if stream else '5e233aa5f08473d716ca2e9b3d8937c1821d513f'
     require(pair.get('device_profile') == prior_profile and
             pair.get('source_head') == prior_head and
             pair.get('host_profile_source_head') == prior_host and
@@ -49,7 +50,7 @@ def raw_file(path, data):
                 ctime_ns=int(s.st_ctime_ns))
 
 
-def input_binding(root, result, image, lines, *, fdt_owned_route=False, native_memory_route=False):
+def input_binding(root, result, image, lines, *, fdt_owned_route=False, native_memory_route=False, data_carrier_route=False):
     from builtin_init_route import cpio, elf_manifest, sha, builtin_cmdline_policy
     root = Path(root)
     require(result.get('builtin_init_route') is True, 'builtin route result required')
@@ -71,7 +72,10 @@ def input_binding(root, result, image, lines, *, fdt_owned_route=False, native_m
               'builtin_init_manifest_sha256': sha((root/'minimal-init.json').read_bytes()),
               'guarded_init_main_sha256': sha((root/'overlay/init/main.c').read_bytes())}
     require(all(result.get(k) == v for k, v in inputs.items()), 'actual builtin route pins differ')
-    require(not (fdt_owned_route and native_memory_route), 'one selected route consumer required')
+    require(sum(map(bool, (fdt_owned_route, native_memory_route, data_carrier_route))) <= 1, 'one selected route consumer required')
+    if data_carrier_route:
+        from linux_data_carrier import input_binding as data_binding
+        inputs.update(data_binding(result, lines, elf=elf, archive=archive, raw_inputs=inputs))
     if native_memory_route:
         from native_memory_observation import input_binding as native_binding
         inputs.update(native_binding(result,lines,elf=elf,archive=archive,raw_inputs=inputs))

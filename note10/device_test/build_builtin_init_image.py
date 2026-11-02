@@ -94,12 +94,13 @@ def retain_route_prerequisites(source, objects, out, compiler_include):
 
 
 def main(kind=None):
-    if kind not in (None, "sha256-stream-state", "cpu-affinity-binding", "early-fdt-binding", "native-memory-observation"):
+    if kind not in (None, "sha256-stream-state", "cpu-affinity-binding", "early-fdt-binding", "native-memory-observation", "linux-data-carrier"):
         raise ValueError("closed diagnostic task required")
     stream = kind == "sha256-stream-state"
     affinity = kind == "cpu-affinity-binding"
     fdt = kind == "early-fdt-binding"
     native = kind == "native-memory-observation"
+    data_task = kind == "linux-data-carrier"
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--archive', type=Path)
@@ -128,12 +129,17 @@ def main(kind=None):
              'sealed_affinity_artifact.cjs', 'bundle_affinity_evidence.py') if fdt else (
              'native_memory_observation.py','native_memory_observation.c','native_memory_composition.c',
              'build_native_memory_observation.py','test_native_memory_observation.py','native_memory_fixture.c',
-             'early_fdt_binding.py','sealed_affinity_artifact.cjs','bundle_affinity_evidence.py') if native else ()
+             'early_fdt_binding.py','sealed_affinity_artifact.cjs','bundle_affinity_evidence.py') if native else (
+             'linux_data_carrier.py','linux_data_carrier.c','linux_data_carrier_composition.c',
+             'build_linux_data_carrier.py','linux_data_carrier_fixture.c','test_linux_data_carrier.py',
+             'carrier_lzma.c','carrier_lzma.h','early_fdt_binding.py','sealed_affinity_artifact.cjs',
+             'bundle_affinity_evidence.py') if data_task else ()
     names = (*PUBLIC, *INPUTS, *('note10/device_test/'+n for n in extra),
              *(('.github/workflows/note10-sha256-stream-state.yml',) if stream else
                ('.github/workflows/note10-cpu-affinity-binding.yml',) if affinity else
                ('.github/workflows/note10-early-fdt-binding.yml',) if fdt else
-               ('.github/workflows/note10-native-memory-observation.yml',) if native else ()))
+               ('.github/workflows/note10-native-memory-observation.yml',) if native else
+               ('.github/workflows/note10-linux-data-carrier.yml',) if data_task else ()))
     for name in names:
         data = (ROOT/name).read_bytes()
         manifest[name] = hashlib.sha256(data).hexdigest()
@@ -155,6 +161,8 @@ def main(kind=None):
         from early_fdt_binding import install, API_PINS as extra_kernel_pins
     elif native:
         from native_memory_observation import install, API_PINS as extra_kernel_pins
+    elif data_task:
+        from linux_data_carrier import install, API_PINS as extra_kernel_pins
     save(out/'source-manifest.json', manifest)
     ci = {name: os.environ.get(name) for name in
           ('GITHUB_SHA', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'GITHUB_JOB')}
@@ -191,9 +199,9 @@ def main(kind=None):
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source/name, target)
         # Diagnostic hooks follow the existing original-input preparation.
-        image_prep = prepare_image_inputs(source) if (fdt or native) else None
+        image_prep = prepare_image_inputs(source) if (fdt or native or data_task) else None
         overlay = install(source, identity)
-        if not (fdt or native):
+        if not (fdt or native or data_task):
             image_prep = prepare_image_inputs(source)
         save(out/'overlay.json', {'identity': identity, 'files_sha256': overlay,
                                   'image_preparation_sha256': image_prep,
@@ -243,6 +251,10 @@ def main(kind=None):
             settings.update(NOTE10_NATIVE_MEMORY_OBSERVATION='y',NOTE10_EARLY_FDT_BINDING='n',
                             NOTE10_CPU_AFFINITY_BINDING='n',NOTE10_SHA256_STREAM_STATE='n',
                             SMP='y',LOCALVERSION='"-v82-native-memory"')
+        elif data_task:
+            settings.update(NOTE10_DATA_CARRIER='y', NOTE10_NATIVE_MEMORY_OBSERVATION='n',
+                            NOTE10_EARLY_FDT_BINDING='n', NOTE10_CPU_AFFINITY_BINDING='n',
+                            NOTE10_SHA256_STREAM_STATE='n', SMP='y', LOCALVERSION='"-v88-linux-data"')
         run([*make, DEFCONFIG], 'build/01-defconfig.log')
         shutil.copyfile(objects/'.config', out/'public-baseline.config')
         for index, (name, value) in enumerate(settings.items()):
@@ -267,7 +279,7 @@ def main(kind=None):
         run([*make, 'V=1', '-j'+str(args.jobs), 'Image'], 'build/03-Image.log', timeout=5400)
         capture(source, objects, compiler_include, out)
         retain_route_prerequisites(source, objects, out, compiler_include)
-        run(['aarch64-linux-gnu-nm', *(['-S'] if (fdt or native) else []), '-n', objects/TARGET], 'new-object-symbols.log')
+        run(['aarch64-linux-gnu-nm', *(['-S'] if (fdt or native or data_task) else []), '-n', objects/TARGET], 'new-object-symbols.log')
         run(['aarch64-linux-gnu-readelf', '-SW', objects/TARGET], 'new-object-sections.log')
         image = objects/'arch/arm64/boot/Image'
         raw = image.read_bytes()
@@ -275,10 +287,12 @@ def main(kind=None):
             raise ValueError('completed ARM64 Image header invalid')
         if raw.count(b'N10_CYCLE_SLOT_UNSET_0123456789A') != 1:
             raise ValueError('exact one unpatched inherited recovery cycle slot required')
-        if any(marker not in raw for marker in (b'N10RET1', b'N10MEMARGS1' if native else b'N10FDT1' if fdt else b'N10AFF1' if affinity else b'N10SHASTREAM1' if stream else b'N10SHA1', b'N10SHACTL1', b'N10ROUTE2', b'N10INIT2', b'N10MININIT2', b'N10BOOTLINK2', identity.encode())):
+        if any(marker not in raw for marker in (b'N10RET1', b'N10DATA1' if data_task else b'N10MEMARGS1' if native else b'N10FDT1' if fdt else b'N10AFF1' if affinity else b'N10SHASTREAM1' if stream else b'N10SHA1', b'N10SHACTL1', b'N10ROUTE2', b'N10INIT2', b'N10MININIT2', b'N10BOOTLINK2', identity.encode())):
             raise ValueError('new diagnostic Image identity/markers missing')
         if (stream and b'N10SHA1' in raw) or ((affinity or fdt) and any(marker in raw for marker in (b'N10SHA1', b'N10SHASTREAM1'))) or (fdt and b'N10AFF1' in raw) or (native and any(marker in raw for marker in (b'N10SHA1',b'N10SHASTREAM1',b'N10AFF1',b'N10FDT1'))):
             raise ValueError('old SHA tasks must not be compiled into the new task')
+        if data_task and any(marker in raw for marker in (b'N10SHA1',b'N10SHASTREAM1',b'N10AFF1',b'N10FDT1',b'N10MEMARGS1')):
+            raise ValueError('old diagnostic callback compiled into DATA task')
         if raw.count(archive_data) != 1:
             raise ValueError('exact raw builtin CPIO missing/duplicated in actual Image')
         shutil.copyfile(objects/'init/.main.o.cmd', out/'actual-init-main.cmd')
@@ -288,7 +302,7 @@ def main(kind=None):
         stable_archive(archive, before)
         if manifest != {name: sha(ROOT/name) for name in manifest}:
             raise ValueError('local first-use inputs changed during build')
-        result = dict(schema=1, version='v82' if native else 'v81' if fdt else 'v78' if affinity else 'v73' if stream else 'v72', diagnostic_kind=kind, passed=True, kernel_commit=COMMIT,
+        result = dict(schema=1, version='v88' if data_task else 'v82' if native else 'v81' if fdt else 'v78' if affinity else 'v73' if stream else 'v72', diagnostic_kind=kind, passed=True, kernel_commit=COMMIT,
                       build_evidence_id=identity, ci_context=ci, source_sha256=manifest,
                       settings=settings, make_target='Image', integration_object=TARGET,
                       bootloader_cmdline_policy=cmdline_policy,
@@ -325,6 +339,14 @@ def main(kind=None):
             result['files_sha256']={'minimal-init.elf':result['minimal_init_elf_sha256'],
                                     'initramfs.cpio':result['initramfs_cpio_sha256']}
             result['native_relative_placement']=relative_admission(result,config,footprint,elf=init,archive=archive_data,
+                raw_inputs={k:result[k] for k in ('minimal_init_elf_sha256','initramfs_cpio_sha256')})
+        if data_task:
+            from linux_data_carrier import linked_footprint, relative_admission, STAGE
+            footprint = linked_footprint((objects/'System.map').read_text(),(out/'new-object-symbols.log').read_text(),
+                struct.unpack_from('<Q',raw,16)[0],struct.unpack_from('<Q',raw,8)[0],struct.unpack_from('<Q',raw,24)[0])
+            result.update(raw_input_binding=False,data_carrier_stage=STAGE,data_footprint=footprint,physical_placement_review_required=True)
+            result['files_sha256'] = {'minimal-init.elf':result['minimal_init_elf_sha256'],'initramfs.cpio':result['initramfs_cpio_sha256']}
+            result['data_relative_placement'] = relative_admission(result,config,footprint,elf=init,archive=archive_data,
                 raw_inputs={k:result[k] for k in ('minimal_init_elf_sha256','initramfs_cpio_sha256')})
         result['files_sha256'] = {p.relative_to(out).as_posix(): sha(p) for p in out.rglob('*') if p.is_file()}
         save(out/'result.json', result)
