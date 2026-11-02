@@ -93,11 +93,14 @@ def boot_identity_strings(data, identity, cycle):
     return {m[1].decode() for m in re.finditer(pattern, data)}
 
 
-def decode(data, banner, identity, cycle, *, digest_decoder=None, digest_marker=b'N10SHA1'):
+def decode(data, banner, identity, cycle, *, digest_decoder=None, digest_marker=b'N10SHA1', component_evidence=None):
     from sha256_kat_device_profile import decode_selected
     require(len(boot_identity_strings(data, identity, cycle)) == 1,
             'ambiguous/multiple retained boot identities for one current cycle')
-    clipped, observation = decode_selected(data, banner, identity, cycle, digest_decoder=digest_decoder)
+    options = dict(digest_decoder=digest_decoder)
+    if component_evidence is not None:
+        options['component_evidence'] = component_evidence
+    clipped, observation = decode_selected(data, banner, identity, cycle, **options)
     start = observation['boot_byte_start']
     boot = data[start:]
     route = list(re.finditer(rb'N10ROUTE2 id=([0-9a-f]{32}) boot=([0-9a-f]{32}) cycle=([0-9a-f]{32}) route=builtin exec_attempt=1(?=\r?\n)', boot))
@@ -122,6 +125,9 @@ def decode(data, banner, identity, cycle, *, digest_decoder=None, digest_marker=
     # original checksums/order semantics; this prefix is not authentication.
     observation['boot_identity'] = token.decode()
     observation['minimal_PID1_start_observed'] = True
+    if component_evidence is not None:
+        component_evidence['pid1_validation'] = 'validated'
+        component_evidence['return_boot_association'] = 'validated'
     return clipped, observation
 
 
@@ -148,6 +154,7 @@ def snapshot(adb, out, bound, cycle, *, decode_fn=None):
     decode_fn = decode_fn or decode
     profile_name = bound.get('device_profile', PROFILE)
     rows, snapshots, selections, observations = [], {}, {}, []
+    rejected_components = []
     for index, (name, remote) in enumerate(LOGS):
         from sha256_kat_device_profile import log_probe_command
         row = dict(name=name, remote=remote, status='pending',
@@ -180,6 +187,9 @@ def snapshot(adb, out, bound, cycle, *, decode_fn=None):
             observations.append(observation)
         except Exception as error:
             errors.append(name+': '+str(error))
+            components = getattr(error, 'component_evidence', None)
+            if isinstance(components, dict):
+                rejected_components.append(dict(source=name, components=components))
     same = bool(observations) and all(o == observations[0] for o in observations)
     # Offsets may differ between independent intact sources; compare decoded
     # semantic identity rather than the position in each source file.
@@ -199,5 +209,7 @@ def snapshot(adb, out, bound, cycle, *, decode_fn=None):
     result['retained_boot_identity_strings'] = sorted(set().union(*[
         boot_identity_strings(data, bound['build_evidence_id'], cycle) for data in snapshots.values()]))
     result['actual_hardware_boot_count_proven'] = False
+    if rejected_components:
+        result['rejected_component_observations'] = rejected_components
     save(out/'result.json', result)
     return result

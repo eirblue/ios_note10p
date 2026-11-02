@@ -771,7 +771,7 @@ def precheck(packages, kernel_build, backup, adb, staged):
         save(packages/'PREINSTALL-CHECK.json', report)
 
 
-def decode_selected(data, banner, identity, cycle, *, digest_decoder=None):
+def decode_selected(data, banner, identity, cycle, *, digest_decoder=None, component_evidence=None):
     from decode_auto_return import select_cycle_log, decode as decode_return
     if digest_decoder is None:
         from decode_sha256_runtime_kat import decode as digest_decoder
@@ -780,6 +780,9 @@ def decode_selected(data, banner, identity, cycle, *, digest_decoder=None):
     selected_boot = data[starts[-1].start():]
     clipped, offset = select_cycle_log(selected_boot, identity, cycle)
     recovery = decode_return(clipped, identity, cycle)
+    if component_evidence is not None:
+        component_evidence['auto_return_records'] = recovery
+        component_evidence['return_validation'] = 'validated_request_records'
     kat = digest_decoder(clipped.decode('ascii', errors='replace'), identity)
     require(kat['passed'], 'current-cycle KAT did not pass')
     return clipped, dict(kat=kat, auto_return=recovery, boot_byte_start=starts[-1].start(), cycle_byte_start=offset)

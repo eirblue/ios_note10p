@@ -315,24 +315,65 @@ def decode(text, identity, cycle):
                 owned_virtual_decode=passed, global_RAM_ownership=False, handoff_ready=False, xnu_executed=False)
 
 
-def require_functional(result):
-    require(result['passed'], 'DATA functional decode failed status='+result['status']+
+def functional_phase(status):
+    return {'unavailable': 'input_guards', 'carrier_crypto': 'carrier_hash',
+            'carrier_mismatch': 'carrier_integrity', 'header': 'carrier_header',
+            'stream_hash': 'stream_integrity', 'owned_output': 'allocation',
+            'allocation': 'allocation', 'decode': 'lzma_decode',
+            'payload_hash': 'payload_integrity', 'ok': 'complete'}.get(status, 'unknown')
+
+
+def require_functional(result, *, report_phase=False):
+    prefix = ('DATA functional acceptance failed phase='+functional_phase(result['status'])+' status='
+              if report_phase else 'DATA functional decode failed status=')
+    require(result['passed'], prefix+result['status']+
         ' reasons=%08x' % result['reasons']+' labels='+','.join(result['reason_labels'])+
         ' carrier_rc='+str(result['carrier_rc'])+' native='+str(result['carrier'])+' logical='+str(result['logical'])+
         ' expectations='+str(result['expectations'])+' captures='+str(result['captures'])+
         ' retained='+str(int(result['retained'])))
 
 
+class ComponentObservationError(ValueError):
+    """Rejected observation with private component evidence; never a PASS."""
+    def __init__(self, error, components):
+        super().__init__(str(error))
+        self.component_evidence = components
+
+
+def structural_presence(text, identity, cycle, boot):
+    # Exact marker presence only. This does not run or replace PID1 acceptance.
+    result = {'validation': 'presence_only'}
+    for name, marker, tail in (
+            ('route', 'N10ROUTE2', 'route=builtin exec_attempt=1'),
+            ('pid1', 'N10INIT2', 'route=builtin started=1')):
+        tokens = re.findall(r'\b'+marker+r' id='+re.escape(identity)+
+                            r' boot=([0-9a-f]{32}) cycle='+re.escape(cycle)+
+                            ' '+tail+r'(?=\r?\n|$)', text)
+        result[name+'_same_boot_markers'] = tokens.count(boot)
+        result[name+'_other_boot_markers'] = len(tokens)-tokens.count(boot)
+    return result
+
+
 def decode_selected(data, banner, identity, cycle, *, expected=None):
     from builtin_init_profile import decode as baseline_decode
+    components = dict(pid1_validation='not_checked', return_validation='not_checked',
+                      return_boot_association='not_checked',
+                      functional_acceptance=False, hardware_return_proven_by_frames=False)
     def selected(text, rid):
         result = decode(text, rid, cycle)
-        require_functional(result)
+        components['data'] = result
+        components['data_phase'] = functional_phase(result['status'])
+        components['structural_presence'] = structural_presence(text, rid, cycle, result['boot_identity'])
+        require_functional(result, report_phase=True)
         return result
-    clipped, observed = baseline_decode(data, banner, identity, cycle, digest_decoder=selected, digest_marker=b'N10DATA1')
-    require(observed['kat']['boot_identity'] == observed['boot_identity'], 'DATA/recovery/PID1 boot differs')
-    if expected is not None:
-        row = observed['kat']
-        require(row['digest'] == expected['data_payload_sha256'] and row['payload'] == row['written'] == expected['data_payload_bytes'] and
-                row['logical'] == expected['data_carrier_bytes'], 'DATA decoded package identity differs')
+    try:
+        clipped, observed = baseline_decode(data, banner, identity, cycle, digest_decoder=selected,
+                                           digest_marker=b'N10DATA1', component_evidence=components)
+        require(observed['kat']['boot_identity'] == observed['boot_identity'], 'DATA/recovery/PID1 boot differs')
+        if expected is not None:
+            row = observed['kat']
+            require(row['digest'] == expected['data_payload_sha256'] and row['payload'] == row['written'] == expected['data_payload_bytes'] and
+                    row['logical'] == expected['data_carrier_bytes'], 'DATA decoded package identity differs')
+    except ValueError as error:
+        raise ComponentObservationError(error, components) from error
     return clipped, observed

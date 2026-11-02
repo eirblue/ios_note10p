@@ -1115,3 +1115,12 @@ Exynos SoC MASTER 및 플랫폼 archive 입력 분리:
 - 공개 소스 `0f1584873b667a88ed2f0e37e43f1ea6d1c62ad0`의 [통합 커널 CI 40705922907](https://github.com/eirblue/ios_note10p/actions/runs/40705922907)이 통과했다. CPU 및 클러스터 PM 진입의 notifier 호출 횟수를 초기화하고, 클러스터 진입 실패 시 원래 오류를 유지하면서 앞선 CPU 진입을 한 번 정리한다.
 - 실제 Image 컴파일과 최종 소스 검증을 병행했다. PC guard 모형 19개, 프로세스 수명 검사 6개와 deadline 경계, 결합 변이 검사 12개가 통과했다. 기존 33개 평가의 실기기 회귀를 한 번 수행해 모두 통과했고, 설치 직전 배터리 97%, 자동 TWRP 복귀와 5개 파티션 해시를 확인했다. [관측 범위와 한계](device_test/PM-CALLBACK-INVENTORY.md).
 - 하드웨어 CPU PM 실패 주입이나 직접 syscore 호출은 검증하지 않았다. 전체 DMA 정지, MMU/cache 인계, XNU 실행과 iOS 부팅도 확인하지 않았다.
+
+
+## v98: carrier refusal and partial observation reporting
+
+The retained v97 result stopped at `carrier_mismatch` with a successful carrier-hash API return and no guard-reason bits. The matched historical producer source places this status at the whole-carrier digest comparison, before carrier-header parsing, output allocation, and decoder entry. This does not establish a decoder failure or a successful decode. The cause of the digest comparison mismatch remains unresolved; the saved result does not contain both digests at that comparison point.
+
+The host accepted-observation count is an end-to-end acceptance result. A DATA refusal can discard earlier parsed components, so a zero count alone does not establish that PID1 or return frames were absent. v98 is limited to host reporting: partial component metadata must remain separate from accepted observations and hardware automatic-return proof. Functional refusal remains a failing result.
+
+No new native code, Linux Image, device operation, payload transform, or historical log re-decoding is part of this host reporting change. The consumed v97 cycle is not replayed, and the preserved v91 plan remains unselected. No XNU execution is claimed.
