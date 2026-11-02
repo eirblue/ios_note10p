@@ -1,3 +1,12 @@
+## v88: late Linux DATA decoder diagnostic (CI passed)
+
+- Reviewed source: `1b18b5045c0e695e271329505634ccfdddfc808d`; [CI run 41375553719](https://github.com/eirblue/ios_note10p/actions/runs/41375553719).
+- Eight new wrapper/package tests passed in one batch with one fixture compilation. One Linux Image build passed; historical suites were not replayed.
+- Image: 46,413,836 bytes; linked span: 55,132,160 bytes; retained DATA state: 80 bytes. All seven existing relative admission checks passed, including header/config/builtin PID1 route.
+- The opt-in diagnostic authenticates the fixed private external DATA carrier, decodes into bounded ordinary Linux virtual memory after recovery arm, verifies output and frees its own buffers. No XNU branch.
+- Necessary private template and single-cycle plan were prepared and self-validated. Physical execution is pending direct authorization after two prelaunch automatic-review rejections: zero device commands, BOOT writes or reboots.
+- Existing physical diagnostic remains v82, consumed once. No global RAM ownership, observed runtime placement or deployment readiness is claimed. Raw inputs and artifacts remain private.
+
 ## v87: fixed DATA carrier and bounded decoder (PC only)
 
 - Reviewed source: `55faef52954b81176fd639223e2946cc2c204f63`.
