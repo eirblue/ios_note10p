@@ -1,3 +1,14 @@
+## v96: opt-in current-capacity Linux staging passed PC tests and Image build
+
+- Reviewed source: `39fe450c5044eed2c51fc8ed15a8e5fea1eeb284`; [CI run 41457807215](https://github.com/eirblue/ios_note10p/actions/runs/41457807215), attempt 1 succeeded in 15m29s.
+- Three new methods passed once, with one optimized C fixture compilation and one Linux Image build. The fixture exercises the actual reserve/output path with a controlled decoder stub; the portable decoder and v95 actual payload were not replayed. Exact capacity, old-span refusal, cleanup/canaries and closed context/default behavior passed.
+- The new default-off profile uses exactly 19,136,512 bytes at 16-KiB alignment. The legacy 19,546,112-byte default remains unchanged. Intrinsic metadata reports a 46,413,836-byte Image, 55,132,160-byte linked span and 120-byte combined permanent state within existing caps.
+- A single JSON-only join matched the new profile capacity to the frozen v95 host payload, while the legacy capacity match remains false. No Image, MachO, carrier, payload or decoder-library bytes were read by this join; no transform, compression or real-input decode was repeated.
+- Existing relative geometry/config/header/canonical-route checks passed. Physical readiness and global RAM ownership remain false; the PC kind is rejected from physical template/package admission even if its PC flag is altered. Actual reservation and target decoding remain unverified.
+- Artifact download, authenticated decrypt and bounded private extraction each occurred once. No device query, package, plan, BOOT write or reboot occurred for v96; raw evidence and artifacts stay private.
+- The user has now made the device available starting at v97. v96 remains PC-only. The next same-safe DATA diagnostic will reuse the accepted unconsumed v91 generic Linux Image and ordinary late-vmalloc output, with a new host experiment/current payload/variant/plan; it will preserve old producer provenance, all original fresh safety gates and the one-write/reboot limit. It will not promote the PC-owned Image or add early reservation/XNU-entry risk.
+- Last completed physical build remains v90; the original v91 plan remains unconsumed (0/1) and will not automatically resume. Exact standing approvals, the v97 availability instruction and the complete execution ledger accompany each private handoff.
+
 ## v95: fresh checked XNU payload fits the fixed carrier and decodes once on PC
 
 - Reviewed adapter source: `de5d400ed31fbc243109f702b60c44ae1ceb2bed`. The actual input is the authenticated v94 XNU producer from [CI run 41450171734](https://github.com/eirblue/ios_note10p/actions/runs/41450171734), not an earlier payload or geometry.
