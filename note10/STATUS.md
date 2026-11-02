@@ -1,5 +1,14 @@
 # 작업 상태 (2026-11-02, Asia/Seoul)
 
+## v85: Exynos early counter-clock source path
+
+Added an Exynos-only early clock path that selects one explicitly running CPU from a caller-owned canonical Apple device tree and validates its counter-frequency declaration before committing the counter/decrementer fields. It avoids the Apple arm-io requirement, guessed bus/CPU frequencies and legacy ratio defaults. The original Apple path remains unchanged.
+
+The production C helper is byte-bound to its kernel patch and exercised through a thin synthetic device-tree fixture. Three new methods passed on the initial component; a native-header printf declaration conflict then stopped compilation. Removing the unused include changed the production inputs, so those three directly affected methods ran once on the corrected component, with one fixture compile per component version. No earlier v84 cases were rerun.
+
+[Successful CI](https://github.com/eirblue/ios_note10p/actions/runs/41366211538) from project source `c7d8655685561a142aef49f5d69880ca2bd28d8e` freshly compiled 1,067 native and four dependency objects and linked the 1,071-object arm64 MH_EXECUTE research kernel. This validates source logic and build integration, not a measured clock or live boot-CPU state. Actual owned device-tree input, complete platform clocks, staging/entry/handoff readiness, hardware support and exact target ABI compatibility remain unverified. No Image, BOOT write, reboot, device call or XNU execution.
+
+
 ## v84: Current native-selected objects linked directly
 
 Built 1,067 objects from the current native configuration and four explicit dependency/metadata objects, then linked all 1,071 directly into one arm64 MH_EXECUTE research kernel. The intrinsic producer result reports zero undefined symbols. The old forced architecture-candidate archive and historical objects were not used. [Successful CI](https://github.com/eirblue/ios_note10p/actions/runs/41362589872), project source `7bc425f4d58b3d4755894bb00e2e72b8a47ee266`.
