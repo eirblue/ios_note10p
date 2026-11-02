@@ -1,3 +1,12 @@
+## v86: current native payload preparation (PC only)
+
+- Reviewed adapter source: `4d766d6c8c6313bb7330036c3fcd9e0b35e72063`.
+- Three new adapter tests passed in one local batch; one functional production reused the existing materializer core on the accepted v85 native kernel.
+- Real memory payload: 19,546,112 bytes. One unpadded LZMA_ALONE preset-6 stream: 4,429,107 bytes.
+- Fixed external-ramdisk budget: 10,962,166 bytes; measured spare capacity: 6,533,059 bytes.
+- Capacity only: fixed-extent padding/container rules, permanent late decoding, loader placement and ownership remain unresolved. No carrier admission or deployment readiness.
+- Raw payload products remain private. No CI dispatch, device operation, BOOT write, reboot or XNU execution. Current physical diagnostic remains v82, consumed once.
+
 # 작업 상태 (2026-11-02, Asia/Seoul)
 
 ## v85: Exynos early counter-clock source path
