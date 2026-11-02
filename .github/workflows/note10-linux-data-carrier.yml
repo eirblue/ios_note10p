@@ -1,4 +1,4 @@
-name: Note10 v90 generic readonly Image expectation private Image
+name: Note10 v91 trusted logical Image expectation private Image
 on:
   workflow_dispatch:
     inputs:
@@ -7,7 +7,7 @@ on:
         required: true
         type: string
       new_cases_json:
-        description: Select only the three new Image-slot methods; all historical cases excluded
+        description: Select only the three new trusted-logical methods; all historical cases excluded
         default: '[]'
         type: string
 permissions:
@@ -51,23 +51,23 @@ jobs:
         env:
           PYTHONDONTWRITEBYTECODE: '1'
           N10_NEW_CASES_JSON: ${{ inputs.new_cases_json }}
-        run: python -B note10/device_test/test_linux_data_carrier.py --output note10/private/v90-ci-new-tests
+        run: python -B note10/device_test/test_linux_data_carrier.py --output note10/private/v91-ci-new-tests
       - name: Compile minimal Linux PID1 and build one new diagnostic Image
         env:
           PYTHONDONTWRITEBYTECODE: '1'
-        run: python -B note10/device_test/build_linux_data_carrier.py --output note10/private/v90-ci-linux-data-carrier --jobs 4
+        run: python -B note10/device_test/build_linux_data_carrier.py --output note10/private/v91-ci-linux-data-carrier --jobs 4
       - name: Bundle and seal private producer evidence including failures
         if: always()
         env:
           N10_RECIPIENT_PUBLIC_KEY_B64: ${{ inputs.recipient_public_key_b64 }}
         run: |
-          python -B note10/device_test/bundle_affinity_evidence.py --tests note10/private/v90-ci-new-tests --build note10/private/v90-ci-linux-data-carrier --output note10/private/v90-evidence.zip --source "$GITHUB_SHA"
-          node note10/device_test/sealed_affinity_artifact.cjs seal note10/private/v90-evidence.zip note10/private/v90-sealed-evidence.n10sealed "$GITHUB_SHA"
+          python -B note10/device_test/bundle_affinity_evidence.py --tests note10/private/v91-ci-new-tests --build note10/private/v91-ci-linux-data-carrier --output note10/private/v91-evidence.zip --source "$GITHUB_SHA"
+          node note10/device_test/sealed_affinity_artifact.cjs seal note10/private/v91-evidence.zip note10/private/v91-sealed-evidence.n10sealed "$GITHUB_SHA"
       - name: Upload ciphertext only
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: note10-v90-sealed-evidence
+          name: note10-v91-sealed-evidence
           if-no-files-found: error
           retention-days: 7
-          path: note10/private/v90-sealed-evidence.n10sealed
+          path: note10/private/v91-sealed-evidence.n10sealed

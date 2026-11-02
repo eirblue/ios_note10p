@@ -9,9 +9,10 @@ HERE = Path(__file__).resolve().parent
 KIND = 'linux-data-carrier'
 PROFILE = KIND+'-v1'
 STAGE = 'late_linux_owned_virtual_decode'
-MODE = 'image-slot-v1'
-SLOT_MAGIC = b'N10DATAEXPECTV1!'
-SLOT_PREIMAGE = SLOT_MAGIC + bytes((1,0,0,0,64,0,0,0)) + bytes(40)
+MODE = 'image-slot-logical-v2'
+BOOT_PAGE = 2048
+SLOT_MAGIC = b'N10DATAEXPECTV2!'
+SLOT_PREIMAGE = SLOT_MAGIC + bytes((2,0,0,0,64,0,0,0)) + bytes(40)
 SLOT_SYMBOL = 'n10_image_expectation_slot'
 SLOT_SECTION = '.rodata.n10_expectation'
 LEGACY_FIELDS = ('data_carrier_stage', 'data_relative_placement_admitted', 'raw_input_binding')
@@ -22,15 +23,15 @@ SOURCES = ('linux_data_carrier.py', 'linux_data_carrier.c', 'linux_data_carrier_
            'build_linux_data_carrier.py', 'linux_data_carrier_fixture.c', 'test_linux_data_carrier.py',
            'carrier_lzma.c', 'carrier_lzma.h')
 API_PINS = {'arch/arm64/kernel/setup.c': 'f80fd02832b12c48eba11b3e3148c59c6ad87d9ea2328c8c37492d107fd141d7'}
-CASE_NAMES = ('test_private_slot_patch_preimage_bounds_and_exact_variant',
-              'test_actual_loaded_readonly_slot_and_refusal_order',
-              'test_intrinsic_slot_profile_and_context_preservation')
+CASE_NAMES = ('test_trusted_logical_native_extent_and_authenticated_header_bounds',
+              'test_v2_exact_private_patch_and_current_producer_binding',
+              'test_preload_sha_length_reads_and_carrier_error_wire')
 REASONS = {1:'parameter_missing',2:'parameter_invalid',4:'parameter_duplicate',
            8:'capture_missing',16:'capture_invalid',32:'capture_repeat',64:'input_missing',
-           128:'global_mismatch',256:'emit_repeat',512:'sticky_invalid',1024:'image_unpatched',2048:'image_invalid'}
+           128:'global_mismatch',256:'emit_repeat',512:'sticky_invalid',1024:'image_unpatched',2048:'image_invalid',4096:'native_extent_invalid'}
 
 TEST_SOURCES = (*SOURCES, 'sha256_kat_device_profile.py', 'builtin_init_profile.py',
-                'prepare_linux_boot.py', 'build_boot_test_packages.py')
+                'prepare_linux_boot.py', 'build_boot_test_packages.py', 'materialize_auto_cycle.py')
 
 
 def require(value, message):
@@ -94,7 +95,7 @@ def slot_metadata(raw, system_map, object_symbols, object_sections):
     offset = raw.index(SLOT_PREIMAGE)
     require(values['__start_rodata'] <= values[SLOT_SYMBOL] and values[SLOT_SYMBOL]+64 <= values['__init_begin'] and
             offset == values[SLOT_SYMBOL]-values['_text'] and offset+64 <= len(raw), 'linked slot/file offset differs')
-    return dict(kind=MODE,offset=offset,bytes=64,expectation_offset=offset+24,expectation_bytes=32,
+    return dict(kind=MODE,offset=offset,bytes=64,expectation_offset=offset+24,expectation_bytes=40,logical_offset=offset+56,logical_bytes=8,boot_page=BOOT_PAGE,
         preimage_sha256=sha(SLOT_PREIMAGE),symbol=SLOT_SYMBOL,symbol_bytes=64,section=SLOT_SECTION,
         readonly_flags=sections[0][1],generic=True)
 
@@ -104,13 +105,14 @@ def patch_image(raw, report, token, cycle_slot):
             report.get('image_sha256') == sha(raw), 'original generic CI Image binding required')
     slot = report['data_expectation_slot']
     keys = {'kind','offset','bytes','expectation_offset','expectation_bytes','preimage_sha256',
-            'symbol','symbol_bytes','section','readonly_flags','generic'}
+            'symbol','symbol_bytes','section','readonly_flags','generic','logical_offset','logical_bytes','boot_page'}
     require(type(slot) is dict and set(slot) == keys and slot['kind'] == MODE and slot['bytes'] == slot['symbol_bytes'] == 64 and
-            slot['expectation_bytes'] == 32 and slot['preimage_sha256'] == sha(SLOT_PREIMAGE) and
+            slot['expectation_bytes'] == 40 and slot['logical_bytes'] == 8 and slot['boot_page'] == BOOT_PAGE and slot['preimage_sha256'] == sha(SLOT_PREIMAGE) and
             slot['symbol'] == SLOT_SYMBOL and slot['section'] == SLOT_SECTION and slot['generic'] is True and
             'A' in slot['readonly_flags'] and not {'W','X'} & set(slot['readonly_flags']), 'closed CI slot metadata required')
     require(type(slot['offset']) is int and 0 <= slot['offset'] <= len(raw)-64 and
             type(slot['expectation_offset']) is int and slot['expectation_offset'] == slot['offset']+24 and
+            type(slot['logical_offset']) is int and slot['logical_offset'] == slot['offset']+56 and
             raw.count(SLOT_PREIMAGE) == 1 and raw[slot['offset']:slot['offset']+64] == SLOT_PREIMAGE,
             'exact generic slot preimage/span required')
     require(type(cycle_slot) is bytes and len(cycle_slot) == 32 and raw.count(cycle_slot+b'\0') == 1 and
@@ -119,12 +121,14 @@ def patch_image(raw, report, token, cycle_slot):
     require(cycle+32 <= slot['offset'] or slot['offset']+64 <= cycle, 'disjoint data slots required')
     digest = report.get('data_carrier_sha256')
     require(type(digest) is str and re.fullmatch('[0-9a-f]{64}',digest) and digest != '0'*64, 'accepted nonplaceholder carrier identity required')
-    expected = bytes.fromhex(digest)
+    length = report.get('data_carrier_bytes')
+    require(type(length) is int and 128 <= length <= 64*1024*1024, 'accepted trusted logical length required')
+    expected = bytes.fromhex(digest)+length.to_bytes(8,'little')
     result = bytearray(raw)
     result[cycle:cycle+32] = token.encode('ascii')
     start = slot['expectation_offset']
-    result[start:start+32] = expected
-    patched_slot = SLOT_PREIMAGE[:24]+expected+SLOT_PREIMAGE[56:]
+    result[start:start+40] = expected
+    patched_slot = SLOT_PREIMAGE[:24]+expected
     require(result.count(patched_slot) == 1 and result[slot['offset']:slot['offset']+64] == patched_slot,
             'unique patched slot required')
     return bytes(result)
@@ -175,7 +179,7 @@ def relative_admission(result, lines, footprint, *, elf, archive, raw_inputs):
 
 
 def input_binding(result, lines, *, elf, archive, raw_inputs):
-    require(result.get('version') == 'v90' and result.get('diagnostic_kind') == KIND and
+    require(result.get('version') == 'v91' and result.get('diagnostic_kind') == KIND and
             result.get('data_carrier_stage') == STAGE and result.get('raw_input_binding') is False and
             result.get('data_expectation_mode') == MODE and type(result.get('data_expectation_slot')) is dict,
             'closed new DATA Image required')
@@ -257,7 +261,10 @@ def data_cmdline(original, digest):
 def package_data(build, reference, cmdline, raw):
     require(build.get('device_profile') == PROFILE and build['data_carrier_bytes'] == len(reference) == len(raw) and
             sha(raw) == build['data_carrier_sha256'], 'DATA fixed extent/accepted identity differs')
-    if build.get('data_expectation_mode') == MODE:
+    if build.get('data_expectation_mode') in (MODE,'image-slot-v1'):
+        if build['data_expectation_mode'] != MODE:
+            from sha256_kat_device_profile import V90_IMAGE_HEAD
+            require(build.get('source_head') == V90_IMAGE_HEAD, 'historical Image expectation source differs')
         require(build.get('image_expectation_patched') is True, 'new expectation must be bound in private Image variant')
         return cmdline
     return data_cmdline(cmdline, build['data_carrier_sha256'])
@@ -277,24 +284,27 @@ def decode(text, identity, cycle):
     from decode_reservation import checksum
     lines = [line for line in text.splitlines() if 'N10DATA1' in line]
     require(len(lines) == 1, 'one DATA result required')
-    m = re.search(r'N10BOOTLINK2 boot=([0-9a-f]{32}) N10DATA1 ([^\r\n\x00]{1,383}) checksum=([0-9a-f]{8})$', lines[0])
+    m = re.search(r'N10BOOTLINK2 boot=([0-9a-f]{32}) N10DATA1 ([^\r\n\x00]{1,447}) checksum=([0-9a-f]{8})$', lines[0])
     require(m is not None and m[1] != '0'*32 and checksum(m[2].encode('ascii')) == int(m[3],16), 'DATA boot/checksum differs')
     pairs = [part.split('=') for part in m[2].split(' ')]
-    keys = ('id','cycle','kind','source','status','carrier','stream','payload','consumed','written','calls','digest','reasons','expectations','captures','retained','ownership','executed')
+    keys = ('id','cycle','kind','source','status','carrier','logical','carrier_rc','stream','payload','consumed','written','calls','digest','reasons','expectations','captures','retained','ownership','executed')
     require(all(len(p) == 2 for p in pairs) and tuple(p[0] for p in pairs) == keys, 'DATA closed schema required')
     row = dict(pairs)
     require(row['id'] == identity and row['cycle'] == cycle and row['kind'] == 'result' and row['source'] == MODE and
             row['ownership'] == row['executed'] == '0' and re.fullmatch('[0-9a-f]{64}', row['digest']), 'DATA identity/nonclaim differs')
     numbers = {}
-    for key in ('carrier','stream','payload','consumed','written','calls'):
+    for key in ('carrier','logical','stream','payload','consumed','written','calls'):
         require(re.fullmatch('0|[1-9][0-9]{0,8}', row[key]), 'bounded DATA count required')
         numbers[key] = int(row[key])
-    require(re.fullmatch('[0-9a-f]{8}',row['reasons']) and int(row['reasons'],16) <= 0xfff and
+    require(re.fullmatch('0|-?[1-9][0-9]{0,9}',row['carrier_rc']) and -(1<<31) <= int(row['carrier_rc']) < (1<<31), 'signed carrier crypto result required')
+    numbers['carrier_rc'] = int(row['carrier_rc'])
+    require(re.fullmatch('[0-9a-f]{8}',row['reasons']) and int(row['reasons'],16) <= 0x1fff and
             row['expectations'] in ('0','1') and row['captures'] in ('0','1','2') and row['retained'] in ('0','1'), 'bounded DATA guard reasons required')
     reasons = int(row['reasons'],16)
     passed = row['status'] == 'ok' and reasons == 0 and row['expectations'] == row['captures'] == row['retained'] == '1' and \
         numbers['calls'] == 1 and 0 < numbers['payload'] == numbers['written'] <= 64*1024*1024 and \
-        18 <= numbers['stream'] <= numbers['carrier']-128 and numbers['carrier'] <= 64*1024*1024 and numbers['consumed'] <= numbers['stream']
+        18 <= numbers['stream'] <= numbers['logical']-128 and 128 <= numbers['logical'] <= numbers['carrier'] <= 64*1024*1024 and \
+        numbers['carrier'] in (numbers['logical'],(numbers['logical']+BOOT_PAGE-1)//BOOT_PAGE*BOOT_PAGE) and numbers['carrier_rc'] == 0 and numbers['consumed'] <= numbers['stream']
     return dict(passed=passed, boot_identity=m[1], status=row['status'], **numbers, digest=row['digest'],
                 reasons=reasons, reason_labels=[label for bit,label in REASONS.items() if reasons&bit],
                 expectations=int(row['expectations']), expectation_source=row['source'], captures=int(row['captures']), retained=row['retained']=='1',
@@ -304,6 +314,7 @@ def decode(text, identity, cycle):
 def require_functional(result):
     require(result['passed'], 'DATA functional decode failed status='+result['status']+
         ' reasons=%08x' % result['reasons']+' labels='+','.join(result['reason_labels'])+
+        ' carrier_rc='+str(result['carrier_rc'])+' native='+str(result['carrier'])+' logical='+str(result['logical'])+
         ' expectations='+str(result['expectations'])+' captures='+str(result['captures'])+
         ' retained='+str(int(result['retained'])))
 
@@ -319,5 +330,5 @@ def decode_selected(data, banner, identity, cycle, *, expected=None):
     if expected is not None:
         row = observed['kat']
         require(row['digest'] == expected['data_payload_sha256'] and row['payload'] == row['written'] == expected['data_payload_bytes'] and
-                row['carrier'] == expected['data_carrier_bytes'], 'DATA decoded package identity differs')
+                row['logical'] == expected['data_carrier_bytes'], 'DATA decoded package identity differs')
     return clipped, observed

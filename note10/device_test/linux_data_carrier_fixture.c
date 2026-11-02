@@ -13,6 +13,7 @@
 #define __init
 static unsigned long initrd_start, initrd_end, host_first, host_last;
 static unsigned int allocations, frees, cleared = 1, fail_alloc, hashes, fail_hash, core_calls;
+static size_t first_hash_bytes;
 static void *allocated[2];
 static size_t lengths[2];
 #define n10_data_linear(x) ((x) >= host_first && (x) < host_last)
@@ -42,7 +43,8 @@ static void fixture_free(void *p)
 #define n10_data_free(p) fixture_free(p)
 static int n10_data_hash(const void *input, size_t bytes, unsigned char digest[32])
 {
-    if (++hashes == fail_hash) return -1;
+    if (!hashes) first_hash_bytes = bytes;
+    if (++hashes == fail_hash) return -5;
     return SHA256(input,bytes,digest) ? 0 : -1;
 }
 static int fixture_decode(const uint8_t *input, size_t bytes, uint8_t *output, size_t capacity,
@@ -128,10 +130,10 @@ int main(int argc,char **argv)
     if (!strcmp(mode,"repeat_callback") || !strcmp(mode,"repeat_refused_callback")) n10_sha256_worker(NULL);
     for (i=0;i<32;++i) sprintf(digest+2*i,"%02x",outcome.digest[i]);
     digest[64]=0;
-    printf("{\"status\":\"%s\",\"source\":\"image-slot-v1\",\"calls\":%u,\"callbacks\":%u,\"allocations\":%u,\"frees\":%u,\"cleared\":%u,\"written\":%llu,\"consumed\":%llu,\"digest\":\"%s\",\"reasons\":\"%08x\",\"expectations\":%u,\"captures\":%u,\"retained\":%u,\"hashes\":%u,\"carrier\":%llu,\"stream\":%llu,\"payload\":%llu}\n",
+    printf("{\"status\":\"%s\",\"source\":\"image-slot-logical-v2\",\"calls\":%u,\"callbacks\":%u,\"allocations\":%u,\"frees\":%u,\"cleared\":%u,\"written\":%llu,\"consumed\":%llu,\"digest\":\"%s\",\"reasons\":\"%08x\",\"expectations\":%u,\"captures\":%u,\"retained\":%u,\"hashes\":%u,\"carrier\":%llu,\"logical\":%llu,\"carrier_rc\":%d,\"first_hash_bytes\":%llu,\"stream\":%llu,\"payload\":%llu}\n",
         outcome.status ? outcome.status : "skipped",core_calls,callbacks,allocations,frees,cleared,
         (unsigned long long)outcome.written,(unsigned long long)outcome.consumed,digest,
         outcome.reasons,outcome.expectations,outcome.captures,outcome.retained,hashes,
-        (unsigned long long)outcome.carrier,(unsigned long long)outcome.stream,(unsigned long long)outcome.payload);
+        (unsigned long long)outcome.carrier,(unsigned long long)outcome.logical,outcome.carrier_rc,(unsigned long long)first_hash_bytes,(unsigned long long)outcome.stream,(unsigned long long)outcome.payload);
     free(data); return 0;
 }

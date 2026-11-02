@@ -24,33 +24,36 @@ enum n10_data_reason {
     N10_DATA_CAPTURE_INVALID = 1u << 4, N10_DATA_CAPTURE_REPEAT = 1u << 5,
     N10_DATA_INPUT_MISSING = 1u << 6, N10_DATA_GLOBAL_MISMATCH = 1u << 7,
     N10_DATA_EMIT_REPEAT = 1u << 8, N10_DATA_STICKY_INVALID = 1u << 9,
-    N10_DATA_EXPECT_UNPATCHED = 1u << 10, N10_DATA_EXPECT_INVALID = 1u << 11
+    N10_DATA_EXPECT_UNPATCHED = 1u << 10, N10_DATA_EXPECT_INVALID = 1u << 11, N10_DATA_EXTENT_INVALID = 1u << 12
 };
 
 #ifdef N10_DATA_IMAGE_EXPECTATION
 struct n10_expectation_slot {
-    unsigned char magic[16], version[4], bytes[4], expectation[32], reserved[8];
+    unsigned char magic[16], version[4], bytes[4], expectation[32], logical[8];
 };
 static const struct n10_expectation_slot n10_image_expectation_slot __used
     __attribute__((section(".rodata.n10_expectation"),aligned(16))) = {
-    {'N','1','0','D','A','T','A','E','X','P','E','C','T','V','1','!'},
-    {1,0,0,0}, {64,0,0,0}, {0}, {0}
+    {'N','1','0','D','A','T','A','E','X','P','E','C','T','V','2','!'},
+    {2,0,0,0}, {64,0,0,0}, {0}, {0}
 };
 _Static_assert(sizeof(n10_image_expectation_slot) == 64, "exact generic readonly slot");
-static int n10_image_expectation_read(unsigned char expected[32])
+static int n10_image_expectation_read(unsigned char expected[32], uint64_t *logical)
 {
-    static const unsigned char magic[16] = {'N','1','0','D','A','T','A','E','X','P','E','C','T','V','1','!'};
+    static const unsigned char magic[16] = {'N','1','0','D','A','T','A','E','X','P','E','C','T','V','2','!'};
     unsigned int i, any = 0;
+    uint64_t length = 0;
     for (i=0;i<16;++i) if (READ_ONCE(n10_image_expectation_slot.magic[i]) != magic[i]) return -1;
     for (i=0;i<4;++i) {
-        if (READ_ONCE(n10_image_expectation_slot.version[i]) != (i ? 0 : 1) ||
+        if (READ_ONCE(n10_image_expectation_slot.version[i]) != (i ? 0 : 2) ||
             READ_ONCE(n10_image_expectation_slot.bytes[i]) != (i ? 0 : 64)) return -1;
     }
-    for (i=0;i<8;++i) if (READ_ONCE(n10_image_expectation_slot.reserved[i])) return -1;
+    for (i=0;i<8;++i) length |= (uint64_t)READ_ONCE(n10_image_expectation_slot.logical[i]) << (8*i);
     for (i=0;i<32;++i) { expected[i] = READ_ONCE(n10_image_expectation_slot.expectation[i]); any |= expected[i]; }
-    return any ? 1 : 0;
+    *logical = length;
+    if (!any && !length) return 0;
+    return any && length >= 128 && length <= N10_LZMA_MAX_BYTES ? 1 : -1;
 }
-#define N10_DATA_EXPECTATION_SOURCE "image-slot-v1"
+#define N10_DATA_EXPECTATION_SOURCE "image-slot-logical-v2"
 #else
 #define N10_DATA_EXPECTATION_SOURCE "cmdline-v1"
 #endif
@@ -146,7 +149,8 @@ out:
 
 struct n10_data_outcome {
     const char *status;
-    uint64_t carrier, stream, payload, consumed, written;
+    uint64_t carrier, logical, stream, payload, consumed, written;
+    int carrier_rc;
     unsigned int decoded, reasons, expectations, captures, retained;
     unsigned char digest[32];
 };
@@ -157,7 +161,7 @@ static void n10_data_run(struct n10_data_outcome *out)
     unsigned char digest[32] = {0}, expectation[32] = {0};
     unsigned char *output = NULL;
     void *workspace = NULL;
-    uint64_t count, payload;
+    uint64_t count, payload, logical = n10_data.length, rounded = 0;
     size_t i;
     struct n10_lzma_result result = {0};
     int status;
@@ -183,26 +187,38 @@ static void n10_data_run(struct n10_data_outcome *out)
         !p || initrd_start != n10_data.start || initrd_end != n10_data.end)
         return;
 #ifdef N10_DATA_IMAGE_EXPECTATION
-    status = n10_image_expectation_read(expectation);
+    out->carrier = n10_data.length;
+    status = n10_image_expectation_read(expectation,&logical);
+    out->logical = logical <= N10_LZMA_MAX_BYTES ? logical : 0;
     if (status != 1) {
         out->reasons |= status ? N10_DATA_EXPECT_INVALID : N10_DATA_EXPECT_UNPATCHED;
         n10_data_clear(expectation,sizeof(expectation)); return;
     }
     out->expectations = 1;
+    rounded = (logical+2047) & ~(uint64_t)2047;
+    if (logical > n10_data.length || (n10_data.length != logical && n10_data.length != rounded)) {
+        out->reasons |= N10_DATA_EXTENT_INVALID;
+        n10_data_clear(expectation,sizeof(expectation)); return;
+    }
 #else
     memcpy(expectation,n10_data.expected,sizeof(expectation));
+    out->logical = logical;
+    (void)rounded;
 #endif
     out->carrier = n10_data.length;
-    out->status = "carrier_hash";
-    if (n10_data_hash(p, n10_data.length, digest) || memcmp(digest,expectation,32)) goto done;
+    out->status = "carrier_crypto";
+    out->carrier_rc = n10_data_hash(p,(size_t)logical,digest);
+    if (out->carrier_rc) goto done;
+    out->status = "carrier_mismatch";
+    if (memcmp(digest,expectation,32)) goto done;
     out->status = "header";
     if (memcmp(p,"N10DATA1",8) || n10_data_le(p+8,2) != 1 || n10_data_le(p+10,2) != 128 ||
-        n10_data_le(p+12,4) || n10_data_le(p+16,8) != n10_data.length || n10_data_le(p+24,8) != 128)
+        n10_data_le(p+12,4) || n10_data_le(p+16,8) != logical || n10_data_le(p+24,8) != 128)
         goto done;
     count = n10_data_le(p+32,8); payload = n10_data_le(p+40,8);
-    if (count < 18 || count > n10_data.length-128 || !payload || payload > N10_LZMA_MAX_BYTES) goto done;
+    if (count < 18 || count > logical-128 || !payload || payload > N10_LZMA_MAX_BYTES) goto done;
     for (i = 112; i < 128; ++i) if (p[i]) goto done;
-    for (i = 128+(size_t)count; i < n10_data.length; ++i) if (p[i]) goto done;
+    for (i = 128+(size_t)count; i < logical; ++i) if (p[i]) goto done;
     if (p[128] != 0x5d || n10_data_le(p+129,4) != (1u << 23) || n10_data_le(p+133,8) != payload) goto done;
     out->stream = count; out->payload = payload;
     out->status = "stream_hash";
@@ -231,7 +247,7 @@ done:
 static int n10_data_emit(void)
 {
     struct n10_data_outcome outcome;
-    char frame[384], digest[65];
+    char frame[448], digest[65];
     unsigned int i;
     int count;
     static const char digits[] = "0123456789abcdef";
@@ -239,9 +255,9 @@ static int n10_data_emit(void)
     for (i = 0; i < 32; ++i) { digest[2*i] = digits[outcome.digest[i] >> 4]; digest[2*i+1] = digits[outcome.digest[i]&15]; }
     digest[64] = 0;
     count = scnprintf(frame,sizeof(frame),
-        "id=%s cycle=%s kind=result source=%s status=%s carrier=%llu stream=%llu payload=%llu consumed=%llu written=%llu calls=%u digest=%s reasons=%08x expectations=%u captures=%u retained=%u ownership=0 executed=0",
+        "id=%s cycle=%s kind=result source=%s status=%s carrier=%llu logical=%llu carrier_rc=%d stream=%llu payload=%llu consumed=%llu written=%llu calls=%u digest=%s reasons=%08x expectations=%u captures=%u retained=%u ownership=0 executed=0",
         N10_SHA256_KAT_ID,(const char *)n10_cycle,N10_DATA_EXPECTATION_SOURCE,outcome.status,
-        (unsigned long long)outcome.carrier,(unsigned long long)outcome.stream,(unsigned long long)outcome.payload,
+        (unsigned long long)outcome.carrier,(unsigned long long)outcome.logical,outcome.carrier_rc,(unsigned long long)outcome.stream,(unsigned long long)outcome.payload,
         (unsigned long long)outcome.consumed,(unsigned long long)outcome.written,outcome.decoded,digest,outcome.reasons,outcome.expectations,outcome.captures,outcome.retained);
     pr_info("N10DATA1 %s checksum=%08x\n",frame,n10_frame_checksum(frame,count));
     n10_data_clear(&outcome,sizeof(outcome)); n10_data_clear(digest,sizeof(digest));

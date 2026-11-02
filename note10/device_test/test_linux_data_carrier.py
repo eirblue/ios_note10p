@@ -54,7 +54,7 @@ class LinuxDataCarrierTests(unittest.TestCase):
                              bytes.fromhex(data.sha(stream)),bytes.fromhex(data.sha(payload)),bytes(16))
         return header+stream+bytes(4096-128-len(stream))
 
-    def invoke(self, raw=None, mode='good', slot_expectation=None, invalid_slot=False):
+    def invoke(self, raw=None, mode='good', slot_expectation=None, invalid_slot=False, slot_logical=None):
         raw = self.container() if raw is None else raw
         self.invocations += 1
         path = self.root/('synthetic-carrier-%02d.data' % self.invocations)
@@ -65,6 +65,10 @@ class LinuxDataCarrierTests(unittest.TestCase):
             expected = bytes.fromhex(slot_expectation)
             self.assertEqual(len(expected),32)
             program[offset+24:offset+56] = expected
+            if slot_logical is None:
+                slot_logical = len(raw)
+        if slot_logical is not None:
+            program[offset+56:offset+64] = slot_logical.to_bytes(8,'little')
         if invalid_slot:
             program[offset] ^= 1
         executable = self.root/('readonly-fixture-%02d' % self.invocations)
@@ -355,6 +359,96 @@ class LinuxDataCarrierTests(unittest.TestCase):
                 cycle.validate(output,'d'*32,template)
 
 
+    def logical_container(self, length=4079):
+        raw = bytearray(self.container()[:length])
+        struct.pack_into('<Q',raw,16,length)
+        return bytes(raw)
+
+    def test_trusted_logical_native_extent_and_authenticated_header_bounds(self):
+        logical = self.logical_container()
+        native = logical+b'\xa5'*(4096-len(logical))
+        for raw in (logical,native):
+            row = self.invoke(raw,slot_expectation=data.sha(logical),slot_logical=len(logical))
+            self.assertEqual((row['status'],row['logical'],row['carrier'],row['carrier_rc']),('ok',len(logical),len(raw),0))
+            self.assertEqual((row['first_hash_bytes'],row['calls'],row['cleared']),(len(logical),1,1))
+            self.assertEqual(row['digest'],data.sha(self.sample()))
+        from decode_reservation import checksum
+        keys=('status','carrier','logical','carrier_rc','stream','payload','consumed','written','calls','digest','reasons','expectations','captures','retained')
+        body='id='+'a'*32+' cycle='+'b'*32+' kind=result source='+data.MODE+' '+' '.join(k+'='+str(row[k]) for k in keys)+' ownership=0 executed=0'
+        decoded=data.decode('N10BOOTLINK2 boot='+'c'*32+' N10DATA1 '+body+' checksum=%08x'%checksum(body.encode()),'a'*32,'b'*32)
+        self.assertTrue(decoded['passed'])
+        self.assertEqual((decoded['logical'],decoded['carrier']),(len(logical),len(native)))
+        for raw,size in ((native[:-1],len(logical)),(logical[:-1],len(logical)),(native,127),
+                         (native,0),(native,64*1024*1024+1),(native,(1<<64)-1)):
+            row = self.invoke(raw,slot_expectation=data.sha(logical),slot_logical=size)
+            self.assertEqual((row['status'],row['hashes'],row['allocations'],row['calls']),('unavailable',0,0,0))
+        for offset,value in ((16,len(logical)-1),(32,len(logical))):
+            bad = bytearray(logical);struct.pack_into('<Q',bad,offset,value)
+            row = self.invoke(bytes(bad),slot_expectation=data.sha(bad),slot_logical=len(bad))
+            self.assertEqual((row['status'],row['hashes'],row['allocations'],row['calls']),('header',1,0,0))
+        bad = bytearray(logical);bad[-1]=1
+        row = self.invoke(bytes(bad),slot_expectation=data.sha(bad),slot_logical=len(bad))
+        self.assertEqual((row['status'],row['allocations'],row['calls']),('header',0,0))
+        minimum = bytearray(logical[:128]);struct.pack_into('<Q',minimum,16,128)
+        row = self.invoke(bytes(minimum)+b'\x7e'*(2048-128),slot_expectation=data.sha(minimum),slot_logical=128)
+        self.assertEqual((row['status'],row['first_hash_bytes'],row['allocations'],row['calls']),('header',128,0,0))
+
+    def test_v2_exact_private_patch_and_current_producer_binding(self):
+        import materialize_auto_cycle as cycle
+        raw,report,system,symbols,sections = self.synthetic_slot_inputs()
+        original = json.loads(json.dumps(report))
+        private = data.patch_image(raw,report,'d'*32,cycle.SLOT)
+        self.assertEqual(report,original)
+        self.assertEqual(private[280:320],bytes.fromhex(report['data_carrier_sha256'])+report['data_carrier_bytes'].to_bytes(8,'little'))
+        allowed = set(range(64,96))|set(range(280,320))
+        self.assertTrue(all(i in allowed for i,(a,b) in enumerate(zip(raw,private)) if a!=b))
+        for changed in (dict(report,data_expectation_mode='image-slot-v1'),dict(report,image_expectation_patched=True),
+                        dict(report,image_sha256='f'*64),dict(report,data_carrier_bytes=127),
+                        dict(report,data_carrier_bytes=64*1024*1024+1),dict(report,data_carrier_sha256='0'*64)):
+            with self.assertRaises(ValueError):data.patch_image(raw,changed,'d'*32,cycle.SLOT)
+        for changes in ({'expectation_bytes':32},{'logical_offset':313},{'boot_page':4096},{'offset':64},{'readonly_flags':'WA'}):
+            with self.assertRaises(ValueError):
+                data.patch_image(raw,dict(report,data_expectation_slot=dict(report['data_expectation_slot'],**changes)),'d'*32,cycle.SLOT)
+        with self.assertRaises(ValueError):data.slot_metadata(raw+data.SLOT_PREIMAGE,system,symbols,sections)
+        with self.assertRaises(ValueError):data.slot_metadata(raw,system,symbols,sections.replace('00 A ','00 AX '))
+        template,variant = self.root/'generic',self.root/'variant'
+        template.mkdir();(template/'Image').write_bytes(raw)
+        (template/'build-result.json').write_text(json.dumps(report))
+        with patch('sha256_kat_device_profile.validate_template',return_value=report):
+            bound = cycle.materialize(template,variant,'d'*32)
+            self.assertEqual((template/'Image').read_bytes(),raw)
+            for key in ('accepted_result_sha256','image_root_receipt_sha256','source_head','ci_context'):
+                self.assertEqual(bound[key],report[key])
+            self.assertEqual(data.package_data(bound,b'R'*4096,'original-recovery',b'D'*4096),'original-recovery')
+            edited = bytearray((variant/'Image').read_bytes());edited[-1]^=1;(variant/'Image').write_bytes(edited)
+            with self.assertRaises(ValueError):cycle.validate(variant,'d'*32,template)
+
+    def test_preload_sha_length_reads_and_carrier_error_wire(self):
+        logical = self.logical_container();native=logical+b'\x91'*(4096-len(logical))
+        generic = self.invoke(native)
+        partial = self.invoke(native,slot_logical=len(logical))
+        for row in (generic,partial):
+            self.assertEqual((row['status'],row['hashes'],row['allocations'],row['calls']),('unavailable',0,0,0))
+        self.assertEqual(int(generic['reasons'],16),1024)
+        self.assertEqual(int(partial['reasons'],16),2048)
+        shortened = self.invoke(native,slot_expectation=data.sha(logical[:-1]),slot_logical=len(logical)-1)
+        self.assertEqual((shortened['logical'],shortened['first_hash_bytes'],shortened['status'],shortened['allocations']),(len(logical)-1,len(logical)-1,'header',0))
+        mismatch = self.invoke(native,slot_expectation='a'*64,slot_logical=len(logical))
+        api = self.invoke(native,mode='hash1',slot_expectation=data.sha(logical),slot_logical=len(logical))
+        self.assertEqual((mismatch['status'],mismatch['carrier_rc']),('carrier_mismatch',0))
+        self.assertEqual((api['status'],api['carrier_rc']),('carrier_crypto',-5))
+        from decode_reservation import checksum
+        for row in (mismatch,api):
+            self.assertEqual((row['first_hash_bytes'],row['allocations'],row['calls']),(len(logical),0,0))
+            keys=('status','carrier','logical','carrier_rc','stream','payload','consumed','written','calls','digest','reasons','expectations','captures','retained')
+            body='id='+'a'*32+' cycle='+'b'*32+' kind=result source='+data.MODE+' '+' '.join(k+'='+str(row[k]) for k in keys)+' ownership=0 executed=0'
+            self.assertLessEqual(len(body),447)
+            parsed=data.decode('N10BOOTLINK2 boot='+'c'*32+' N10DATA1 '+body+' checksum=%08x'%checksum(body.encode()),'a'*32,'b'*32)
+            self.assertFalse(parsed['passed'])
+            self.assertEqual((parsed['status'],parsed['carrier_rc'],parsed['logical'],parsed['carrier']),(row['status'],row['carrier_rc'],len(logical),len(native)))
+            with self.assertRaisesRegex(ValueError,'carrier_rc='+str(row['carrier_rc'])):data.require_functional(parsed)
+
+
 class Recorded(unittest.TextTestResult):
     def __init__(self,*args,**kwargs):
         super().__init__(*args,**kwargs)
@@ -384,7 +478,7 @@ def main():
         parser.error('closed unique new case selection required')
     selected = selected or list(data.CASE_NAMES)
     LinuxDataCarrierTests.output = output
-    LinuxDataCarrierTests.needs_fixture = 'test_actual_loaded_readonly_slot_and_refusal_order' in selected
+    LinuxDataCarrierTests.needs_fixture = any(n in selected for n in ('test_trusted_logical_native_extent_and_authenticated_header_bounds','test_preload_sha_length_reads_and_carrier_error_wire'))
     result = unittest.TextTestRunner(verbosity=2,resultclass=Recorded).run(unittest.TestSuite(LinuxDataCarrierTests(n) for n in selected))
     complete = result.testsRun == len(selected) and not result.framework_errors
     report = dict(kind='linux-data-carrier-new-tests',selected=selected,
