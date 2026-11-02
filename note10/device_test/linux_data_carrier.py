@@ -178,14 +178,18 @@ def relative_admission(result, lines, footprint, *, elf, archive, raw_inputs):
                 observed_runtime_base=False, absolute_FDT_extent_known=False, global_RAM_ownership=False)
 
 
-def input_binding(result, lines, *, elf, archive, raw_inputs):
+def input_binding(result, lines, *, elf, archive, raw_inputs, producing_sources=None):
     require(result.get('version') == 'v91' and result.get('diagnostic_kind') == KIND and
             result.get('data_carrier_stage') == STAGE and result.get('raw_input_binding') is False and
             result.get('data_expectation_mode') == MODE and type(result.get('data_expectation_slot')) is dict,
             'closed new DATA Image required')
-    for name in SOURCES:
-        require(result.get('source_sha256', {}).get('note10/device_test/'+name) == sha((HERE/name).read_bytes()),
-                'DATA Image source differs: '+name)
+    if producing_sources is None:
+        for name in SOURCES:
+            require(result.get('source_sha256', {}).get('note10/device_test/'+name) == sha((HERE/name).read_bytes()),
+                    'DATA Image source differs: '+name)
+    else:
+        from current_data_reuse import require_context
+        require_context(producing_sources).verify_sources(result,SOURCES)
     admission = relative_admission(result, lines, result['data_footprint'], elf=elf, archive=archive, raw_inputs=raw_inputs)
     require(result.get('data_relative_placement') == admission and admission['eligible'], 'DATA relative placement unresolved')
     return dict(data_carrier_stage=STAGE, data_relative_placement_admitted=True, raw_input_binding=False,

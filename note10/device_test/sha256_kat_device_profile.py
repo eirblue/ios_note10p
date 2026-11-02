@@ -24,7 +24,7 @@ FIELDS = ('device_profile', 'profile_sha256', 'build_evidence_id', 'kernel_banne
           'host_profile_source_head', 'host_profile_source_sha256')
 HOST_SOURCES = ('sha256_kat_device_profile.py', 'test_sha256_kat_device_profile.py',
                 'materialize_auto_cycle.py', 'prepare_linux_boot.py', 'build_boot_test_packages.py',
-                'stage_phase2.py', 'auto_cycle.py')
+                'stage_phase2.py', 'auto_cycle.py','current_data_reuse.py','test_current_data_reuse.py')
 PLAN_KEYS = {'schema', 'kind', 'device_profile', 'kernel_build', 'backup', 'backup_manifest_sha256',
              'build_result_sha256', 'image_sha256', 'identity', 'current_packages',
              'current_package_result_sha256', 'reference_twrp', 'mkbootimg',
@@ -78,13 +78,16 @@ def physical_input_scope(result):
     require(result.get('PC_only') is not True and result.get('diagnostic_kind') not in ('owned-contiguous-staging-pc','current-owned-staging-pc'), 'PC-only owned staging cannot create a physical template/package')
 
 
-def raw_binding(root, expected_result, expected_source):
+def raw_binding(root, expected_result, expected_source, *, producing_sources=None):
     root = private(root)
     require(re.fullmatch('[0-9a-f]{64}', expected_result or '') and
             re.fullmatch('[0-9a-f]{40}', expected_source or ''), 'exact accepted result/source pins required')
     require(sha(root/'result.json') == expected_result, 'accepted CI result changed')
     result = read(root/'result.json')
     physical_input_scope(result)
+    if producing_sources is not None:
+        from current_data_reuse import require_context
+        require_context(producing_sources).require_result(root,expected_result,expected_source,result)
     stream = result.get('version') == 'v73'
     affinity = result.get('version') == 'v78'
     fdt = result.get('version') == 'v81'
@@ -135,6 +138,9 @@ def raw_binding(root, expected_result, expected_source):
     if not builtin:
         required.add('CONFIG_INITRAMFS_SOURCE=""')
     lines = config.read_text().splitlines()
+    if producing_sources is not None:
+        require(not any(x in lines for x in ('CONFIG_NOTE10_OWNED_CONTIGUOUS_STAGING=y','CONFIG_NOTE10_CURRENT_OWNED_STAGING=y')),
+                'historical reuse forbids early owned reservation')
     if stream:
         require('CONFIG_NOTE10_SHA256_STREAM_STATE=y' in lines and
                 sha(ROOT/'note10/device_test/sha256_stream_vectors.json') ==
@@ -151,7 +157,7 @@ def raw_binding(root, expected_result, expected_source):
     extra = {}
     if builtin:
         from builtin_init_profile import input_binding
-        extra = input_binding(root, result, image, lines, fdt_owned_route=fdt,native_memory_route=native,data_carrier_route=data)
+        extra = input_binding(root, result, image, lines, fdt_owned_route=fdt,native_memory_route=native,data_carrier_route=data,producing_sources=producing_sources)
     if affinity:
         from affinity_binding import input_binding as affinity_input_binding
         extra.update(affinity_input_binding(result, lines))
@@ -358,7 +364,7 @@ def common_report(binding, profile_sha):
 
 def prepare_template(build, output, accepted_result_sha256, source_head, *, root_receipt=None,
                      root_receipt_sha256=None, host_source_head, ci_success_context=None,
-                     ci_success_context_sha256=None, carrier_manifest=None, carrier_manifest_sha256=None):
+                     ci_success_context_sha256=None, carrier_manifest=None, carrier_manifest_sha256=None, producing_sources=None):
     build, output = private(build), private(output)
     require(not output.exists() and not output.is_relative_to(build) and not build.is_relative_to(output),
             'fresh disjoint template required')
@@ -376,7 +382,7 @@ def prepare_template(build, output, accepted_result_sha256, source_head, *, root
     else:
         require(root_receipt is not None and root_receipt_sha256 is not None, 'reviewed root receipt and SHA required')
         root_receipt = private(root_receipt)
-    binding = raw_binding(build, accepted_result_sha256, source_head)
+    binding = raw_binding(build, accepted_result_sha256, source_head,producing_sources=producing_sources)
     if context_mode:
         require(binding['device_profile'] in (AFFINITY_PROFILE,FDT_PROFILE,NATIVE_PROFILE,DATA_PROFILE) and
                 (binding['device_profile'] in (NATIVE_PROFILE,DATA_PROFILE) or host_source_head != source_head),
@@ -404,6 +410,11 @@ def prepare_template(build, output, accepted_result_sha256, source_head, *, root
     if binding['device_profile'] == DATA_PROFILE:
         from linux_data_carrier import attach_carrier
         binding.update(attach_carrier(output, carrier_manifest, carrier_manifest_sha256))
+    if producing_sources is not None:
+        from current_data_reuse import require_context
+        context=require_context(producing_sources)
+        context.check_carrier(binding)
+        binding.update(context.write_record(output,host_source_head))
     if context_mode:
         binding.update(write_ci_success_receipt(output, generated_receipt))
         with (output/'ci-success-context.json').open('xb') as stream:
@@ -422,10 +433,17 @@ def validate_template(root):
     root = private(root)
     binding = read(root/'device-profile.json')
     require(selected(binding), 'closed KAT profile required')
-    measured = raw_binding(root, binding['accepted_result_sha256'], binding['source_head'])
+    context=None
+    if 'data_current_binding_sha256' in binding or 'data_host_experiment' in binding:
+        from current_data_reuse import load_record
+        context=load_record(root,binding)
+    measured = raw_binding(root, binding['accepted_result_sha256'], binding['source_head'],producing_sources=context)
     if binding['device_profile'] == DATA_PROFILE:
         from linux_data_carrier import carrier_fields
         measured.update(carrier_fields(root))
+    if context is not None:
+        context.check_carrier(measured)
+        measured.update(data_current_binding_sha256=binding['data_current_binding_sha256'],data_host_experiment=binding['data_host_experiment'])
     measured.update(root_receipt_binding(root, root/'image-root-receipt.json', binding['image_root_receipt_sha256'], measured))
     measured.update(host_binding(binding['host_profile_source_head']))
     require(binding == measured and sha(root/'handoff.config') == binding['effective_config_sha256'],
@@ -461,6 +479,8 @@ def fields(row):
     if row['device_profile'] == DATA_PROFILE:
         from linux_data_carrier import FIELDS as data_fields, LEGACY_FIELDS, CARRIER_FIELDS
         keys = (*keys, *(LEGACY_FIELDS if row.get('source_head') in (V88_HOST_HEAD,V89_IMAGE_HEAD) else data_fields), *CARRIER_FIELDS)
+    if 'data_current_binding_sha256' in row or 'data_host_experiment' in row:
+        keys=(*keys,'data_current_binding_sha256','data_host_experiment')
     return {key: row[key] for key in keys}
 
 
@@ -515,6 +535,11 @@ def package_scope(row, mode=None):
         require(row.get('data_carrier_stage') == STAGE and row.get('data_relative_placement_admitted') is True and row.get('raw_input_binding') is False and
             all(re.fullmatch('[0-9a-f]{64}', row.get(k,'')) for k in ('data_manifest_sha256','data_carrier_sha256','data_payload_sha256')) and
             all(type(row.get(k)) is int and 0 < row[k] <= 64*1024*1024 for k in ('data_carrier_bytes','data_payload_bytes')), 'DATA package scope differs')
+    if 'data_current_binding_sha256' in row or 'data_host_experiment' in row:
+        from current_data_reuse import IMAGE_HEAD,MODE
+        require(row['device_profile']==DATA_PROFILE and row.get('source_head')==IMAGE_HEAD and
+            row.get('host_profile_source_head')!=IMAGE_HEAD and row.get('data_host_experiment')==MODE and
+            re.fullmatch('[0-9a-f]{64}',row.get('data_current_binding_sha256','')), 'new current DATA host scope differs')
     if mode is None or mode in ('diagnostic', 'rollback'):
         diagnostic = mode in (None, 'diagnostic')
         require(row.get('auto_return_diagnostic') is diagnostic and
