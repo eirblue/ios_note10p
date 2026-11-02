@@ -26,16 +26,28 @@ def template_bytes(root):
     if report.get('auto_cycle_slot')!=SLOT.decode():raise ValueError('Template slot metadata differs')
     return report,data
 
+def bound_image(data, report, token):
+    mode = report.get('data_expectation_mode')
+    if mode is not None:
+        from linux_data_carrier import MODE, patch_image
+        if mode != MODE:
+            raise ValueError('closed Image expectation mode required')
+        return patch_image(data,report,token,SLOT)
+    return data.replace(SLOT,token.encode(),1)
+
+
 def materialize(template,output,token):
     template=Path(template).resolve();output=Path(output).resolve()
     if not re.fullmatch('[0-9a-f]{32}',token) or output.exists():raise ValueError('Fresh variant and valid token required')
     report,data=template_bytes(template)
     shutil.copytree(template,output)
-    patched=data.replace(SLOT,token.encode(),1)
+    patched=bound_image(data,report,token)
     (output/'Image').write_bytes(patched)
     report.update(auto_cycle_variant=True,auto_cycle_token=token,auto_cycle_template=str(template),
         auto_cycle_template_report_sha256=sha((template/'build-result.json').read_bytes()),
         auto_cycle_template_image_sha256=sha(data),image_sha256=sha(patched))
+    if report.get('data_expectation_mode') is not None:
+        report['image_expectation_patched'] = True
     (output/'build-result.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
     validate(output,token,template)
     return report
@@ -49,10 +61,12 @@ def validate(root,token,template=None):
     original,data=template_bytes(source)
     if sha((source/'build-result.json').read_bytes())!=report['auto_cycle_template_report_sha256'] or sha(data)!=report['auto_cycle_template_image_sha256']:
         raise ValueError('Compiled template changed')
-    expected=data.replace(SLOT,token.encode(),1)
+    expected=bound_image(data,original,token)
     allowed=dict(original)
     allowed.update(auto_cycle_variant=True,auto_cycle_token=token,auto_cycle_template=str(source),
         auto_cycle_template_report_sha256=report['auto_cycle_template_report_sha256'],
         auto_cycle_template_image_sha256=sha(data),image_sha256=sha(expected))
-    if report!=allowed or (root/'Image').read_bytes()!=expected:raise ValueError('Variant differs outside the 32-byte data slot')
+    if original.get('data_expectation_mode') is not None:
+        allowed['image_expectation_patched'] = True
+    if report!=allowed or (root/'Image').read_bytes()!=expected:raise ValueError('Variant differs outside its closed data-slot patches')
     return report

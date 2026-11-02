@@ -26,6 +26,7 @@ static u32 n10_frame_checksum(const char *text, unsigned int length)
 #define pr_info(fmt, ...) printk(KERN_INFO "N10BOOTLINK2 boot=%s " fmt, n10_boot_id, ##__VA_ARGS__)
 #include "note10_auto_return.c"
 #include "carrier_lzma.c"
+#define N10_DATA_IMAGE_EXPECTATION 1
 #include "linux_data_carrier.c"
 #define n10_sha256_kat_init n10_data_emit
 #include "sha256_kat_recovery_work.c"

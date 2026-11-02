@@ -7,6 +7,9 @@
 #include <openssl/sha.h>
 #include "carrier_lzma.c"
 #define N10_DATA_HOST_TEST
+#define N10_DATA_IMAGE_EXPECTATION 1
+#define __used __attribute__((used))
+#define READ_ONCE(x) (*(volatile __typeof__(x) *)&(x))
 #define __init
 static unsigned long initrd_start, initrd_end, host_first, host_last;
 static unsigned int allocations, frees, cleared = 1, fail_alloc, hashes, fail_hash, core_calls;
@@ -66,7 +69,6 @@ static struct n10_data_outcome outcome;
 #define SYSTEM_RUNNING 1u
 #define WQ_UNBOUND 1u
 #define WQ_MEM_RECLAIM 2u
-#define READ_ONCE(x) (x)
 #define DECLARE_DELAYED_WORK(name, fn) struct delayed_work name = {{0}}
 #define late_initcall(fn)
 #define pr_info(...) ((void)0)
@@ -98,15 +100,13 @@ int main(int argc,char **argv)
     const char *mode;
     char digest[65];
     unsigned int i;
-    if (argc != 4) return 2;
+    if (argc != 3) return 2;
     file = fopen(argv[1],"rb"); if (!file) return 2;
     if (fseek(file,0,SEEK_END) || (size=ftell(file)) <= 128 || size > (long)N10_LZMA_MAX_BYTES || fseek(file,0,SEEK_SET)) return 2;
     data = malloc((size_t)size); if (!data || fread(data,1,(size_t)size,file) != (size_t)size) return 2;
     fclose(file); mode = argv[2];
     initrd_start = host_first = (unsigned long)data;
     initrd_end = host_last = initrd_start+(unsigned long)size;
-    if (strcmp(mode,"missing_parameter") && strcmp(mode,"repeat_refused_callback")) n10_data_parameter(argv[3]);
-    if (!strcmp(mode,"duplicate_parameter")) n10_data_parameter(argv[3]);
     if (!strcmp(mode,"reversed")) n10_data_capture(initrd_end,initrd_start);
     else if (!strcmp(mode,"nonlinear")) n10_data_capture(initrd_start-1,initrd_end);
     else if (strcmp(mode,"missing_capture")) n10_data_capture(initrd_start,initrd_end);
@@ -128,10 +128,10 @@ int main(int argc,char **argv)
     if (!strcmp(mode,"repeat_callback") || !strcmp(mode,"repeat_refused_callback")) n10_sha256_worker(NULL);
     for (i=0;i<32;++i) sprintf(digest+2*i,"%02x",outcome.digest[i]);
     digest[64]=0;
-    printf("{\"status\":\"%s\",\"calls\":%u,\"callbacks\":%u,\"allocations\":%u,\"frees\":%u,\"cleared\":%u,\"written\":%llu,\"consumed\":%llu,\"digest\":\"%s\",\"reasons\":\"%08x\",\"params\":%u,\"captures\":%u,\"retained\":%u,\"hashes\":%u,\"carrier\":%llu,\"stream\":%llu,\"payload\":%llu}\n",
+    printf("{\"status\":\"%s\",\"source\":\"image-slot-v1\",\"calls\":%u,\"callbacks\":%u,\"allocations\":%u,\"frees\":%u,\"cleared\":%u,\"written\":%llu,\"consumed\":%llu,\"digest\":\"%s\",\"reasons\":\"%08x\",\"expectations\":%u,\"captures\":%u,\"retained\":%u,\"hashes\":%u,\"carrier\":%llu,\"stream\":%llu,\"payload\":%llu}\n",
         outcome.status ? outcome.status : "skipped",core_calls,callbacks,allocations,frees,cleared,
         (unsigned long long)outcome.written,(unsigned long long)outcome.consumed,digest,
-        outcome.reasons,outcome.parameters,outcome.captures,outcome.retained,hashes,
+        outcome.reasons,outcome.expectations,outcome.captures,outcome.retained,hashes,
         (unsigned long long)outcome.carrier,(unsigned long long)outcome.stream,(unsigned long long)outcome.payload);
     free(data); return 0;
 }

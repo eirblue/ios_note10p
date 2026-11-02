@@ -23,7 +23,7 @@ class LinuxDataCarrierTests(unittest.TestCase):
         if not cls.needs_fixture:
             return
         cls.fixture = cls.output/'linux-data-carrier-fixture'
-        command = ['gcc', '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror',
+        command = ['clang-14', '-std=gnu11', '-O2', '-Wall', '-Wextra', '-Werror',
                    str(data.HERE/'linux_data_carrier_fixture.c'), '-lcrypto', '-o', str(cls.fixture)]
         cls.compiles += 1
         result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=120)
@@ -31,6 +31,10 @@ class LinuxDataCarrierTests(unittest.TestCase):
         (cls.output/'fixture-command.json').write_text(json.dumps(command, indent=2)+'\n')
         if result.returncode:
             raise RuntimeError('new wrapper fixture compilation failed')
+        cls.fixture_raw = cls.fixture.read_bytes()
+        if cls.fixture_raw.count(data.SLOT_PREIMAGE) != 1:
+            raise RuntimeError('one generic compiled readonly fixture slot required')
+        cls.fixture_slot_offset = cls.fixture_raw.index(data.SLOT_PREIMAGE)
 
     def setUp(self):
         self.root = self.output/self._testMethodName
@@ -50,12 +54,23 @@ class LinuxDataCarrierTests(unittest.TestCase):
                              bytes.fromhex(data.sha(stream)),bytes.fromhex(data.sha(payload)),bytes(16))
         return header+stream+bytes(4096-128-len(stream))
 
-    def invoke(self, raw=None, mode='good', parameter=None):
+    def invoke(self, raw=None, mode='good', slot_expectation=None, invalid_slot=False):
         raw = self.container() if raw is None else raw
         self.invocations += 1
         path = self.root/('synthetic-carrier-%02d.data' % self.invocations)
         path.write_bytes(raw)
-        result = subprocess.run([str(self.fixture),str(path),mode,parameter if parameter is not None else data.sha(raw)],
+        program = bytearray(self.fixture_raw)
+        offset = self.fixture_slot_offset
+        if slot_expectation is not None:
+            expected = bytes.fromhex(slot_expectation)
+            self.assertEqual(len(expected),32)
+            program[offset+24:offset+56] = expected
+        if invalid_slot:
+            program[offset] ^= 1
+        executable = self.root/('readonly-fixture-%02d' % self.invocations)
+        executable.write_bytes(program)
+        executable.chmod(self.fixture.stat().st_mode & 0o777)
+        result = subprocess.run([str(executable),str(path),mode],
                                 stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=30)
         path.with_suffix('.stdout').write_bytes(result.stdout)
         path.with_suffix('.stderr').write_bytes(result.stderr)
@@ -230,6 +245,116 @@ class LinuxDataCarrierTests(unittest.TestCase):
                 data.decode(frame(dict(row,**changes)),identity,cycle)
 
 
+    @staticmethod
+    def synthetic_slot_inputs():
+        from materialize_auto_cycle import SLOT
+        raw = bytearray(4096)
+        raw[64:97] = SLOT+b'\0'
+        raw[256:320] = data.SLOT_PREIMAGE
+        raw[400:407] = b'N10RET1'
+        raw = bytes(raw)
+        system = '100000 T _text\n100080 R __start_rodata\n100100 r n10_image_expectation_slot\n100800 T __init_begin\n'
+        symbols = '0000000000000000 0000000000000040 r n10_image_expectation_slot\n'
+        sections = '[ 3] .rodata.n10_expectation PROGBITS 0000000000000000 000080 000040 00 A 0 0 16\n'
+        slot = data.slot_metadata(raw,system,symbols,sections)
+        report = dict(data_expectation_mode=data.MODE,data_expectation_slot=slot,image_expectation_patched=False,
+                      image_sha256=data.sha(raw),image_size=len(raw),data_carrier_sha256=data.sha(b'D'*4096),
+                      data_carrier_bytes=4096,device_profile=data.PROFILE,build_passed=True,auto_return_diagnostic=True,
+                      auto_cycle_slot=SLOT.decode(),accepted_result_sha256='a'*64,image_root_receipt_sha256='b'*64,
+                      source_head='c'*40,ci_context={'synthetic':'only'})
+        return raw,report,system,symbols,sections
+
+    def test_private_slot_patch_preimage_bounds_and_exact_variant(self):
+        from materialize_auto_cycle import SLOT
+        raw,report,_,_,_ = self.synthetic_slot_inputs()
+        original_report = json.loads(json.dumps(report))
+        patched = data.patch_image(raw,report,'d'*32,SLOT)
+        self.assertEqual(report,original_report)
+        self.assertEqual(data.sha(raw),report['image_sha256'])
+        self.assertNotEqual(data.sha(patched),report['image_sha256'])
+        self.assertEqual(patched[280:312],bytes.fromhex(report['data_carrier_sha256']))
+        allowed = set(range(64,96)) | set(range(280,312))
+        self.assertTrue(all(i in allowed for i,(a,b) in enumerate(zip(raw,patched)) if a != b))
+        self.assertEqual(patched[256:280],raw[256:280])
+        self.assertEqual(patched[312:320],raw[312:320])
+        variants = [dict(report,image_sha256='f'*64),dict(report,image_expectation_patched=True),
+                    dict(report,data_carrier_sha256='0'*64),dict(report,data_expectation_mode='unknown')]
+        for changes in ({'offset':64},{'expectation_offset':281},{'readonly_flags':'WA'},{'bytes':65}):
+            variants.append(dict(report,data_expectation_slot=dict(report['data_expectation_slot'],**changes)))
+        for invalid in variants:
+            with self.assertRaises(ValueError):
+                data.patch_image(raw,invalid,'d'*32,SLOT)
+        duplicate = raw+data.SLOT_PREIMAGE
+        with self.assertRaises(ValueError):
+            data.patch_image(duplicate,dict(report,image_sha256=data.sha(duplicate)),'d'*32,SLOT)
+        with self.assertRaises(ValueError):
+            data.patch_image(patched,dict(report,image_sha256=data.sha(patched)),'d'*32,SLOT)
+
+    def test_actual_loaded_readonly_slot_and_refusal_order(self):
+        raw = self.container()
+        unpatched = self.invoke(raw)
+        self.assertEqual(unpatched['status'],'unavailable')
+        self.assertEqual(int(unpatched['reasons'],16),1024)
+        invalid = self.invoke(raw,slot_expectation=data.sha(raw),invalid_slot=True)
+        self.assertEqual(invalid['status'],'unavailable')
+        self.assertEqual(int(invalid['reasons'],16),2048)
+        for row in (unpatched,invalid):
+            self.assertEqual((row['hashes'],row['allocations'],row['calls'],row['expectations']),(0,0,0,0))
+            self.assertEqual(row['source'],data.MODE)
+            self.assertNotIn('params',row)
+        expected = bytes.fromhex(data.sha(raw))
+        wrong = bytes([expected[0]^1])+expected[1:]
+        rejected = self.invoke(raw,slot_expectation=wrong.hex())
+        self.assertEqual((rejected['status'],rejected['hashes'],rejected['allocations'],rejected['calls']),('carrier_hash',1,0,0))
+        accepted = self.invoke(raw,slot_expectation=expected.hex())
+        self.assertEqual((accepted['status'],accepted['expectations'],accepted['calls']),('ok',1,1))
+        self.assertEqual(accepted['digest'],data.sha(self.sample()))
+        self.assertEqual((accepted['allocations'],accepted['frees'],accepted['cleared']),(2,2,1))
+        from decode_reservation import checksum
+        body = 'id='+'a'*32+' cycle='+'b'*32+' kind=result source='+data.MODE+' '+ ' '.join(
+            key+'='+str(accepted[key]) for key in ('status','carrier','stream','payload','consumed','written','calls','digest','reasons','expectations','captures','retained'))+' ownership=0 executed=0'
+        frame = 'N10BOOTLINK2 boot='+'c'*32+' N10DATA1 '+body+' checksum=%08x' % checksum(body.encode())
+        parsed = data.decode(frame,'a'*32,'b'*32)
+        self.assertTrue(parsed['passed'])
+        self.assertEqual(parsed['expectation_source'],data.MODE)
+        self.assertEqual(parsed['expectations'],1)
+        for key,value in (('expectations','0'),('reasons','00000400')):
+            contradictory = body.replace(key+'='+str(accepted[key]),key+'='+value)
+            refused = data.decode('N10BOOTLINK2 boot='+'c'*32+' N10DATA1 '+contradictory+' checksum=%08x' % checksum(contradictory.encode()),'a'*32,'b'*32)
+            self.assertFalse(refused['passed'])
+
+    def test_intrinsic_slot_profile_and_context_preservation(self):
+        import materialize_auto_cycle as cycle
+        raw,report,system,symbols,sections = self.synthetic_slot_inputs()
+        for changed in (sections.replace('00 A ','00 WA '),sections.replace('00 A ','00 AX ')):
+            with self.assertRaises(ValueError):
+                data.slot_metadata(raw,system,symbols,changed)
+        with self.assertRaises(ValueError):
+            data.slot_metadata(raw,system.replace('100100 r','100101 r'),symbols,sections)
+        with self.assertRaises(ValueError):
+            data.slot_metadata(raw,system,symbols.replace('0040 r','0040 d'),sections)
+        template,output = self.root/'generic-template',self.root/'private-variant'
+        template.mkdir()
+        (template/'Image').write_bytes(raw)
+        (template/'build-result.json').write_text(json.dumps(report))
+        with patch('sha256_kat_device_profile.validate_template',return_value=report):
+            private = cycle.materialize(template,output,'d'*32)
+            cycle.validate(output,'d'*32,template)
+            self.assertEqual((template/'Image').read_bytes(),raw)
+            self.assertEqual(private['auto_cycle_template_image_sha256'],report['image_sha256'])
+            self.assertEqual(private['accepted_result_sha256'],report['accepted_result_sha256'])
+            self.assertEqual(private['image_root_receipt_sha256'],report['image_root_receipt_sha256'])
+            self.assertNotEqual(private['image_sha256'],report['image_sha256'])
+            self.assertTrue(private['image_expectation_patched'])
+            self.assertEqual(data.package_data(private,b'R'*4096,'synthetic-recovery=unchanged',b'D'*4096),'synthetic-recovery=unchanged')
+            with self.assertRaises(ValueError):
+                data.package_data(report,b'R'*4096,'synthetic-recovery=unchanged',b'D'*4096)
+            bad = bytearray((output/'Image').read_bytes());bad[-1]^=1
+            (output/'Image').write_bytes(bad)
+            with self.assertRaises(ValueError):
+                cycle.validate(output,'d'*32,template)
+
+
 class Recorded(unittest.TextTestResult):
     def __init__(self,*args,**kwargs):
         super().__init__(*args,**kwargs)
@@ -259,7 +384,7 @@ def main():
         parser.error('closed unique new case selection required')
     selected = selected or list(data.CASE_NAMES)
     LinuxDataCarrierTests.output = output
-    LinuxDataCarrierTests.needs_fixture = any(n in data.CASE_NAMES[:4] for n in selected)
+    LinuxDataCarrierTests.needs_fixture = 'test_actual_loaded_readonly_slot_and_refusal_order' in selected
     result = unittest.TextTestRunner(verbosity=2,resultclass=Recorded).run(unittest.TestSuite(LinuxDataCarrierTests(n) for n in selected))
     complete = result.testsRun == len(selected) and not result.framework_errors
     report = dict(kind='linux-data-carrier-new-tests',selected=selected,

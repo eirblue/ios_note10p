@@ -23,8 +23,37 @@ enum n10_data_reason {
     N10_DATA_PARAM_DUPLICATE = 1u << 2, N10_DATA_CAPTURE_MISSING = 1u << 3,
     N10_DATA_CAPTURE_INVALID = 1u << 4, N10_DATA_CAPTURE_REPEAT = 1u << 5,
     N10_DATA_INPUT_MISSING = 1u << 6, N10_DATA_GLOBAL_MISMATCH = 1u << 7,
-    N10_DATA_EMIT_REPEAT = 1u << 8, N10_DATA_STICKY_INVALID = 1u << 9
+    N10_DATA_EMIT_REPEAT = 1u << 8, N10_DATA_STICKY_INVALID = 1u << 9,
+    N10_DATA_EXPECT_UNPATCHED = 1u << 10, N10_DATA_EXPECT_INVALID = 1u << 11
 };
+
+#ifdef N10_DATA_IMAGE_EXPECTATION
+struct n10_expectation_slot {
+    unsigned char magic[16], version[4], bytes[4], expectation[32], reserved[8];
+};
+static const struct n10_expectation_slot n10_image_expectation_slot __used
+    __attribute__((section(".rodata.n10_expectation"),aligned(16))) = {
+    {'N','1','0','D','A','T','A','E','X','P','E','C','T','V','1','!'},
+    {1,0,0,0}, {64,0,0,0}, {0}, {0}
+};
+_Static_assert(sizeof(n10_image_expectation_slot) == 64, "exact generic readonly slot");
+static int n10_image_expectation_read(unsigned char expected[32])
+{
+    static const unsigned char magic[16] = {'N','1','0','D','A','T','A','E','X','P','E','C','T','V','1','!'};
+    unsigned int i, any = 0;
+    for (i=0;i<16;++i) if (READ_ONCE(n10_image_expectation_slot.magic[i]) != magic[i]) return -1;
+    for (i=0;i<4;++i) {
+        if (READ_ONCE(n10_image_expectation_slot.version[i]) != (i ? 0 : 1) ||
+            READ_ONCE(n10_image_expectation_slot.bytes[i]) != (i ? 0 : 64)) return -1;
+    }
+    for (i=0;i<8;++i) if (READ_ONCE(n10_image_expectation_slot.reserved[i])) return -1;
+    for (i=0;i<32;++i) { expected[i] = READ_ONCE(n10_image_expectation_slot.expectation[i]); any |= expected[i]; }
+    return any ? 1 : 0;
+}
+#define N10_DATA_EXPECTATION_SOURCE "image-slot-v1"
+#else
+#define N10_DATA_EXPECTATION_SOURCE "cmdline-v1"
+#endif
 
 static struct {
     const unsigned char *input;
@@ -32,9 +61,10 @@ static struct {
     size_t length;
     unsigned int captures, parameters, invalid, emitted, reasons;
     unsigned char expected[32];
-} n10_data;
+} n10_data __used;
 _Static_assert(sizeof(n10_data) <= 128, "bounded permanent DATA metadata");
 
+#ifndef N10_DATA_IMAGE_EXPECTATION
 static int __init n10_data_parameter(char *value)
 {
     unsigned char parsed[32];
@@ -56,6 +86,7 @@ static int __init n10_data_parameter(char *value)
 }
 #ifndef N10_DATA_HOST_TEST
 __setup("n10.data_sha=", n10_data_parameter);
+#endif
 #endif
 
 void __init n10_data_capture(unsigned long start, unsigned long end);
@@ -116,14 +147,14 @@ out:
 struct n10_data_outcome {
     const char *status;
     uint64_t carrier, stream, payload, consumed, written;
-    unsigned int decoded, reasons, parameters, captures, retained;
+    unsigned int decoded, reasons, expectations, captures, retained;
     unsigned char digest[32];
 };
 
 static void n10_data_run(struct n10_data_outcome *out)
 {
     const unsigned char *p = n10_data.input;
-    unsigned char digest[32] = {0};
+    unsigned char digest[32] = {0}, expectation[32] = {0};
     unsigned char *output = NULL;
     void *workspace = NULL;
     uint64_t count, payload;
@@ -132,21 +163,38 @@ static void n10_data_run(struct n10_data_outcome *out)
     int status;
     memset(out, 0, sizeof(*out)); out->status = "unavailable";
     out->reasons = n10_data.reasons;
-    out->parameters = n10_data.parameters > 1 ? 2 : n10_data.parameters;
+#ifndef N10_DATA_IMAGE_EXPECTATION
+    out->expectations = n10_data.parameters > 1 ? 2 : n10_data.parameters;
+#endif
     out->captures = n10_data.captures > 1 ? 2 : n10_data.captures;
     out->retained = p != NULL;
+#ifndef N10_DATA_IMAGE_EXPECTATION
     if (!n10_data.parameters) out->reasons |= N10_DATA_PARAM_MISSING;
+#endif
     if (!n10_data.captures) out->reasons |= N10_DATA_CAPTURE_MISSING;
     if (!p) out->reasons |= N10_DATA_INPUT_MISSING;
     if (initrd_start != n10_data.start || initrd_end != n10_data.end) out->reasons |= N10_DATA_GLOBAL_MISMATCH;
     if (n10_data.emitted) out->reasons |= N10_DATA_EMIT_REPEAT;
     if (n10_data.invalid) out->reasons |= N10_DATA_STICKY_INVALID;
     if (n10_data.emitted++ || n10_data.invalid || n10_data.captures != 1 ||
-        n10_data.parameters != 1 || !p || initrd_start != n10_data.start || initrd_end != n10_data.end)
+#ifndef N10_DATA_IMAGE_EXPECTATION
+        n10_data.parameters != 1 ||
+#endif
+        !p || initrd_start != n10_data.start || initrd_end != n10_data.end)
         return;
+#ifdef N10_DATA_IMAGE_EXPECTATION
+    status = n10_image_expectation_read(expectation);
+    if (status != 1) {
+        out->reasons |= status ? N10_DATA_EXPECT_INVALID : N10_DATA_EXPECT_UNPATCHED;
+        n10_data_clear(expectation,sizeof(expectation)); return;
+    }
+    out->expectations = 1;
+#else
+    memcpy(expectation,n10_data.expected,sizeof(expectation));
+#endif
     out->carrier = n10_data.length;
     out->status = "carrier_hash";
-    if (n10_data_hash(p, n10_data.length, digest) || memcmp(digest,n10_data.expected,32)) goto done;
+    if (n10_data_hash(p, n10_data.length, digest) || memcmp(digest,expectation,32)) goto done;
     out->status = "header";
     if (memcmp(p,"N10DATA1",8) || n10_data_le(p+8,2) != 1 || n10_data_le(p+10,2) != 128 ||
         n10_data_le(p+12,4) || n10_data_le(p+16,8) != n10_data.length || n10_data_le(p+24,8) != 128)
@@ -176,6 +224,7 @@ done:
     if (workspace) { n10_data_clear(workspace,N10_LZMA_WORKSPACE); n10_data_free(workspace); }
     if (output) { n10_data_clear(output,(size_t)out->payload); n10_data_free(output); }
     n10_data_clear(digest,sizeof(digest));
+    n10_data_clear(expectation,sizeof(expectation));
 }
 
 #ifndef N10_DATA_HOST_TEST
@@ -190,10 +239,10 @@ static int n10_data_emit(void)
     for (i = 0; i < 32; ++i) { digest[2*i] = digits[outcome.digest[i] >> 4]; digest[2*i+1] = digits[outcome.digest[i]&15]; }
     digest[64] = 0;
     count = scnprintf(frame,sizeof(frame),
-        "id=%s cycle=%s kind=result status=%s carrier=%llu stream=%llu payload=%llu consumed=%llu written=%llu calls=%u digest=%s reasons=%08x params=%u captures=%u retained=%u ownership=0 executed=0",
-        N10_SHA256_KAT_ID,(const char *)n10_cycle,outcome.status,
+        "id=%s cycle=%s kind=result source=%s status=%s carrier=%llu stream=%llu payload=%llu consumed=%llu written=%llu calls=%u digest=%s reasons=%08x expectations=%u captures=%u retained=%u ownership=0 executed=0",
+        N10_SHA256_KAT_ID,(const char *)n10_cycle,N10_DATA_EXPECTATION_SOURCE,outcome.status,
         (unsigned long long)outcome.carrier,(unsigned long long)outcome.stream,(unsigned long long)outcome.payload,
-        (unsigned long long)outcome.consumed,(unsigned long long)outcome.written,outcome.decoded,digest,outcome.reasons,outcome.parameters,outcome.captures,outcome.retained);
+        (unsigned long long)outcome.consumed,(unsigned long long)outcome.written,outcome.decoded,digest,outcome.reasons,outcome.expectations,outcome.captures,outcome.retained);
     pr_info("N10DATA1 %s checksum=%08x\n",frame,n10_frame_checksum(frame,count));
     n10_data_clear(&outcome,sizeof(outcome)); n10_data_clear(digest,sizeof(digest));
     return 0;
