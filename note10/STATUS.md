@@ -1,3 +1,13 @@
+## v87: fixed DATA carrier and bounded decoder (PC only)
+
+- Reviewed source: `55faef52954b81176fd639223e2946cc2c204f63`.
+- Six new tests passed in one executed local batch. Two compiler-wrapper launches: the first stopped with a child execution permission error before tests; the corrected launch compiled the C core once.
+- One actual private container production reused that DLL for one bounded decode. Decoded 19,546,112 bytes and matched the accepted payload SHA-256.
+- Exact carrier size: 10,962,166 bytes = 128-byte header + 4,429,107-byte finite-size LZMA stream + 6,532,931 zero bytes.
+- The original compressed artifact is preserved. Only its transport header length field changes; no kernel materialization or recompression.
+- Decoder consumed 4,429,100 stream bytes; seven encoded tail bytes remain unread after the finite output length. The complete selected stream is hashed separately within production.
+- Host functionality only: Linux integration, carrier admission, physical placement and deployment remain unresolved. Raw products stay private. No CI, device, BOOT, reboot or XNU execution; physical diagnostic remains v82, consumed once.
+
 ## v86: current native payload preparation (PC only)
 
 - Reviewed adapter source: `4d766d6c8c6313bb7330036c3fcd9e0b35e72063`.
