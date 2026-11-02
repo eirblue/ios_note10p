@@ -159,7 +159,9 @@ def main():
         p.add_argument('--'+name,type=Path,required=True)
     for name in ('linux-receipt-sha256','current-receipt-sha256','ci-success-context-sha256','host-source-head'):
         p.add_argument('--'+name,required=True)
-    a=p.parse_args();context=ProducingSources(a.linux_receipt,a.linux_receipt_sha256,a.current_receipt,a.current_receipt_sha256)
+    # Script __main__ and imported module must use the same exact adapter class.
+    from current_data_reuse import ProducingSources as CanonicalProducingSources
+    a=p.parse_args();context=CanonicalProducingSources(a.linux_receipt,a.linux_receipt_sha256,a.current_receipt,a.current_receipt_sha256)
     require(private(a.build)==context.producer,'original generic producer is the only input route')
     from sha256_kat_device_profile import prepare_template
     report=prepare_template(a.build,a.output,context.result_sha,IMAGE_HEAD,

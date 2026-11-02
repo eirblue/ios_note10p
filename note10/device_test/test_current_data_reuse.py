@@ -2,6 +2,8 @@
 import argparse
 import copy
 import json
+import runpy
+import sys
 from pathlib import Path
 import tempfile
 import types
@@ -14,7 +16,8 @@ from materialize_auto_cycle import bound_image
 
 CASE_IDS=('test_exact_historical_sources_generic_and_PC_refusals',
           'test_current_subject_and_root_record_binding',
-          'test_fresh_two_patch_variant_and_plan_field_forwarding')
+          'test_fresh_two_patch_variant_and_plan_field_forwarding',
+          'test_script_entry_forwards_canonical_context_to_real_raw_binding')
 
 
 def store(path,value):
@@ -152,6 +155,29 @@ class ReuseTests(unittest.TestCase):
         with mock.patch.dict('sys.modules',modules),mock.patch.object(profile,'validate_template',return_value=report):
             with self.assertRaisesRegex(ValueError,'fresh KAT plan required'):
                 profile.prepare_plan(template,backup,self.root/'t',self.root/'m',current,f['root']/'fresh-plan',1)
+
+
+    def test_script_entry_forwards_canonical_context_to_real_raw_binding(self):
+        f=self.fixture('real-cli-chain')
+        f['result'].update(kernel_or_provider_executed=False,
+            kernel_commit='55f042627bb7030c93550faafa117674d32b21d1',make_target='Image',
+            integration_object='drivers/misc/note10_sha256_kat.o')
+        f['linux']['image_producer']['result_sha256']=store(f['producer']/'result.json',f['result'])
+        f['linux_sha']=store(f['linux_path'],f['linux'])
+        ci=f['root']/'ci.json';ci_sha=store(ci,{})
+        output=f['root']/'fresh-template'
+        argv=[str(Path(reuse.__file__)), '--build',str(f['producer']),'--output',str(output),
+            '--linux-receipt',str(f['linux_path']),'--linux-receipt-sha256',f['linux_sha'],
+            '--current-receipt',str(f['host_path']),'--current-receipt-sha256',f['host_sha'],
+            '--ci-success-context',str(ci),'--ci-success-context-sha256',ci_sha,'--host-source-head','b'*40]
+        # Execute the actual script entry -> prepare_template -> raw_binding/type gate.
+        # A deliberately absent artifact inventory stops immediately AFTER that gate;
+        # there are no Image/carrier binaries, and no downstream gate is mocked out.
+        with mock.patch.object(sys,'argv',argv):
+            with self.assertRaises(KeyError) as stopped:
+                runpy.run_path(str(Path(reuse.__file__)),run_name='__main__')
+        self.assertEqual(stopped.exception.args,('files_sha256',))
+        self.assertFalse(output.exists())
 
 
 def main():
