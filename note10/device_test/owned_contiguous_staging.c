@@ -9,7 +9,9 @@
 #define n10_owned_pa(p) __pa(p)
 #define n10_owned_linear(p) __is_lm_address(p)
 #endif
+#ifndef N10_OWNED_BYTES
 #define N10_OWNED_BYTES 19546112u
+#endif
 #define N10_OWNED_ALIGN 16384u
 static struct {
     unsigned char *output;

@@ -94,14 +94,15 @@ def retain_route_prerequisites(source, objects, out, compiler_include):
 
 
 def main(kind=None):
-    if kind not in (None, "sha256-stream-state", "cpu-affinity-binding", "early-fdt-binding", "native-memory-observation", "linux-data-carrier", "owned-contiguous-staging-pc"):
+    if kind not in (None, "sha256-stream-state", "cpu-affinity-binding", "early-fdt-binding", "native-memory-observation", "linux-data-carrier", "owned-contiguous-staging-pc", "current-owned-staging-pc"):
         raise ValueError("closed diagnostic task required")
     stream = kind == "sha256-stream-state"
     affinity = kind == "cpu-affinity-binding"
     fdt = kind == "early-fdt-binding"
     native = kind == "native-memory-observation"
-    owned = kind == "owned-contiguous-staging-pc"
-    data_task = kind in ("linux-data-carrier","owned-contiguous-staging-pc")
+    current_owned = kind == "current-owned-staging-pc"
+    owned = kind in ("owned-contiguous-staging-pc","current-owned-staging-pc")
+    data_task = kind in ("linux-data-carrier","owned-contiguous-staging-pc","current-owned-staging-pc")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--archive', type=Path)
@@ -138,11 +139,15 @@ def main(kind=None):
     if owned:
         extra=(*extra,'owned_contiguous_staging.py','owned_contiguous_staging.c','owned_contiguous_staging_composition.c',
                'build_owned_contiguous_staging.py','test_owned_contiguous_staging.py')
+    if current_owned:
+        extra=(*extra,'current_owned_staging.py','current_owned_capacity.h','current_owned_staging_composition.c',
+               'build_current_owned_staging.py','current_owned_staging_fixture.c','test_current_owned_staging.py')
     names = (*PUBLIC, *INPUTS, *('note10/device_test/'+n for n in extra),
              *(('.github/workflows/note10-sha256-stream-state.yml',) if stream else
                ('.github/workflows/note10-cpu-affinity-binding.yml',) if affinity else
                ('.github/workflows/note10-early-fdt-binding.yml',) if fdt else
                ('.github/workflows/note10-native-memory-observation.yml',) if native else
+               ('.github/workflows/note10-current-owned-staging-pc.yml',) if current_owned else
                ('.github/workflows/note10-owned-contiguous-staging-pc.yml',) if owned else
                ('.github/workflows/note10-linux-data-carrier.yml',) if data_task else ()))
     for name in names:
@@ -166,6 +171,8 @@ def main(kind=None):
         from early_fdt_binding import install, API_PINS as extra_kernel_pins
     elif native:
         from native_memory_observation import install, API_PINS as extra_kernel_pins
+    elif current_owned:
+        from current_owned_staging import install, API_PINS as extra_kernel_pins
     elif owned:
         from owned_contiguous_staging import install, API_PINS as extra_kernel_pins
     elif data_task:
@@ -173,6 +180,8 @@ def main(kind=None):
     save(out/'source-manifest.json', manifest)
     ci = {name: os.environ.get(name) for name in
           ('GITHUB_SHA', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'GITHUB_JOB')}
+    if current_owned:
+        ci.update({name:os.environ.get(name) for name in ('GITHUB_WORKFLOW_REF','GITHUB_WORKFLOW_SHA','GITHUB_REPOSITORY')})
     identity = hashlib.sha256(json.dumps({'source': manifest, 'ci': ci}, sort_keys=True).encode()).hexdigest()[:32]
     commands = []
     env = dict(os.environ, PLATFORM_VERSION='11', ANDROID_MAJOR_VERSION='r')
@@ -264,10 +273,15 @@ def main(kind=None):
                             NOTE10_SHA256_STREAM_STATE='n', SMP='y', LOCALVERSION='"-v91-trusted-logical"')
         if owned:
             settings.update(NOTE10_OWNED_CONTIGUOUS_STAGING='y',HAVE_MEMBLOCK='y',NO_BOOTMEM='y',LOCALVERSION='"-v92-owned-contiguous-pc"')
+        if current_owned:
+            settings.update(NOTE10_CURRENT_OWNED_STAGING='y',LOCALVERSION='"-v96-current-owned-pc"')
         run([*make, DEFCONFIG], 'build/01-defconfig.log')
         owned_default_enabled=owned and any(line.startswith('CONFIG_NOTE10_OWNED_CONTIGUOUS_STAGING=') for line in (objects/'.config').read_text().splitlines())
         if owned_default_enabled:
             raise ValueError('owned staging must be disabled in unchanged baseline config')
+        current_owned_default_enabled=current_owned and any(line.startswith('CONFIG_NOTE10_CURRENT_OWNED_STAGING=') for line in (objects/'.config').read_text().splitlines())
+        if current_owned_default_enabled:
+            raise ValueError('current owned staging must be default off')
         shutil.copyfile(objects/'.config', out/'public-baseline.config')
         for index, (name, value) in enumerate(settings.items()):
             if value in ('y', 'n'):
@@ -314,7 +328,7 @@ def main(kind=None):
         stable_archive(archive, before)
         if manifest != {name: sha(ROOT/name) for name in manifest}:
             raise ValueError('local first-use inputs changed during build')
-        result = dict(schema=1, version='v92' if owned else 'v91' if data_task else 'v82' if native else 'v81' if fdt else 'v78' if affinity else 'v73' if stream else 'v72', diagnostic_kind=kind, passed=True, kernel_commit=COMMIT,
+        result = dict(schema=1, version='v96' if current_owned else 'v92' if owned else 'v91' if data_task else 'v82' if native else 'v81' if fdt else 'v78' if affinity else 'v73' if stream else 'v72', diagnostic_kind=kind, passed=True, kernel_commit=COMMIT,
                       build_evidence_id=identity, ci_context=ci, source_sha256=manifest,
                       settings=settings, make_target='Image', integration_object=TARGET,
                       bootloader_cmdline_policy=cmdline_policy,
@@ -360,17 +374,22 @@ def main(kind=None):
             result.update(raw_input_binding=False,data_carrier_stage=STAGE,data_footprint=footprint,physical_placement_review_required=True,
                           data_expectation_mode=MODE,data_expectation_slot=slot,image_expectation_patched=False)
             result['files_sha256'] = {'minimal-init.elf':result['minimal_init_elf_sha256'],'initramfs.cpio':result['initramfs_cpio_sha256']}
-            data_config=[x for x in config if not x.startswith('CONFIG_NOTE10_OWNED_CONTIGUOUS_STAGING=') and x != '# CONFIG_NOTE10_OWNED_CONTIGUOUS_STAGING is not set'] if owned else config
+            data_config=[x for x in config if not x.startswith(('CONFIG_NOTE10_OWNED_CONTIGUOUS_STAGING=','CONFIG_NOTE10_CURRENT_OWNED_STAGING=')) and x not in ('# CONFIG_NOTE10_OWNED_CONTIGUOUS_STAGING is not set','# CONFIG_NOTE10_CURRENT_OWNED_STAGING is not set')] if owned else config
             result['data_relative_placement'] = relative_admission(result,data_config,footprint,elf=init,archive=archive_data,
                 raw_inputs={k:result[k] for k in ('minimal_init_elf_sha256','initramfs_cpio_sha256')})
         if owned:
-            from owned_contiguous_staging import footprint as owned_footprint, relative as owned_relative, pc_contract, BYTES, ALIGN
+            if current_owned:
+                from current_owned_staging import footprint as owned_footprint, relative as owned_relative, pc_contract, BYTES, ALIGN
+            else:
+                from owned_contiguous_staging import footprint as owned_footprint, relative as owned_relative, pc_contract, BYTES, ALIGN
             record=owned_footprint((objects/'System.map').read_text(),(out/'new-object-symbols.log').read_text(),
                 struct.unpack_from('<Q',raw,16)[0],struct.unpack_from('<Q',raw,8)[0],struct.unpack_from('<Q',raw,24)[0])
             result.update(PC_only=True,physical_ready=False,owned_capacity_bytes=BYTES,owned_alignment_bytes=ALIGN,
                 owned_default_enabled=owned_default_enabled,owned_footprint=record,
                 owned_relative_placement=owned_relative(result,config,record,elf=init,archive=archive_data,
                     raw_inputs={k:result[k] for k in ('minimal_init_elf_sha256','initramfs_cpio_sha256')}))
+            if current_owned:
+                result.update(current_owned_default_enabled=current_owned_default_enabled,owned_capacity_source='current_owned_capacity.h')
             result['owned_pc_contract']=pc_contract(result,os.environ.get('GITHUB_SHA',''))
         result['files_sha256'] = {p.relative_to(out).as_posix(): sha(p) for p in out.rglob('*') if p.is_file()}
         save(out/'result.json', result)

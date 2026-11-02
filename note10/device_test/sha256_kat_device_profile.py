@@ -75,7 +75,7 @@ def no_legacy(row):
 
 
 def physical_input_scope(result):
-    require(result.get('PC_only') is not True and result.get('diagnostic_kind') != 'owned-contiguous-staging-pc', 'PC-only owned staging cannot create a physical template/package')
+    require(result.get('PC_only') is not True and result.get('diagnostic_kind') not in ('owned-contiguous-staging-pc','current-owned-staging-pc'), 'PC-only owned staging cannot create a physical template/package')
 
 
 def raw_binding(root, expected_result, expected_source):
