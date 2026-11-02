@@ -6,7 +6,6 @@
 #include <pexpert/pexpert.h>
 #include <pexpert/device_tree.h>
 #include <kern/debug.h>
-#include <libkern/libkern.h>
 
 struct n10_clock_properties {
     unsigned name, device_type, state, frequency;

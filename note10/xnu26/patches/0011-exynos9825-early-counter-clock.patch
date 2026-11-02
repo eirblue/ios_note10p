@@ -33,7 +33,7 @@
  vm_offset_t
 --- /dev/null
 +++ b/pexpert/arm/note10/early_clock.c
-@@ -0,0 +1,124 @@
+@@ -0,0 +1,123 @@
 +/* Included once by pe_identify_machine.c on the Exynos-only path.
 + * Input is an owned, canonical AppleDT supplied by the selected loader.
 + * A running marker is required input, never inferred CPU execution state.
@@ -42,7 +42,6 @@
 +#include <pexpert/pexpert.h>
 +#include <pexpert/device_tree.h>
 +#include <kern/debug.h>
-+#include <libkern/libkern.h>
 +
 +struct n10_clock_properties {
 +    unsigned name, device_type, state, frequency;

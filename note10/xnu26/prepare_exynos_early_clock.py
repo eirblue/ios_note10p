@@ -10,8 +10,8 @@ PATCH_NAME = '0011-exynos9825-early-counter-clock.patch'
 REL = 'pexpert/arm/pe_identify_machine.c'
 KERNEL_COMPONENT = 'pexpert/arm/note10/early_clock.c'
 SOURCE_PIN = 'f6d325385d7948e5df7549f8564fe7cea994fe144a8c9f03eff94f5f76cc6e95'
-COMPONENT_SHA256 = '95670dd17837380c83aa20e8972ab8b0eb7e786ad6949c7d528991bf5aba0620'
-PATCH_SHA256 = 'b686155a549e5249c8d7031f8827b6970067de759bf610461354b0118c4bf0f6'
+COMPONENT_SHA256 = '7c37c0413dd5dbffecd642849fb98452334319e0413e9b82cc9163bf25ac4ce4'
+PATCH_SHA256 = '8c74fa259d3d2924b0f1fd176660a3d2ca5da64c58c1df48ca33f5e69464dd54'
 HERE = Path(__file__).resolve().parent
 
 
