@@ -18,11 +18,19 @@
 #endif
 #include "carrier_lzma.h"
 
+enum n10_data_reason {
+    N10_DATA_PARAM_MISSING = 1u << 0, N10_DATA_PARAM_INVALID = 1u << 1,
+    N10_DATA_PARAM_DUPLICATE = 1u << 2, N10_DATA_CAPTURE_MISSING = 1u << 3,
+    N10_DATA_CAPTURE_INVALID = 1u << 4, N10_DATA_CAPTURE_REPEAT = 1u << 5,
+    N10_DATA_INPUT_MISSING = 1u << 6, N10_DATA_GLOBAL_MISMATCH = 1u << 7,
+    N10_DATA_EMIT_REPEAT = 1u << 8, N10_DATA_STICKY_INVALID = 1u << 9
+};
+
 static struct {
     const unsigned char *input;
     unsigned long start, end;
     size_t length;
-    unsigned int captures, parameters, invalid, emitted;
+    unsigned int captures, parameters, invalid, emitted, reasons;
     unsigned char expected[32];
 } n10_data;
 _Static_assert(sizeof(n10_data) <= 128, "bounded permanent DATA metadata");
@@ -31,17 +39,17 @@ static int __init n10_data_parameter(char *value)
 {
     unsigned char parsed[32];
     unsigned int i;
-    if (n10_data.parameters++) { n10_data.invalid = 1; return 1; }
+    if (n10_data.parameters++) { n10_data.invalid = 1; n10_data.reasons |= N10_DATA_PARAM_DUPLICATE; return 1; }
     for (i = 0; i < 64; ++i) {
         unsigned int digit;
-        if (!value[i]) { n10_data.invalid = 1; return 1; }
+        if (!value[i]) { n10_data.invalid = 1; n10_data.reasons |= N10_DATA_PARAM_INVALID; return 1; }
         if (value[i] >= '0' && value[i] <= '9') digit = value[i]-'0';
         else if (value[i] >= 'a' && value[i] <= 'f') digit = value[i]-'a'+10;
-        else { n10_data.invalid = 1; return 1; }
+        else { n10_data.invalid = 1; n10_data.reasons |= N10_DATA_PARAM_INVALID; return 1; }
         if (!(i & 1)) parsed[i/2] = digit << 4;
         else parsed[i/2] |= digit;
     }
-    if (value[64]) { n10_data.invalid = 1; return 1; }
+    if (value[64]) { n10_data.invalid = 1; n10_data.reasons |= N10_DATA_PARAM_INVALID; return 1; }
     memcpy(n10_data.expected, parsed, sizeof(parsed));
     n10_data_clear(parsed, sizeof(parsed));
     return 1;
@@ -55,17 +63,17 @@ void __init n10_data_capture(unsigned long start, unsigned long end)
 {
     unsigned long length;
     uint64_t physical;
-    if (n10_data.captures++) { n10_data.invalid = 1; return; }
-    if (!start || end <= start) { n10_data.invalid = 1; return; }
+    if (n10_data.captures++) { n10_data.invalid = 1; n10_data.reasons |= N10_DATA_CAPTURE_REPEAT; return; }
+    if (!start || end <= start) { n10_data.invalid = 1; n10_data.reasons |= N10_DATA_CAPTURE_INVALID; return; }
     length = end-start;
     if (length <= 128 || length > N10_LZMA_MAX_BYTES ||
         !n10_data_linear(start) || !n10_data_linear(end-1)) {
-        n10_data.invalid = 1; return;
+        n10_data.invalid = 1; n10_data.reasons |= N10_DATA_CAPTURE_INVALID; return;
     }
     physical = n10_data_pa(start);
     if (physical > UINT64_MAX-length || n10_data_va(physical) != start ||
         n10_data_pa(end-1) != physical+length-1) {
-        n10_data.invalid = 1; return;
+        n10_data.invalid = 1; n10_data.reasons |= N10_DATA_CAPTURE_INVALID; return;
     }
     n10_data.input = (const unsigned char *)start;
     n10_data.start = start; n10_data.end = end; n10_data.length = length;
@@ -108,7 +116,7 @@ out:
 struct n10_data_outcome {
     const char *status;
     uint64_t carrier, stream, payload, consumed, written;
-    unsigned int decoded;
+    unsigned int decoded, reasons, parameters, captures, retained;
     unsigned char digest[32];
 };
 
@@ -123,6 +131,16 @@ static void n10_data_run(struct n10_data_outcome *out)
     struct n10_lzma_result result = {0};
     int status;
     memset(out, 0, sizeof(*out)); out->status = "unavailable";
+    out->reasons = n10_data.reasons;
+    out->parameters = n10_data.parameters > 1 ? 2 : n10_data.parameters;
+    out->captures = n10_data.captures > 1 ? 2 : n10_data.captures;
+    out->retained = p != NULL;
+    if (!n10_data.parameters) out->reasons |= N10_DATA_PARAM_MISSING;
+    if (!n10_data.captures) out->reasons |= N10_DATA_CAPTURE_MISSING;
+    if (!p) out->reasons |= N10_DATA_INPUT_MISSING;
+    if (initrd_start != n10_data.start || initrd_end != n10_data.end) out->reasons |= N10_DATA_GLOBAL_MISMATCH;
+    if (n10_data.emitted) out->reasons |= N10_DATA_EMIT_REPEAT;
+    if (n10_data.invalid) out->reasons |= N10_DATA_STICKY_INVALID;
     if (n10_data.emitted++ || n10_data.invalid || n10_data.captures != 1 ||
         n10_data.parameters != 1 || !p || initrd_start != n10_data.start || initrd_end != n10_data.end)
         return;
@@ -172,10 +190,10 @@ static int n10_data_emit(void)
     for (i = 0; i < 32; ++i) { digest[2*i] = digits[outcome.digest[i] >> 4]; digest[2*i+1] = digits[outcome.digest[i]&15]; }
     digest[64] = 0;
     count = scnprintf(frame,sizeof(frame),
-        "id=%s cycle=%s kind=result status=%s carrier=%llu stream=%llu payload=%llu consumed=%llu written=%llu calls=%u digest=%s ownership=0 executed=0",
+        "id=%s cycle=%s kind=result status=%s carrier=%llu stream=%llu payload=%llu consumed=%llu written=%llu calls=%u digest=%s reasons=%08x params=%u captures=%u retained=%u ownership=0 executed=0",
         N10_SHA256_KAT_ID,(const char *)n10_cycle,outcome.status,
         (unsigned long long)outcome.carrier,(unsigned long long)outcome.stream,(unsigned long long)outcome.payload,
-        (unsigned long long)outcome.consumed,(unsigned long long)outcome.written,outcome.decoded,digest);
+        (unsigned long long)outcome.consumed,(unsigned long long)outcome.written,outcome.decoded,digest,outcome.reasons,outcome.parameters,outcome.captures,outcome.retained);
     pr_info("N10DATA1 %s checksum=%08x\n",frame,n10_frame_checksum(frame,count));
     n10_data_clear(&outcome,sizeof(outcome)); n10_data_clear(digest,sizeof(digest));
     return 0;

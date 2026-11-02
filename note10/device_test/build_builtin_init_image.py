@@ -254,7 +254,7 @@ def main(kind=None):
         elif data_task:
             settings.update(NOTE10_DATA_CARRIER='y', NOTE10_NATIVE_MEMORY_OBSERVATION='n',
                             NOTE10_EARLY_FDT_BINDING='n', NOTE10_CPU_AFFINITY_BINDING='n',
-                            NOTE10_SHA256_STREAM_STATE='n', SMP='y', LOCALVERSION='"-v88-linux-data"')
+                            NOTE10_SHA256_STREAM_STATE='n', SMP='y', LOCALVERSION='"-v89-data-guard"')
         run([*make, DEFCONFIG], 'build/01-defconfig.log')
         shutil.copyfile(objects/'.config', out/'public-baseline.config')
         for index, (name, value) in enumerate(settings.items()):
@@ -302,7 +302,7 @@ def main(kind=None):
         stable_archive(archive, before)
         if manifest != {name: sha(ROOT/name) for name in manifest}:
             raise ValueError('local first-use inputs changed during build')
-        result = dict(schema=1, version='v88' if data_task else 'v82' if native else 'v81' if fdt else 'v78' if affinity else 'v73' if stream else 'v72', diagnostic_kind=kind, passed=True, kernel_commit=COMMIT,
+        result = dict(schema=1, version='v89' if data_task else 'v82' if native else 'v81' if fdt else 'v78' if affinity else 'v73' if stream else 'v72', diagnostic_kind=kind, passed=True, kernel_commit=COMMIT,
                       build_evidence_id=identity, ci_context=ci, source_sha256=manifest,
                       settings=settings, make_target='Image', integration_object=TARGET,
                       bootloader_cmdline_policy=cmdline_policy,

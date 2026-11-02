@@ -16,14 +16,11 @@ SOURCES = ('linux_data_carrier.py', 'linux_data_carrier.c', 'linux_data_carrier_
            'build_linux_data_carrier.py', 'linux_data_carrier_fixture.c', 'test_linux_data_carrier.py',
            'carrier_lzma.c', 'carrier_lzma.h')
 API_PINS = {'arch/arm64/kernel/setup.c': 'f80fd02832b12c48eba11b3e3148c59c6ad87d9ea2328c8c37492d107fd141d7'}
-CASE_NAMES = ('test_native_capture_and_private_parameter_refuse_ambiguity',
-              'test_actual_wrapper_owned_decode_and_cleanup',
-              'test_actual_wrapper_hash_header_and_slice_refusals',
-              'test_actual_wrapper_allocation_and_decoder_failure_cleanup',
-              'test_data_profile_private_input_and_cmdline_binding',
-              'test_new_package_label_and_nonclaim_fields',
-              'test_new_frame_identity_counts_and_relative_caps',
-              'test_retained_pass_gate_fails_closed')
+CASE_NAMES = ('test_data_guard_reasons_and_parser_error_wire',)
+REASONS = {1:'parameter_missing',2:'parameter_invalid',4:'parameter_duplicate',
+           8:'capture_missing',16:'capture_invalid',32:'capture_repeat',64:'input_missing',
+           128:'global_mismatch',256:'emit_repeat',512:'sticky_invalid'}
+
 TEST_SOURCES = (*SOURCES, 'sha256_kat_device_profile.py', 'builtin_init_profile.py',
                 'prepare_linux_boot.py', 'build_boot_test_packages.py')
 
@@ -116,7 +113,7 @@ def relative_admission(result, lines, footprint, *, elf, archive, raw_inputs):
 
 
 def input_binding(result, lines, *, elf, archive, raw_inputs):
-    require(result.get('version') == 'v88' and result.get('diagnostic_kind') == KIND and
+    require(result.get('version') == 'v89' and result.get('diagnostic_kind') == KIND and
             result.get('data_carrier_stage') == STAGE and result.get('raw_input_binding') is False,
             'closed new DATA Image required')
     for name in SOURCES:
@@ -216,7 +213,7 @@ def decode(text, identity, cycle):
     m = re.search(r'N10BOOTLINK2 boot=([0-9a-f]{32}) N10DATA1 ([^\r\n\x00]{1,383}) checksum=([0-9a-f]{8})$', lines[0])
     require(m is not None and m[1] != '0'*32 and checksum(m[2].encode('ascii')) == int(m[3],16), 'DATA boot/checksum differs')
     pairs = [part.split('=') for part in m[2].split(' ')]
-    keys = ('id','cycle','kind','status','carrier','stream','payload','consumed','written','calls','digest','ownership','executed')
+    keys = ('id','cycle','kind','status','carrier','stream','payload','consumed','written','calls','digest','reasons','params','captures','retained','ownership','executed')
     require(all(len(p) == 2 for p in pairs) and tuple(p[0] for p in pairs) == keys, 'DATA closed schema required')
     row = dict(pairs)
     require(row['id'] == identity and row['cycle'] == cycle and row['kind'] == 'result' and
@@ -225,17 +222,29 @@ def decode(text, identity, cycle):
     for key in ('carrier','stream','payload','consumed','written','calls'):
         require(re.fullmatch('0|[1-9][0-9]{0,8}', row[key]), 'bounded DATA count required')
         numbers[key] = int(row[key])
+    require(re.fullmatch('[0-9a-f]{8}',row['reasons']) and int(row['reasons'],16) <= 0x3ff and
+            row['params'] in ('0','1','2') and row['captures'] in ('0','1','2') and row['retained'] in ('0','1'), 'bounded DATA guard reasons required')
+    reasons = int(row['reasons'],16)
     passed = row['status'] == 'ok' and numbers['calls'] == 1 and 0 < numbers['payload'] == numbers['written'] <= 64*1024*1024 and \
         18 <= numbers['stream'] <= numbers['carrier']-128 and numbers['carrier'] <= 64*1024*1024 and numbers['consumed'] <= numbers['stream']
     return dict(passed=passed, boot_identity=m[1], status=row['status'], **numbers, digest=row['digest'],
+                reasons=reasons, reason_labels=[label for bit,label in REASONS.items() if reasons&bit],
+                parameters=int(row['params']), captures=int(row['captures']), retained=row['retained']=='1',
                 owned_virtual_decode=passed, global_RAM_ownership=False, handoff_ready=False, xnu_executed=False)
+
+
+def require_functional(result):
+    require(result['passed'], 'DATA functional decode failed status='+result['status']+
+        ' reasons=%08x' % result['reasons']+' labels='+','.join(result['reason_labels'])+
+        ' params='+str(result['parameters'])+' captures='+str(result['captures'])+
+        ' retained='+str(int(result['retained'])))
 
 
 def decode_selected(data, banner, identity, cycle, *, expected=None):
     from builtin_init_profile import decode as baseline_decode
     def selected(text, rid):
         result = decode(text, rid, cycle)
-        require(result['passed'], 'DATA functional decode failed')
+        require_functional(result)
         return result
     clipped, observed = baseline_decode(data, banner, identity, cycle, digest_decoder=selected, digest_marker=b'N10DATA1')
     require(observed['kat']['boot_identity'] == observed['boot_identity'], 'DATA/recovery/PID1 boot differs')

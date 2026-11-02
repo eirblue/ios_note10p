@@ -187,6 +187,49 @@ class LinuxDataCarrierTests(unittest.TestCase):
 
 
 
+    def test_data_guard_reasons_and_parser_error_wire(self):
+        from decode_reservation import checksum
+        raw = self.container()
+        cases = (
+            ('missing_parameter',None,'parameter_missing'),
+            ('good','g'*64,'parameter_invalid'),
+            ('duplicate_parameter',None,'parameter_duplicate'),
+            ('missing_capture',None,'capture_missing'),
+            ('reversed',None,'capture_invalid'),
+            ('repeat_capture',None,'capture_repeat'),
+            ('changed',None,'global_mismatch'),
+            ('repeat_refused_callback',None,'emit_repeat'),
+        )
+        identity,cycle,boot = 'a'*32,'b'*32,'c'*32
+        def frame(row):
+            keys = ('status','carrier','stream','payload','consumed','written','calls','digest',
+                    'reasons','params','captures','retained')
+            body = 'id='+identity+' cycle='+cycle+' kind=result '+ ' '.join(k+'='+str(row[k]) for k in keys)+' ownership=0 executed=0'
+            return 'N10BOOTLINK2 boot='+boot+' N10DATA1 '+body+' checksum=%08x' % checksum(body.encode())
+        masks = set()
+        for mode,parameter,label in cases:
+            row = self.invoke(raw,mode,parameter)
+            self.assertEqual(row['status'],'unavailable',mode)
+            self.assertEqual((row['hashes'],row['allocations'],row['calls']),(0,0,0),mode)
+            self.assertIn(row['params'],(0,1,2))
+            self.assertIn(row['captures'],(0,1,2))
+            self.assertIn(row['retained'],(0,1))
+            parsed = data.decode(frame(row),identity,cycle)
+            self.assertFalse(parsed['passed'])
+            self.assertIn(label,parsed['reason_labels'])
+            masks.add(parsed['reasons'])
+            with self.assertRaisesRegex(ValueError,'DATA functional decode failed status=unavailable reasons='+row['reasons']) as error:
+                data.require_functional(parsed)
+            self.assertIn(label,str(error.exception))
+            self.assertIn('params='+str(row['params']),str(error.exception))
+            self.assertIn('captures='+str(row['captures']),str(error.exception))
+            self.assertIn('retained='+str(row['retained']),str(error.exception))
+        self.assertEqual(len(masks),len(cases))
+        for changes in ({'reasons':'00000400'},{'params':3},{'captures':3},{'retained':2}):
+            with self.assertRaisesRegex(ValueError,'bounded DATA guard reasons'):
+                data.decode(frame(dict(row,**changes)),identity,cycle)
+
+
 class Recorded(unittest.TextTestResult):
     def __init__(self,*args,**kwargs):
         super().__init__(*args,**kwargs)

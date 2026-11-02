@@ -105,11 +105,11 @@ int main(int argc,char **argv)
     fclose(file); mode = argv[2];
     initrd_start = host_first = (unsigned long)data;
     initrd_end = host_last = initrd_start+(unsigned long)size;
-    if (strcmp(mode,"missing_parameter")) n10_data_parameter(argv[3]);
+    if (strcmp(mode,"missing_parameter") && strcmp(mode,"repeat_refused_callback")) n10_data_parameter(argv[3]);
     if (!strcmp(mode,"duplicate_parameter")) n10_data_parameter(argv[3]);
     if (!strcmp(mode,"reversed")) n10_data_capture(initrd_end,initrd_start);
     else if (!strcmp(mode,"nonlinear")) n10_data_capture(initrd_start-1,initrd_end);
-    else n10_data_capture(initrd_start,initrd_end);
+    else if (strcmp(mode,"missing_capture")) n10_data_capture(initrd_start,initrd_end);
     if (!strcmp(mode,"repeat_capture")) n10_data_capture(initrd_start,initrd_end);
     if (!strcmp(mode,"changed")) --initrd_end;
     if (!strcmp(mode,"alloc1")) fail_alloc=1;
@@ -118,18 +118,20 @@ int main(int argc,char **argv)
     if (!strcmp(mode,"hash2")) fail_hash=2;
     if (!strcmp(mode,"hash3")) fail_hash=3;
     n10_sha256_worker(NULL); /* Before arm: deadline refuses callback. */
-    if (callbacks || core_calls || allocations) abort();
+    if (callbacks || core_calls || allocations || hashes) abort();
     arm_fail = !strcmp(mode,"arm_fail");
     (void)n10_sha256_recovery_init();
     n10_sha256_worker(NULL); /* Booting: actual worker requeues only. */
-    if (callbacks || core_calls || allocations) abort();
+    if (callbacks || core_calls || allocations || hashes) abort();
     system_state = SYSTEM_RUNNING;
     if (strcmp(mode,"unarmed")) n10_sha256_worker(NULL);
-    if (!strcmp(mode,"repeat_callback")) n10_sha256_worker(NULL);
+    if (!strcmp(mode,"repeat_callback") || !strcmp(mode,"repeat_refused_callback")) n10_sha256_worker(NULL);
     for (i=0;i<32;++i) sprintf(digest+2*i,"%02x",outcome.digest[i]);
     digest[64]=0;
-    printf("{\"status\":\"%s\",\"calls\":%u,\"callbacks\":%u,\"allocations\":%u,\"frees\":%u,\"cleared\":%u,\"written\":%llu,\"consumed\":%llu,\"digest\":\"%s\"}\n",
+    printf("{\"status\":\"%s\",\"calls\":%u,\"callbacks\":%u,\"allocations\":%u,\"frees\":%u,\"cleared\":%u,\"written\":%llu,\"consumed\":%llu,\"digest\":\"%s\",\"reasons\":\"%08x\",\"params\":%u,\"captures\":%u,\"retained\":%u,\"hashes\":%u,\"carrier\":%llu,\"stream\":%llu,\"payload\":%llu}\n",
         outcome.status ? outcome.status : "skipped",core_calls,callbacks,allocations,frees,cleared,
-        (unsigned long long)outcome.written,(unsigned long long)outcome.consumed,digest);
+        (unsigned long long)outcome.written,(unsigned long long)outcome.consumed,digest,
+        outcome.reasons,outcome.parameters,outcome.captures,outcome.retained,hashes,
+        (unsigned long long)outcome.carrier,(unsigned long long)outcome.stream,(unsigned long long)outcome.payload);
     free(data); return 0;
 }
