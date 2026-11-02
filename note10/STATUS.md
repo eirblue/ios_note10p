@@ -1,3 +1,13 @@
+## v91: trusted logical extent CI passed; battery gate blocked installation
+
+- Reviewed source: `0696b4dbf157a2d51b68b26e4a5237a7c51daa80`; [CI run 41404110966](https://github.com/eirblue/ios_note10p/actions/runs/41404110966).
+- Three new methods passed with one fixture compilation and one Image build. Earlier methods were not replayed. The 64-byte read-only v2 slot and all seven existing relative admission checks passed; Image size is 46,413,836 bytes and linked span 55,132,160 bytes.
+- The private variant binds SHA plus logical length in exactly 40 bytes, alongside the 32-byte cycle field. Native code authenticates every interpreted logical byte before reading the container header. Only exact or BOOT-page-rounded native extents are admitted; extra native tail bytes are unused and not assumed zero.
+- Necessary template and one-cycle plan passed intrinsic self-validation. The single run invocation stopped at the existing 10-percent battery precheck before any partition write or reboot. No battery percentage was retained.
+- v91 remains unconsumed (0/1); device state remains the last completed v90 package. After external charging, continuation requires a fresh run output and all original gates. Standing same-safe-scope approval remains active.
+- Artifact download, authenticated decrypt and private extraction each occurred once. A mistaken sibling output location led to a redundant evidence-tree copy and extra copy hashing; originals and provenance are preserved, with no CI/decrypt/extraction replay.
+- No target functional success, XNU execution or deployment readiness is claimed. Raw artifacts/device evidence remain private; exact approval scopes and the complete consumption ledger accompany every handoff.
+
 ## v90: Image expectation delivered; carrier hash stage failed
 
 - Reviewed source: `59bfd8d9f21047c9d943cd0dd4f4eb96fb5459e9`; [CI run 41395783341](https://github.com/eirblue/ios_note10p/actions/runs/41395783341).
