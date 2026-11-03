@@ -167,6 +167,14 @@ def transaction(row,phase):
     return journal
 
 
+def _copy_ci_context(output,raw):
+    output=private(output)
+    require(output.is_dir() and type(raw) is bytes and 0<len(raw)<=65536,'bounded reviewed CI context copy required')
+    # The receipt pins the reviewed bytes, including JSON ordering/whitespace.
+    # A fresh copy must not reserialize or overwrite that evidence.
+    with (output/'ci-success-context.json').open('xb') as stream:stream.write(raw)
+
+
 def prepare_template(contract,path,expected):
     item=origins.record(contract.get('native_source_head'))
     require(item['version']=='v109' and contract.get('execution_version')=='v110','new templates require native109/host110')
@@ -193,7 +201,7 @@ def prepare_template(contract,path,expected):
         compact_hashes=1,stream_hashes=1,manifest_hashes=2,compact_files_written=1,compact_bytes_written=len(compact),
         metadata_copies=2,derivations=0,recompressions=0,decoder_calls=0))
     binding.update(write_ci_success_receipt(output,receipt))
-    save(output/'ci-success-context.json',json.loads(context_raw.decode('utf-8-sig')))
+    _copy_ci_context(output,context_raw)
     save(output/'device-profile.json',binding)
     save(output/'build-result.json',common_report(binding,file_sha(output/'device-profile.json')))
     shutil.copyfile(output/'prerequisites/objects/.config',output/'handoff.config')

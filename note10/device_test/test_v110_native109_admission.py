@@ -26,6 +26,8 @@ from decode_reservation import checksum
 
 METHOD='test_native109_host110_admission_witness_join_and_pretransport_scope'
 SCOPE='v110-native109-host-admission'
+RECEIPT_METHOD='test_raw_context_copy_and_exact_receipt_regeneration'
+RECEIPT_SCOPE='v110-ci-context-byte-copy-rev1'
 OUTPUT=None
 IDENTITY,BOOT,HOST='1'*32,'3'*32,'8'*40
 
@@ -251,14 +253,53 @@ class Native109AdmissionTests(unittest.TestCase):
         save(OUTPUT/'integration-summary.json',dict(counts=counts,synthetic_registry=True,actual_private_inputs=0,actual_device_operations=[],
             C_compiles=0,fixture_processes=0,Image_builds=0,CI=0,old_methods_run=0,missing_companion_core_only_fallback=False))
 
+
+    def test_raw_context_copy_and_exact_receipt_regeneration(self):
+        work=OUTPUT/'synthetic-receipt';work.mkdir()
+        reviewed_raw=b'{\r\n  "synthetic": true,\r\n  "native_version": "v109"\r\n}\r\n'
+        reviewed_context=json.loads(reviewed_raw.decode('utf-8-sig'));reviewed_sha=digest(reviewed_raw)
+        reviewed_receipt=dict(schema='native109-root-ci-receipt-v1',kind='synthetic-accepted-image',
+            root_reader_result_sha256=reviewed_sha,accepted=True)
+        normalized=work/'normalized';normalized.mkdir();correct=work/'exact';correct.mkdir()
+        for directory in (normalized,correct):
+            save(directory/'result.json',dict(synthetic=True))
+            save(directory/'image-root-receipt.json',reviewed_receipt)
+        # Reproduce the new failed metadata-only path, without native inputs or the passed integration method.
+        typed.save(normalized/'ci-success-context.json',reviewed_context)
+        self.assertEqual(read(normalized/'ci-success-context.json'),reviewed_context)
+        self.assertNotEqual(digest((normalized/'ci-success-context.json').read_bytes()),reviewed_sha)
+        def checked_receipt(context,context_sha,binding,producer):
+            if context!=reviewed_context or producer!=dict(synthetic=True):raise ValueError('synthetic reviewed metadata differs')
+            return dict(reviewed_receipt,root_reader_result_sha256=context_sha)
+        def validate(directory):
+            receipt=directory/'image-root-receipt.json'
+            return profile.root_receipt_binding(directory,receipt,digest(receipt.read_bytes()),{})
+        # Unchanged native CI-authority validation is isolated; exercise real copy/hash/receipt equality logic.
+        with patch('class3_native_origin.ci_receipt',side_effect=checked_receipt):
+            with self.assertRaisesRegex(ValueError,'native109 stored CI receipt differs'):validate(normalized)
+            typed._copy_ci_context(correct,reviewed_raw)
+            self.assertEqual((correct/'ci-success-context.json').read_bytes(),reviewed_raw)
+            result=validate(correct);self.assertEqual(result['root_reader_result_sha256'],reviewed_sha)
+            with self.assertRaises(FileExistsError):typed._copy_ci_context(correct,reviewed_raw)
+            self.assertEqual((correct/'ci-success-context.json').read_bytes(),reviewed_raw)
+            save(correct/'image-root-receipt.json',dict(reviewed_receipt,root_reader_result_sha256='0'*64))
+            with self.assertRaisesRegex(ValueError,'native109 stored CI receipt differs'):validate(correct)
+            save(correct/'image-root-receipt.json',reviewed_receipt)
+            typed.save(correct/'ci-success-context.json',dict(reviewed_context,native_version='v110'))
+            with self.assertRaisesRegex(ValueError,'synthetic reviewed metadata differs'):validate(correct)
+        save(OUTPUT/'receipt-summary.json',dict(raw_reviewed_bytes_preserved=True,normalized_object_equality_insufficient=True,
+            exact_receipt_equality_required=True,exclusive_copy=True,old_integration_method_run=0,actual_private_inputs=0,
+            actual_device_operations=[],Image_builds=0,CI=0,fixture_compiles=0,fixture_processes=0))
+
+
 if __name__=='__main__':
-    parser=argparse.ArgumentParser();parser.add_argument('--scope',required=True,choices=(SCOPE,));parser.add_argument('--output',type=Path,required=True)
+    parser=argparse.ArgumentParser();parser.add_argument('--scope',required=True,choices=(RECEIPT_SCOPE,));parser.add_argument('--output',type=Path,required=True)
     args=parser.parse_args();OUTPUT=profile.private(args.output);OUTPUT.mkdir(parents=True,exist_ok=False)
     names=('class3_native_origin.py','type3_admission.py','sha256_kat_device_profile.py','kernel_readonly_span_candidate.py',
         'readonly_stage_witness.py','linux_data_carrier.py','kernel_readonly_input.py','auto_cycle.py','materialize_auto_cycle.py','test_v110_native109_admission.py')
     save(OUTPUT/'source-sha256.json',{name:digest((Path(__file__).resolve().parent/name).read_bytes()) for name in names})
-    result=unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite([Native109AdmissionTests(METHOD)]))
-    save(OUTPUT/'result.json',dict(schema='v110-new-native109-host-admission-tests-v1',scope=args.scope,selected=[METHOD],run=result.testsRun,
+    result=unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite([Native109AdmissionTests(RECEIPT_METHOD)]))
+    save(OUTPUT/'result.json',dict(schema='v110-ci-context-receipt-regression-v1',scope=args.scope,selected=[RECEIPT_METHOD],run=result.testsRun,
         errors=len(result.errors),failures=len(result.failures),passed=result.wasSuccessful(),fixture_compiles=0,fixture_processes=0,Image_builds=0,CI=0,
         actual_private_inputs=0,actual_device_operations=[],old_methods_run=0,error_tracebacks=[dict(test=test.id(),traceback=trace) for test,trace in result.errors],
         failure_tracebacks=[dict(test=test.id(),traceback=trace) for test,trace in result.failures]))
