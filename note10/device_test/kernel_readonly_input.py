@@ -31,6 +31,9 @@ OLD_BYTES=10962166
 STREAM_BYTES=4437203
 PAYLOAD_BYTES=19136512
 COMPACT_SCHEMA='n10-kernel-readonly-compact-v1'
+HISTORICAL_HEAD='e49ccf7fe46eb92b32c0b425a2e4da5fe667f9b4'
+PACKING_SCHEMA='n10-kernel-readonly-compact-external-v1'
+PACKING_FIELDS=('kernel_readonly_packing_revision','kernel_readonly_external_choice','kernel_readonly_packing_host','kernel_readonly_reused_variant')
 IO_EVENTS=[]
 
 
@@ -127,8 +130,19 @@ def metadata_contract(slot,image_bytes):
 
 
 
-def producer_contract(result,source,*,producing_sources=None):
+def producer_contract(result,source,*,producing_sources=None,historical_origin=None):
     ci=result.get('ci_context',{})
+    if historical_origin is not None:
+        data.require(historical_origin==source==HISTORICAL_HEAD and producing_sources is None,'exact retained readonly origin only')
+        from sha256_kat_device_profile import V105_CANDIDATE_ORIGIN_PINS
+        producing_sources={key:value for key,value in V105_CANDIDATE_ORIGIN_PINS.items() if key in
+            {'note10/device_test/'+name for name in (*SOURCES,'linux_data_carrier.c','linux_data_carrier_composition.c','build_builtin_init_image.py')}}
+        # This intrinsic compiler helper is outside host-profile56 and is frozen
+        # in this host-only revision. Its live equality remains strict; if it
+        # changes later, retained admission fails instead of trusting row hashes.
+        producing_sources['note10/device_test/build_builtin_init_image.py']=data.sha((data.HERE/'build_builtin_init_image.py').read_bytes())
+    else:
+        data.require(source!=HISTORICAL_HEAD,'retained candidate cannot construct a new producer')
     pins=producing_sources if producing_sources is not None else {
         'note10/device_test/'+name:data.sha((data.HERE/name).read_bytes()) for name in
         (*SOURCES,'linux_data_carrier.c','linux_data_carrier_composition.c','build_builtin_init_image.py')}
@@ -164,9 +178,9 @@ def producer_contract(result,source,*,producing_sources=None):
         global_RAM_ownership=False,hardware_mapping_attested=False,linked_budget=BUDGET)
 
 
-def input_binding(result,lines,*,elf,archive,raw_inputs):
+def input_binding(result,lines,*,elf,archive,raw_inputs,historical_origin=None):
     from early_fdt_binding import fixed_route_relation
-    producer_contract(result,result.get('ci_context',{}).get('GITHUB_SHA'))
+    producer_contract(result,result.get('ci_context',{}).get('GITHUB_SHA'),historical_origin=historical_origin)
     data.require('CONFIG_NOTE10_KERNEL_READONLY_INPUT=y' in lines and
         not {'CONFIG_NOTE10_READONLY_INPUT_PC=y','CONFIG_NOTE10_OWNED_CONTIGUOUS_STAGING=y',
              'CONFIG_NOTE10_CURRENT_OWNED_STAGING=y'} & set(lines),'distinct readonly source configuration required')
@@ -177,7 +191,7 @@ def input_binding(result,lines,*,elf,archive,raw_inputs):
 
 
 def is_candidate(row):
-    return row.get('data_input_kind')==KIND or row.get('diagnostic_kind')==KIND or row.get('data_expectation_mode')==MODE or any(key in row for key in FIELDS)
+    return row.get('data_input_kind')==KIND or row.get('diagnostic_kind')==KIND or row.get('data_expectation_mode')==MODE or any(key in row for key in (*FIELDS,*PACKING_FIELDS))
 
 
 def candidate_scope(row,*,require_compact=True):
@@ -198,6 +212,7 @@ def candidate_scope(row,*,require_compact=True):
             all(re.fullmatch('[0-9a-f]{64}',row.get(key,'') or '') and row[key]!='0'*64 for key in
                 ('kernel_readonly_compact_sha256','kernel_readonly_compact_manifest_sha256')),
             'authenticated compact candidate identity required')
+    packing_scope(row)
     return True
 
 
@@ -375,9 +390,148 @@ def decode_selected(raw,banner,identity,cycle,*,expected):
     return clipped,observed
 
 
+def packing_scope(row):
+    present=any(key in row for key in PACKING_FIELDS)
+    if not present:return None
+    from sha256_kat_device_profile import host_binding
+    data.require(all(key in row for key in PACKING_FIELDS) and row['kernel_readonly_packing_revision']==PACKING_SCHEMA and
+        row['kernel_readonly_external_choice']=='compact-v1' and row.get('source_head')==HISTORICAL_HEAD and
+        row.get('host_profile_source_head')==HISTORICAL_HEAD,'exact retained class2 compact-external revision required')
+    host=row['kernel_readonly_packing_host'];reuse=row['kernel_readonly_reused_variant']
+    data.require(type(host) is dict and set(host)=={'host_profile_source_head','host_profile_source_sha256'} and
+        host==host_binding(host.get('host_profile_source_head')),'new executing packing host identity differs')
+    keys={'template','template_profile_sha256','source_variant','source_report_sha256','source_image_sha256','cycle',
+          'operator_receipt','operator_receipt_sha256'}
+    data.require(type(reuse) is dict and set(reuse)==keys and re.fullmatch('[0-9a-f]{32}',reuse.get('cycle','')) and
+        all(re.fullmatch('[0-9a-f]{64}',reuse.get(key,'')) for key in
+            ('template_profile_sha256','source_report_sha256','source_image_sha256','operator_receipt_sha256')),
+        'closed retained materialization pins required')
+    return dict(choice='compact-v1',old_external_bytes=OLD_BYTES,new_external_bytes=CAPACITY,
+        external_sha256=row['kernel_readonly_compact_sha256'],encoding='N10DATA1-raw',addresses_or_flags_changed=False)
+
+
+def read_external(root,row):
+    if row.get('kernel_readonly_external_choice')=='compact-v1':
+        packing_scope(row)
+        raw,fields=read_compact(root,row)
+        data.require(fields=={key:row[key] for key in COMPACT_FIELDS},'compact external input differs')
+        return raw
+    return data.bounded_private_read(Path(root)/'carrier.data',64*1024*1024)
+
+
+def reuse_metadata(generic,original,operator,reuse,template_report_sha256):
+    data.require(generic.get('source_head')==generic.get('host_profile_source_head')==HISTORICAL_HEAD and
+        generic.get('data_input_kind')==KIND and generic.get('image_expectation_patched') is False,
+        'frozen generic e49 candidate required')
+    cycle=reuse['cycle']
+    expected=dict(generic,auto_cycle_variant=True,auto_cycle_token=cycle,auto_cycle_template=reuse['template'],
+        auto_cycle_template_report_sha256=template_report_sha256,auto_cycle_template_image_sha256=generic['image_sha256'],
+        image_sha256=reuse['source_image_sha256'],image_expectation_patched=True)
+    data.require(original==expected,'retained materialization report differs outside original patches')
+    data.require(operator.get('schema')=='v105-offline-preparation-operator-receipt-v1' and
+        operator.get('status')=='stopped_on_plan_prepare_failure' and operator.get('source_head')==HISTORICAL_HEAD and
+        operator.get('template',{}).get('exit_code')==0 and operator['template'].get('invocation_count')==1 and
+        operator['template'].get('path')==reuse['template'] and operator['template'].get('build_result_sha256')==template_report_sha256 and
+        operator.get('plan',{}).get('exit_code')==1 and operator['plan'].get('invocation_count')==1 and
+        operator['plan'].get('exact_failure')=='Prototype exceeds actual boot partition' and
+        operator['plan'].get('plan_json_exists') is False and operator['plan'].get('partial_cycle_packages_exist') is False,
+        'exact unfinished packing failure authority required')
+    return expected
+
+
+def authenticate_reuse(reuse):
+    from sha256_kat_device_profile import private,read,sha,validate_template
+    template=private(reuse['template']);source=private(reuse['source_variant']);receipt=private(reuse['operator_receipt'])
+    data.require(source.name=='kernel-build' and source.parent.name=='cycle-01' and
+        not (source.parent.parent/'plan.json').exists() and not (source.parent/'boot.img').exists() and
+        not (source.parent/'packages').exists(),'only unfinished original packing may resume')
+    data.require(sha(template/'device-profile.json')==reuse['template_profile_sha256'] and
+        sha(source/'build-result.json')==reuse['source_report_sha256'] and sha(receipt)==reuse['operator_receipt_sha256'],
+        'reviewed frozen template/report/operator pins differ')
+    validate_template(template)
+    generic=read(template/'build-result.json');original=read(source/'build-result.json');operator=read(receipt)
+    original_root=Path(operator['plan']['output_directory'])
+    if not original_root.is_absolute():original_root=data.HERE.parents[1]/original_root
+    data.require(private(original_root)==source.parent.parent,'failed plan origin path differs')
+    reuse_metadata(generic,original,operator,reuse,sha(template/'build-result.json'))
+    data.require(sha(source/'Image')==reuse['source_image_sha256'] and
+        sha(source/'handoff.config')==original['effective_config_sha256'],'already-materialized Image/config changed')
+    event('authenticate_completed_materialization',materialized_Image_hashes=1,materialize_calls=0,repatch_calls=0,
+        note='Template validation keeps its existing intrinsic I/O; no expected patched Image is reconstructed')
+    return original
+
+
+def validate_resumed_variant(root,token,template=None):
+    from sha256_kat_device_profile import private,read,sha
+    root=private(root);report=read(root/'build-result.json');candidate_scope(report)
+    reuse=report['kernel_readonly_reused_variant']
+    data.require(token==reuse['cycle'] and (template is None or private(template)==private(reuse['template'])),
+        'resumed cycle/template binding differs')
+    original=authenticate_reuse(reuse)
+    expected=dict(original,**{key:report[key] for key in PACKING_FIELDS})
+    data.require(report==expected and sha(root/'Image')==reuse['source_image_sha256'] and
+        sha(root/'handoff.config')==original['effective_config_sha256'],'resumed wrapper changed immutable kernel/config/report')
+    fields=compact_fields(root,report)
+    data.require(fields=={key:report[key] for key in COMPACT_FIELDS},'resumed compact input changed')
+    return report
+
+
+def resume_pack(*,template,template_profile_sha256,materialized,materialized_report_sha256,materialized_image_sha256,
+    operator_receipt,operator_receipt_sha256,backup,twrp,mkbootimg,current_packages,output,host_source_head):
+    import shutil
+    from sha256_kat_device_profile import private,read,sha,host_binding,save,validate_plan
+    from prepare_linux_boot import prepare
+    from build_boot_test_packages import build
+    from stage_phase2 import verify_packages
+    template=private(template);materialized=private(materialized);output=private(output);backup=private(backup)
+    current_packages=private(current_packages)
+    data.require(not output.exists() and not output.is_relative_to(materialized.parent.parent) and
+        not output.is_relative_to(template) and not output.is_relative_to(materialized) and
+        not template.is_relative_to(output) and not materialized.is_relative_to(output),'fresh disjoint revision output required')
+    source=read(materialized/'build-result.json')
+    reuse=dict(template=str(template),template_profile_sha256=template_profile_sha256,source_variant=str(materialized),
+        source_report_sha256=materialized_report_sha256,source_image_sha256=materialized_image_sha256,
+        cycle=source.get('auto_cycle_token'),operator_receipt=str(private(operator_receipt)),operator_receipt_sha256=operator_receipt_sha256)
+    original=authenticate_reuse(reuse)
+    packing_host=host_binding(host_source_head)
+    records=verify_packages(current_packages);current=next(row for row in records if row['mode']=='diagnostic')
+    revision=dict(zip(PACKING_FIELDS,(PACKING_SCHEMA,'compact-v1',packing_host,reuse)))
+    report=dict(original,**revision);candidate_scope(report)
+    output.mkdir(parents=True);folder=output/'cycle-01';folder.mkdir();target=folder/'kernel-build';target.mkdir()
+    # Bit-identical copies only. No template creation, materialize(), patch_image(),
+    # derivation, compression, decoder, archive replay or original-directory write.
+    for name in ('Image','handoff.config','kernel-readonly.data','kernel-readonly-compact.json'):
+        shutil.copyfile(materialized/name,target/name)
+    save(target/'build-result.json',report)
+    boot=folder/'boot.img';prepare(backup,target,Path(twrp),Path(mkbootimg),boot,reuse['cycle'])
+    packages=folder/'packages';build(backup,boot,packages,current_packages)
+    generic=read(template/'build-result.json')
+    stage=dict(index=1,cycle=reuse['cycle'],kernel_build=str(target),image_sha256=original['image_sha256'],
+        build_result_sha256=sha(target/'build-result.json'),packages=str(packages),package_result_sha256=sha(packages/'package-result.json'))
+    plan=dict(schema=1,kind='note10-bounded-auto-cycle',device_profile=generic['device_profile'],kernel_build=str(template),backup=str(backup),
+        backup_manifest_sha256=sha(backup/'backup-manifest.json'),build_result_sha256=sha(template/'build-result.json'),
+        image_sha256=generic['image_sha256'],identity=generic['build_evidence_id'],current_packages=str(current_packages),
+        current_package_result_sha256=sha(current_packages/'package-result.json'),reference_twrp=str(Path(twrp).resolve()),
+        mkbootimg=str(Path(mkbootimg).resolve()),minimum_battery=10,return_timeout_seconds=240,stages=[stage],
+        current_boot_payload_sha256=current['payload_sha256'],**revision)
+    save(output/'plan.json',plan);validate_plan(output/'plan.json',sha(output/'plan.json'))
+    event('resume_unfinished_packing',new_derivations=0,new_templates=0,new_materializations=0,new_repatches=0,
+        immutable_files_copied=4,BOOT_packings=1,package_pair_builds=1,device_queries=0)
+    return dict(plan=str(output/'plan.json'),plan_sha256=sha(output/'plan.json'),external_choice=packing_scope(report),
+        native_source_head=HISTORICAL_HEAD,original_profile_host_head=HISTORICAL_HEAD,executing_host=packing_host,
+        materialized_Image_sha256=materialized_image_sha256,IO_events=list(IO_EVENTS),device_operations=[],physical_scope_pending=True)
+
+
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__);sub=parser.add_subparsers(dest='command',required=True)
     d=sub.add_parser('derive');d.add_argument('--source-manifest',type=Path,required=True)
     d.add_argument('--source-manifest-sha256',required=True);d.add_argument('--output',type=Path,required=True)
-    args=parser.parse_args()
-    print(json.dumps(derive(args.source_manifest,args.source_manifest_sha256,args.output),indent=2))
+    r=sub.add_parser('resume-pack')
+    for key in ('template','materialized','operator-receipt','backup','twrp','mkbootimg','current-packages','output'):
+        r.add_argument('--'+key,type=Path,required=True)
+    for key in ('template-profile-sha256','materialized-report-sha256','materialized-image-sha256','operator-receipt-sha256','host-source-head'):
+        r.add_argument('--'+key,required=True)
+    args=vars(parser.parse_args());command=args.pop('command')
+    if command=='derive':result=derive(args['source_manifest'],args['source_manifest_sha256'],args['output'])
+    else:result=resume_pack(**args)
+    print(json.dumps(result,indent=2))

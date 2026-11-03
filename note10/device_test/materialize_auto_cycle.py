@@ -61,6 +61,9 @@ def materialize(template,output,token):
 
 def validate(root,token,template=None):
     root=Path(root);report=read(root/'build-result.json')
+    if 'kernel_readonly_packing_revision' in report:
+        from kernel_readonly_input import validate_resumed_variant
+        return validate_resumed_variant(root,token,template)
     if report.get('auto_cycle_variant') is not True or report.get('auto_cycle_token')!=token or not re.fullmatch('[0-9a-f]{32}',token or ''):
         raise ValueError('Cycle data binding differs')
     source=Path(report['auto_cycle_template']).resolve()

@@ -99,7 +99,7 @@ def raw_file(path, data):
                 ctime_ns=int(s.st_ctime_ns))
 
 
-def input_binding(root, result, image, lines, *, fdt_owned_route=False, native_memory_route=False, data_carrier_route=False, producing_sources=None):
+def input_binding(root, result, image, lines, *, fdt_owned_route=False, native_memory_route=False, data_carrier_route=False, producing_sources=None, readonly_origin=None):
     from builtin_init_route import cpio, elf_manifest, sha, builtin_cmdline_policy
     root = Path(root)
     require(result.get('builtin_init_route') is True, 'builtin route result required')
@@ -124,7 +124,7 @@ def input_binding(root, result, image, lines, *, fdt_owned_route=False, native_m
     require(sum(map(bool, (fdt_owned_route, native_memory_route, data_carrier_route))) <= 1, 'one selected route consumer required')
     if data_carrier_route:
         from linux_data_carrier import input_binding as data_binding
-        inputs.update(data_binding(result, lines, elf=elf, archive=archive, raw_inputs=inputs,producing_sources=producing_sources))
+        inputs.update(data_binding(result, lines, elf=elf, archive=archive, raw_inputs=inputs,producing_sources=producing_sources,readonly_origin=readonly_origin))
     if native_memory_route:
         from native_memory_observation import input_binding as native_binding
         inputs.update(native_binding(result,lines,elf=elf,archive=archive,raw_inputs=inputs))

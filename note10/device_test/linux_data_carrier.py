@@ -192,11 +192,11 @@ def relative_admission(result, lines, footprint, *, elf, archive, raw_inputs):
                 observed_runtime_base=False, absolute_FDT_extent_known=False, global_RAM_ownership=False)
 
 
-def input_binding(result, lines, *, elf, archive, raw_inputs, producing_sources=None):
+def input_binding(result, lines, *, elf, archive, raw_inputs, producing_sources=None, readonly_origin=None):
     if result.get('diagnostic_kind')=='kernel-readonly-candidate':
         from kernel_readonly_input import input_binding as readonly_binding
         require(producing_sources is None,'readonly candidate cannot use historical reuse adapter')
-        return readonly_binding(result,lines,elf=elf,archive=archive,raw_inputs=raw_inputs)
+        return readonly_binding(result,lines,elf=elf,archive=archive,raw_inputs=raw_inputs,historical_origin=readonly_origin)
     require(result.get('version') == 'v91' and result.get('diagnostic_kind') == KIND and
             result.get('data_carrier_stage') == STAGE and result.get('raw_input_binding') is False and
             result.get('data_expectation_mode') == MODE and type(result.get('data_expectation_slot')) is dict,
@@ -303,6 +303,13 @@ def data_cmdline(original, digest):
 
 
 def package_data(build, reference, cmdline, raw):
+    if build.get('kernel_readonly_external_choice')=='compact-v1':
+        from kernel_readonly_input import candidate_scope, CAPACITY
+        candidate_scope(build)
+        require(build.get('device_profile')==PROFILE and len(reference)==build['data_carrier_bytes']==10962166 and
+            len(raw)==CAPACITY and sha(raw)==build['kernel_readonly_compact_sha256'] and
+            build.get('image_expectation_patched') is True,'explicit compact external carrier binding differs')
+        return cmdline
     require(build.get('device_profile') == PROFILE and build['data_carrier_bytes'] == len(reference) == len(raw) and
             sha(raw) == build['data_carrier_sha256'], 'DATA fixed extent/accepted identity differs')
     if build.get('data_expectation_mode')=='kernel-readonly-candidate-v1':

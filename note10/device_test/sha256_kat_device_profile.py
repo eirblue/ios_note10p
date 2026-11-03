@@ -83,8 +83,12 @@ def physical_input_scope(result):
             'PC-only candidate cannot create a physical template/package')
 
 
-def raw_binding(root, expected_result, expected_source, *, producing_sources=None):
+def raw_binding(root, expected_result, expected_source, *, producing_sources=None, readonly_origin=None):
     root = private(root)
+    if readonly_origin is not None:
+        require(readonly_origin==expected_source==V105_CANDIDATE_ORIGIN_HEAD and producing_sources is None,'exact read-side candidate origin only')
+    else:
+        require(expected_source!=V105_CANDIDATE_ORIGIN_HEAD,'retained candidate cannot construct a new template')
     require(re.fullmatch('[0-9a-f]{64}', expected_result or '') and
             re.fullmatch('[0-9a-f]{40}', expected_source or ''), 'exact accepted result/source pins required')
     require(sha(root/'result.json') == expected_result, 'accepted CI result changed')
@@ -97,6 +101,8 @@ def raw_binding(root, expected_result, expected_source, *, producing_sources=Non
     affinity = result.get('version') == 'v78'
     fdt = result.get('version') == 'v81'
     kernel_ro = result.get('version')=='v105'
+    require(readonly_origin is None or kernel_ro and result.get('diagnostic_kind')=='kernel-readonly-candidate',
+            'retained read-side exception is candidate-only')
     data = result.get('version') in ('v88','v89','v90','v91','v105')
     native = result.get('version') == 'v82'
     builtin = result.get('version') in ('v72', 'v73', 'v78', 'v81', 'v82', 'v88', 'v89', 'v90', 'v91', 'v105')
@@ -163,7 +169,7 @@ def raw_binding(root, expected_result, expected_source, *, producing_sources=Non
     extra = {}
     if builtin:
         from builtin_init_profile import input_binding
-        extra = input_binding(root, result, image, lines, fdt_owned_route=fdt,native_memory_route=native,data_carrier_route=data,producing_sources=producing_sources)
+        extra = input_binding(root, result, image, lines, fdt_owned_route=fdt,native_memory_route=native,data_carrier_route=data,producing_sources=producing_sources,readonly_origin=readonly_origin)
     if affinity:
         from affinity_binding import input_binding as affinity_input_binding
         extra.update(affinity_input_binding(result, lines))
@@ -521,9 +527,70 @@ V104_PROFILE_ORIGIN_PINS = MappingProxyType({
 })
 
 
+V105_CANDIDATE_ORIGIN_HEAD = 'e49ccf7fe46eb92b32c0b425a2e4da5fe667f9b4'
+V105_CANDIDATE_ORIGIN_PINS = MappingProxyType({
+    "note10/device_test/affinity_binding.py": "6d5b16d54a803c95bdd391a38efbd2bac5ef36baffe199f86cd83f878bf10678",
+    "note10/device_test/auto_cycle.py": "f96796425bae2c1f1308ef4567edcd92b24eb0980ef3f6af2a1d44e6ccbf33a5",
+    "note10/device_test/build_boot_test_packages.py": "17b973f54185521be6685acb5e019f8bf8b5f10897d01c0167929c97859cddef",
+    "note10/device_test/build_kernel_readonly_input.py": "5391edfa477324dbdd5f4d9c6fb13deb5df8a66b2ed4df7d018213012b227000",
+    "note10/device_test/build_readonly_input_pc.py": "893698f6741fd178334777b4f96c98934d78b5a927fe4cf3d383d92e90557d9e",
+    "note10/device_test/builtin_init_profile.py": "97d8402ea4e351f6ccae24311fd85e5d27d92d235806449a11ddbb01ab794352",
+    "note10/device_test/builtin_init_route.py": "46b100dc95f11e344c11b8cb3fba5d34d17b2884385923426a42246699fda43d",
+    "note10/device_test/carrier_lzma.c": "e204732754f15929f7134885ec2740e1ed26f0291dd64c7df7957a4aee7b987a",
+    "note10/device_test/carrier_lzma.h": "6790aa17da94025e0bab175377573edb8df3f503c8cde86f8c919e33ee742974",
+    "note10/device_test/current_data_reuse.py": "15c7a5a55e22f4445c216904769d7ba9b6367f792122e5b936305c95ae031129",
+    "note10/device_test/early_fdt_binding.py": "d4f7099fb45eca31c83c9acd9fbfe0cd5c7ccc5c271c18180e3672e22f9a6b78",
+    "note10/device_test/kernel_readonly_input.h": "4aa99ff2ab756b854174eb2519af96e79669f82114293790a538ddd3025298ea",
+    "note10/device_test/kernel_readonly_input.py": "2e3856095d7cffab144697f6a835945e5181c37335bb2032fa52be6ed18c0812",
+    "note10/device_test/kernel_readonly_input_fixture.c": "6300f13ba284b4f42614a4c6cda8f09c6e6671e88d6e524ec24dacd3a7ab70e0",
+    "note10/device_test/linux_data_carrier.c": "ab69b1c91364b8ad6643fe3c5065a9e8724f9acccd22f38049e6badf90a9484b",
+    "note10/device_test/linux_data_carrier.py": "11ccb1033110df0bce0f896fe8e96f522724df0256d3aa963d36112b8df6afb5",
+    "note10/device_test/linux_data_carrier_composition.c": "2eb666597983d3a2dfb0a4f98da26dc02dff287db49d39756ada6edc90e0c667",
+    "note10/device_test/linux_data_carrier_fixture.c": "6b1b0e14184582c734a3154eeef6c0e2736fd1b8ef3491881b7decaacb5ecbe4",
+    "note10/device_test/linux_data_compare_evidence.h": "3383823cf1fd56f688ad9d6823d965fdda270a08acede17f6df8d87fa6199438",
+    "note10/device_test/linux_data_compare_evidence_fixture.c": "45a0cdfd8d4bd8df5ffbbb0e370cd05f768d522e96208881a7f7a02ee02fadc3",
+    "note10/device_test/linux_data_early_prefix.h": "60fb29d56be78212e04cc164938db4a25296fdea5250e372824b317127aaeb98",
+    "note10/device_test/linux_data_early_prefix_fixture.c": "b058ccfa33fccadfa2547986a724b21dd7de0b781e003cd3ca1c71fddfe36f09",
+    "note10/device_test/linux_data_growth.h": "640ae63bd927d205ad8bc489c4c7b25935f1c4311332dce5d10821acf3ac0746",
+    "note10/device_test/linux_data_growth_fixture.c": "d567edfc28efc1b258eff93a72dda94d8f24af00297b315b1f7d371c7d77066a",
+    "note10/device_test/linux_data_input_probe_fixture.c": "c7192b0515eb7de9526291913ef97737207844a45d266a4e1287437f49b3e0b4",
+    "note10/device_test/linux_data_input_range.h": "c53f208c886ba21af0f22d266a1edb1de0f42a3e40d5a68080a41fcf775d4dac",
+    "note10/device_test/linux_data_input_range_fixture.c": "d3c7695b319963b9d6de679a5eadaf107c4dc667e610b892f2953a390854ecd5",
+    "note10/device_test/materialize_auto_cycle.py": "3821c1069c5b0c8cef3ae19702525a5449f2763944da0affac00409b7219586e",
+    "note10/device_test/native_memory_observation.py": "f4acd0f310989bfcd1b0c2039fef6e429e8ec4d4f41ebdb94fc483538fa26663",
+    "note10/device_test/prepare_linux_boot.py": "3543131327e60553ef8708916cdb831aaa727230e664169a580cd018c3bac20f",
+    "note10/device_test/readonly_input_pc.h": "01b18e5fddcd12fba45190baa337b47c3309f54cc7a448cd6d72209c5ba8a3f0",
+    "note10/device_test/readonly_input_pc.py": "d7125058dc85a57eb4283fccf87bcb6af96c26de1363f81d1acb0999b94f1fc7",
+    "note10/device_test/readonly_input_pc_fixture.c": "99f0e7eb9240b5c08314993a14dfcd9a532df0e24158679cdbed8b0c3c752730",
+    "note10/device_test/sha256_kat_device_profile.py": "4193a30c66c8a9be97a7c4524ef20d9dc300c4ff3e764559966a3ffe37b4c4e9",
+    "note10/device_test/sha256_stream_state.py": "55de2735fb830ae8047bb4a8fa74325f51b766b1e885c482dbbc5ebabe3ea437",
+    "note10/device_test/sha256_stream_vectors.json": "5c379d1ef41a40b9a1262c985476e9dc0ba88dae7b1586f949bbe79686f2165f",
+    "note10/device_test/stage_phase2.py": "fd95f75a0c204de6c66464dc2e25094c1f41d09ade11e21716155d0089e789ac",
+    "note10/device_test/test_affinity_binding.py": "bf602887c4437e0096473392789da33e3ef502297d8c060faf7d9da9ecd3eb89",
+    "note10/device_test/test_affinity_ci_context.py": "71aad30ab105a45efe2703fd7b222233836d6e7514560834daa71bfdd351dea9",
+    "note10/device_test/test_builtin_init_route.py": "9fa63dd55114472a748062447dd95c17bf4d4d7e743117f69f0bb6a7aca6ea42",
+    "note10/device_test/test_current_data_reuse.py": "c1a868d4f9669539aee3e4fca4868118db37071467325a85d73c279b2f1d29de",
+    "note10/device_test/test_early_fdt_binding.py": "2444d3d20b7cc42e705cb89c1d04de72599f7da2a5d1b9282636f3b9990ce1fa",
+    "note10/device_test/test_early_fdt_host_route.py": "75992eb3e8b1228d0ae3916d47306f0329b7947cb0dfae234ec25c1e737fef6a",
+    "note10/device_test/test_linux_data_carrier.py": "550344e818b42f8147ea1f688929feda322c68173f79f6e72850053dbc2e1ca7",
+    "note10/device_test/test_native_memory_observation.py": "d34e94fd5d964004c42dedd172ec07bd62826b675dcc9f4925ab4ac06c460599",
+    "note10/device_test/test_partition_gate_evidence.py": "b7dd52aa5c7747489a2713f805dbe15a6318f3d3776a8043700549e9383bcc72",
+    "note10/device_test/test_sha256_kat_device_profile.py": "c48400d5573695d217101806b8481e39aec38fd5382e64b85f999b4cee42c498",
+    "note10/device_test/test_sha256_stream_state.py": "088881f92037a9895b7947eb44692f51ecba1eb602a02dacc02ff3b94a836db8",
+    "note10/device_test/test_v100_carrier_input_probe.py": "f8e37cb2da1fc1efda5582079bb619d8853565d892a589872d0699277e8c4489",
+    "note10/device_test/test_v101_live_input_range.py": "e4424b6128a18f4099b31ddc6dcf16ba6256749ba2a87f8bd565b68a1ef68183",
+    "note10/device_test/test_v102_input_lifetime.py": "29cdae5c4b8ace788ad84f529700d753bcb19c9d4a34697bddf8ca7dfa80bed1",
+    "note10/device_test/test_v103_readonly_input_pc.py": "cdce146aed40d9526eae04259e39896f629248f6b395ad8ceeec341cae5be9c5",
+    "note10/device_test/test_v104_growth_region.py": "89ca671ca695b083ccf9cb58c6f474acfeadb9a67ff9747d640cc533dde40e7d",
+    "note10/device_test/test_v105_kernel_readonly.py": "7c1cccbdda3e8df612a0fa7d52870e74d750385b85cff7b2965d236177bb23dd",
+    "note10/device_test/test_v99_carrier_compare_evidence.py": "2b45c21197709706d3f3ffc23e1428084d5d50a93a1d9b5bd22c2693124cf20c",
+    "note10/device_test/test_v99_host_profile_origin.py": "fb4a1c349ca298b4f18ba64e0692c7a93e9f0877b2f7a7ec22fa2c8f29ac219a"
+})
+
+
 def host_binding(source_head):
     require(re.fullmatch('[0-9a-f]{40}', source_head or ''), 'exact host-profile publication source pin required')
-    require(source_head not in (V97_PROFILE_ORIGIN_HEAD, V99_PROFILE_ORIGIN_HEAD, V100_PROFILE_ORIGIN_HEAD, V101_PROFILE_ORIGIN_HEAD, V102_PROFILE_ORIGIN_HEAD, V104_PROFILE_ORIGIN_HEAD, 'e32ec501551b74b4cca5618ea25245f012656f29'),
+    require(source_head not in (V97_PROFILE_ORIGIN_HEAD, V99_PROFILE_ORIGIN_HEAD, V100_PROFILE_ORIGIN_HEAD, V101_PROFILE_ORIGIN_HEAD, V102_PROFILE_ORIGIN_HEAD, V104_PROFILE_ORIGIN_HEAD, V105_CANDIDATE_ORIGIN_HEAD, 'e32ec501551b74b4cca5618ea25245f012656f29'),
             'retained host origin cannot construct current host')
     pins = V71_HOST_PINS if source_head == V71_HOST_HEAD else V72_HOST_PINS if source_head == V72_HOST_HEAD else V73_HOST_PINS if source_head == V73_HOST_HEAD else V78_HOST_PINS if source_head == V78_HOST_HEAD else V81_IMAGE_HOST_PINS if source_head == V81_IMAGE_HEAD else V81_HOST_PINS if source_head == V81_HOST_HEAD else V82_HOST_PINS if source_head == V82_HOST_HEAD else V88_HOST_PINS if source_head == V88_HOST_HEAD else V89_HOST_PINS if source_head == V89_HOST_HEAD else V90_HOST_PINS if source_head == V90_HOST_HEAD else V91_HOST_PINS if source_head == V91_HOST_HEAD else {
         'note10/device_test/'+name: sha(Path(__file__).parent/name)
@@ -542,7 +609,7 @@ def host_binding(source_head):
                       'readonly_input_pc_fixture.c','test_v103_readonly_input_pc.py',
                       'linux_data_growth.h','linux_data_growth_fixture.c','test_v104_growth_region.py',
                       'kernel_readonly_input.py','kernel_readonly_input.h','build_kernel_readonly_input.py',
-                      'kernel_readonly_input_fixture.c','test_v105_kernel_readonly.py')}
+                      'kernel_readonly_input_fixture.c','test_v105_kernel_readonly.py','test_v105_packing_rev1.py')}
     return dict(host_profile_source_head=source_head, host_profile_source_sha256=dict(pins))
 
 
@@ -605,6 +672,12 @@ def host_profile_origin(binding):
                 'kernel_readonly_schema','kernel_readonly_slot','kernel_readonly_compact_sha256',
                 'readonly_input_schema','readonly_input_slot','readonly_pc_contract')),'exact retained normal v104 origin required')
         pins = V104_PROFILE_ORIGIN_PINS
+    elif head == V105_CANDIDATE_ORIGIN_HEAD:
+        from kernel_readonly_input import candidate_scope
+        require(binding.get('device_profile')==DATA_PROFILE and binding.get('source_head')==V105_CANDIDATE_ORIGIN_HEAD,
+                'exact retained candidate native/profile origin required')
+        candidate_scope(binding)
+        pins=V105_CANDIDATE_ORIGIN_PINS
     else:
         pins = host_binding(head)['host_profile_source_sha256']
     require(binding.get('host_profile_source_sha256') == dict(pins), 'host-profile code identity differs')
@@ -796,11 +869,13 @@ def validate_template(root):
     binding = read(root/'device-profile.json')
     physical_input_scope(binding)
     require(selected(binding), 'closed KAT profile required')
+    origin=host_profile_origin(binding)
+    readonly_origin=V105_CANDIDATE_ORIGIN_HEAD if binding.get('host_profile_source_head')==V105_CANDIDATE_ORIGIN_HEAD else None
     context=None
     if 'data_current_binding_sha256' in binding or 'data_host_experiment' in binding:
         from current_data_reuse import load_record
         context=load_record(root,binding)
-    measured = raw_binding(root, binding['accepted_result_sha256'], binding['source_head'],producing_sources=context)
+    measured = raw_binding(root, binding['accepted_result_sha256'], binding['source_head'],producing_sources=context,readonly_origin=readonly_origin)
     if binding['device_profile'] == DATA_PROFILE:
         from linux_data_carrier import carrier_fields
         measured.update(carrier_fields(root))
@@ -811,7 +886,7 @@ def validate_template(root):
         context.check_carrier(measured)
         measured.update(data_current_binding_sha256=binding['data_current_binding_sha256'],data_host_experiment=binding['data_host_experiment'])
     measured.update(root_receipt_binding(root, root/'image-root-receipt.json', binding['image_root_receipt_sha256'], measured))
-    measured.update(host_profile_origin(binding))
+    measured.update(origin)
     require(binding == measured and sha(root/'handoff.config') == binding['effective_config_sha256'],
             'template profile/config changed')
     report = read(root/'build-result.json')
@@ -858,6 +933,8 @@ def fields(row):
         keys=(*keys,*GROWTH_FIELDS)
     from kernel_readonly_input import FIELDS as kernel_fields, is_candidate
     if is_candidate(row):keys=(*keys,*kernel_fields)
+    from kernel_readonly_input import PACKING_FIELDS
+    if any(key in row for key in PACKING_FIELDS):keys=(*keys,*PACKING_FIELDS)
     return {key: row[key] for key in keys}
 
 
@@ -1028,7 +1105,9 @@ def validate_plan(path, expected):
     path = private(path)
     require(re.fullmatch('[0-9a-f]{64}', expected or '') and sha(path) == expected, 'reviewed KAT plan SHA required')
     plan = read(path)
-    require(set(plan) == (PLAN_KEYS | {'current_boot_payload_sha256'} if plan.get('device_profile') in (BUILTIN_PROFILE, STREAM_PROFILE, AFFINITY_PROFILE, FDT_PROFILE, NATIVE_PROFILE, DATA_PROFILE) else PLAN_KEYS) and selected(plan) and plan.get('kind') == 'note10-bounded-auto-cycle' and
+    from kernel_readonly_input import PACKING_FIELDS
+    packing_keys=set(PACKING_FIELDS) if any(key in plan for key in PACKING_FIELDS) else set()
+    require(set(plan)-packing_keys == (PLAN_KEYS | {'current_boot_payload_sha256'} if plan.get('device_profile') in (BUILTIN_PROFILE, STREAM_PROFILE, AFFINITY_PROFILE, FDT_PROFILE, NATIVE_PROFILE, DATA_PROFILE) else PLAN_KEYS) and selected(plan) and plan.get('kind') == 'note10-bounded-auto-cycle' and
             type(plan.get('schema')) is int and plan['schema'] == 1 and
             type(plan.get('minimum_battery')) is int and type(plan.get('return_timeout_seconds')) is int and
             plan.get('minimum_battery') == 10 and plan.get('return_timeout_seconds') == 240 and
@@ -1041,6 +1120,8 @@ def validate_plan(path, expected):
     item = plan['stages'][0]
     require(set(item) == STAGE_KEYS and type(item.get('index')) is int, 'closed KAT stage schema required')
     bound = variant(private(item['kernel_build']), item['cycle'])
+    require(all(plan.get(key)==bound.get(key) for key in PACKING_FIELDS) and
+        bool(packing_keys)==any(key in bound for key in PACKING_FIELDS),'plan/resumed host packing binding differs')
     require(item['index'] == 1 and bound['auto_cycle_template'] == str(root) and
             sha(Path(item['kernel_build'])/'build-result.json') == item['build_result_sha256'] and
             bound['image_sha256'] == item['image_sha256'], 'KAT stage variant changed')
@@ -1110,7 +1191,14 @@ def validate_plan(path, expected):
                        recovery_header['ramdisk_file_offset']+recovery_header['ramdisk_size']]
     actual_ramdisk = payload[header['ramdisk_file_offset']:header['ramdisk_file_offset']+header['ramdisk_size']]
     if plan['device_profile'] == DATA_PROFILE:
-        require(len(actual_ramdisk) == len(ramdisk) == pair['data_carrier_bytes'] and hashlib.sha256(actual_ramdisk).hexdigest() == pair['data_carrier_sha256'], 'actual fixed DATA carrier differs')
+        if pair.get('kernel_readonly_external_choice')=='compact-v1':
+            from kernel_readonly_input import packing_scope, CAPACITY, OLD_BYTES
+            packing_scope(pair)
+            require(len(ramdisk)==pair['data_carrier_bytes']==OLD_BYTES and len(actual_ramdisk)==CAPACITY and
+                hashlib.sha256(actual_ramdisk).hexdigest()==pair['kernel_readonly_compact_sha256'],
+                'actual explicit compact external carrier differs')
+        else:
+            require(len(actual_ramdisk) == len(ramdisk) == pair['data_carrier_bytes'] and hashlib.sha256(actual_ramdisk).hexdigest() == pair['data_carrier_sha256'], 'actual fixed DATA carrier differs')
     else:
         require(ramdisk and actual_ramdisk == ramdisk, 'actual external TWRP ramdisk differs')
     end, trailer = header['second_file_offset'], b'SEANDROIDENFORCE'
