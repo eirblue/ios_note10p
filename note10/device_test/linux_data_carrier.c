@@ -17,6 +17,32 @@
 #define n10_data_clear(p,n) memzero_explicit(p,n)
 #endif
 #include "carrier_lzma.h"
+#ifdef N10_DATA_COMPARE_EVIDENCE
+#define N10_DATA_EARLY_EVIDENCE 1
+#ifndef N10_DATA_HOST_TEST
+#include <linux/memblock.h>
+#ifdef CONFIG_HAVE_MEMBLOCK
+#define n10_data_region_memory(p,n) memblock_is_region_memory((phys_addr_t)(p),(phys_addr_t)(n))
+#define n10_data_map_memory(p) memblock_is_map_memory((phys_addr_t)(p))
+#else
+#define n10_data_region_memory(p,n) 0
+#define n10_data_map_memory(p) 0
+#endif
+#endif
+#endif
+#ifdef N10_DATA_EARLY_EVIDENCE
+#define N10_EARLY_CLEAR(p,n) n10_data_clear(p,n)
+#ifndef N10_EARLY_COPY8
+#define N10_EARLY_COPY8(p,s) memcpy(p,s,8)
+#define N10_EARLY_LOCAL_COPY 1
+#endif
+#include "linux_data_early_prefix.h"
+#ifdef N10_EARLY_LOCAL_COPY
+#undef N10_EARLY_COPY8
+#undef N10_EARLY_LOCAL_COPY
+#endif
+#undef N10_EARLY_CLEAR
+#endif
 
 enum n10_data_reason {
     N10_DATA_PARAM_MISSING = 1u << 0, N10_DATA_PARAM_INVALID = 1u << 1,
@@ -27,7 +53,7 @@ enum n10_data_reason {
     N10_DATA_EXPECT_UNPATCHED = 1u << 10, N10_DATA_EXPECT_INVALID = 1u << 11, N10_DATA_EXTENT_INVALID = 1u << 12
 };
 
-#ifdef N10_DATA_IMAGE_EXPECTATION
+#if defined(N10_DATA_IMAGE_EXPECTATION) && !defined(N10_DATA_EARLY_CAPTURE_ONLY)
 struct n10_expectation_slot {
     unsigned char magic[16], version[4], bytes[4], expectation[32], logical[8];
 };
@@ -64,8 +90,14 @@ static struct {
     size_t length;
     unsigned int captures, parameters, invalid, emitted, reasons;
     unsigned char expected[32];
+#ifdef N10_DATA_EARLY_EVIDENCE
+    struct n10_early_prefix early;
+#endif
 } n10_data __used;
 _Static_assert(sizeof(n10_data) <= 128, "bounded permanent DATA metadata");
+#ifdef N10_DATA_EARLY_EVIDENCE
+_Static_assert(sizeof(n10_data)==104,"exact permanent early-flag DATA metadata");
+#endif
 #ifdef N10_DATA_CONTIGUOUS
 _Static_assert(sizeof(n10_data)+sizeof(n10_owned) <= 128, "combined permanent DATA/owned metadata");
 #endif
@@ -100,7 +132,19 @@ void __init n10_data_capture(unsigned long start, unsigned long end)
 {
     unsigned long length;
     uint64_t physical;
-    if (n10_data.captures++) { n10_data.invalid = 1; n10_data.reasons |= N10_DATA_CAPTURE_REPEAT; return; }
+#ifdef N10_DATA_EARLY_EVIDENCE
+    int ram_and_map;
+#endif
+    if (n10_data.captures++) {
+        n10_data.invalid = 1; n10_data.reasons |= N10_DATA_CAPTURE_REPEAT;
+#ifdef N10_DATA_EARLY_EVIDENCE
+        n10_early_unavailable(&n10_data.early,N10_EARLY_REPEAT);
+#endif
+        return;
+    }
+#ifdef N10_DATA_EARLY_EVIDENCE
+    n10_early_unavailable(&n10_data.early,N10_EARLY_CAPTURE_INVALID);
+#endif
     if (!start || end <= start) { n10_data.invalid = 1; n10_data.reasons |= N10_DATA_CAPTURE_INVALID; return; }
     length = end-start;
     if (length <= 128 || length > N10_LZMA_MAX_BYTES ||
@@ -114,8 +158,20 @@ void __init n10_data_capture(unsigned long start, unsigned long end)
     }
     n10_data.input = (const unsigned char *)start;
     n10_data.start = start; n10_data.end = end; n10_data.length = length;
+#ifdef N10_DATA_EARLY_EVIDENCE
+    if(READ_ONCE(initrd_start)!=start || READ_ONCE(initrd_end)!=end) {
+        n10_early_unavailable(&n10_data.early,N10_EARLY_GLOBAL); return;
+    }
+    /* At the existing post-paging hook only. No late memblock query, mutation
+     * or ownership claim. Full containment identifies one memory region;
+     * the second read-only predicate rejects its NOMAP flag. */
+    ram_and_map=n10_data_region_memory(physical,length)==1 && n10_data_map_memory(physical)==1;
+    n10_early_observe(&n10_data.early,n10_data.input,n10_data.captures,
+        READ_ONCE(initrd_start)==start && READ_ONCE(initrd_end)==end,ram_and_map);
+#endif
 }
 
+#ifndef N10_DATA_EARLY_CAPTURE_ONLY
 static uint64_t n10_data_le(const unsigned char *p, unsigned int bytes)
 {
     uint64_t value = 0;
@@ -202,10 +258,11 @@ struct n10_data_outcome {
 #ifdef N10_DATA_COMPARE_EVIDENCE
     struct n10_data_compare_evidence comparison;
     struct n10_data_range range;
+    struct n10_early_prefix early;
 #endif
 };
 #ifdef N10_DATA_COMPARE_EVIDENCE
-_Static_assert(sizeof(struct n10_data_outcome) == 248, "exact temporary normal DATA outcome");
+_Static_assert(sizeof(struct n10_data_outcome) == 264, "exact temporary normal DATA outcome");
 #endif
 
 static void n10_data_run(struct n10_data_outcome *out)
@@ -221,6 +278,7 @@ static void n10_data_run(struct n10_data_outcome *out)
     memset(out, 0, sizeof(*out)); out->status = "unavailable";
 #ifdef N10_DATA_COMPARE_EVIDENCE
     n10_range_unavailable(&out->range,N10_RANGE_UNREACHED);
+    n10_early_snapshot(&out->early,&n10_data.early);
 #endif
     out->reasons = n10_data.reasons;
 #ifndef N10_DATA_IMAGE_EXPECTATION
@@ -353,9 +411,15 @@ static int n10_data_emit(void)
     if (count)
         pr_info("N10DATARANGE1 %s checksum=%08x\n",frame,n10_frame_checksum(frame,count));
     n10_range_clear(&outcome.range);
+    count=n10_early_format(&outcome.early,frame,sizeof(frame),N10_SHA256_KAT_ID,
+        (const char *)n10_cycle,outcome.captures);
+    if(count)
+        pr_info("N10DATAEARLY1 %s checksum=%08x\n",frame,n10_frame_checksum(frame,count));
+    n10_early_clear(&outcome.early);
     n10_data_clear(frame,sizeof(frame));
 #endif
     n10_data_clear(&outcome,sizeof(outcome)); n10_data_clear(digest,sizeof(digest));
     return 0;
 }
 #endif
+#endif /* !N10_DATA_EARLY_CAPTURE_ONLY */

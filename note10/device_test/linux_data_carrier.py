@@ -14,6 +14,8 @@ COMPARE_SCHEMA_V1 = 'n10-data-compare-v1'
 COMPARE_SCHEMA = 'n10-data-compare-v2'
 RANGE_SCHEMA = 'n10-data-range-v1'
 RANGE_SOURCES = ('linux_data_input_range.h',)
+EARLY_SCHEMA = 'n10-data-early-prefix-v1'
+EARLY_SOURCES = ('linux_data_early_prefix.h',)
 COMPARE_SOURCES = ('linux_data_compare_evidence.h',)
 BOOT_PAGE = 2048
 SLOT_MAGIC = b'N10DATAEXPECTV2!'
@@ -66,7 +68,7 @@ def install(source, identity):
     result = baseline_install(source, identity)
     replacements = {'arch/arm64/kernel/setup.c': setup,
         'drivers/misc/note10_sha256_kat.c': (HERE/'linux_data_carrier_composition.c').read_bytes(),
-        **{'drivers/misc/'+n: (HERE/n).read_bytes() for n in ('linux_data_carrier.c', 'carrier_lzma.c', 'carrier_lzma.h', *COMPARE_SOURCES, *RANGE_SOURCES)}}
+        **{'drivers/misc/'+n: (HERE/n).read_bytes() for n in ('linux_data_carrier.c', 'carrier_lzma.c', 'carrier_lzma.h', *COMPARE_SOURCES, *RANGE_SOURCES, *EARLY_SOURCES)}}
     config = source/'drivers/misc/note10_sha256_kat.Kconfig'
     config.write_bytes(config.read_bytes()+b'''
 config NOTE10_DATA_CARRIER
@@ -190,18 +192,20 @@ def input_binding(result, lines, *, elf, archive, raw_inputs, producing_sources=
             'closed new DATA Image required')
     if producing_sources is None:
         require(result.get('data_compare_schema') == COMPARE_SCHEMA, 'new DATA comparison feature declaration required')
+        require(result.get('data_early_prefix_schema') == EARLY_SCHEMA, 'new DATA early prefix declaration required')
         require(result.get('data_input_range_schema') == RANGE_SCHEMA and
                 type(result.get('data_linked_kernel_bytes')) is int and result['data_linked_kernel_bytes']>0 and
                 result['data_linked_kernel_bytes'] == result.get('data_footprint',{}).get('linked_kernel_bytes'),
                 'new DATA live range/accepted linked span declaration required')
         require(not {'CONFIG_NOTE10_OWNED_CONTIGUOUS_STAGING=y', 'CONFIG_NOTE10_CURRENT_OWNED_STAGING=y'} & set(lines),
                 'comparison DATA forbids early owned reservation')
-        for name in (*SOURCES, *COMPARE_SOURCES, *RANGE_SOURCES):
+        for name in (*SOURCES, *COMPARE_SOURCES, *RANGE_SOURCES, *EARLY_SOURCES):
             require(result.get('source_sha256', {}).get('note10/device_test/'+name) == sha((HERE/name).read_bytes()),
                     'DATA Image source differs: '+name)
     else:
         from current_data_reuse import require_context
         require('data_compare_schema' not in result, 'historical reuse cannot declare new comparison feature')
+        require('data_early_prefix_schema' not in result, 'historical reuse cannot declare early prefix feature')
         require(not any(key in result for key in ('data_input_range_schema','data_linked_kernel_bytes')),
                 'historical reuse cannot declare live range feature')
         require_context(producing_sources).verify_sources(result,SOURCES)
@@ -212,6 +216,7 @@ def input_binding(result, lines, *, elf, archive, raw_inputs, producing_sources=
     if producing_sources is None:
         bound['data_compare_schema'] = COMPARE_SCHEMA
         bound.update(data_input_range_schema=RANGE_SCHEMA,data_linked_kernel_bytes=result['data_linked_kernel_bytes'])
+        bound['data_early_prefix_schema']=EARLY_SCHEMA
     return bound
 
 
@@ -500,6 +505,61 @@ def decode_range(text, identity, cycle, result, *, expected=None):
                 global_RAM_ownership=False,hardware_translation_attested=False,xnu_executed=False)
 
 
+def expected_early_schema(expected):
+    if expected is None:
+        return EARLY_SCHEMA
+    if 'data_early_prefix_schema' in expected:
+        from sha256_kat_device_profile import V97_PROFILE_ORIGIN_HEAD, V99_PROFILE_ORIGIN_HEAD, V100_PROFILE_ORIGIN_HEAD, V101_PROFILE_ORIGIN_HEAD
+        retired=(V97_PROFILE_ORIGIN_HEAD,V99_PROFILE_ORIGIN_HEAD,V100_PROFILE_ORIGIN_HEAD,V101_PROFILE_ORIGIN_HEAD)
+        require(expected['data_early_prefix_schema']==EARLY_SCHEMA and
+                expected.get('data_compare_schema')==COMPARE_SCHEMA and expected.get('data_input_range_schema')==RANGE_SCHEMA and
+                expected.get('source_head') not in retired and expected.get('host_profile_source_head') not in retired,
+                'early prefix producer declaration differs')
+        return EARLY_SCHEMA
+    from sha256_kat_device_profile import host_profile_origin, V97_PROFILE_ORIGIN_HEAD, V99_PROFILE_ORIGIN_HEAD, V100_PROFILE_ORIGIN_HEAD, V101_PROFILE_ORIGIN_HEAD
+    host_profile_origin(expected)
+    require(expected.get('host_profile_source_head') in
+            (V97_PROFILE_ORIGIN_HEAD,V99_PROFILE_ORIGIN_HEAD,V100_PROFILE_ORIGIN_HEAD,V101_PROFILE_ORIGIN_HEAD),
+            'new DATA early prefix declaration missing')
+    return None
+
+
+def decode_early(text,identity,cycle,result,*,expected=None):
+    from decode_reservation import checksum
+    schema=expected_early_schema(expected)
+    all_lines=text.splitlines()
+    lines=[line for line in all_lines if 'N10DATAEARLY' in line]
+    if schema is None:
+        require(not lines,'retained producer cannot claim early prefix evidence')
+        return dict(schema=None,state='unsupported',sampled=False)
+    require(len(lines)==1,'one declared early prefix companion required')
+    match=re.search(r'N10BOOTLINK2 boot=([0-9a-f]{32}) N10DATAEARLY1 ([^\r\n\x00]{1,255}) checksum=([0-9a-f]{8})$',lines[0])
+    require(match is not None and match[1]==result['boot_identity'] and match[1]!='0'*32 and
+            checksum(match[2].encode('ascii'))==int(match[3],16),'early prefix boot/checksum differs')
+    pairs=[part.split('=') for part in match[2].split(' ')]
+    keys=('id','cycle','kind','source','phase','state','captures','sampled','magic_match','prefix_zero','reasons','ownership','executed')
+    require(all(len(part)==2 for part in pairs) and tuple(part[0] for part in pairs)==keys,'early prefix closed schema required')
+    row=dict(pairs)
+    require(row['id']==identity and row['cycle']==cycle and row['kind']=='early' and row['source']=='memblock-ram-map' and
+            row['phase']=='post_paging' and row['ownership']==row['executed']=='0','early prefix identity/nonclaim differs')
+    require(row['captures'] in ('0','1','2') and int(row['captures'])==result['captures'] and
+            re.fullmatch('[0-9a-f]{8}',row['reasons']) and int(row['reasons'],16)<=31,'early prefix captures/reasons differ')
+    prior=[line for line in all_lines if 'N10DATARANGE' in line]
+    require(len(prior)==1 and text.find(lines[0])>text.find(prior[0]),'early prefix order differs')
+    sampled=row['state']=='sampled'
+    if sampled:
+        require(row['sampled']=='1' and row['captures']=='1' and row['reasons']=='00000000' and
+                row['magic_match'] in ('0','1') and row['prefix_zero'] in ('0','1') and
+                not (row['magic_match']==row['prefix_zero']=='1'),'early prefix sampled fields differ')
+    else:
+        require(row['state']=='unavailable' and row['sampled']=='0' and row['magic_match']==row['prefix_zero']=='na' and
+                int(row['reasons'],16)>0,'early prefix unavailable fields differ')
+    return dict(schema=EARLY_SCHEMA,state=row['state'],phase='post_paging',sampled=sampled,
+                magic_match=row['magic_match']=='1' if sampled else None,
+                prefix_zero=row['prefix_zero']=='1' if sampled else None,reasons=int(row['reasons'],16),
+                captures=int(row['captures']),global_RAM_ownership=False,hardware_mapping_attested=False)
+
+
 def require_functional(result, *, report_phase=False):
     prefix = ('DATA functional acceptance failed phase='+functional_phase(result['status'])+' status='
               if report_phase else 'DATA functional decode failed status=')
@@ -550,6 +610,10 @@ def decode_selected(data, banner, identity, cycle, *, expected=None):
         components['live_input_range'] = relation
         if relation['schema'] is not None:
             result['live_input_range'] = relation
+        early=decode_early(text,rid,cycle,result,expected=expected)
+        components['early_input_prefix']=early
+        if early['schema'] is not None:
+            result['early_input_prefix']=early
         require_functional(result, report_phase=True)
         return result
     try:
