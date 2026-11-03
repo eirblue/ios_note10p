@@ -76,7 +76,8 @@ def no_legacy(row):
 
 
 def physical_input_scope(result):
-    require(result.get('PC_only') is not True and result.get('diagnostic_kind') not in
+    require(result.get('PC_only') is not True and result.get('data_expectation_mode')!='kernel-readonly-slot-v1' and
+            result.get('version')!='v103' and result.get('diagnostic_kind') not in
             ('owned-contiguous-staging-pc','current-owned-staging-pc','readonly-input-pc') and
             not any(key in result for key in ('readonly_input_schema','readonly_input_slot','readonly_pc_contract')),
             'PC-only candidate cannot create a physical template/package')
@@ -95,11 +96,12 @@ def raw_binding(root, expected_result, expected_source, *, producing_sources=Non
     stream = result.get('version') == 'v73'
     affinity = result.get('version') == 'v78'
     fdt = result.get('version') == 'v81'
-    data = result.get('version') in ('v88','v89','v90','v91')
+    kernel_ro = result.get('version')=='v105'
+    data = result.get('version') in ('v88','v89','v90','v91','v105')
     native = result.get('version') == 'v82'
-    builtin = result.get('version') in ('v72', 'v73', 'v78', 'v81', 'v82', 'v88', 'v89', 'v90', 'v91')
+    builtin = result.get('version') in ('v72', 'v73', 'v78', 'v81', 'v82', 'v88', 'v89', 'v90', 'v91', 'v105')
     marker = DATA_PROFILE if data else NATIVE_PROFILE if native else FDT_PROFILE if fdt else AFFINITY_PROFILE if affinity else STREAM_PROFILE if stream else BUILTIN_PROFILE if builtin else PROFILE
-    require(result.get('version') in ('v71', 'v72', 'v73', 'v78', 'v81', 'v82', 'v88', 'v89', 'v90', 'v91') and result.get('passed') is True and
+    require(result.get('version') in ('v71', 'v72', 'v73', 'v78', 'v81', 'v82', 'v88', 'v89', 'v90', 'v91', 'v105') and result.get('passed') is True and
             result.get('Image_built') is True and result.get('BOOT_built') is False and
             result.get('cycle_slot_patched') is False and result.get('kernel_or_provider_executed') is False and
             result.get('ci_context', {}).get('GITHUB_SHA') == expected_source and
@@ -111,7 +113,7 @@ def raw_binding(root, expected_result, expected_source, *, producing_sources=Non
     require(not affinity or result.get('diagnostic_kind') == 'cpu-affinity-binding', 'new affinity task required')
     require(not fdt or result.get('diagnostic_kind') == 'early-fdt-binding', 'new FDT task required')
     require(not native or result.get('diagnostic_kind') == 'native-memory-observation', 'new native task required')
-    require(not data or result.get('diagnostic_kind') == 'linux-data-carrier', 'new DATA task required')
+    require(not data or result.get('diagnostic_kind') == ('kernel-readonly-candidate' if kernel_ro else 'linux-data-carrier'), 'new DATA task required')
     for name, digest in result['files_sha256'].items():
         path = root/name
         require(not Path(name).is_absolute() and '..' not in Path(name).parts and
@@ -126,13 +128,13 @@ def raw_binding(root, expected_result, expected_source, *, producing_sources=Non
             image[56:60] == b'ARM\x64' and image.count(SLOT+b'\0') == 1, 'Image/unique unarmed cycle slot differs')
     identity = result['build_evidence_id']
     require(re.fullmatch('[0-9a-f]{32}', identity or '') and identity.encode() in image and
-            all(x in image for x in (b'N10RET1', b'N10DATA1' if data else b'N10MEMARGS1' if native else b'N10FDT1' if fdt else b'N10AFF1' if affinity else b'N10SHASTREAM1' if stream else b'N10SHA1')) and
+            all(x in image for x in (b'N10RET1', b'N10DATARO1' if kernel_ro else b'N10DATA1' if data else b'N10MEMARGS1' if native else b'N10FDT1' if fdt else b'N10AFF1' if affinity else b'N10SHASTREAM1' if stream else b'N10SHA1')) and
             (not stream or b'N10SHA1' not in image) and
             (not (affinity or fdt) or not any(marker in image for marker in (b'N10SHA1', b'N10SHASTREAM1'))) and
             (not fdt or b'N10AFF1' not in image) and
             (not native or not any(x in image for x in (b'N10SHA1',b'N10SHASTREAM1',b'N10AFF1',b'N10FDT1'))) and
             (not data or not any(x in image for x in (b'N10SHA1',b'N10SHASTREAM1',b'N10AFF1',b'N10FDT1',b'N10MEMARGS1'))), 'Image evidence identity differs')
-    banners = re.findall((rb'Linux version 4\.14\.113-v91-trusted-logical [^\x00\r\n]+' if result.get('version') == 'v91' else rb'Linux version 4\.14\.113-v90-image-expectation [^\x00\r\n]+' if result.get('version') == 'v90' else rb'Linux version 4\.14\.113-v89-data-guard [^\x00\r\n]+' if result.get('version') == 'v89' else rb'Linux version 4\.14\.113-v88-linux-data [^\x00\r\n]+' if data else rb'Linux version 4\.14\.113-v82-native-memory [^\x00\r\n]+' if native else rb'Linux version 4\.14\.113-v81-early-fdt [^\x00\r\n]+' if fdt else rb'Linux version 4\.14\.113-v78-cpu-affinity [^\x00\r\n]+' if affinity else rb'Linux version 4\.14\.113-v73-sha256-stream [^\x00\r\n]+' if stream else rb'Linux version 4\.14\.113-v72-builtin-init [^\x00\r\n]+' if builtin else rb'Linux version 4\.14\.113-v71-sha256-recovery [^\x00\r\n]+'), image)
+    banners = re.findall((rb'Linux version 4\.14\.113-v105-kernel-readonly [^\x00\r\n]+' if kernel_ro else rb'Linux version 4\.14\.113-v91-trusted-logical [^\x00\r\n]+' if result.get('version') == 'v91' else rb'Linux version 4\.14\.113-v90-image-expectation [^\x00\r\n]+' if result.get('version') == 'v90' else rb'Linux version 4\.14\.113-v89-data-guard [^\x00\r\n]+' if result.get('version') == 'v89' else rb'Linux version 4\.14\.113-v88-linux-data [^\x00\r\n]+' if data else rb'Linux version 4\.14\.113-v82-native-memory [^\x00\r\n]+' if native else rb'Linux version 4\.14\.113-v81-early-fdt [^\x00\r\n]+' if fdt else rb'Linux version 4\.14\.113-v78-cpu-affinity [^\x00\r\n]+' if affinity else rb'Linux version 4\.14\.113-v73-sha256-stream [^\x00\r\n]+' if stream else rb'Linux version 4\.14\.113-v72-builtin-init [^\x00\r\n]+' if builtin else rb'Linux version 4\.14\.113-v71-sha256-recovery [^\x00\r\n]+'), image)
     require(len(banners) == 1, 'unique actual profile kernel banner required')
     config = root/'prerequisites/objects/.config'
     required = {'CONFIG_NOTE10_SHA256_KAT_RECOVERY=y', 'CONFIG_CRYPTO=y', 'CONFIG_CRYPTO_HASH=y',
@@ -185,7 +187,13 @@ def raw_binding(root, expected_result, expected_source, *, producing_sources=Non
         measured = data_footprint(map_text, object_text,
             struct.unpack_from('<Q',image,16)[0],struct.unpack_from('<Q',image,8)[0],struct.unpack_from('<Q',image,24)[0])
         require(measured == result.get('data_footprint'), 'DATA footprint differs')
-        require(slot_metadata(image,map_text,object_text,(root/'new-object-sections.log').read_text()) == result.get('data_expectation_slot'), 'original CI Image slot provenance differs')
+        if kernel_ro:
+            from kernel_readonly_input import slot_metadata as kernel_slot
+            require(kernel_slot(image,map_text,object_text,(root/'new-object-sections.log').read_text(),
+                (root/'new-object-symbol-table.log').read_text())==result.get('kernel_readonly_slot'),
+                'original CI readonly class2 slot provenance differs')
+        else:
+            require(slot_metadata(image,map_text,object_text,(root/'new-object-sections.log').read_text()) == result.get('data_expectation_slot'), 'original CI Image slot provenance differs')
     return dict(device_profile=marker, **extra, accepted_result_sha256=expected_result,
                 source_head=expected_source, image_sha256=result['image_sha256'], image_size=len(image),
                 effective_config_sha256=sha(config), build_evidence_id=identity,
@@ -457,9 +465,65 @@ V102_PROFILE_ORIGIN_PINS = MappingProxyType({
 })
 
 
+V104_PROFILE_ORIGIN_HEAD = '392e0352715c60d96adc0ecbe860335547941dce'
+V104_PROFILE_ORIGIN_PINS = MappingProxyType({
+    "note10/device_test/affinity_binding.py": "6d5b16d54a803c95bdd391a38efbd2bac5ef36baffe199f86cd83f878bf10678",
+    "note10/device_test/auto_cycle.py": "36793ff1964331b3a77b530fc1be5923d1807a3752ab0f7d4f68a51adde12812",
+    "note10/device_test/build_boot_test_packages.py": "17b973f54185521be6685acb5e019f8bf8b5f10897d01c0167929c97859cddef",
+    "note10/device_test/build_readonly_input_pc.py": "893698f6741fd178334777b4f96c98934d78b5a927fe4cf3d383d92e90557d9e",
+    "note10/device_test/builtin_init_profile.py": "78dd3b93a3c1aaf3651a1b3efcf1568beb608dab0693721ec336dd8dc3c4b1a6",
+    "note10/device_test/builtin_init_route.py": "46b100dc95f11e344c11b8cb3fba5d34d17b2884385923426a42246699fda43d",
+    "note10/device_test/carrier_lzma.c": "e204732754f15929f7134885ec2740e1ed26f0291dd64c7df7957a4aee7b987a",
+    "note10/device_test/carrier_lzma.h": "6790aa17da94025e0bab175377573edb8df3f503c8cde86f8c919e33ee742974",
+    "note10/device_test/current_data_reuse.py": "15c7a5a55e22f4445c216904769d7ba9b6367f792122e5b936305c95ae031129",
+    "note10/device_test/early_fdt_binding.py": "d4f7099fb45eca31c83c9acd9fbfe0cd5c7ccc5c271c18180e3672e22f9a6b78",
+    "note10/device_test/linux_data_carrier.c": "25b219d04ebd391c160ad39c4ffed070a82104d4242eab4adad7a53dbdc66c9f",
+    "note10/device_test/linux_data_carrier.py": "71b70fac5eb77fe55e6db2a0ab915ba3e1deeb723793e476488fb1f7b33652e3",
+    "note10/device_test/linux_data_carrier_composition.c": "2eb666597983d3a2dfb0a4f98da26dc02dff287db49d39756ada6edc90e0c667",
+    "note10/device_test/linux_data_carrier_fixture.c": "6b1b0e14184582c734a3154eeef6c0e2736fd1b8ef3491881b7decaacb5ecbe4",
+    "note10/device_test/linux_data_compare_evidence.h": "3383823cf1fd56f688ad9d6823d965fdda270a08acede17f6df8d87fa6199438",
+    "note10/device_test/linux_data_compare_evidence_fixture.c": "45a0cdfd8d4bd8df5ffbbb0e370cd05f768d522e96208881a7f7a02ee02fadc3",
+    "note10/device_test/linux_data_early_prefix.h": "60fb29d56be78212e04cc164938db4a25296fdea5250e372824b317127aaeb98",
+    "note10/device_test/linux_data_early_prefix_fixture.c": "b058ccfa33fccadfa2547986a724b21dd7de0b781e003cd3ca1c71fddfe36f09",
+    "note10/device_test/linux_data_growth.h": "640ae63bd927d205ad8bc489c4c7b25935f1c4311332dce5d10821acf3ac0746",
+    "note10/device_test/linux_data_growth_fixture.c": "d567edfc28efc1b258eff93a72dda94d8f24af00297b315b1f7d371c7d77066a",
+    "note10/device_test/linux_data_input_probe_fixture.c": "c7192b0515eb7de9526291913ef97737207844a45d266a4e1287437f49b3e0b4",
+    "note10/device_test/linux_data_input_range.h": "c53f208c886ba21af0f22d266a1edb1de0f42a3e40d5a68080a41fcf775d4dac",
+    "note10/device_test/linux_data_input_range_fixture.c": "d3c7695b319963b9d6de679a5eadaf107c4dc667e610b892f2953a390854ecd5",
+    "note10/device_test/materialize_auto_cycle.py": "ca9bb27f8cf08fc61d2a7ea677e63edb620a99119c2ead871ebae2c29ac8c289",
+    "note10/device_test/native_memory_observation.py": "f4acd0f310989bfcd1b0c2039fef6e429e8ec4d4f41ebdb94fc483538fa26663",
+    "note10/device_test/prepare_linux_boot.py": "2dc0ddd51a68f3da30f58df6243bbc33d441a296bd141cc6b9da5dc7fa10b604",
+    "note10/device_test/readonly_input_pc.h": "01b18e5fddcd12fba45190baa337b47c3309f54cc7a448cd6d72209c5ba8a3f0",
+    "note10/device_test/readonly_input_pc.py": "d7125058dc85a57eb4283fccf87bcb6af96c26de1363f81d1acb0999b94f1fc7",
+    "note10/device_test/readonly_input_pc_fixture.c": "99f0e7eb9240b5c08314993a14dfcd9a532df0e24158679cdbed8b0c3c752730",
+    "note10/device_test/sha256_kat_device_profile.py": "81843092a418cb04ed001882ca97ee0de158eac6d19496a2188e27441159908c",
+    "note10/device_test/sha256_stream_state.py": "55de2735fb830ae8047bb4a8fa74325f51b766b1e885c482dbbc5ebabe3ea437",
+    "note10/device_test/sha256_stream_vectors.json": "5c379d1ef41a40b9a1262c985476e9dc0ba88dae7b1586f949bbe79686f2165f",
+    "note10/device_test/stage_phase2.py": "1ecc741d7517fc15a6043b1329b726e420791f06e712bfd1aaf901a7747db433",
+    "note10/device_test/test_affinity_binding.py": "bf602887c4437e0096473392789da33e3ef502297d8c060faf7d9da9ecd3eb89",
+    "note10/device_test/test_affinity_ci_context.py": "71aad30ab105a45efe2703fd7b222233836d6e7514560834daa71bfdd351dea9",
+    "note10/device_test/test_builtin_init_route.py": "9fa63dd55114472a748062447dd95c17bf4d4d7e743117f69f0bb6a7aca6ea42",
+    "note10/device_test/test_current_data_reuse.py": "c1a868d4f9669539aee3e4fca4868118db37071467325a85d73c279b2f1d29de",
+    "note10/device_test/test_early_fdt_binding.py": "2444d3d20b7cc42e705cb89c1d04de72599f7da2a5d1b9282636f3b9990ce1fa",
+    "note10/device_test/test_early_fdt_host_route.py": "75992eb3e8b1228d0ae3916d47306f0329b7947cb0dfae234ec25c1e737fef6a",
+    "note10/device_test/test_linux_data_carrier.py": "550344e818b42f8147ea1f688929feda322c68173f79f6e72850053dbc2e1ca7",
+    "note10/device_test/test_native_memory_observation.py": "d34e94fd5d964004c42dedd172ec07bd62826b675dcc9f4925ab4ac06c460599",
+    "note10/device_test/test_partition_gate_evidence.py": "b7dd52aa5c7747489a2713f805dbe15a6318f3d3776a8043700549e9383bcc72",
+    "note10/device_test/test_sha256_kat_device_profile.py": "c48400d5573695d217101806b8481e39aec38fd5382e64b85f999b4cee42c498",
+    "note10/device_test/test_sha256_stream_state.py": "088881f92037a9895b7947eb44692f51ecba1eb602a02dacc02ff3b94a836db8",
+    "note10/device_test/test_v100_carrier_input_probe.py": "f8e37cb2da1fc1efda5582079bb619d8853565d892a589872d0699277e8c4489",
+    "note10/device_test/test_v101_live_input_range.py": "e4424b6128a18f4099b31ddc6dcf16ba6256749ba2a87f8bd565b68a1ef68183",
+    "note10/device_test/test_v102_input_lifetime.py": "29cdae5c4b8ace788ad84f529700d753bcb19c9d4a34697bddf8ca7dfa80bed1",
+    "note10/device_test/test_v103_readonly_input_pc.py": "cdce146aed40d9526eae04259e39896f629248f6b395ad8ceeec341cae5be9c5",
+    "note10/device_test/test_v104_growth_region.py": "89ca671ca695b083ccf9cb58c6f474acfeadb9a67ff9747d640cc533dde40e7d",
+    "note10/device_test/test_v99_carrier_compare_evidence.py": "2b45c21197709706d3f3ffc23e1428084d5d50a93a1d9b5bd22c2693124cf20c",
+    "note10/device_test/test_v99_host_profile_origin.py": "fb4a1c349ca298b4f18ba64e0692c7a93e9f0877b2f7a7ec22fa2c8f29ac219a"
+})
+
+
 def host_binding(source_head):
     require(re.fullmatch('[0-9a-f]{40}', source_head or ''), 'exact host-profile publication source pin required')
-    require(source_head not in (V97_PROFILE_ORIGIN_HEAD, V99_PROFILE_ORIGIN_HEAD, V100_PROFILE_ORIGIN_HEAD, V101_PROFILE_ORIGIN_HEAD, V102_PROFILE_ORIGIN_HEAD),
+    require(source_head not in (V97_PROFILE_ORIGIN_HEAD, V99_PROFILE_ORIGIN_HEAD, V100_PROFILE_ORIGIN_HEAD, V101_PROFILE_ORIGIN_HEAD, V102_PROFILE_ORIGIN_HEAD, V104_PROFILE_ORIGIN_HEAD, 'e32ec501551b74b4cca5618ea25245f012656f29'),
             'retained host origin cannot construct current host')
     pins = V71_HOST_PINS if source_head == V71_HOST_HEAD else V72_HOST_PINS if source_head == V72_HOST_HEAD else V73_HOST_PINS if source_head == V73_HOST_HEAD else V78_HOST_PINS if source_head == V78_HOST_HEAD else V81_IMAGE_HOST_PINS if source_head == V81_IMAGE_HEAD else V81_HOST_PINS if source_head == V81_HOST_HEAD else V82_HOST_PINS if source_head == V82_HOST_HEAD else V88_HOST_PINS if source_head == V88_HOST_HEAD else V89_HOST_PINS if source_head == V89_HOST_HEAD else V90_HOST_PINS if source_head == V90_HOST_HEAD else V91_HOST_PINS if source_head == V91_HOST_HEAD else {
         'note10/device_test/'+name: sha(Path(__file__).parent/name)
@@ -476,7 +540,9 @@ def host_binding(source_head):
                       'linux_data_early_prefix.h', 'linux_data_early_prefix_fixture.c', 'test_v102_input_lifetime.py',
                       'readonly_input_pc.py','readonly_input_pc.h','build_readonly_input_pc.py',
                       'readonly_input_pc_fixture.c','test_v103_readonly_input_pc.py',
-                      'linux_data_growth.h','linux_data_growth_fixture.c','test_v104_growth_region.py')}
+                      'linux_data_growth.h','linux_data_growth_fixture.c','test_v104_growth_region.py',
+                      'kernel_readonly_input.py','kernel_readonly_input.h','build_kernel_readonly_input.py',
+                      'kernel_readonly_input_fixture.c','test_v105_kernel_readonly.py')}
     return dict(host_profile_source_head=source_head, host_profile_source_sha256=dict(pins))
 
 
@@ -527,6 +593,18 @@ def host_profile_origin(binding):
                                                     'readonly_input_schema','readonly_input_slot','readonly_pc_contract')),
                 'retained v102 host origin scope differs')
         pins = V102_PROFILE_ORIGIN_PINS
+    elif head == V104_PROFILE_ORIGIN_HEAD:
+        require(binding.get('device_profile')==DATA_PROFILE and binding.get('source_head')==V104_PROFILE_ORIGIN_HEAD and
+            binding.get('data_compare_schema')=='n10-data-compare-v2' and binding.get('data_input_range_schema')=='n10-data-range-v1' and
+            binding.get('data_early_prefix_schema')=='n10-data-early-prefix-v1' and binding.get('data_growth_schema')=='n10-data-growth-v1' and
+            binding.get('data_growth_target_source')=='e32ec501551b74b4cca5618ea25245f012656f29' and
+            type(binding.get('data_growth_target_bytes')) is int and binding['data_growth_target_bytes']==59523072 and
+            type(binding.get('data_growth_budget_bytes')) is int and binding['data_growth_budget_bytes']==59768832 and
+            type(binding.get('data_linked_kernel_bytes')) is int and 0<binding['data_linked_kernel_bytes']<59523072 and
+            not any(key in binding for key in ('data_host_experiment','data_current_binding_sha256','data_input_kind',
+                'kernel_readonly_schema','kernel_readonly_slot','kernel_readonly_compact_sha256',
+                'readonly_input_schema','readonly_input_slot','readonly_pc_contract')),'exact retained normal v104 origin required')
+        pins = V104_PROFILE_ORIGIN_PINS
     else:
         pins = host_binding(head)['host_profile_source_sha256']
     require(binding.get('host_profile_source_sha256') == dict(pins), 'host-profile code identity differs')
@@ -582,8 +660,8 @@ def ci_success_receipt(context, context_sha256, binding, producer):
             isinstance(context['build_evidence_id'], str) and re.fullmatch('[0-9a-f]{32}', context['build_evidence_id']),
             'CI-success context types/pins differ')
     ci = producer.get('ci_context', {})
-    require(producer.get('version') == ('v91' if binding['device_profile']==DATA_PROFILE else 'v82' if binding['device_profile']==NATIVE_PROFILE else 'v81' if binding['device_profile']==FDT_PROFILE else 'v78') and
-            producer.get('diagnostic_kind') == ('linux-data-carrier' if binding['device_profile']==DATA_PROFILE else 'native-memory-observation' if binding['device_profile']==NATIVE_PROFILE else 'early-fdt-binding' if binding['device_profile']==FDT_PROFILE else 'cpu-affinity-binding') and
+    require(producer.get('version') == ('v105' if binding.get('data_input_kind')=='kernel-readonly-candidate' else 'v91' if binding['device_profile']==DATA_PROFILE else 'v82' if binding['device_profile']==NATIVE_PROFILE else 'v81' if binding['device_profile']==FDT_PROFILE else 'v78') and
+            producer.get('diagnostic_kind') == ('kernel-readonly-candidate' if binding.get('data_input_kind')=='kernel-readonly-candidate' else 'linux-data-carrier' if binding['device_profile']==DATA_PROFILE else 'native-memory-observation' if binding['device_profile']==NATIVE_PROFILE else 'early-fdt-binding' if binding['device_profile']==FDT_PROFILE else 'cpu-affinity-binding') and
             producer.get('passed') is True and producer.get('Image_built') is True and
             context['producer_source_head'] == binding['source_head'] == ci.get('GITHUB_SHA') and
             str(context['run_id']) == ci.get('GITHUB_RUN_ID') and
@@ -596,7 +674,7 @@ def ci_success_receipt(context, context_sha256, binding, producer):
                 producer.get('files_sha256', {}).get('actual-effective.config') and
             context['build_evidence_id'] == binding['build_evidence_id'] == producer.get('build_evidence_id') and
             isinstance(binding.get('kernel_banner'), str) and
-            binding['kernel_banner'].startswith('Linux version 4.14.113-v91-trusted-logical ' if binding['device_profile']==DATA_PROFILE else 'Linux version 4.14.113-v82-native-memory ' if binding['device_profile']==NATIVE_PROFILE else 'Linux version 4.14.113-v81-early-fdt ' if binding['device_profile']==FDT_PROFILE else 'Linux version 4.14.113-v78-cpu-affinity '),
+            binding['kernel_banner'].startswith('Linux version 4.14.113-v105-kernel-readonly ' if binding.get('data_input_kind')=='kernel-readonly-candidate' else 'Linux version 4.14.113-v91-trusted-logical ' if binding['device_profile']==DATA_PROFILE else 'Linux version 4.14.113-v82-native-memory ' if binding['device_profile']==NATIVE_PROFILE else 'Linux version 4.14.113-v81-early-fdt ' if binding['device_profile']==FDT_PROFILE else 'Linux version 4.14.113-v78-cpu-affinity '),
             'CI-success context/producer/package tuple differs')
     # No banner is accepted from the context. Workflow/job/artifact IDs originate
     # in the explicitly hash-approved Root collection record, not Image guesses.
@@ -640,7 +718,7 @@ def common_report(binding, profile_sha):
 
 def prepare_template(build, output, accepted_result_sha256, source_head, *, root_receipt=None,
                      root_receipt_sha256=None, host_source_head, ci_success_context=None,
-                     ci_success_context_sha256=None, carrier_manifest=None, carrier_manifest_sha256=None, producing_sources=None):
+                     ci_success_context_sha256=None, carrier_manifest=None, carrier_manifest_sha256=None, producing_sources=None, readonly_compact_manifest=None, readonly_compact_manifest_sha256=None):
     build, output = private(build), private(output)
     require(not output.exists() and not output.is_relative_to(build) and not build.is_relative_to(output),
             'fresh disjoint template required')
@@ -681,11 +759,18 @@ def prepare_template(build, output, accepted_result_sha256, source_head, *, root
     require(binding['device_profile'] != DATA_PROFILE or host_source_head not in (V71_HOST_HEAD,V72_HOST_HEAD,V73_HOST_HEAD,V78_HOST_HEAD,V81_IMAGE_HEAD,V81_HOST_HEAD,V82_HOST_HEAD,V88_HOST_HEAD,V89_IMAGE_HEAD,V89_HOST_HEAD,V90_IMAGE_HEAD,V90_HOST_HEAD), 'DATA requires new host publication')
     require((binding['device_profile'] == DATA_PROFILE and carrier_manifest is not None and carrier_manifest_sha256 is not None) or
             (binding['device_profile'] != DATA_PROFILE and carrier_manifest is None and carrier_manifest_sha256 is None), 'DATA alone requires accepted private carrier input')
+    candidate=binding.get('data_input_kind')=='kernel-readonly-candidate'
+    require((candidate and readonly_compact_manifest is not None and readonly_compact_manifest_sha256 is not None) or
+        (not candidate and readonly_compact_manifest is None and readonly_compact_manifest_sha256 is None),
+        'readonly candidate alone requires approved compact manifest')
     binding.update(host_binding(host_source_head))
     shutil.copytree(build, output)
     if binding['device_profile'] == DATA_PROFILE:
         from linux_data_carrier import attach_carrier
         binding.update(attach_carrier(output, carrier_manifest, carrier_manifest_sha256))
+        if candidate:
+            from kernel_readonly_input import attach_compact
+            binding.update(attach_compact(output,readonly_compact_manifest,readonly_compact_manifest_sha256,binding))
     if producing_sources is not None:
         from current_data_reuse import require_context
         context=require_context(producing_sources)
@@ -702,7 +787,8 @@ def prepare_template(build, output, accepted_result_sha256, source_head, *, root
     shutil.copyfile(output/'prerequisites/objects/.config', output/'handoff.config')
     validate_template(output)
     return dict(template=str(output), profile=binding['device_profile'], build_result_sha256=sha(output/'build-result.json'),
-                device_operations=[], deployment_ready=False)
+                device_operations=[], deployment_ready=False,
+                kernel_readonly_IO_events=list(__import__('kernel_readonly_input').IO_EVENTS) if candidate else [])
 
 
 def validate_template(root):
@@ -718,6 +804,9 @@ def validate_template(root):
     if binding['device_profile'] == DATA_PROFILE:
         from linux_data_carrier import carrier_fields
         measured.update(carrier_fields(root))
+        if binding.get('data_input_kind')=='kernel-readonly-candidate':
+            from kernel_readonly_input import compact_fields
+            measured.update(compact_fields(root,measured))
     if context is not None:
         context.check_carrier(measured)
         measured.update(data_current_binding_sha256=binding['data_current_binding_sha256'],data_host_experiment=binding['data_host_experiment'])
@@ -767,6 +856,8 @@ def fields(row):
     from linux_data_carrier import GROWTH_FIELDS
     if any(key in row for key in GROWTH_FIELDS):
         keys=(*keys,*GROWTH_FIELDS)
+    from kernel_readonly_input import FIELDS as kernel_fields, is_candidate
+    if is_candidate(row):keys=(*keys,*kernel_fields)
     return {key: row[key] for key in keys}
 
 
@@ -777,7 +868,7 @@ def package_scope(row, mode=None):
     for key in ('profile_sha256', 'accepted_result_sha256', 'image_root_receipt_sha256', 'root_reader_result_sha256'):
         require(re.fullmatch('[0-9a-f]{64}', row.get(key, '')), 'KAT package result/profile pin missing')
     require(re.fullmatch('[0-9a-f]{32}', row.get('build_evidence_id', '')) and
-            row.get('kernel_banner', '').startswith(('Linux version 4.14.113-v88-linux-data ' if row.get('source_head') == V88_HOST_HEAD else 'Linux version 4.14.113-v89-data-guard ' if row.get('source_head') == V89_IMAGE_HEAD else 'Linux version 4.14.113-v90-image-expectation ' if row.get('source_head') == V90_IMAGE_HEAD else 'Linux version 4.14.113-v91-trusted-logical ') if row['device_profile']==DATA_PROFILE else 'Linux version 4.14.113-v82-native-memory ' if row['device_profile']==NATIVE_PROFILE else 'Linux version 4.14.113-v81-early-fdt ' if row['device_profile'] == FDT_PROFILE else 'Linux version 4.14.113-v78-cpu-affinity ' if row['device_profile'] == AFFINITY_PROFILE else 'Linux version 4.14.113-v73-sha256-stream ' if row['device_profile'] == STREAM_PROFILE else 'Linux version 4.14.113-v72-builtin-init ' if row['device_profile'] == BUILTIN_PROFILE else 'Linux version 4.14.113-v71-sha256-recovery '),
+            row.get('kernel_banner', '').startswith(('Linux version 4.14.113-v105-kernel-readonly ' if row.get('data_input_kind')=='kernel-readonly-candidate' else 'Linux version 4.14.113-v88-linux-data ' if row.get('source_head') == V88_HOST_HEAD else 'Linux version 4.14.113-v89-data-guard ' if row.get('source_head') == V89_IMAGE_HEAD else 'Linux version 4.14.113-v90-image-expectation ' if row.get('source_head') == V90_IMAGE_HEAD else 'Linux version 4.14.113-v91-trusted-logical ') if row['device_profile']==DATA_PROFILE else 'Linux version 4.14.113-v82-native-memory ' if row['device_profile']==NATIVE_PROFILE else 'Linux version 4.14.113-v81-early-fdt ' if row['device_profile'] == FDT_PROFILE else 'Linux version 4.14.113-v78-cpu-affinity ' if row['device_profile'] == AFFINITY_PROFILE else 'Linux version 4.14.113-v73-sha256-stream ' if row['device_profile'] == STREAM_PROFILE else 'Linux version 4.14.113-v72-builtin-init ' if row['device_profile'] == BUILTIN_PROFILE else 'Linux version 4.14.113-v71-sha256-recovery '),
             'KAT package identity missing')
     host_profile_origin(row)
     if row['device_profile'] in (BUILTIN_PROFILE, STREAM_PROFILE, AFFINITY_PROFILE, FDT_PROFILE, NATIVE_PROFILE, DATA_PROFILE):
@@ -811,51 +902,60 @@ def package_scope(row, mode=None):
                 type(row.get('native_memory_capacity')) is int and row['native_memory_capacity']==CAPACITY and
                 row.get('native_relative_placement_admitted') is True,'native stage/source/nonclaim binding differs')
     if row['device_profile'] == DATA_PROFILE:
-        from linux_data_carrier import STAGE, MODE, RANGE_SCHEMA, COMPARE_SCHEMA
-        retained = (V97_PROFILE_ORIGIN_HEAD,V99_PROFILE_ORIGIN_HEAD,V100_PROFILE_ORIGIN_HEAD,
-                    V88_HOST_HEAD,V89_IMAGE_HEAD,V89_HOST_HEAD,V90_IMAGE_HEAD,V90_HOST_HEAD,V91_IMAGE_HEAD)
-        has_range = 'data_input_range_schema' in row or 'data_linked_kernel_bytes' in row
-        if has_range:
-            require(row.get('data_input_range_schema') == RANGE_SCHEMA and
-                    row.get('data_compare_schema') == COMPARE_SCHEMA and
-                    type(row.get('data_linked_kernel_bytes')) is int and 0 < row['data_linked_kernel_bytes'] < (1<<64) and
-                    row.get('source_head') not in retained and row.get('host_profile_source_head') not in retained,
-                    'new live range producer binding differs')
+        from kernel_readonly_input import is_candidate,candidate_scope
+        if is_candidate(row):
+            candidate_scope(row)
+            require(row.get('image_expectation_patched') is True and
+                all(re.fullmatch('[0-9a-f]{64}',row.get(key,'')) for key in
+                    ('data_manifest_sha256','data_carrier_sha256','data_payload_sha256')) and
+                row.get('data_carrier_bytes')==10962166 and row.get('data_payload_bytes')==19136512,
+                'readonly variant and unchanged external carrier binding required')
         else:
-            require(row.get('host_profile_source_head') in retained, 'new DATA live range declaration missing')
-        from linux_data_carrier import EARLY_SCHEMA
-        early_retained=(*retained,V101_PROFILE_ORIGIN_HEAD)
-        if 'data_early_prefix_schema' in row:
-            require(row['data_early_prefix_schema']==EARLY_SCHEMA and has_range and
-                    row.get('source_head') not in early_retained and row.get('host_profile_source_head') not in early_retained,
-                    'new early prefix producer binding differs')
-        else:
-            require(row.get('host_profile_source_head') in early_retained, 'new DATA early prefix declaration missing')
-        from linux_data_carrier import GROWTH_FIELDS, growth_declaration, growth_retained_heads
-        growth_retained=growth_retained_heads()
-        if any(key in row for key in GROWTH_FIELDS):
-            growth_declaration(row)
-            require(row.get('source_head') not in growth_retained and row.get('host_profile_source_head') not in growth_retained and
-                    row.get('data_early_prefix_schema')==EARLY_SCHEMA and has_range,
-                    'new normal growth producer binding differs')
-        else:
-            require(row.get('host_profile_source_head') in growth_retained,'new DATA growth declaration missing')
-        if 'data_compare_schema' in row:
-            from linux_data_carrier import COMPARE_SCHEMA, COMPARE_SCHEMA_V1
-            if row['data_compare_schema'] == COMPARE_SCHEMA_V1:
-                require(row.get('source_head') == row.get('host_profile_source_head') == V99_PROFILE_ORIGIN_HEAD,
-                        'v1 comparison requires exact retained v99 origin')
+            from linux_data_carrier import STAGE, MODE, RANGE_SCHEMA, COMPARE_SCHEMA
+            retained = (V97_PROFILE_ORIGIN_HEAD,V99_PROFILE_ORIGIN_HEAD,V100_PROFILE_ORIGIN_HEAD,
+                        V88_HOST_HEAD,V89_IMAGE_HEAD,V89_HOST_HEAD,V90_IMAGE_HEAD,V90_HOST_HEAD,V91_IMAGE_HEAD)
+            has_range = 'data_input_range_schema' in row or 'data_linked_kernel_bytes' in row
+            if has_range:
+                require(row.get('data_input_range_schema') == RANGE_SCHEMA and
+                        row.get('data_compare_schema') == COMPARE_SCHEMA and
+                        type(row.get('data_linked_kernel_bytes')) is int and 0 < row['data_linked_kernel_bytes'] < (1<<64) and
+                        row.get('source_head') not in retained and row.get('host_profile_source_head') not in retained,
+                        'new live range producer binding differs')
             else:
-                require(row['data_compare_schema'] == COMPARE_SCHEMA and
-                        row.get('source_head') not in (V88_HOST_HEAD,V89_IMAGE_HEAD,V90_IMAGE_HEAD,V91_IMAGE_HEAD,V99_PROFILE_ORIGIN_HEAD),
-                        'new DATA comparison producer binding differs')
-        if row.get('source_head') == V90_IMAGE_HEAD:
-            require(row.get('data_expectation_mode') == 'image-slot-v1' and row.get('image_expectation_patched') is True, 'historical Image expectation differs')
-        elif row.get('source_head') not in (V88_HOST_HEAD,V89_IMAGE_HEAD):
-            require(row.get('data_expectation_mode') == MODE and row.get('image_expectation_patched') is True and type(row.get('data_expectation_slot')) is dict, 'private Image expectation binding required')
-        require(row.get('data_carrier_stage') == STAGE and row.get('data_relative_placement_admitted') is True and row.get('raw_input_binding') is False and
-            all(re.fullmatch('[0-9a-f]{64}', row.get(k,'')) for k in ('data_manifest_sha256','data_carrier_sha256','data_payload_sha256')) and
-            all(type(row.get(k)) is int and 0 < row[k] <= 64*1024*1024 for k in ('data_carrier_bytes','data_payload_bytes')), 'DATA package scope differs')
+                require(row.get('host_profile_source_head') in retained, 'new DATA live range declaration missing')
+            from linux_data_carrier import EARLY_SCHEMA
+            early_retained=(*retained,V101_PROFILE_ORIGIN_HEAD)
+            if 'data_early_prefix_schema' in row:
+                require(row['data_early_prefix_schema']==EARLY_SCHEMA and has_range and
+                        row.get('source_head') not in early_retained and row.get('host_profile_source_head') not in early_retained,
+                        'new early prefix producer binding differs')
+            else:
+                require(row.get('host_profile_source_head') in early_retained, 'new DATA early prefix declaration missing')
+            from linux_data_carrier import GROWTH_FIELDS, growth_declaration, growth_retained_heads
+            growth_retained=growth_retained_heads()
+            if any(key in row for key in GROWTH_FIELDS):
+                growth_declaration(row)
+                require(row.get('source_head') not in growth_retained and row.get('host_profile_source_head') not in growth_retained and
+                        row.get('data_early_prefix_schema')==EARLY_SCHEMA and has_range,
+                        'new normal growth producer binding differs')
+            else:
+                require(row.get('host_profile_source_head') in growth_retained,'new DATA growth declaration missing')
+            if 'data_compare_schema' in row:
+                from linux_data_carrier import COMPARE_SCHEMA, COMPARE_SCHEMA_V1
+                if row['data_compare_schema'] == COMPARE_SCHEMA_V1:
+                    require(row.get('source_head') == row.get('host_profile_source_head') == V99_PROFILE_ORIGIN_HEAD,
+                            'v1 comparison requires exact retained v99 origin')
+                else:
+                    require(row['data_compare_schema'] == COMPARE_SCHEMA and
+                            row.get('source_head') not in (V88_HOST_HEAD,V89_IMAGE_HEAD,V90_IMAGE_HEAD,V91_IMAGE_HEAD,V99_PROFILE_ORIGIN_HEAD),
+                            'new DATA comparison producer binding differs')
+            if row.get('source_head') == V90_IMAGE_HEAD:
+                require(row.get('data_expectation_mode') == 'image-slot-v1' and row.get('image_expectation_patched') is True, 'historical Image expectation differs')
+            elif row.get('source_head') not in (V88_HOST_HEAD,V89_IMAGE_HEAD):
+                require(row.get('data_expectation_mode') == MODE and row.get('image_expectation_patched') is True and type(row.get('data_expectation_slot')) is dict, 'private Image expectation binding required')
+            require(row.get('data_carrier_stage') == STAGE and row.get('data_relative_placement_admitted') is True and row.get('raw_input_binding') is False and
+                all(re.fullmatch('[0-9a-f]{64}', row.get(k,'')) for k in ('data_manifest_sha256','data_carrier_sha256','data_payload_sha256')) and
+                all(type(row.get(k)) is int and 0 < row[k] <= 64*1024*1024 for k in ('data_carrier_bytes','data_payload_bytes')), 'DATA package scope differs')
     if 'data_current_binding_sha256' in row or 'data_host_experiment' in row:
         from current_data_reuse import IMAGE_HEAD,MODE
         require(row['device_profile']==DATA_PROFILE and row.get('source_head')==IMAGE_HEAD and
@@ -916,7 +1016,8 @@ def prepare_plan(kernel_build, backup, twrp, mkbootimg, current_packages, output
         plan['current_boot_payload_sha256'] = current_diagnostic['payload_sha256']
     save(output/'plan.json', plan)
     validate_plan(output/'plan.json', sha(output/'plan.json'))
-    return dict(plan=str(output/'plan.json'), plan_sha256=sha(output/'plan.json'), cycles=1, device_operations=[])
+    return dict(plan=str(output/'plan.json'), plan_sha256=sha(output/'plan.json'), cycles=1, device_operations=[],
+        kernel_readonly_IO_events=list(__import__('kernel_readonly_input').IO_EVENTS) if template.get('data_input_kind')=='kernel-readonly-candidate' else [])
 
 
 def validate_plan(path, expected):
@@ -993,9 +1094,9 @@ def validate_plan(path, expected):
     expected_cmdline = recovery_header['cmdline']
     if plan['device_profile'] == DATA_PROFILE:
         from linux_data_carrier import data_cmdline, MODE, BOOT_PAGE
-        if pair.get('data_expectation_mode') == MODE:
+        if pair.get('data_expectation_mode') in (MODE,'kernel-readonly-candidate-v1'):
             require(header['page_size'] == BOOT_PAGE and pair['data_expectation_slot'].get('boot_page') == BOOT_PAGE, 'trusted logical DATA BOOT-page policy differs')
-        if pair.get('data_expectation_mode') not in (MODE,'image-slot-v1'):
+        if pair.get('data_expectation_mode') not in (MODE,'image-slot-v1','kernel-readonly-candidate-v1'):
             expected_cmdline = data_cmdline(expected_cmdline,pair['data_carrier_sha256'])
     require(all(header[k] == original_header[k] for k in
                 ('name', 'os_version', 'security_patch_month', 'kernel_addr', 'tags_addr', 'page_size')) and
@@ -1018,7 +1119,7 @@ def validate_plan(path, expected):
     return plan
 
 
-def precheck(packages, kernel_build, backup, adb, staged):
+def precheck(packages, kernel_build, backup, adb, staged, *, ack_kernel_readonly_growth=False):
     from run_probe import preflight
     from stage_phase2 import verify_packages
     from prepare_linux_boot import read_verified_backup
@@ -1036,6 +1137,8 @@ def precheck(packages, kernel_build, backup, adb, staged):
         records = verify_packages(packages)
         pair = read(packages/'package-result.json')
         package_scope(pair)
+        from kernel_readonly_input import require_device_scope
+        require_device_scope(pair,ack_kernel_readonly_growth)
         bound = variant(kernel_build, pair['auto_cycle_token'])
         require(all(pair.get(k) == bound[k] for k in fields(bound)) and
                 pair['kernel_image_sha256'] == bound['image_sha256'] and
@@ -1121,14 +1224,16 @@ def log_probe_command(remote):
             '*) exit "$n10_probe_status";; esac')
 
 
-def collect(packages, kernel_build, adb, capture_parent=None):
+def collect(packages, kernel_build, adb, capture_parent=None, *, ack_kernel_readonly_growth=False):
     # Return a failed observation after retaining raw logs, rather than raising
     # past run_plan's common post-return five-partition verification.
+    from kernel_readonly_input import require_device_scope
+    require_device_scope(read(Path(packages)/'package-result.json'),ack_kernel_readonly_growth)
     parent = private(capture_parent or ROOT/'note10/private/device-observations')
     out = private(parent/('kat-test-'+uuid.uuid4().hex[:12]))
     out.mkdir(parents=True)
     try:
-        return _collect_into(packages, kernel_build, adb, out)
+        return _collect_into(packages, kernel_build, adb, out,ack_kernel_readonly_growth=ack_kernel_readonly_growth)
     except Exception as error:
         index = read(out/'capture-index.json') if (out/'capture-index.json').is_file() else {}
         failed = dict(directory=str(out), device_profile=read(Path(packages)/'package-result.json').get('device_profile'), diagnostic_passed=False,
@@ -1139,11 +1244,13 @@ def collect(packages, kernel_build, adb, capture_parent=None):
         return failed
 
 
-def _collect_into(packages, kernel_build, adb, out):
+def _collect_into(packages, kernel_build, adb, out, *, ack_kernel_readonly_growth=False):
     from run_probe import preflight
     from stage_phase2 import verify_packages
     verify_packages(private(packages))
     pair = read(Path(packages)/'package-result.json')
+    from kernel_readonly_input import require_device_scope
+    require_device_scope(pair,ack_kernel_readonly_growth)
     bound = variant(private(kernel_build), pair['auto_cycle_token'])
     require(all(pair.get(k) == bound[k] for k in fields(bound)), 'collection profile binding differs')
     preflight(adb)
@@ -1153,7 +1260,10 @@ def _collect_into(packages, kernel_build, adb, out):
         if bound['device_profile'] == STREAM_PROFILE:
             from sha256_stream_state import decode_selected as decode_fn
         elif bound['device_profile'] == DATA_PROFILE:
-            from linux_data_carrier import decode_selected as data_decode
+            if bound.get('data_input_kind')=='kernel-readonly-candidate':
+                from kernel_readonly_input import decode_selected as data_decode
+            else:
+                from linux_data_carrier import decode_selected as data_decode
             decode_fn = lambda *args: data_decode(*args, expected=bound)
         elif bound['device_profile'] == NATIVE_PROFILE:
             from native_memory_observation import decode_selected as decode_fn
@@ -1214,9 +1324,12 @@ if __name__ == '__main__':
     parser.add_argument('--host-source-head', required=True)
     parser.add_argument('--carrier-manifest', type=Path)
     parser.add_argument('--carrier-manifest-sha256')
+    parser.add_argument('--readonly-compact-manifest',type=Path)
+    parser.add_argument('--readonly-compact-manifest-sha256')
     args = parser.parse_args()
     print(json.dumps(prepare_template(args.build, args.output, args.accepted_result_sha256, args.source_head,
         root_receipt=args.root_receipt, root_receipt_sha256=args.root_receipt_sha256,
         host_source_head=args.host_source_head, ci_success_context=args.ci_success_context,
         ci_success_context_sha256=args.ci_success_context_sha256, carrier_manifest=args.carrier_manifest,
-        carrier_manifest_sha256=args.carrier_manifest_sha256), indent=2))
+        carrier_manifest_sha256=args.carrier_manifest_sha256,readonly_compact_manifest=args.readonly_compact_manifest,
+        readonly_compact_manifest_sha256=args.readonly_compact_manifest_sha256), indent=2))

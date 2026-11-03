@@ -26,8 +26,15 @@ def template_bytes(root):
     if report.get('auto_cycle_slot')!=SLOT.decode():raise ValueError('Template slot metadata differs')
     return report,data
 
-def bound_image(data, report, token):
+def bound_image(data, report, token, *, template_root=None):
     mode = report.get('data_expectation_mode')
+    if mode=='kernel-readonly-candidate-v1':
+        from kernel_readonly_input import read_compact, patch_image, COMPACT_FIELDS
+        if template_root is None:raise ValueError('readonly template source context required')
+        compact,fields=read_compact(template_root,report)
+        if fields!={key:report[key] for key in COMPACT_FIELDS}:
+            raise ValueError('readonly compact binding changed')
+        return patch_image(data,report,token,SLOT,compact)
     if mode is not None:
         from linux_data_carrier import MODE, patch_image
         if mode != MODE:
@@ -41,7 +48,7 @@ def materialize(template,output,token):
     if not re.fullmatch('[0-9a-f]{32}',token) or output.exists():raise ValueError('Fresh variant and valid token required')
     report,data=template_bytes(template)
     shutil.copytree(template,output)
-    patched=bound_image(data,report,token)
+    patched=bound_image(data,report,token,template_root=template)
     (output/'Image').write_bytes(patched)
     report.update(auto_cycle_variant=True,auto_cycle_token=token,auto_cycle_template=str(template),
         auto_cycle_template_report_sha256=sha((template/'build-result.json').read_bytes()),
@@ -61,7 +68,7 @@ def validate(root,token,template=None):
     original,data=template_bytes(source)
     if sha((source/'build-result.json').read_bytes())!=report['auto_cycle_template_report_sha256'] or sha(data)!=report['auto_cycle_template_image_sha256']:
         raise ValueError('Compiled template changed')
-    expected=bound_image(data,original,token)
+    expected=bound_image(data,original,token,template_root=source)
     allowed=dict(original)
     allowed.update(auto_cycle_variant=True,auto_cycle_token=token,auto_cycle_template=str(source),
         auto_cycle_template_report_sha256=report['auto_cycle_template_report_sha256'],

@@ -200,7 +200,7 @@ def pack_verified(backup,kernel_build,official,mkbootimg,output,parts,build,conf
     data_command_line = None
     if data_mode:
         from linux_data_carrier import package_data, bounded_private_read, MODE, BOOT_PAGE
-        if build.get('data_expectation_mode') == MODE and boot['page_size'] != BOOT_PAGE:
+        if build.get('data_expectation_mode') in (MODE,'kernel-readonly-candidate-v1') and boot['page_size'] != BOOT_PAGE:
             raise ValueError('Trusted logical DATA requires closed BOOT page policy')
         reference_ramdisk = ramdisk
         ramdisk = bounded_private_read(kernel_build/'carrier.data',64*1024*1024)

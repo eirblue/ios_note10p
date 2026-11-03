@@ -193,6 +193,10 @@ def relative_admission(result, lines, footprint, *, elf, archive, raw_inputs):
 
 
 def input_binding(result, lines, *, elf, archive, raw_inputs, producing_sources=None):
+    if result.get('diagnostic_kind')=='kernel-readonly-candidate':
+        from kernel_readonly_input import input_binding as readonly_binding
+        require(producing_sources is None,'readonly candidate cannot use historical reuse adapter')
+        return readonly_binding(result,lines,elf=elf,archive=archive,raw_inputs=raw_inputs)
     require(result.get('version') == 'v91' and result.get('diagnostic_kind') == KIND and
             result.get('data_carrier_stage') == STAGE and result.get('raw_input_binding') is False and
             result.get('data_expectation_mode') == MODE and type(result.get('data_expectation_slot')) is dict,
@@ -301,6 +305,11 @@ def data_cmdline(original, digest):
 def package_data(build, reference, cmdline, raw):
     require(build.get('device_profile') == PROFILE and build['data_carrier_bytes'] == len(reference) == len(raw) and
             sha(raw) == build['data_carrier_sha256'], 'DATA fixed extent/accepted identity differs')
+    if build.get('data_expectation_mode')=='kernel-readonly-candidate-v1':
+        from kernel_readonly_input import candidate_scope
+        candidate_scope(build)
+        require(build.get('image_expectation_patched') is True,'readonly compact source must be patched in variant')
+        return cmdline
     if build.get('data_expectation_mode') in (MODE,'image-slot-v1'):
         if build['data_expectation_mode'] != MODE:
             from sha256_kat_device_profile import V90_IMAGE_HEAD
@@ -320,17 +329,21 @@ def retained_pass(record):
     raise ValueError('retained PASS disabled: no authenticated actual-result gate')
 
 
-def decode(text, identity, cycle):
+def decode(text, identity, cycle, *, _source_class='native-initrd'):
     from decode_reservation import checksum
-    lines = [line for line in text.splitlines() if 'N10DATA1' in line]
+    require(_source_class in ('native-initrd','kernel-readonly-candidate-v1'),'closed DATA source class required')
+    readonly=_source_class=='kernel-readonly-candidate-v1'
+    marker='N10DATARO1' if readonly else 'N10DATA1'
+    source=_source_class if readonly else MODE
+    lines = [line for line in text.splitlines() if marker in line]
     require(len(lines) == 1, 'one DATA result required')
-    m = re.search(r'N10BOOTLINK2 boot=([0-9a-f]{32}) N10DATA1 ([^\r\n\x00]{1,447}) checksum=([0-9a-f]{8})$', lines[0])
+    m = re.search(r'N10BOOTLINK2 boot=([0-9a-f]{32}) '+marker+r' ([^\r\n\x00]{1,447}) checksum=([0-9a-f]{8})$', lines[0])
     require(m is not None and m[1] != '0'*32 and checksum(m[2].encode('ascii')) == int(m[3],16), 'DATA boot/checksum differs')
     pairs = [part.split('=') for part in m[2].split(' ')]
     keys = ('id','cycle','kind','source','status','carrier','logical','carrier_rc','stream','payload','consumed','written','calls','digest','reasons','expectations','captures','retained','ownership','executed')
     require(all(len(p) == 2 for p in pairs) and tuple(p[0] for p in pairs) == keys, 'DATA closed schema required')
     row = dict(pairs)
-    require(row['id'] == identity and row['cycle'] == cycle and row['kind'] == 'result' and row['source'] == MODE and
+    require(row['id'] == identity and row['cycle'] == cycle and row['kind'] == 'result' and row['source'] == source and
             row['ownership'] == row['executed'] == '0' and re.fullmatch('[0-9a-f]{64}', row['digest']), 'DATA identity/nonclaim differs')
     numbers = {}
     for key in ('carrier','logical','stream','payload','consumed','written','calls'):
@@ -340,8 +353,9 @@ def decode(text, identity, cycle):
     numbers['carrier_rc'] = int(row['carrier_rc'])
     require(re.fullmatch('[0-9a-f]{8}',row['reasons']) and int(row['reasons'],16) <= 0x1fff and
             row['expectations'] in ('0','1') and row['captures'] in ('0','1','2') and row['retained'] in ('0','1'), 'bounded DATA guard reasons required')
+    require(not readonly or row['captures']=='0','readonly source cannot claim external captures')
     reasons = int(row['reasons'],16)
-    passed = row['status'] == 'ok' and reasons == 0 and row['expectations'] == row['captures'] == row['retained'] == '1' and \
+    passed = row['status'] == 'ok' and reasons == 0 and row['expectations'] == row['retained'] == '1' and row['captures']==('0' if readonly else '1') and \
         numbers['calls'] == 1 and 0 < numbers['payload'] == numbers['written'] <= 64*1024*1024 and \
         18 <= numbers['stream'] <= numbers['logical']-128 and 128 <= numbers['logical'] <= numbers['carrier'] <= 64*1024*1024 and \
         numbers['carrier'] in (numbers['logical'],(numbers['logical']+BOOT_PAGE-1)//BOOT_PAGE*BOOT_PAGE) and numbers['carrier_rc'] == 0 and numbers['consumed'] <= numbers['stream']

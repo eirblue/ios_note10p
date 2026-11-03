@@ -94,8 +94,9 @@ def retain_route_prerequisites(source, objects, out, compiler_include):
 
 
 def main(kind=None):
-    if kind not in (None, "sha256-stream-state", "cpu-affinity-binding", "early-fdt-binding", "native-memory-observation", "linux-data-carrier", "owned-contiguous-staging-pc", "current-owned-staging-pc", "readonly-input-pc"):
+    if kind not in (None, "sha256-stream-state", "cpu-affinity-binding", "early-fdt-binding", "native-memory-observation", "linux-data-carrier", "owned-contiguous-staging-pc", "current-owned-staging-pc", "readonly-input-pc", "kernel-readonly-candidate"):
         raise ValueError("closed diagnostic task required")
+    kernel_ro = kind == "kernel-readonly-candidate"
     readonly = kind == "readonly-input-pc"
     stream = kind == "sha256-stream-state"
     affinity = kind == "cpu-affinity-binding"
@@ -103,7 +104,7 @@ def main(kind=None):
     native = kind == "native-memory-observation"
     current_owned = kind == "current-owned-staging-pc"
     owned = kind in ("owned-contiguous-staging-pc","current-owned-staging-pc")
-    data_task = kind in ("linux-data-carrier","owned-contiguous-staging-pc","current-owned-staging-pc","readonly-input-pc")
+    data_task = kind in ("linux-data-carrier","owned-contiguous-staging-pc","current-owned-staging-pc","readonly-input-pc","kernel-readonly-candidate")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--archive', type=Path)
@@ -142,6 +143,9 @@ def main(kind=None):
              'linux_data_growth.h','linux_data_growth_fixture.c','test_v104_growth_region.py',
              'early_fdt_binding.py','sealed_affinity_artifact.cjs',
              'bundle_affinity_evidence.py') if data_task else ()
+    if kernel_ro:
+        from kernel_readonly_input import SOURCES as kernel_ro_sources
+        extra=(*extra,*kernel_ro_sources)
     if readonly:
         from readonly_input_pc import SOURCES as readonly_sources
         extra=(*extra,*readonly_sources)
@@ -180,6 +184,8 @@ def main(kind=None):
         from early_fdt_binding import install, API_PINS as extra_kernel_pins
     elif native:
         from native_memory_observation import install, API_PINS as extra_kernel_pins
+    elif kernel_ro:
+        from kernel_readonly_input import install, API_PINS as extra_kernel_pins
     elif readonly:
         from readonly_input_pc import install, API_PINS as extra_kernel_pins
     elif current_owned:
@@ -191,7 +197,7 @@ def main(kind=None):
     save(out/'source-manifest.json', manifest)
     ci = {name: os.environ.get(name) for name in
           ('GITHUB_SHA', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'GITHUB_JOB')}
-    if current_owned or readonly:
+    if current_owned or readonly or kernel_ro:
         ci.update({name:os.environ.get(name) for name in ('GITHUB_WORKFLOW_REF','GITHUB_WORKFLOW_SHA','GITHUB_REPOSITORY')})
     identity = hashlib.sha256(json.dumps({'source': manifest, 'ci': ci}, sort_keys=True).encode()).hexdigest()[:32]
     commands = []
@@ -282,6 +288,8 @@ def main(kind=None):
             settings.update(NOTE10_DATA_CARRIER='y', NOTE10_NATIVE_MEMORY_OBSERVATION='n',
                             NOTE10_EARLY_FDT_BINDING='n', NOTE10_CPU_AFFINITY_BINDING='n',
                             NOTE10_SHA256_STREAM_STATE='n', SMP='y', LOCALVERSION='"-v91-trusted-logical"')
+        if kernel_ro:
+            settings.update(NOTE10_KERNEL_READONLY_INPUT='y',NOTE10_READONLY_INPUT_PC='n',LOCALVERSION='"-v105-kernel-readonly"')
         if readonly:
             settings.update(NOTE10_READONLY_INPUT_PC='y',LOCALVERSION='"-v103-readonly-input-pc"')
         if owned:
@@ -302,6 +310,9 @@ def main(kind=None):
         readonly_default_enabled=readonly and any(line.startswith('CONFIG_NOTE10_READONLY_INPUT_PC=') for line in (objects/'.config').read_text().splitlines())
         if readonly_default_enabled:
             raise ValueError('readonly input must be default off')
+        kernel_ro_default_enabled=kernel_ro and any(line.startswith('CONFIG_NOTE10_KERNEL_READONLY_INPUT=') for line in (objects/'.config').read_text().splitlines())
+        if kernel_ro_default_enabled:
+            raise ValueError('kernel readonly candidate must be default off')
         shutil.copyfile(objects/'.config', out/'public-baseline.config')
         for index, (name, value) in enumerate(settings.items()):
             if value in ('y', 'n'):
@@ -327,7 +338,7 @@ def main(kind=None):
         retain_route_prerequisites(source, objects, out, compiler_include)
         run(['aarch64-linux-gnu-nm', *(['-S'] if (fdt or native or data_task) else []), '-n', objects/TARGET], 'new-object-symbols.log')
         run(['aarch64-linux-gnu-readelf', '-SW', objects/TARGET], 'new-object-sections.log')
-        if readonly:
+        if readonly or kernel_ro:
             run(['aarch64-linux-gnu-readelf','-sW',objects/TARGET],'new-object-symbol-table.log')
         image = objects/'arch/arm64/boot/Image'
         raw = image.read_bytes()
@@ -335,14 +346,14 @@ def main(kind=None):
             raise ValueError('completed ARM64 Image header invalid')
         if raw.count(b'N10_CYCLE_SLOT_UNSET_0123456789A') != 1:
             raise ValueError('exact one unpatched inherited recovery cycle slot required')
-        if any(marker not in raw for marker in (b'N10RET1', b'N10DATAPC1' if readonly else b'N10DATA1' if data_task else b'N10MEMARGS1' if native else b'N10FDT1' if fdt else b'N10AFF1' if affinity else b'N10SHASTREAM1' if stream else b'N10SHA1', b'N10SHACTL1', b'N10ROUTE2', b'N10INIT2', b'N10MININIT2', b'N10BOOTLINK2', identity.encode())):
+        if any(marker not in raw for marker in (b'N10RET1', b'N10DATARO1' if kernel_ro else b'N10DATAPC1' if readonly else b'N10DATA1' if data_task else b'N10MEMARGS1' if native else b'N10FDT1' if fdt else b'N10AFF1' if affinity else b'N10SHASTREAM1' if stream else b'N10SHA1', b'N10SHACTL1', b'N10ROUTE2', b'N10INIT2', b'N10MININIT2', b'N10BOOTLINK2', identity.encode())):
             raise ValueError('new diagnostic Image identity/markers missing')
         if (stream and b'N10SHA1' in raw) or ((affinity or fdt) and any(marker in raw for marker in (b'N10SHA1', b'N10SHASTREAM1'))) or (fdt and b'N10AFF1' in raw) or (native and any(marker in raw for marker in (b'N10SHA1',b'N10SHASTREAM1',b'N10AFF1',b'N10FDT1'))):
             raise ValueError('old SHA tasks must not be compiled into the new task')
         if data_task and any(marker in raw for marker in (b'N10SHA1',b'N10SHASTREAM1',b'N10AFF1',b'N10FDT1',b'N10MEMARGS1')):
             raise ValueError('old diagnostic callback compiled into DATA task')
         normal_readonly_excluded=False
-        if data_task and not owned and not readonly:
+        if data_task and not owned and not readonly and not kernel_ro:
             if ('CONFIG_NOTE10_READONLY_INPUT_PC=y' in config or b'N10ROINPUTPCV1!!' in raw or
                 'n10_readonly_input' in (out/'new-object-symbols.log').read_text() or
                 'n10_readonly_descriptor' in (out/'new-object-symbols.log').read_text() or
@@ -358,7 +369,7 @@ def main(kind=None):
         stable_archive(archive, before)
         if manifest != {name: sha(ROOT/name) for name in manifest}:
             raise ValueError('local first-use inputs changed during build')
-        result = dict(schema=1, version='v103' if readonly else 'v96' if current_owned else 'v92' if owned else 'v91' if data_task else 'v82' if native else 'v81' if fdt else 'v78' if affinity else 'v73' if stream else 'v72', diagnostic_kind=kind, passed=True, kernel_commit=COMMIT,
+        result = dict(schema=1, version='v105' if kernel_ro else 'v103' if readonly else 'v96' if current_owned else 'v92' if owned else 'v91' if data_task else 'v82' if native else 'v81' if fdt else 'v78' if affinity else 'v73' if stream else 'v72', diagnostic_kind=kind, passed=True, kernel_commit=COMMIT,
                       build_evidence_id=identity, ci_context=ci, source_sha256=manifest,
                       settings=settings, make_target='Image', integration_object=TARGET,
                       bootloader_cmdline_policy=cmdline_policy,
@@ -396,7 +407,7 @@ def main(kind=None):
                                     'initramfs.cpio':result['initramfs_cpio_sha256']}
             result['native_relative_placement']=relative_admission(result,config,footprint,elf=init,archive=archive_data,
                 raw_inputs={k:result[k] for k in ('minimal_init_elf_sha256','initramfs_cpio_sha256')})
-        if data_task and not readonly:
+        if data_task and not readonly and not kernel_ro:
             from linux_data_carrier import linked_footprint, relative_admission, STAGE, MODE, slot_metadata
             footprint = linked_footprint((objects/'System.map').read_text(),(out/'new-object-symbols.log').read_text(),
                 struct.unpack_from('<Q',raw,16)[0],struct.unpack_from('<Q',raw,8)[0],struct.unpack_from('<Q',raw,24)[0])
@@ -448,6 +459,23 @@ def main(kind=None):
                     actual_image_file_bytes=len(raw),actual_linked_kernel_bytes=footprint['linked_kernel_bytes'],
                     exact_growth_vs_saved_current='Root JSON-only comparison; no baseline build or placement claim'))
             result['readonly_pc_contract']=pc_contract(result,os.environ.get('GITHUB_SHA',''))
+        if kernel_ro:
+            from kernel_readonly_input import slot_metadata as kro_metadata, producer_contract, MODE as kro_mode, SCHEMA as kro_schema, KIND as kro_kind, CAPACITY, BUDGET
+            from linux_data_carrier import linked_footprint
+            record=kro_metadata(raw,(objects/'System.map').read_text(),(out/'new-object-symbols.log').read_text(),
+                (out/'new-object-sections.log').read_text(),(out/'new-object-symbol-table.log').read_text())
+            footprint=linked_footprint((objects/'System.map').read_text(),(out/'new-object-symbols.log').read_text(),
+                struct.unpack_from('<Q',raw,16)[0],struct.unpack_from('<Q',raw,8)[0],struct.unpack_from('<Q',raw,24)[0])
+            if footprint['linked_kernel_bytes']>BUDGET:
+                raise ValueError('actual readonly candidate exceeds explicit linked budget')
+            result.update(PC_only=False,physical_ready=False,data_input_kind=kro_kind,kernel_readonly_schema=kro_schema,
+                kernel_readonly_slot=record,kernel_readonly_linked_bytes=footprint['linked_kernel_bytes'],kernel_readonly_image_bytes=len(raw),
+                kernel_readonly_requires_ack=True,kernel_readonly_default_enabled=kernel_ro_default_enabled,
+                data_expectation_mode=kro_mode,data_expectation_slot=record,image_expectation_patched=False,data_footprint=footprint,
+                external_initrd_capture=False,input_capture_source='late-kernel-readonly-class2',
+                permanent_input_storage_bytes=CAPACITY,permanent_descriptor_bytes=80,additional_linked_storage_bytes=CAPACITY+80,
+                physical_placement_review_required=True,requires_new_user_growth_scope=True,global_RAM_ownership=False)
+            result['kernel_readonly_candidate_contract']=producer_contract(result,os.environ.get('GITHUB_SHA',''))
         result['files_sha256'] = {p.relative_to(out).as_posix(): sha(p) for p in out.rglob('*') if p.is_file()}
         save(out/'result.json', result)
     except Exception as error:

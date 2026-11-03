@@ -167,9 +167,11 @@ def wait_recovery(adb,previous_id,seconds,monotonic=time.monotonic,sleep=time.sl
         adb.call=original
 
 
-def run_plan(path,expected,output,*,execute=False,limit=1,adb=None,verified_roundtrip=None,roundtrip_sha256=None):
+def run_plan(path,expected,output,*,execute=False,limit=1,adb=None,verified_roundtrip=None,roundtrip_sha256=None,ack_kernel_readonly_growth=False):
     if not execute:raise ValueError('Preparation only: run requires explicit --execute; no device contacted')
     plan=validate_plan(path,expected)
+    from kernel_readonly_input import require_device_scope
+    require_device_scope(read(Path(plan['kernel_build'])/'build-result.json'),ack_kernel_readonly_growth)
     if limit not in range(1,len(plan['stages'])+1):raise ValueError('Cycle limit exceeds reviewed plan')
     proof=None
     if limit>1:
@@ -181,7 +183,7 @@ def run_plan(path,expected,output,*,execute=False,limit=1,adb=None,verified_roun
     output=private(output)
     if output.exists():raise ValueError('Fresh journal directory required')
     output.mkdir(parents=True)
-    journal=dict(plan_sha256=expected,kernel_image_sha256=plan['image_sha256'],backup_manifest_sha256=plan['backup_manifest_sha256'],single_cycle_verified=False,status='started',completed=[],partition_writes_attempted=False,reboots_attempted=False,partition_gate_evidence=[])
+    journal=dict(plan_sha256=expected,kernel_image_sha256=plan['image_sha256'],backup_manifest_sha256=plan['backup_manifest_sha256'],single_cycle_verified=False,status='started',completed=[],partition_writes_attempted=False,reboots_attempted=False,partition_gate_evidence=[],kernel_readonly_growth_ack=ack_kernel_readonly_growth is True)
     def persist():save(output/'journal.json',journal)
     persist()
     try:
@@ -191,7 +193,7 @@ def run_plan(path,expected,output,*,execute=False,limit=1,adb=None,verified_roun
         for item in plan['stages'][:limit]:
             if item['index']>1 and not journal['completed'][-1]['passed']:raise ValueError('Previous cycle did not pass')
             packages=Path(item['packages']);records=verify_packages(packages);diag=next(r for r in records if r['mode']=='diagnostic')
-            staged=stage(packages,adb)
+            staged=stage(packages,adb,ack_kernel_readonly_growth=ack_kernel_readonly_growth)
             from sha256_kat_device_profile import selected,precheck as check_kat,collect as collect_kat
             kat=selected(plan)
             preinstall_evidence=None
@@ -199,7 +201,7 @@ def run_plan(path,expected,output,*,execute=False,limit=1,adb=None,verified_roun
                 preinstall_evidence=dict(phase='preinstall',index=item['index'],cycle=item['cycle'],
                     receipt_path=str(packages/'PREINSTALL-CHECK.json'),evidence=None)
                 journal['partition_gate_evidence'].append(preinstall_evidence)
-            ready=(check_kat(packages,Path(item['kernel_build']),Path(plan['backup']),adb,staged) if kat else
+            ready=(check_kat(packages,Path(item['kernel_build']),Path(plan['backup']),adb,staged,ack_kernel_readonly_growth=ack_kernel_readonly_growth) if kat else
                    check(packages,Path(item['kernel_build']),Path(plan['backup']),Path(plan['core_model']),Path(plan['gate_model']),Path(plan['init_model']),adb))
             if preinstall_evidence is not None:preinstall_evidence['evidence']=ready.get('partition_evidence')
             if ready.get('ready_for_manual_access_test') is not True:raise ValueError('Readiness did not pass')
@@ -245,7 +247,8 @@ def run_plan(path,expected,output,*,execute=False,limit=1,adb=None,verified_roun
             journal['observed_return_boot_id']=after;persist()
             if preflight(adb)['twrp_version']!=initial['twrp_version']:raise ValueError('Recovery version changed')
             # Preserve diagnostic logs immediately after return, even when tests failed.
-            captured=(collect_kat if kat else collect)(packages,Path(item['kernel_build']),adb)
+            captured=(collect_kat(packages,Path(item['kernel_build']),adb,ack_kernel_readonly_growth=ack_kernel_readonly_growth)
+                      if kat else collect(packages,Path(item['kernel_build']),adb))
             postreturn_evidence=dict(phase='postreturn',index=item['index'],cycle=item['cycle'])
             journal['partition_gate_evidence'].append(postreturn_evidence)
             try:verify_partitions(adb,plan['backup'],diag['payload_sha256'],evidence=postreturn_evidence)
@@ -272,12 +275,12 @@ def main():
     p.add_argument('--cycles',type=int,default=1)
     for command in ('inspect','run'):
         p=sub.add_parser(command);p.add_argument('--plan',type=Path,required=True);p.add_argument('--plan-sha256',required=True)
-        if command=='run':p.add_argument('--output',type=Path,required=True);p.add_argument('--execute',action='store_true');p.add_argument('--limit',type=int,default=1);p.add_argument('--verified-roundtrip',type=Path);p.add_argument('--roundtrip-sha256')
+        if command=='run':p.add_argument('--output',type=Path,required=True);p.add_argument('--execute',action='store_true');p.add_argument('--limit',type=int,default=1);p.add_argument('--verified-roundtrip',type=Path);p.add_argument('--roundtrip-sha256');p.add_argument('--ack-kernel-readonly-growth',action='store_true')
     args=vars(parser.parse_args());command=args.pop('command')
     if command=='prepare':result=prepare_plan(**args)
     elif command=='inspect':
         plan=validate_plan(args['plan'],args['plan_sha256']);result=dict(valid=True,cycles=len(plan['stages']),device_operations=[])
-    else:result=run_plan(args['plan'],args['plan_sha256'],args['output'],execute=args['execute'],limit=args['limit'],verified_roundtrip=args['verified_roundtrip'],roundtrip_sha256=args['roundtrip_sha256'])
+    else:result=run_plan(args['plan'],args['plan_sha256'],args['output'],execute=args['execute'],limit=args['limit'],verified_roundtrip=args['verified_roundtrip'],roundtrip_sha256=args['roundtrip_sha256'],ack_kernel_readonly_growth=args['ack_kernel_readonly_growth'])
     print(json.dumps(result,indent=2))
 
 if __name__=='__main__':main()
