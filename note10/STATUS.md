@@ -1,3 +1,9 @@
+## 2026-11-04: v110 호스트 준비 통과, 실기기 첫 설치 전 중단
+
+- 새 호스트 CLI 문맥 회귀 시험이 한 번 통과했다. 앞선 호스트 통과 항목은 다시 실행하지 않았다. v110 후보 패키지와 단일 계획도 호스트에서 준비됐다.
+- 첫 실기기 시도는 설치 전 retained-variant 문맥 검증에서 중단됐다. 실행 기록에는 BOOT 기록 시도와 재부팅 시도가 없고 완료된 실기기 회차도 없다. 설치 전 파티션 검사 자리 하나는 기록됐지만 실제 해시 증거는 남지 않았다.
+- 배터리 정책 임계값은 10%였으나 실제 측정값은 기록되지 않았다. 복구 쌍 증거, 설치 후 및 복귀 후 파티션 검사는 완료되지 않았고, 정상 부팅이나 런타임 witness도 검증되지 않았다.
+- v109 읽기 전용 span은 논리적 후보 메타데이터다. 하드웨어 소유권이나 실제 하드웨어 검증을 입증하지 않는다. v108은 마지막 확인된 선행 기준이며 이번 중단 후 다시 확인하지 않았다. v110 물리 준비 완료는 false다.
 ## v97: DATA diagnostic mismatch; automatic return evidence incomplete
 
 - One physical cycle was consumed. The DATA observation ended with `carrier_mismatch`, while its reported carrier status code and reason bits were zero. A complete current-cycle minimal PID1/KAT/return observation was not produced, so this run does not establish a successful DATA diagnostic or an underlying decode failure.
