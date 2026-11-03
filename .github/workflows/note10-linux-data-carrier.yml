@@ -1,4 +1,4 @@
-name: Note10 v102 early input lifetime private Image
+name: Note10 v103 readonly kernel input PC-only private Image
 on:
   workflow_dispatch:
     inputs:
@@ -43,26 +43,26 @@ jobs:
             sudo -n env DEBIAN_FRONTEND=noninteractive timeout --kill-after=30s 180s apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
             sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a timeout --kill-after=30s 480s apt-get -o Dpkg::Use-Pty=0 -o DPkg::Lock::Timeout=60 -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install --no-install-recommends -y "${missing[@]}"
           fi
-      - name: One NEW early lifetime batch and actual capture fixture
+      - name: One NEW readonly input batch and actual late consumer fixture
         env:
           PYTHONDONTWRITEBYTECODE: '1'
-        run: python -B note10/device_test/test_v102_input_lifetime.py --output note10/private/v102-ci-new-tests
+        run: python -B note10/device_test/test_v103_readonly_input_pc.py --output note10/private/v103-ci-new-tests
       - name: Compile minimal Linux PID1 and build one new diagnostic Image
         env:
           PYTHONDONTWRITEBYTECODE: '1'
-        run: python -B note10/device_test/build_linux_data_carrier.py --output note10/private/v102-ci-linux-data-carrier --jobs 4
+        run: python -B note10/device_test/build_readonly_input_pc.py --output note10/private/v103-ci-linux-data-carrier --jobs 4
       - name: Bundle and seal private producer evidence including failures
         if: always()
         env:
           N10_RECIPIENT_PUBLIC_KEY_B64: ${{ inputs.recipient_public_key_b64 }}
         run: |
-          python -B note10/device_test/bundle_affinity_evidence.py --tests note10/private/v102-ci-new-tests --build note10/private/v102-ci-linux-data-carrier --output note10/private/v102-evidence.zip --source "$GITHUB_SHA"
-          node note10/device_test/sealed_affinity_artifact.cjs seal note10/private/v102-evidence.zip note10/private/v102-sealed-evidence.n10sealed "$GITHUB_SHA"
+          python -B note10/device_test/bundle_affinity_evidence.py --tests note10/private/v103-ci-new-tests --build note10/private/v103-ci-linux-data-carrier --output note10/private/v103-evidence.zip --source "$GITHUB_SHA"
+          node note10/device_test/sealed_affinity_artifact.cjs seal note10/private/v103-evidence.zip note10/private/v103-sealed-evidence.n10sealed "$GITHUB_SHA"
       - name: Upload ciphertext only
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: note10-v102-sealed-evidence
+          name: note10-v103-sealed-evidence
           if-no-files-found: error
           retention-days: 7
-          path: note10/private/v102-sealed-evidence.n10sealed
+          path: note10/private/v103-sealed-evidence.n10sealed

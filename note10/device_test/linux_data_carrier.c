@@ -17,6 +17,20 @@
 #define n10_data_clear(p,n) memzero_explicit(p,n)
 #endif
 #include "carrier_lzma.h"
+#ifdef N10_DATA_READONLY_PC
+#if defined(N10_DATA_COMPARE_EVIDENCE) || defined(N10_DATA_CONTIGUOUS) || !defined(N10_DATA_IMAGE_EXPECTATION)
+#error "readonly PC source cannot mix external-input or owned modes"
+#endif
+#include "readonly_input_pc.h"
+#ifndef N10_DATA_HOST_TEST
+static const unsigned char n10_readonly_input[N10_RO_CAPACITY] __used
+    __attribute__((section(".rodata.n10_readonly_input"),aligned(16)))={0};
+static const struct n10_ro_descriptor n10_readonly_descriptor __used
+    __attribute__((section(".rodata.n10_readonly_descriptor"),aligned(16)))={
+    N10_RO_MAGIC,{1,0,0,0},{80,0,0,0},{0,192,67,0,0,0,0,0},{0},{0},{0}
+};
+#endif
+#endif
 #ifdef N10_DATA_COMPARE_EVIDENCE
 #define N10_DATA_EARLY_EVIDENCE 1
 #ifndef N10_DATA_HOST_TEST
@@ -53,7 +67,7 @@ enum n10_data_reason {
     N10_DATA_EXPECT_UNPATCHED = 1u << 10, N10_DATA_EXPECT_INVALID = 1u << 11, N10_DATA_EXTENT_INVALID = 1u << 12
 };
 
-#if defined(N10_DATA_IMAGE_EXPECTATION) && !defined(N10_DATA_EARLY_CAPTURE_ONLY)
+#if defined(N10_DATA_IMAGE_EXPECTATION) && !defined(N10_DATA_EARLY_CAPTURE_ONLY) && !defined(N10_DATA_READONLY_PC)
 struct n10_expectation_slot {
     unsigned char magic[16], version[4], bytes[4], expectation[32], logical[8];
 };
@@ -82,6 +96,11 @@ static int n10_image_expectation_read(unsigned char expected[32], uint64_t *logi
 #define N10_DATA_EXPECTATION_SOURCE "image-slot-logical-v2"
 #else
 #define N10_DATA_EXPECTATION_SOURCE "cmdline-v1"
+#endif
+
+#ifdef N10_DATA_READONLY_PC
+#undef N10_DATA_EXPECTATION_SOURCE
+#define N10_DATA_EXPECTATION_SOURCE "kernel-readonly-slot-v1"
 #endif
 
 static struct {
@@ -127,6 +146,7 @@ __setup("n10.data_sha=", n10_data_parameter);
 #endif
 #endif
 
+#ifndef N10_DATA_READONLY_PC
 void __init n10_data_capture(unsigned long start, unsigned long end);
 void __init n10_data_capture(unsigned long start, unsigned long end)
 {
@@ -170,6 +190,8 @@ void __init n10_data_capture(unsigned long start, unsigned long end)
         READ_ONCE(initrd_start)==start && READ_ONCE(initrd_end)==end,ram_and_map);
 #endif
 }
+
+#endif /* external initrd capture is absent from readonly PC source */
 
 #ifndef N10_DATA_EARLY_CAPTURE_ONLY
 static uint64_t n10_data_le(const unsigned char *p, unsigned int bytes)
@@ -280,6 +302,21 @@ static void n10_data_run(struct n10_data_outcome *out)
     n10_range_unavailable(&out->range,N10_RANGE_UNREACHED);
     n10_early_snapshot(&out->early,&n10_data.early);
 #endif
+#ifdef N10_DATA_READONLY_PC
+    /* New source is admitted only here in the ordinary late DATA consumer.
+     * No external initrd capture, same-global fiction, or early source read. */
+    out->carrier=N10_RO_CAPACITY;
+    if(n10_data.emitted++) { out->reasons=N10_DATA_EMIT_REPEAT; return; }
+    status=n10_ro_admit(&n10_readonly_descriptor,sizeof(n10_readonly_descriptor),
+        (const unsigned char *)RELOC_HIDE((const unsigned char *)n10_readonly_input,0),sizeof(n10_readonly_input),
+        N10_RO_SOURCE,&p,&logical,expectation);
+    if(status!=1) {
+        out->reasons=status ? N10_DATA_EXPECT_INVALID : N10_DATA_EXPECT_UNPATCHED;
+        n10_data_clear(expectation,sizeof(expectation)); return;
+    }
+    out->logical=logical; out->expectations=1; out->retained=1;
+    (void)rounded;
+#else
     out->reasons = n10_data.reasons;
 #ifndef N10_DATA_IMAGE_EXPECTATION
     out->expectations = n10_data.parameters > 1 ? 2 : n10_data.parameters;
@@ -320,6 +357,7 @@ static void n10_data_run(struct n10_data_outcome *out)
     (void)rounded;
 #endif
     out->carrier = n10_data.length;
+#endif /* external initrd source / readonly PC source */
     out->status = "carrier_crypto";
     out->carrier_rc = n10_data_hash(p,(size_t)logical,digest);
     if (out->carrier_rc) goto done;
@@ -398,7 +436,11 @@ static int n10_data_emit(void)
         N10_SHA256_KAT_ID,(const char *)n10_cycle,N10_DATA_EXPECTATION_SOURCE,outcome.status,
         (unsigned long long)outcome.carrier,(unsigned long long)outcome.logical,outcome.carrier_rc,(unsigned long long)outcome.stream,(unsigned long long)outcome.payload,
         (unsigned long long)outcome.consumed,(unsigned long long)outcome.written,outcome.decoded,digest,outcome.reasons,outcome.expectations,outcome.captures,outcome.retained);
+#ifdef N10_DATA_READONLY_PC
+    pr_info("N10DATAPC1 %s checksum=%08x\n",frame,n10_frame_checksum(frame,count));
+#else
     pr_info("N10DATA1 %s checksum=%08x\n",frame,n10_frame_checksum(frame,count));
+#endif
 #ifdef N10_DATA_COMPARE_EVIDENCE
     count = n10_data_compare_format(&outcome.comparison,frame,sizeof(frame),digest,expected,
         N10_SHA256_KAT_ID,(const char *)n10_cycle,(unsigned long long)outcome.logical);
