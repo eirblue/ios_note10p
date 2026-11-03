@@ -1,0 +1,65 @@
+name: Note10 v112 output lifetime lease PC-only
+run-name: "v112 output lease PC | ${{ inputs.expected_source_head }}"
+on:
+  workflow_dispatch:
+    inputs:
+      expected_source_head:
+        description: Exact reviewed public source commit; must equal GITHUB_SHA before compile or test
+        required: true
+        type: string
+      test_scope:
+        description: Only the one NEW standalone synthetic PC method; historical tests excluded
+        required: true
+        type: choice
+        default: v112-output-lifetime-lease-pc
+        options:
+          - v112-output-lifetime-lease-pc
+permissions:
+  contents: read
+jobs:
+  output-lease-pc:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Bind exact reviewed source and new scope
+        shell: bash --noprofile --norc -euo pipefail {0}
+        env:
+          N10_EXPECTED_SOURCE_HEAD: ${{ inputs.expected_source_head }}
+          N10_TEST_SCOPE: ${{ inputs.test_scope }}
+        run: |
+          [[ "$N10_EXPECTED_SOURCE_HEAD" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$GITHUB_SHA" == "$N10_EXPECTED_SOURCE_HEAD" ]]
+          [[ "$N10_TEST_SCOPE" == "v112-output-lifetime-lease-pc" ]]
+      - name: Existing Ubuntu clang-14 host fixture toolchain
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          if [ "$(dpkg-query -W -f='${Status}' clang-14 2>/dev/null || true)" != "install ok installed" ]; then
+            sudo -n env DEBIAN_FRONTEND=noninteractive timeout --kill-after=30s 180s apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
+            sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a timeout --kill-after=30s 480s apt-get -o Dpkg::Use-Pty=0 -o DPkg::Lock::Timeout=60 -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install --no-install-recommends -y clang-14
+          fi
+      - name: One NEW grouped output lease PC method
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+          N10_TEST_SCOPE: ${{ inputs.test_scope }}
+        run: python -B note10/device_test/test_v112_output_lease.py --scope "$N10_TEST_SCOPE" --output note10/private/v112-ci-output-lease
+      - name: Upload synthetic JSON and text only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: note10-v112-output-lease-pc-synthetic
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            note10/private/v112-ci-output-lease/result.json
+            note10/private/v112-ci-output-lease/source-sha256.json
+            note10/private/v112-ci-output-lease/fixture-command.json
+            note10/private/v112-ci-output-lease/fixture-compile.txt
+            note10/private/v112-ci-output-lease/fixture-output.json
+            note10/private/v112-ci-output-lease/fixture-stderr.txt
+            note10/private/v112-ci-output-lease/guard-summary.json

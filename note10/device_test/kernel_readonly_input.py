@@ -364,6 +364,10 @@ def candidate_scope(row,*,require_compact=True):
 
 
 def require_device_scope(row,ack_kernel_readonly_growth=False,type3_context=None):
+    data.require(row.get('diagnostic_kind')!='output-lifetime-lease-pc' and
+        row.get('output_lease_schema')!='n10-output-lifetime-lease-pc-v1' and
+        row.get('schema')!='n10-output-lifetime-lease-pc-v1',
+        'PC-only output lifetime contract is permanently forbidden on device')
     from class3_native_origin import stage_selected
     if stage_selected(row):
         from type3_admission import require_device_scope
