@@ -179,6 +179,8 @@ def run_plan(path,expected,output,*,execute=False,limit=1,adb=None,verified_roun
         if limit!=1 or v105_battery_5pct_exception:raise ValueError('Type3 permits one new cycle and default battery10 only')
         item=plan['stages'][0]
         execution_build=read(Path(item['kernel_build'])/'build-result.json')
+        from type3_remaining_pack import FIELD as remaining_field
+        if remaining_field in plan:execution_build=dict(execution_build,**{remaining_field:plan[remaining_field]})
         type3_context=execution_context(execution_build,expected,item['packages'],declared_test_version,execution_host_source_head,
             type3_device_contract,type3_device_contract_sha256,output)
     elif type3_device_contract is not None or type3_device_contract_sha256 is not None:

@@ -11,6 +11,7 @@ import subprocess
 import sys
 import uuid
 import class3_native_origin as origins
+import type3_remaining_pack as remaining
 
 PROFILE = 'sha256-kat-recovery-v1'
 BUILTIN_PROFILE = 'sha256-kat-builtin-init-v2'
@@ -705,7 +706,7 @@ def host_binding(source_head):
                       'kernel_readonly_span_candidate.py','kernel_readonly_span_candidate.h','kernel_readonly_span_candidate_fixture.c',
                       'test_v107_readonly_span_candidate.py','build_kernel_readonly_span_candidate.py',
                       'type3_admission.py','test_v108_type3_admission.py','retained_v108_origin.py',
-                      'readonly_stage_witness.py','readonly_stage_witness.h','readonly_stage_witness_fixture.c','test_v109_readonly_stage_witness.py','class3_native_origin.py','test_v110_native109_admission.py')}
+                      'readonly_stage_witness.py','readonly_stage_witness.h','readonly_stage_witness_fixture.c','test_v109_readonly_stage_witness.py','class3_native_origin.py','test_v110_native109_admission.py','type3_remaining_pack.py')}
     return dict(host_profile_source_head=source_head, host_profile_source_sha256=dict(pins))
 
 
@@ -724,6 +725,7 @@ def host_profile_origin(binding):
     """Validate a producing profile origin without relabeling the live host."""
     from retained_v108_origin import selected,origin
     if selected(binding):return origin(binding)
+    if remaining.selected(binding):return remaining.origin(binding)
     head = binding.get('host_profile_source_head')
     require(re.fullmatch('[0-9a-f]{40}', head or '') and
             re.fullmatch('[0-9a-f]{40}', binding.get('source_head', '')),
@@ -1055,10 +1057,12 @@ def fields(row):
     elif is_candidate(row):keys=(*keys,*kernel_fields)
     from kernel_readonly_input import PACKING_FIELDS
     if any(key in row for key in PACKING_FIELDS):keys=(*keys,*PACKING_FIELDS)
+    if remaining.FIELD in row:keys=(*keys,remaining.FIELD)
     return {key: row[key] for key in keys}
 
 
 def package_scope(row, mode=None):
+    if remaining.selected(row):remaining.package_scope(row)
     physical_input_scope(row)
     require(selected(row), 'KAT package profile missing')
     no_legacy(row)
@@ -1208,6 +1212,11 @@ def prepare_plan(kernel_build, backup, twrp, mkbootimg, current_packages, output
     prepare(backup, target, Path(twrp), Path(mkbootimg), boot, cycle)
     packages = folder/'packages'
     build(backup, boot, packages, private(current_packages))
+    return finish_plan(kernel_build,backup,twrp,mkbootimg,current_packages,output,template,target,bound,cycle,packages,current_diagnostic)
+
+
+def finish_plan(kernel_build,backup,twrp,mkbootimg,current_packages,output,template,target,bound,cycle,packages,current_diagnostic,*,extra=None):
+    # Common finalizer for new materialization and an exact reviewed saved variant.
     stage = dict(index=1, cycle=cycle, kernel_build=str(target), image_sha256=bound['image_sha256'],
                  build_result_sha256=sha(target/'build-result.json'), packages=str(packages),
                  package_result_sha256=sha(packages/'package-result.json'))
@@ -1223,12 +1232,14 @@ def prepare_plan(kernel_build, backup, twrp, mkbootimg, current_packages, output
         plan['current_boot_payload_sha256'] = current_diagnostic['payload_sha256']
     if origins.selected(template):
         plan.update(execution_version=template['execution_version'],executing_host_source_head=template['host_profile_source_head'],type3_contract_sha256=template['type3_contract_sha256'])
+    if extra is not None:plan.update(extra)
     save(output/'plan.json', plan)
     validate_plan(output/'plan.json', sha(output/'plan.json'))
     return dict(plan=str(output/'plan.json'), plan_sha256=sha(output/'plan.json'), cycles=1, device_operations=[],
         kernel_readonly_IO_events=list(__import__('kernel_readonly_input').IO_EVENTS) if template.get('data_input_kind')=='kernel-readonly-candidate' else [])
 
 
+@remaining.plan_reader
 def validate_plan(path, expected):
     from stage_phase2 import verify_packages
     from prepare_linux_boot import boot_header, read_verified_backup
@@ -1241,7 +1252,8 @@ def validate_plan(path, expected):
     packing_keys=set(PACKING_FIELDS) if any(key in plan for key in PACKING_FIELDS) else set()
     from type3_admission import PLAN_FIELDS
     type3_keys=set(PLAN_FIELDS) if any(key in plan for key in PLAN_FIELDS) else set()
-    require(set(plan)-packing_keys-type3_keys == (PLAN_KEYS | {'current_boot_payload_sha256'} if plan.get('device_profile') in (BUILTIN_PROFILE, STREAM_PROFILE, AFFINITY_PROFILE, FDT_PROFILE, NATIVE_PROFILE, DATA_PROFILE) else PLAN_KEYS) and selected(plan) and plan.get('kind') == 'note10-bounded-auto-cycle' and
+    remaining_keys={remaining.FIELD} if remaining.FIELD in plan else set()
+    require(set(plan)-packing_keys-type3_keys-remaining_keys == (PLAN_KEYS | {'current_boot_payload_sha256'} if plan.get('device_profile') in (BUILTIN_PROFILE, STREAM_PROFILE, AFFINITY_PROFILE, FDT_PROFILE, NATIVE_PROFILE, DATA_PROFILE) else PLAN_KEYS) and selected(plan) and plan.get('kind') == 'note10-bounded-auto-cycle' and
             type(plan.get('schema')) is int and plan['schema'] == 1 and
             type(plan.get('minimum_battery')) is int and type(plan.get('return_timeout_seconds')) is int and
             plan.get('minimum_battery') == 10 and plan.get('return_timeout_seconds') == 240 and
@@ -1268,6 +1280,8 @@ def validate_plan(path, expected):
     records = verify_packages(packages)
     pair = read(packages/'package-result.json')
     package_scope(pair)
+    if remaining_keys:remaining.plan_pair(plan,pair,bound,path)
+    else:require(remaining.FIELD not in pair,'unrelated plan cannot claim remaining-pack lineage')
     require(all(pair.get(k) == bound[k] for k in fields(bound)) and pair['auto_cycle_token'] == item['cycle'] and
             pair['backup_manifest_sha256'] == plan['backup_manifest_sha256'] and
             pair['kernel_image_sha256'] == bound['image_sha256'], 'KAT pair/image/backup binding differs')

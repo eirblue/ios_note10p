@@ -157,6 +157,8 @@ def prepare(backup,kernel_build,twrp,mkbootimg,output,auto_cycle_token=None):
 
 def pack_verified(backup,kernel_build,official,mkbootimg,output,parts,build,config,auto_cycle_token,*,
                   roundtrip_scope=False,notifier_counts_scope=False,notifier_trace_scope=False,kat_profile=False):
+    from type3_remaining_pack import selected as retained_pack,require_pack
+    if retained_pack(build):require_pack(kernel_build,output,auto_cycle_token)
     kernel=kernel_build/'Image';data=kernel.read_bytes()
     auto_return=build.get('auto_return_diagnostic') is True
     if hashlib.sha256(config).hexdigest()!=build['effective_config_sha256']:
@@ -203,7 +205,8 @@ def pack_verified(backup,kernel_build,official,mkbootimg,output,parts,build,conf
         if build.get('data_expectation_mode') in (MODE,'kernel-readonly-candidate-v1','kernel-readonly-span-candidate-v1') and boot['page_size'] != BOOT_PAGE:
             raise ValueError('Trusted logical DATA requires closed BOOT page policy')
         reference_ramdisk = ramdisk
-        if build.get('data_input_kind')=='kernel-readonly-span-candidate':
+        from class3_native_origin import selected as class3_selected
+        if class3_selected(build):
             from type3_admission import read_compact
             ramdisk=read_compact(kernel_build,build)[0]
         elif build.get('kernel_readonly_external_choice')=='compact-v1':

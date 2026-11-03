@@ -7,6 +7,7 @@ import re
 import shutil
 import retained_v108_origin as retained
 import class3_native_origin as origins
+import type3_remaining_pack as remaining
 
 import kernel_readonly_span_candidate as ro3
 import kernel_readonly_input as old
@@ -65,7 +66,9 @@ def load_offline(path,expected):
         require(retained.reading() and row['host_source_head']==retained.HEAD and row['execution_version']=='v108','native107 contract is retained-read-only')
     else:
         require(row['execution_version']=='v110','native109 requires separately versioned host110')
-        origins.live_host(row['host_source_head']);host_binding(row['host_source_head'])
+        if row['host_source_head']==remaining.HEAD:
+            require(row['execution_version']=='v110','retained f39 offline contract is read-only host110')
+        else:origins.live_host(row['host_source_head']);host_binding(row['host_source_head'])
     for key in ('producer_root','ci_success_context','compact_manifest','backup','current_packages','reference_twrp','output'):
         require(type(row[key]) is str and str(private(row[key]))==row[key],'canonical private type3 path required')
     # Only this repository tool crosses the private boundary; payload paths do not.
@@ -93,7 +96,8 @@ def contract_binding(row):
 def candidate_scope(row,*,patched=None):
     item=origins.record(row.get('native_source_head'))
     if item['version']=='v109':
-        origins.live_row(row)
+        if remaining.selected(row):remaining.origin(row)
+        else:origins.live_row(row)
         require(all(row.get(key)==value for key,value in origins.stage_fields().items()),'native109 stage provenance differs')
         require(row.get('kernel_readonly3_image_bytes')==item['image_bytes'] and
             row.get('kernel_readonly3_linked_bytes')==item['linked_bytes'],'accepted native109 dimensions differ')
@@ -108,7 +112,7 @@ def candidate_scope(row,*,patched=None):
         'exact retained native class3 and separate new host identity required')
     version(row.get('execution_version'))
     from sha256_kat_device_profile import host_binding
-    host=retained.origin(row) if retained.selected(row) else host_binding(row.get('host_profile_source_head'))
+    host=remaining.origin(row) if remaining.selected(row) else retained.origin(row) if retained.selected(row) else host_binding(row.get('host_profile_source_head'))
     require(row.get('host_profile_source_sha256')==host['host_profile_source_sha256'],'type3 current host closure differs')
     ro3.metadata_contract(row.get('kernel_readonly3_slot'),row.get('kernel_readonly3_image_bytes'))
     span=row.get('kernel_readonly3_span')
@@ -213,6 +217,7 @@ def prepare_template(contract,path,expected):
 def validate_template(root):
     from sha256_kat_device_profile import raw_binding,host_profile_origin,root_receipt_binding,common_report,ci_success_receipt,sha as file_sha
     root=private(root);binding=read(root/'device-profile.json')
+    if remaining.selected(binding):return remaining.saved_metadata(root)
     contract=candidate_scope(binding,patched=False);item=origins.record(binding['native_source_head'])
     measured=raw_binding(root,item['result'],item['head'],readonly_origin=item['head'])
     _,fields=read_compact(root,binding);measured.update(fields)
@@ -260,7 +265,9 @@ def materialization(report,token,generic_sha,bound_sha,template_report_sha):
 @retained.reader
 def validate_variant(root,token,template=None):
     from materialize_auto_cycle import template_bytes,SLOT
-    root=private(root);report=read(root/'build-result.json');candidate_scope(report,patched=True)
+    root=private(root);report=read(root/'build-result.json')
+    if remaining.selected(report):return remaining.saved_metadata(root,token,template)
+    candidate_scope(report,patched=True)
     require(report.get('auto_cycle_variant') is True and report.get('auto_cycle_token')==token,'type3 cycle differs')
     source=private(report['auto_cycle_template'])
     require(template is None or source==private(template),'type3 template path differs')
@@ -330,6 +337,7 @@ def prepare_offline(path,expected):
 
 
 def execution_context(row,plan_sha,packages,declared_version,host_head,path,expected,execution_output=None):
+    if remaining.selected(row):return remaining.execution_context(row,plan_sha,packages,declared_version,host_head,path,expected,execution_output)
     origins.live_row(row)
     offline=candidate_scope(row,patched=True)
     completed=read(Path(offline['output'])/'transaction.json')
@@ -363,6 +371,17 @@ def require_context_directory(context,directory):
         require(type(context) is dict and context.get('packages')==str(private(directory)),'type3 actual package directory differs from reviewed execution context')
 
 def require_device_scope(row,ack_kernel_readonly_growth=False,context=None):
+    if remaining.selected(row):
+        require(ack_kernel_readonly_growth is True,'type3 requires explicit growth ACK before any device query')
+        keys={'schema','declared_version','host_source_head','plan_sha256','packages','output','contract_path','contract_sha256','remaining_pack'}
+        require(type(context) is dict and set(context)==keys and context.get('schema')==remaining.CONTEXT_SCHEMA,
+            'separate reviewed remaining-pack device context required before transport')
+        require(remaining.FIELD not in row or row[remaining.FIELD]==context['remaining_pack'],'remaining package/context lineage differs')
+        scoped=dict(row,**{remaining.FIELD:context['remaining_pack']})
+        expected=remaining.execution_context(scoped,context['plan_sha256'],context['packages'],context['declared_version'],context['host_source_head'],
+            context['contract_path'],context['contract_sha256'],context['output'])
+        require(expected==context,'remaining-pack execution context differs')
+        return True
     origins.live_row(row)
     require(ack_kernel_readonly_growth is True,'type3 requires explicit growth ACK before any device query')
     candidate_scope(row,patched=True)

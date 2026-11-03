@@ -22,12 +22,15 @@ import retained_v108_origin as retained
 import sha256_kat_device_profile as profile
 import stage_phase2
 import type3_admission as typed
+import type3_remaining_pack as remaining
 from decode_reservation import checksum
 
 METHOD='test_native109_host110_admission_witness_join_and_pretransport_scope'
 SCOPE='v110-native109-host-admission'
 RECEIPT_METHOD='test_raw_context_copy_and_exact_receipt_regeneration'
 RECEIPT_SCOPE='v110-ci-context-byte-copy-rev1'
+PACK_METHOD='test_stage_kind_compact_dispatch_and_exact_remaining_pack_scope'
+PACK_SCOPE='v110-remaining-pack-dispatch-rev2'
 OUTPUT=None
 IDENTITY,BOOT,HOST='1'*32,'3'*32,'8'*40
 
@@ -292,14 +295,198 @@ class Native109AdmissionTests(unittest.TestCase):
             actual_device_operations=[],Image_builds=0,CI=0,fixture_compiles=0,fixture_processes=0))
 
 
+    def test_stage_kind_compact_dispatch_and_exact_remaining_pack_scope(self):
+        work=OUTPUT/'synthetic-remaining';work.mkdir()
+        saved=work/'spent';template=saved/'template';variant=saved/'plan/cycle-01/kernel-build'
+        template.mkdir(parents=True);variant.mkdir(parents=True)
+        backup=work/'backup';backup.mkdir();prior=work/'prior108';prior.mkdir();producer=work/'producer';producer.mkdir()
+        tool_root=work/'canonical-tool';tool=tool_root/'research/twrp-d2x-reference/aosp-mkbootimg.py'
+        tool.parent.mkdir(parents=True);tool.write_bytes(b'# synthetic, never executed\n')
+        tool_module=tool_root/'note10/device_test/type3_admission.py';tool_module.parent.mkdir(parents=True)
+        config=b'CONFIG_BLK_DEV_INITRD=y\nCONFIG_RD_LZMA=y\nCONFIG_ARM64_4K_PAGES=y\n'
+        compact=bytes(ro3.CAPACITY);manifest=b'{"synthetic_compact_metadata":true}\n';native=dict(origins._NATIVE109)
+        result_raw=b'{"synthetic_producer_metadata":true}\n';native['result']=digest(result_raw)
+        slot=dict(schema=ro3.SCHEMA,source=ro3.MODE,capacity=ro3.CAPACITY,descriptor_bytes=80,generic=True,patched=False,
+            permanent_input_bytes=ro3.CAPACITY,permanent_descriptor_bytes=80,physical_ready=False,descriptor_class=3,boot_page=2048)
+        for index,key,symbol,section,size,preimage,offset in (
+            (1,'slot',ro3.SLOT,'.rodata.n10_kernel_readonly3_input',ro3.CAPACITY,digest(compact),4096),
+            (2,'descriptor',ro3.DESC,'.rodata.n10_kernel_readonly3_descriptor',80,digest(ro3.DESCRIPTOR),4096+ro3.CAPACITY)):
+            slot[key]=dict(symbol=symbol,section=section,offset=offset,bytes=size,alignment=16,readonly_flags='A',
+                preimage_sha256=preimage,object_section_index=index,object_symbol_offset=0)
+        span=dict(schema=old.SPAN_SCHEMA,kernel_bytes=native['linked_bytes']-2048,text_prefix_bytes=2048,slot_contained=True,
+            descriptor_contained=True,disjoint=True,source='linked-kernel',phase='pre_descriptor',hardware=False,ownership=False)
+        original_path=work/'spent-offline.json';context_raw=b'{"synthetic_context":true}\n'
+        save(backup/'backup-manifest.json',dict(synthetic=True));save(prior/'package-result.json',dict(
+            device_profile=data.PROFILE,diagnostic_kind=ro3.KIND,data_input_kind=ro3.KIND,storage_input_kind=ro3.KIND,
+            source_head=retained.NATIVE,native_source_head=retained.NATIVE,version='v108',execution_version='v108',native_producer_version='v107',
+            host_profile_source_head=retained.HEAD,host_profile_source_sha256=dict(retained.PINS),
+            backup_manifest_sha256=profile.sha(backup/'backup-manifest.json'),packages=[dict(mode='diagnostic',payload_sha256='d'*64)]))
+        (work/'context.json').write_bytes(context_raw);(work/'compact.json').write_bytes(manifest)
+        twrp=work/'twrp';twrp.write_bytes(b'synthetic-unopened-reference')
+        offline=dict(schema=typed.OFFLINE_SCHEMA,status='reviewed_ready',execution_version='v110',host_source_head=remaining.HEAD,
+            native_source_head=native['head'],accepted_result_sha256=native['result'],producer_root=str(producer),
+            ci_success_context=str(work/'context.json'),ci_success_context_sha256=digest(context_raw),compact_manifest=str(work/'compact.json'),
+            compact_manifest_sha256=digest(manifest),backup=str(backup),backup_manifest_sha256=profile.sha(backup/'backup-manifest.json'),
+            current_packages=str(prior),current_package_result_sha256=profile.sha(prior/'package-result.json'),current_boot_sha256='d'*64,
+            reference_twrp=str(twrp),mkbootimg=str(tool),output=str(saved),caps=dict(typed.OFFLINE_CAPS))
+        save(original_path,offline);old_sha=profile.sha(original_path)
+        receipt_raw=b'{"synthetic_previously_accepted_receipt":true}\n'
+        binding=dict(device_profile=data.PROFILE,diagnostic_kind=stages.KIND,data_input_kind=stages.KIND,storage_input_kind=stages.KIND,
+            **origins.stage_fields(),kernel_readonly3_schema=ro3.SCHEMA,kernel_readonly3_slot=slot,kernel_readonly3_span_schema=old.SPAN_SCHEMA,
+            kernel_readonly3_span=span,kernel_readonly3_linked_bytes=native['linked_bytes'],kernel_readonly3_image_bytes=native['image_bytes'],
+            kernel_readonly3_requires_ack=True,kernel_readonly3_marker='N10DATARO3',data_carrier_stage=data.STAGE,
+            data_relative_placement_admitted=False,raw_input_binding=False,data_expectation_mode=ro3.MODE,data_expectation_slot=slot,
+            image_expectation_patched=False,accepted_result_sha256=native['result'],source_head=native['head'],native_source_head=native['head'],
+            version='v110',execution_version='v110',native_producer_version='v109',native_producer_PC_first_use=True,
+            type3_native_origin=dict(source_head=native['head'],accepted_result_sha256=native['result'],source_sha256=dict(native['pins']),native_version='v109'),
+            host_profile_source_head=remaining.HEAD,host_profile_source_sha256=dict(remaining.PINS),image_sha256='a'*64,image_size=native['image_bytes'],
+            type3_generic_image_sha256='a'*64,type3_contract_path=str(original_path),type3_contract_sha256=old_sha,type3_external_choice='compact-v1',
+            type3_compact_sha256=digest(compact),type3_compact_bytes=ro3.CAPACITY,type3_compact_manifest_sha256=digest(manifest),
+            data_carrier_bytes=old.OLD_BYTES,data_payload_bytes=old.PAYLOAD_BYTES,data_manifest_sha256='b'*64,data_carrier_sha256='c'*64,
+            data_payload_sha256='e'*64,effective_config_sha256=digest(config),build_evidence_id=IDENTITY,
+            kernel_banner=origins.banner(dict(data_input_kind=stages.KIND))+'synthetic',image_root_receipt_sha256=digest(receipt_raw),
+            root_reader_result_sha256=digest(context_raw),**{key:'a'*64 for key in builtin.EXTRA_FIELDS})
+        save(template/'device-profile.json',binding);generic=profile.common_report(binding,profile.sha(template/'device-profile.json'))
+        save(template/'build-result.json',generic)
+        for root in (template,variant):
+            (root/'device-profile.json').write_bytes((template/'device-profile.json').read_bytes())
+            (root/'handoff.config').write_bytes(config);(root/'image-root-receipt.json').write_bytes(receipt_raw)
+            (root/'kernel-readonly-compact.json').write_bytes(manifest)
+        (template/'type3-contract.json').write_bytes(original_path.read_bytes());(template/'ci-success-context.json').write_bytes(context_raw)
+        (template/'result.json').write_bytes(result_raw)
+        token='6'*32;bound=dict(generic,auto_cycle_variant=True,auto_cycle_token=token,auto_cycle_template=str(template),
+            auto_cycle_template_report_sha256=profile.sha(template/'build-result.json'),auto_cycle_template_image_sha256=generic['image_sha256'],
+            image_sha256='f'*64,image_expectation_patched=True)
+        bound['type3_materialization']=typed.materialization(generic,token,generic['image_sha256'],bound['image_sha256'],bound['auto_cycle_template_report_sha256'])
+        save(variant/'build-result.json',bound)
+        journal=dict(schema='type3-offline-journal-v1',status='failed_no_restart',phase='plan_reserved',error_type='ValueError',
+            device_operations=[],contract_sha256=old_sha,attempts=dict(templates=1,plans=1,materializations=1))
+        save(saved/'transaction.json',journal)
+        projection=dict(schema='v110-offline-receipt-copy-rev1-failure-projection-v1',status='failed_no_restart',host_source_head=remaining.HEAD,
+            native_source_head=native['head'],native_result_sha256=native['result'],offline_contract_sha256=old_sha,
+            offline_transaction_sha256=profile.sha(saved/'transaction.json'),offline_transaction_path=str(saved/'transaction.json'),phase='plan_reserved',error_type='ValueError',
+            failure_diagnosis=dict(message='bounded private DATA input required',template_and_variant_completed_before_failure=True),
+            operation_counts=dict(cycles_prepared=0,materializations=1,decoder_calls=0,device_operations=0,plan_attempts=1,packages_created=0,
+                compact_copy_operations=1,variants=1,compact_validation_operations=1,completed_plan=False,templates=1))
+        projection_path=work/'failure.json';save(projection_path,projection)
+        contract=dict(schema=remaining.SCHEMA,status='reviewed_ready',execution_version='v110',packaging_host_source_head=HOST,
+            retained_host_source_head=remaining.HEAD,native_source_head=native['head'],accepted_result_sha256=native['result'],
+            original_contract=str(original_path),original_contract_sha256=old_sha,original_transaction_sha256=profile.sha(saved/'transaction.json'),
+            failure_projection=str(projection_path),failure_projection_sha256=profile.sha(projection_path),
+            template_profile_sha256=profile.sha(template/'device-profile.json'),template_report_sha256=profile.sha(template/'build-result.json'),
+            variant_report_sha256=profile.sha(variant/'build-result.json'),variant_config_sha256=digest(config),bound_image_sha256=bound['image_sha256'],
+            cycle=token,output=str(work/'fresh-remaining'),caps=dict(remaining.CAPS))
+        contract_path=work/'remaining.json';save(contract_path,contract)
+        host=dict(host_profile_source_head=HOST,host_profile_source_sha256={'synthetic/live-packer.py':'8'*64})
+        def host_binding(head):
+            if head!=HOST:raise ValueError('closed synthetic live packaging host required')
+            return copy.deepcopy(host)
+        class ReachedCompactDispatch(Exception):pass
+        class StopBeforePacking(Exception):pass
+        with patch('class3_native_origin._NATIVE109',native),patch('sha256_kat_device_profile.host_binding',side_effect=host_binding),\
+             patch('type3_admission.__file__',str(tool_module)),patch('prepare_linux_boot.MKBOOTIMG_SHA256',digest(tool.read_bytes())):
+            frozen={str(p):p.read_bytes() for p in saved.rglob('*') if p.is_file()}
+            def load_contract(row):
+                save(contract_path,row);return remaining.load(contract_path,profile.sha(contract_path))
+            context=load_contract(contract);self.assertEqual(context['report'],bound);self.assertEqual(context['host'],host)
+            self.assertFalse((variant/'Image').exists())  # Metadata admission never opens Image.
+            for key,value in (('retained_host_source_head',HOST),('packaging_host_source_head',remaining.HEAD),('cycle','7'*32),
+                ('variant_report_sha256','0'*64),('original_transaction_sha256','0'*64),('failure_projection_sha256','0'*64)):
+                with self.subTest(reject=key),self.assertRaises(ValueError):load_contract(dict(contract,**{key:value}))
+            wrong=copy.deepcopy(contract);wrong['caps']['materializations']=1
+            with self.assertRaises(ValueError):load_contract(wrong)
+            wrong=copy.deepcopy(context['binding']);wrong['packaging_host']['host_profile_source_sha256']['arbitrary.py']='0'*64
+            load_contract(contract)
+            with self.assertRaises(ValueError):remaining.checked_binding(wrong)
+            changed=dict(journal,attempts=dict(templates=1,plans=2,materializations=1));save(saved/'transaction.json',changed)
+            with self.assertRaises(ValueError):load_contract(dict(contract,original_transaction_sha256=profile.sha(saved/'transaction.json')))
+            (saved/'transaction.json').write_bytes(frozen[str(saved/'transaction.json')]);context=load_contract(contract)
+            for action in (lambda:origins.live_host(remaining.HEAD),lambda:typed.prepare_template(offline,original_path,old_sha),
+                lambda:remaining.saved_metadata(variant,token),lambda:remaining.require_pack(variant,work/'boot.img',token),
+                lambda:typed.require_device_scope(bound,True),lambda:profile.package_scope(bound)):
+                with self.assertRaises(ValueError):action()
+            with remaining._scope(context):
+                self.assertEqual(remaining.saved_metadata(variant,token),bound)
+                with self.assertRaises(ValueError):remaining.saved_metadata(variant,'7'*32)
+            # Exercise the actual failed packer dispatch up to its unchanged pre-write size boundary.
+            # Only the unchanged header/compact I/O adapters are synthetic; no packer subprocess executes.
+            image=bytearray(64);(variant/'Image').write_bytes(image)
+            header=dict(header_version=1,page_size=2048,recovery_dtbo_size=0,second_size=0,kernel_addr=4096,tags_addr=8192,
+                arm64_text_offset=0,ramdisk_file_offset=64,ramdisk_size=old.OLD_BYTES,cmdline='synthetic')
+            official=bytes(64+old.OLD_BYTES);vbmeta=bytearray(128);vbmeta[:4]=b'AVB0';struct.pack_into('>I',vbmeta,120,2)
+            parts=dict(boot=b'BOOT',vbmeta=bytes(vbmeta));destination=Path(contract['output']);destination.mkdir()
+            pack_journal=dict(schema='type3-remaining-pack-journal-v1',status='started',phase='pack_reserved',
+                contract_sha256=context['binding']['contract_sha256'],attempts=dict(BOOT_packings=1,package_pair_builds=0,plans=0,intrinsic_variant_data_consumptions=1,intrinsic_packer_compact_validations=1),device_operations=[])
+            save(destination/'transaction.json',pack_journal)
+            def size_boundary(kernel_size,ramdisk_size,*args,**kwargs):
+                self.assertEqual((kernel_size,ramdisk_size),(64,ro3.CAPACITY));raise ReachedCompactDispatch()
+            existing_bounded_read=data.bounded_private_read
+            def closed_read(path,*args,**kwargs):
+                if Path(path).name=='carrier.data':raise AssertionError('carrier.data fallback forbidden')
+                return existing_bounded_read(path,*args,**kwargs)
+            with remaining._scope(context),patch('prepare_linux_boot.boot_header',return_value=header),\
+                 patch('type3_admission.read_compact',return_value=(compact,{})) as compact_reader,\
+                 patch('linux_data_carrier.bounded_private_read',side_effect=closed_read),\
+                 patch('prepare_linux_boot.payload_size',side_effect=size_boundary),\
+                 patch('prepare_linux_boot.subprocess.run',side_effect=AssertionError('no subprocess')):
+                with self.assertRaises(ReachedCompactDispatch):packer.pack_verified(backup,variant,official,tool,destination/'cycle-01/boot.img',parts,bound,config,token,kat_profile=True)
+                self.assertEqual(compact_reader.call_count,1)
+                with self.assertRaises(ValueError):packer.pack_verified(backup,variant,official,tool,destination/'other.img',parts,bound,config,token,kat_profile=True)
+            wrapper=dict(bound,**{remaining.FIELD:context['binding']})
+            plan=dict(kernel_build=str(template),backup=str(backup),current_packages=str(prior),
+                current_package_result_sha256=offline['current_package_result_sha256'],current_boot_payload_sha256=offline['current_boot_sha256'],
+                stages=[dict(kernel_build=str(variant),cycle=token,build_result_sha256=contract['variant_report_sha256'],
+                    image_sha256=bound['image_sha256'],packages=str(destination/'cycle-01/packages'),package_result_sha256='0'*64)],
+                **{remaining.FIELD:context['binding']})
+            with remaining._scope(context):
+                remaining.package_scope(wrapper);remaining.plan_pair(plan,wrapper,bound,destination/'plan.json')
+                wrong=copy.deepcopy(plan);wrong[remaining.FIELD]['packaging_host']['host_profile_source_head']='7'*40
+                with self.assertRaises(ValueError):remaining.plan_pair(wrong,wrapper,bound,destination/'plan.json')
+            packages=destination/'cycle-01/packages';packages.mkdir(parents=True);save(packages/'package-result.json',wrapper)
+            plan['stages'][0]['package_result_sha256']=profile.sha(packages/'package-result.json');save(destination/'plan.json',plan)
+            plan_sha=profile.sha(destination/'plan.json')
+            device=dict(schema=remaining.DEVICE_SCHEMA,status='reviewed_ready',execution_version='v110',producer_host_source_head=remaining.HEAD,
+                packaging_host_source_head=HOST,native_source_head=native['head'],plan_sha256=plan_sha,packages=str(packages),
+                package_result_sha256=profile.sha(packages/'package-result.json'),bound_image_sha256=bound['image_sha256'],offline_contract_sha256=old_sha,
+                remaining_contract_sha256=context['binding']['contract_sha256'],output=str(work/'future-device'),minimum_battery=10,BOOT_write_max=1,reboot_max=1,
+                user_availability_record_sha256='4a639d278836af88256a339d199b9fbe53ad65d354db4b8c4401796522e758e9')
+            device_path=work/'future-device-contract.json';save(device_path,device)
+            with self.assertRaises(ValueError):typed.execution_context(wrapper,plan_sha,packages,'v110',HOST,device_path,profile.sha(device_path),work/'future-device')
+            complete=dict(pack_journal,status='complete',phase='complete',attempts=dict(BOOT_packings=1,package_pair_builds=1,plans=1,intrinsic_variant_data_consumptions=1,intrinsic_packer_compact_validations=1),result=dict(plan_sha256=plan_sha))
+            save(destination/'transaction.json',complete)
+            execution=typed.execution_context(wrapper,plan_sha,packages,'v110',HOST,device_path,profile.sha(device_path),work/'future-device')
+            self.assertEqual(execution['schema'],remaining.CONTEXT_SCHEMA)
+            self.assertTrue(typed.require_device_scope(bound,True,execution))
+            for ack,ctx in ((False,execution),(True,None)):
+                with self.assertRaises(ValueError):typed.require_device_scope(bound,ack,ctx)
+            wrong=copy.deepcopy(device);wrong['packaging_host_source_head']=remaining.HEAD;save(device_path,wrong)
+            with self.assertRaises(ValueError):typed.execution_context(wrapper,plan_sha,packages,'v110',HOST,device_path,profile.sha(device_path),work/'future-device')
+            # A fresh remaining-stage reservation invokes only packing, preserving all saved metadata.
+            fresh=dict(contract,output=str(work/'fresh-reservation'));load_contract(fresh)
+            with patch('prepare_linux_boot.prepare',side_effect=StopBeforePacking()) as pack_io,\
+                 patch('materialize_auto_cycle.materialize',side_effect=AssertionError('no rematerialization')),\
+                 patch('type3_admission.patch_image',side_effect=AssertionError('no repatch')),\
+                 patch('type3_admission.prepare_template',side_effect=AssertionError('no template')):
+                with self.assertRaises(StopBeforePacking):remaining.prepare(contract_path,profile.sha(contract_path))
+                self.assertEqual(pack_io.call_count,1)
+                with self.assertRaises(ValueError):remaining.prepare(contract_path,profile.sha(contract_path))
+                self.assertEqual(pack_io.call_count,1)
+            for path,raw in frozen.items():self.assertEqual(Path(path).read_bytes(),raw)
+            self.assertEqual(read(Path(fresh['output'])/'transaction.json')['status'],'failed_no_restart')
+        save(OUTPUT/'remaining-summary.json',dict(actual_failed_dispatch_exercised=True,exact_retained_host_map_count=len(remaining.PINS),
+            intrinsic_variant_data_consumptions=1,intrinsic_packer_compact_validations=1,original_compact_source_consumptions=0,
+            immutable_saved_metadata=True,separate_live_packing_origin=True,prewrite_mismatch_rejection=True,spent_transaction_restart=0,
+            old_methods_run=0,actual_private_inputs=0,actual_device_operations=[],Image_builds=0,CI=0,fixture_compiles=0,fixture_processes=0))
+
+
 if __name__=='__main__':
-    parser=argparse.ArgumentParser();parser.add_argument('--scope',required=True,choices=(RECEIPT_SCOPE,));parser.add_argument('--output',type=Path,required=True)
+    parser=argparse.ArgumentParser();parser.add_argument('--scope',required=True,choices=(PACK_SCOPE,));parser.add_argument('--output',type=Path,required=True)
     args=parser.parse_args();OUTPUT=profile.private(args.output);OUTPUT.mkdir(parents=True,exist_ok=False)
     names=('class3_native_origin.py','type3_admission.py','sha256_kat_device_profile.py','kernel_readonly_span_candidate.py',
-        'readonly_stage_witness.py','linux_data_carrier.py','kernel_readonly_input.py','auto_cycle.py','materialize_auto_cycle.py','test_v110_native109_admission.py')
+        'readonly_stage_witness.py','linux_data_carrier.py','kernel_readonly_input.py','auto_cycle.py','materialize_auto_cycle.py','test_v110_native109_admission.py','type3_remaining_pack.py','prepare_linux_boot.py')
     save(OUTPUT/'source-sha256.json',{name:digest((Path(__file__).resolve().parent/name).read_bytes()) for name in names})
-    result=unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite([Native109AdmissionTests(RECEIPT_METHOD)]))
-    save(OUTPUT/'result.json',dict(schema='v110-ci-context-receipt-regression-v1',scope=args.scope,selected=[RECEIPT_METHOD],run=result.testsRun,
+    result=unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite([Native109AdmissionTests(PACK_METHOD)]))
+    save(OUTPUT/'result.json',dict(schema='v110-remaining-pack-regression-v1',scope=args.scope,selected=[PACK_METHOD],run=result.testsRun,
         errors=len(result.errors),failures=len(result.failures),passed=result.wasSuccessful(),fixture_compiles=0,fixture_processes=0,Image_builds=0,CI=0,
         actual_private_inputs=0,actual_device_operations=[],old_methods_run=0,error_tracebacks=[dict(test=test.id(),traceback=trace) for test,trace in result.errors],
         failure_tracebacks=[dict(test=test.id(),traceback=trace) for test,trace in result.failures]))
