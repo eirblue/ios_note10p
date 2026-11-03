@@ -1,13 +1,13 @@
-name: Note10 v109 readonly stage witness PC first use private Image
+name: Note10 v109 rev1 failed host method and first native Image
 on:
   workflow_dispatch:
     inputs:
       new_scope:
-        description: Only new v109 witness methods and one PC Image; no v107 replay
+        description: Only fixed host method and first Image; earlier fixture PASS is not replayed
         required: true
         type: choice
         options:
-          - v109-readonly-stage-witness-pc
+          - v109-rev1-retained-host-only
       recipient_public_key_b64:
         description: Fresh RSA3072 public recipient key only; private key stays local
         required: true
@@ -16,7 +16,7 @@ permissions:
   contents: read
 jobs:
   linux-data-carrier:
-    if: ${{ inputs.new_scope == 'v109-readonly-stage-witness-pc' }}
+    if: ${{ inputs.new_scope == 'v109-rev1-retained-host-only' }}
     runs-on: ubuntu-22.04
     timeout-minutes: 110
     steps:
@@ -50,26 +50,26 @@ jobs:
             sudo -n env DEBIAN_FRONTEND=noninteractive timeout --kill-after=30s 180s apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
             sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a timeout --kill-after=30s 480s apt-get -o Dpkg::Use-Pty=0 -o DPkg::Lock::Timeout=60 -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install --no-install-recommends -y "${missing[@]}"
           fi
-      - name: Only two NEW stage-witness methods and one stubbed class3 fixture
+      - name: Only fixed retained host method; no fixture compile or process
         env:
           PYTHONDONTWRITEBYTECODE: '1'
-        run: python -B note10/device_test/test_v109_readonly_stage_witness.py --scope v109-readonly-stage-witness-pc --output note10/private/v109-ci-new-tests
-      - name: Compile minimal Linux PID1 and build one new diagnostic Image
+        run: python -B note10/device_test/test_v109_readonly_stage_witness.py --scope v109-rev1-retained-host-only --output note10/private/v109-rev1-ci-host-test
+      - name: Compile minimal Linux PID1 and build first v109 candidate Image
         env:
           PYTHONDONTWRITEBYTECODE: '1'
-        run: python -B note10/device_test/build_kernel_readonly_span_candidate.py --producer v109-readonly-stage-witness-pc --output note10/private/v109-ci-linux-data-carrier --jobs 4
+        run: python -B note10/device_test/build_kernel_readonly_span_candidate.py --producer v109-readonly-stage-witness-pc --output note10/private/v109-rev1-ci-linux-data-carrier --jobs 4
       - name: Bundle and seal private producer evidence including failures
         if: always()
         env:
           N10_RECIPIENT_PUBLIC_KEY_B64: ${{ inputs.recipient_public_key_b64 }}
         run: |
-          python -B note10/device_test/bundle_affinity_evidence.py --tests note10/private/v109-ci-new-tests --build note10/private/v109-ci-linux-data-carrier --output note10/private/v109-evidence.zip --source "$GITHUB_SHA"
-          node note10/device_test/sealed_affinity_artifact.cjs seal note10/private/v109-evidence.zip note10/private/v109-sealed-evidence.n10sealed "$GITHUB_SHA"
+          python -B note10/device_test/bundle_affinity_evidence.py --tests note10/private/v109-rev1-ci-host-test --build note10/private/v109-rev1-ci-linux-data-carrier --output note10/private/v109-rev1-evidence.zip --source "$GITHUB_SHA"
+          node note10/device_test/sealed_affinity_artifact.cjs seal note10/private/v109-rev1-evidence.zip note10/private/v109-rev1-sealed-evidence.n10sealed "$GITHUB_SHA"
       - name: Upload ciphertext only
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: note10-v109-sealed-evidence
+          name: note10-v109-rev1-sealed-evidence
           if-no-files-found: error
           retention-days: 7
-          path: note10/private/v109-sealed-evidence.n10sealed
+          path: note10/private/v109-rev1-sealed-evidence.n10sealed

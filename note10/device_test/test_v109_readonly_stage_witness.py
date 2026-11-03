@@ -1,4 +1,4 @@
-"""Exactly NEW2; one controlled class3 fixture compile/process; no device."""
+"""Rev1 host-only route; carry the earlier fixture PASS without replay."""
 import argparse
 from contextlib import ExitStack
 import copy
@@ -26,6 +26,7 @@ HERE=Path(__file__).resolve().parent
 OUTPUT=None
 IDENTITY,CYCLE,BOOT='1'*32,'2'*32,'3'*32
 METHODS=('test_actual_class3_stage_witness_and_existing_cleanup','test_closed_witness_and_retained_v108_read_scope')
+HOST_ONLY_SCOPE='v109-rev1-retained-host-only'
 
 def digest(raw):return hashlib.sha256(raw).hexdigest()
 def save(path,row):Path(path).write_text(json.dumps(row,sort_keys=True,indent=2)+'\n')
@@ -93,7 +94,12 @@ class StageWitnessTests(unittest.TestCase):
 
         work=OUTPUT/'synthetic-retained';work.mkdir();contract_path=work/'contract.json'
         paths={key:str((work/key).resolve()) for key in ('producer_root','ci_success_context','compact_manifest','backup','current_packages','reference_twrp','output')}
-        tool=HERE.parents[1]/'research/twrp-d2x-reference/aosp-mkbootimg.py'
+        # A closed, inert repository dependency fixture; no real research checkout required.
+        tool_repo=work/'synthetic-tool-repository'
+        tool=tool_repo/'research/twrp-d2x-reference/aosp-mkbootimg.py'
+        tool.parent.mkdir(parents=True);tool.write_bytes(b'# synthetic tool dependency; never executed\n')
+        tool_module=tool_repo/'note10/device_test/type3_admission.py'
+        tool_module.parent.mkdir(parents=True);tool_module.write_bytes(b'# synthetic module root; never imported\n')
         contract=dict(schema=typed.OFFLINE_SCHEMA,status='reviewed_ready',execution_version='v108',host_source_head=retained.HEAD,
             native_source_head=ro3.NATIVE_HEAD,accepted_result_sha256=ro3.NATIVE_RESULT_SHA256,**paths,mkbootimg=str(tool),caps=dict(typed.OFFLINE_CAPS),
             **{key:'a'*64 for key in ('ci_success_context_sha256','compact_manifest_sha256','backup_manifest_sha256','current_package_result_sha256','current_boot_sha256')})
@@ -117,9 +123,13 @@ class StageWitnessTests(unittest.TestCase):
         row['type3_materialization']=dict(schema='type3-fixed-patch-v1',generic_image_sha256='a'*64,bound_image_sha256='b'*64,
             template_report_sha256='a'*64,cycle=CYCLE)
         with ExitStack() as stack:
-            # Old geometry and public tool hash are unchanged dependencies, not new test subjects.
+            # Keep production canonical path/existence/symlink/hash guards intact.
+            # Only this synthetic scope supplies its own module root and matching tool pin.
+            real_file_sha=profile.sha
+            stack.enter_context(patch('type3_admission.__file__',str(tool_module)))
+            stack.enter_context(patch('prepare_linux_boot.MKBOOTIMG_SHA256',digest(tool.read_bytes())))
             stack.enter_context(patch('kernel_readonly_span_candidate.metadata_contract'))
-            stack.enter_context(patch('sha256_kat_device_profile.sha',side_effect=lambda p:packer.MKBOOTIMG_SHA256 if Path(p)==tool else 'e'*64))
+            stack.enter_context(patch('sha256_kat_device_profile.sha',side_effect=lambda p:real_file_sha(p) if Path(p)==tool else 'e'*64))
             stack.enter_context(patch('stage_phase2.preflight',side_effect=AssertionError('no transport')))
             with self.assertRaises(ValueError):profile.host_binding(retained.HEAD)
             with self.assertRaises(ValueError):profile.host_binding(retained.STOPPED_HEAD)
@@ -196,15 +206,18 @@ class StageWitnessTests(unittest.TestCase):
             current_baseline='synthetic-v108',new_candidate_admission=False,actual_private_input_reads=0,device_operations=[]))
 
 if __name__=='__main__':
-    parser=argparse.ArgumentParser();parser.add_argument('--scope',required=True,choices=(stage.SELECTOR,));parser.add_argument('--output',type=Path,required=True)
+    parser=argparse.ArgumentParser();parser.add_argument('--scope',required=True,choices=(HOST_ONLY_SCOPE,));parser.add_argument('--output',type=Path,required=True)
     args=parser.parse_args();OUTPUT=profile.private(args.output);OUTPUT.mkdir(parents=True,exist_ok=False)
     names=(*stage.SOURCES,'linux_data_carrier.c','kernel_readonly_span_candidate.py','kernel_readonly_input.py',
         'sha256_kat_device_profile.py','type3_admission.py','stage_phase2.py','builtin_init_profile.py','materialize_auto_cycle.py',
         'build_builtin_init_image.py','build_kernel_readonly_span_candidate.py')
     save(OUTPUT/'source-sha256.json',{name:digest((HERE/name).read_bytes()) for name in names})
-    result=unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite(StageWitnessTests(name) for name in METHODS))
-    save(OUTPUT/'result.json',dict(schema='v109-new-readonly-stage-witness-tests-v1',selected=list(METHODS),run=result.testsRun,
+    selected=(METHODS[1],)
+    result=unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite(StageWitnessTests(name) for name in selected))
+    save(OUTPUT/'result.json',dict(schema='v109-rev1-host-only-tests-v1',scope=args.scope,selected=list(selected),run=result.testsRun,
         failures=len(result.failures),errors=len(result.errors),passed=result.wasSuccessful(),fixture_compiles=StageWitnessTests.compiles,
         fixture_processes=StageWitnessTests.processes,old_test_methods_run=0,real_decoder_calls=0,actual_private_input_reads=0,
-        Image_builds=0,CI=0,device_operations=[]))
+        error_tracebacks=[dict(test=test.id(),traceback=trace) for test,trace in result.errors],
+        failure_tracebacks=[dict(test=test.id(),traceback=trace) for test,trace in result.failures],
+        fixture_pass_authority='separate private contract; not executed in this scope',Image_builds=0,CI=0,device_operations=[]))
     raise SystemExit(0 if result.wasSuccessful() else 1)
