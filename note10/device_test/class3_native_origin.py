@@ -115,8 +115,8 @@ def stage_fields():
 def live_host(head):
     from retained_v108_origin import live
     live(head)
-    from type3_remaining_pack import HEAD as stopped_host
-    data.require(head!=stopped_host,'stopped f39 host may only supply its reviewed saved read-origin')
+    from type3_remaining_pack import HEAD as stopped_host,PACKAGING_HEAD as retained_packer
+    data.require(head not in (stopped_host,retained_packer),'retained producer/packaging hosts are read-origin only')
     data.require(head not in (_NATIVE109['head'],ro3.NATIVE_HEAD),'native producer cannot be relabeled live host110')
 
 def live_row(row):

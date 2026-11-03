@@ -706,7 +706,7 @@ def host_binding(source_head):
                       'kernel_readonly_span_candidate.py','kernel_readonly_span_candidate.h','kernel_readonly_span_candidate_fixture.c',
                       'test_v107_readonly_span_candidate.py','build_kernel_readonly_span_candidate.py',
                       'type3_admission.py','test_v108_type3_admission.py','retained_v108_origin.py',
-                      'readonly_stage_witness.py','readonly_stage_witness.h','readonly_stage_witness_fixture.c','test_v109_readonly_stage_witness.py','class3_native_origin.py','test_v110_native109_admission.py','type3_remaining_pack.py')}
+                      'readonly_stage_witness.py','readonly_stage_witness.h','readonly_stage_witness_fixture.c','test_v109_readonly_stage_witness.py','class3_native_origin.py','test_v110_native109_admission.py','type3_remaining_pack.py','test_v111_device_read_context.py')}
     return dict(host_profile_source_head=source_head, host_profile_source_sha256=dict(pins))
 
 
@@ -1364,6 +1364,7 @@ def validate_plan(path, expected):
     return plan
 
 
+@remaining.device_reader
 def precheck(packages, kernel_build, backup, adb, staged, *, ack_kernel_readonly_growth=False,battery_policy=None,receipt_path=None,type3_context=None):
     from run_probe import preflight
     from stage_phase2 import verify_packages
@@ -1374,6 +1375,7 @@ def precheck(packages, kernel_build, backup, adb, staged, *, ack_kernel_readonly
     import zipfile
     packages, kernel_build, backup = private(packages), private(kernel_build), private(backup)
     battery_policy=validate_install_battery_policy(battery_policy)
+    if remaining.selected(read(packages/'package-result.json')):receipt_path=remaining.device_precheck_receipt(type3_context,receipt_path)
     target=private(receipt_path) if receipt_path is not None else packages/'PREINSTALL-CHECK.json'
     if battery_policy['five_percent_exception']:
         require(receipt_path is not None and not target.exists() and not target.is_relative_to(packages),
@@ -1502,6 +1504,7 @@ def collect(packages, kernel_build, adb, capture_parent=None, *, ack_kernel_read
         return failed
 
 
+@remaining.device_reader
 def _collect_into(packages, kernel_build, adb, out, *, ack_kernel_readonly_growth=False,type3_context=None):
     from run_probe import preflight
     from stage_phase2 import verify_packages

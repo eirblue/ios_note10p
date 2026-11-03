@@ -14,6 +14,89 @@ SCHEMA='note10-type3-remaining-pack-v1'
 DEVICE_SCHEMA='note10-type3-remaining-pack-device-v1'
 NATIVE='f20987a42249e61ef028c52099931f740d9a6cc5'
 CONTEXT_SCHEMA='type3-remaining-pack-execution-v1'
+DEVICE2_SCHEMA='note10-type3-remaining-pack-device-v2'
+CONTEXT2_SCHEMA='type3-remaining-pack-execution-v2'
+PACKAGING_HEAD='6bf37bf61c01d8ba95f5439743f318a6e5118a45'
+PACKAGING_PINS=MappingProxyType({
+    "note10/device_test/affinity_binding.py": "6d5b16d54a803c95bdd391a38efbd2bac5ef36baffe199f86cd83f878bf10678",
+    "note10/device_test/auto_cycle.py": "be97a2ce8a444b53807f55fae36f599da1869030fce168ff7f26c697bd08dc4a",
+    "note10/device_test/build_boot_test_packages.py": "17b973f54185521be6685acb5e019f8bf8b5f10897d01c0167929c97859cddef",
+    "note10/device_test/build_kernel_readonly_input.py": "5391edfa477324dbdd5f4d9c6fb13deb5df8a66b2ed4df7d018213012b227000",
+    "note10/device_test/build_kernel_readonly_span_candidate.py": "c9b44d314719e2f59e69541c2d6618777f616f468e9ca11b5f12d18dcec0f3a0",
+    "note10/device_test/build_kernel_readonly_span_pc.py": "cd42e0dec6570bcc09c7a07695560eae13a62420d744e16035c4da3a57c588e9",
+    "note10/device_test/build_readonly_input_pc.py": "893698f6741fd178334777b4f96c98934d78b5a927fe4cf3d383d92e90557d9e",
+    "note10/device_test/builtin_init_profile.py": "e196c7143cbd7aa55ded754a8381791efeff2974c03436e61c3f50454117e3bf",
+    "note10/device_test/builtin_init_route.py": "46b100dc95f11e344c11b8cb3fba5d34d17b2884385923426a42246699fda43d",
+    "note10/device_test/carrier_lzma.c": "e204732754f15929f7134885ec2740e1ed26f0291dd64c7df7957a4aee7b987a",
+    "note10/device_test/carrier_lzma.h": "6790aa17da94025e0bab175377573edb8df3f503c8cde86f8c919e33ee742974",
+    "note10/device_test/class3_native_origin.py": "3ca113857cd75daad8fe6fac17006d278d3f2bc198fdbc51aea87cc57c56306a",
+    "note10/device_test/current_data_reuse.py": "15c7a5a55e22f4445c216904769d7ba9b6367f792122e5b936305c95ae031129",
+    "note10/device_test/early_fdt_binding.py": "d4f7099fb45eca31c83c9acd9fbfe0cd5c7ccc5c271c18180e3672e22f9a6b78",
+    "note10/device_test/kernel_readonly_input.h": "4aa99ff2ab756b854174eb2519af96e79669f82114293790a538ddd3025298ea",
+    "note10/device_test/kernel_readonly_input.py": "77dfaeea9c4c1b8c5626c637e1286c988e9257359ebf857f6a0c2f1789015a37",
+    "note10/device_test/kernel_readonly_input_fixture.c": "6300f13ba284b4f42614a4c6cda8f09c6e6671e88d6e524ec24dacd3a7ab70e0",
+    "note10/device_test/kernel_readonly_span.h": "dd0640b8322fb86c8baa29863a931ddb7d005dd589352ba4136c09bdb79de86d",
+    "note10/device_test/kernel_readonly_span_candidate.h": "8f8e8522a7b03413b3db59f21fca5cefa4b74fb9e63a412dfc9d6067beb5dec1",
+    "note10/device_test/kernel_readonly_span_candidate.py": "eaa6e94d44c1c05396741177d2571577293b032ac91d1931e3533bdace45641a",
+    "note10/device_test/kernel_readonly_span_candidate_fixture.c": "b4d02ff71b82365915fca0c112170de9c44184dcce481656832e69e77dee9f29",
+    "note10/device_test/kernel_readonly_span_fixture.c": "afbc9ae410e15bf7221e10a4cbcb325702a3a0235dec0fe585b836e7dae467c6",
+    "note10/device_test/linux_data_carrier.c": "53b29fb87158183a0911596820e2f768d15059a5908c7434fa2ca6796e8d0259",
+    "note10/device_test/linux_data_carrier.py": "29733dc57cd396a401ed344d7f4a33faed6c383a93c3889f61510a15fcce0ae7",
+    "note10/device_test/linux_data_carrier_composition.c": "2eb666597983d3a2dfb0a4f98da26dc02dff287db49d39756ada6edc90e0c667",
+    "note10/device_test/linux_data_carrier_fixture.c": "6b1b0e14184582c734a3154eeef6c0e2736fd1b8ef3491881b7decaacb5ecbe4",
+    "note10/device_test/linux_data_compare_evidence.h": "3383823cf1fd56f688ad9d6823d965fdda270a08acede17f6df8d87fa6199438",
+    "note10/device_test/linux_data_compare_evidence_fixture.c": "45a0cdfd8d4bd8df5ffbbb0e370cd05f768d522e96208881a7f7a02ee02fadc3",
+    "note10/device_test/linux_data_early_prefix.h": "60fb29d56be78212e04cc164938db4a25296fdea5250e372824b317127aaeb98",
+    "note10/device_test/linux_data_early_prefix_fixture.c": "b058ccfa33fccadfa2547986a724b21dd7de0b781e003cd3ca1c71fddfe36f09",
+    "note10/device_test/linux_data_growth.h": "640ae63bd927d205ad8bc489c4c7b25935f1c4311332dce5d10821acf3ac0746",
+    "note10/device_test/linux_data_growth_fixture.c": "d567edfc28efc1b258eff93a72dda94d8f24af00297b315b1f7d371c7d77066a",
+    "note10/device_test/linux_data_input_probe_fixture.c": "c7192b0515eb7de9526291913ef97737207844a45d266a4e1287437f49b3e0b4",
+    "note10/device_test/linux_data_input_range.h": "c53f208c886ba21af0f22d266a1edb1de0f42a3e40d5a68080a41fcf775d4dac",
+    "note10/device_test/linux_data_input_range_fixture.c": "d3c7695b319963b9d6de679a5eadaf107c4dc667e610b892f2953a390854ecd5",
+    "note10/device_test/materialize_auto_cycle.py": "4b0b67be104a25c740f93a2ff3b4d57a859cf34006d0e43852a2e4cf6a4345de",
+    "note10/device_test/native_memory_observation.py": "f4acd0f310989bfcd1b0c2039fef6e429e8ec4d4f41ebdb94fc483538fa26663",
+    "note10/device_test/precheck_window_access.py": "3ef3859ef2a4c154e93e5db7846bde78eb9061742243dba435187a9087226e28",
+    "note10/device_test/prepare_linux_boot.py": "0499a630875cb4319e4bdfb33c02d0bac3e31538b24997bac794357b95a5298f",
+    "note10/device_test/readonly_input_pc.h": "01b18e5fddcd12fba45190baa337b47c3309f54cc7a448cd6d72209c5ba8a3f0",
+    "note10/device_test/readonly_input_pc.py": "d7125058dc85a57eb4283fccf87bcb6af96c26de1363f81d1acb0999b94f1fc7",
+    "note10/device_test/readonly_input_pc_fixture.c": "99f0e7eb9240b5c08314993a14dfcd9a532df0e24158679cdbed8b0c3c752730",
+    "note10/device_test/readonly_stage_witness.h": "85851db4c9622842f4ccc547e7532139f306917d8674c0298529e5041fb08330",
+    "note10/device_test/readonly_stage_witness.py": "200ebe64a1095eca28edc312f897a8c98ee3113f449e47d87ba83a2292cf77ce",
+    "note10/device_test/readonly_stage_witness_fixture.c": "2513117dd52b2c8ef92a6f0c161af3a2e1fe6060e24dc9b166d187c5a3fd0cec",
+    "note10/device_test/retained_v108_origin.py": "737e3de25884daee64e8dc4d938b81e5b2f328a5923a4b6cea0b2c92b0db24f7",
+    "note10/device_test/sha256_kat_device_profile.py": "d910de3582cfad200a0a9a21a160d2bd1f4feba2ddca5030ef084be79678cdc3",
+    "note10/device_test/sha256_stream_state.py": "55de2735fb830ae8047bb4a8fa74325f51b766b1e885c482dbbc5ebabe3ea437",
+    "note10/device_test/sha256_stream_vectors.json": "5c379d1ef41a40b9a1262c985476e9dc0ba88dae7b1586f949bbe79686f2165f",
+    "note10/device_test/stage_phase2.py": "9df734fa4227bb2b9a34953ad286a24ca8ecb43d98fc7b5a79548cd3bd99cab1",
+    "note10/device_test/test_affinity_binding.py": "bf602887c4437e0096473392789da33e3ef502297d8c060faf7d9da9ecd3eb89",
+    "note10/device_test/test_affinity_ci_context.py": "71aad30ab105a45efe2703fd7b222233836d6e7514560834daa71bfdd351dea9",
+    "note10/device_test/test_builtin_init_route.py": "9fa63dd55114472a748062447dd95c17bf4d4d7e743117f69f0bb6a7aca6ea42",
+    "note10/device_test/test_current_data_reuse.py": "c1a868d4f9669539aee3e4fca4868118db37071467325a85d73c279b2f1d29de",
+    "note10/device_test/test_early_fdt_binding.py": "2444d3d20b7cc42e705cb89c1d04de72599f7da2a5d1b9282636f3b9990ce1fa",
+    "note10/device_test/test_early_fdt_host_route.py": "75992eb3e8b1228d0ae3916d47306f0329b7947cb0dfae234ec25c1e737fef6a",
+    "note10/device_test/test_linux_data_carrier.py": "550344e818b42f8147ea1f688929feda322c68173f79f6e72850053dbc2e1ca7",
+    "note10/device_test/test_native_memory_observation.py": "d34e94fd5d964004c42dedd172ec07bd62826b675dcc9f4925ab4ac06c460599",
+    "note10/device_test/test_partition_gate_evidence.py": "b7dd52aa5c7747489a2713f805dbe15a6318f3d3776a8043700549e9383bcc72",
+    "note10/device_test/test_sha256_kat_device_profile.py": "c48400d5573695d217101806b8481e39aec38fd5382e64b85f999b4cee42c498",
+    "note10/device_test/test_sha256_stream_state.py": "088881f92037a9895b7947eb44692f51ecba1eb602a02dacc02ff3b94a836db8",
+    "note10/device_test/test_v100_carrier_input_probe.py": "f8e37cb2da1fc1efda5582079bb619d8853565d892a589872d0699277e8c4489",
+    "note10/device_test/test_v101_live_input_range.py": "e4424b6128a18f4099b31ddc6dcf16ba6256749ba2a87f8bd565b68a1ef68183",
+    "note10/device_test/test_v102_input_lifetime.py": "29cdae5c4b8ace788ad84f529700d753bcb19c9d4a34697bddf8ca7dfa80bed1",
+    "note10/device_test/test_v103_readonly_input_pc.py": "cdce146aed40d9526eae04259e39896f629248f6b395ad8ceeec341cae5be9c5",
+    "note10/device_test/test_v104_growth_region.py": "89ca671ca695b083ccf9cb58c6f474acfeadb9a67ff9747d640cc533dde40e7d",
+    "note10/device_test/test_v105_battery5_policy.py": "8871a297d549df482f8888cc53e392f4b5d659e8d93bfa1e3d16f25f9e4d2c0e",
+    "note10/device_test/test_v105_kernel_readonly.py": "7c1cccbdda3e8df612a0fa7d52870e74d750385b85cff7b2965d236177bb23dd",
+    "note10/device_test/test_v105_packing_rev1.py": "2402b70737ee2ec9c16fadd0a05b8837d68e5ae364cd1a468c4ac4471a75eabe",
+    "note10/device_test/test_v106_kernel_readonly_span.py": "0a777ec820cdfb131f5dc725577e88ed8bffc73d1e951aecfa5671414eb1849c",
+    "note10/device_test/test_v107_readonly_span_candidate.py": "10a3f90b475eda8dcaace92cb1dd387ba0ba6198316773f0212b578d51a1d64c",
+    "note10/device_test/test_v108_type3_admission.py": "6c2e02ac70f187bd315f4f34dbb66266512c7cd5d07b765594079bafbc10cb30",
+    "note10/device_test/test_v109_readonly_stage_witness.py": "33da915026b259cd267705a9a477ebbdf670581cbb8fed6fb604a1870c078684",
+    "note10/device_test/test_v110_native109_admission.py": "eb9b07328cef3bf3ef7a0c7461df1c89f0e8d3b448d440078df27edc69d0d485",
+    "note10/device_test/test_v99_carrier_compare_evidence.py": "2b45c21197709706d3f3ffc23e1428084d5d50a93a1d9b5bd22c2693124cf20c",
+    "note10/device_test/test_v99_host_profile_origin.py": "fb4a1c349ca298b4f18ba64e0692c7a93e9f0877b2f7a7ec22fa2c8f29ac219a",
+    "note10/device_test/type3_admission.py": "c7e8dba8f05dac951bd075fcae6a0ba488963b6cb6c7080d15344257c817d91e",
+    "note10/device_test/type3_remaining_pack.py": "c111e319d7cf3fee1cae648d12c27a7101fff4488201e4de6112ecf090a05b80"
+})
 PINS=MappingProxyType({
     "note10/device_test/affinity_binding.py": "6d5b16d54a803c95bdd391a38efbd2bac5ef36baffe199f86cd83f878bf10678",
     "note10/device_test/auto_cycle.py": "48d986be690da42d91d0934bab0bed261840c183aad8de5145baf13788aef483",
@@ -102,6 +185,49 @@ KEYS={'schema','status','execution_version','packaging_host_source_head','retain
     'failure_projection','failure_projection_sha256','template_profile_sha256','template_report_sha256',
     'variant_report_sha256','variant_config_sha256','bound_image_sha256','cycle','output','caps'}
 _ACTIVE=ContextVar('type3_remaining_pack',default=None)
+_DEVICE_READ=ContextVar('type3_device_metadata_read',default=None)
+
+
+
+def packing_origin(head):
+    import sha256_kat_device_profile as profile
+    import class3_native_origin as origins
+    if head==PACKAGING_HEAD:
+        return dict(host_profile_source_head=PACKAGING_HEAD,host_profile_source_sha256=dict(PACKAGING_PINS))
+    origins.live_host(head)
+    return profile.host_binding(head)
+
+
+def device_reader(function):
+    """Admit exact saved metadata reads, with no packing or output-creation privilege."""
+    @wraps(function)
+    def checked(packages,kernel_build,*args,**kwargs):
+        import sha256_kat_device_profile as profile
+        import type3_admission as typed
+        row=profile.read(profile.private(packages)/'package-result.json')
+        if not selected(row):return function(packages,kernel_build,*args,**kwargs)
+        execution=kwargs.get('type3_context');ack=kwargs.get('ack_kernel_readonly_growth',False)
+        typed.require_context_directory(execution,packages)
+        typed.require_device_scope(row,ack,execution)
+        context=checked_binding(execution['remaining_pack'])
+        typed.require(context['contract']['packaging_host_source_head']==PACKAGING_HEAD and
+            context['host']==packing_origin(PACKAGING_HEAD) and profile.private(kernel_build)==context['variant'],
+            'device-read scope requires exact retained packaging origin and saved variant')
+        token=_DEVICE_READ.set(context)
+        try:return function(packages,kernel_build,*args,**kwargs)
+        finally:_DEVICE_READ.reset(token)
+    return checked
+
+
+
+def device_precheck_receipt(execution,path):
+    import sha256_kat_device_profile as profile
+    from linux_data_carrier import require
+    require(_DEVICE_READ.get() is not None and execution.get('schema')==CONTEXT2_SCHEMA,'validated device-read scope required for precheck receipt')
+    target=profile.private(execution['output'])/'PREINSTALL-CHECK-01.json'
+    require((path is None or profile.private(path)==target) and not target.exists(),
+        'fresh v111 execution precheck receipt required; preserve spent package evidence')
+    return target
 
 
 def selected(row):return row.get('host_profile_source_head')==HEAD
@@ -128,7 +254,7 @@ def load(path,expected):
         row['execution_version']=='v110' and row['retained_host_source_head']==HEAD and row['native_source_head']==item['head'] and
         row['accepted_result_sha256']==item['result'] and row['caps']==CAPS and type(row['caps']) is dict and
         all(type(v) is int for v in row['caps'].values()),'closed native109 remaining-pack scope required')
-    origins.live_host(row['packaging_host_source_head']);host=profile.host_binding(row['packaging_host_source_head'])
+    host=packing_origin(row['packaging_host_source_head'])
     typed.require(re.fullmatch('[0-9a-f]{32}',row['cycle'] or '') and all(re.fullmatch('[0-9a-f]{64}',row[key] or '') for key in
         ('original_contract_sha256','original_transaction_sha256','failure_projection_sha256','template_profile_sha256',
          'template_report_sha256','variant_report_sha256','variant_config_sha256','bound_image_sha256')),'closed remaining-pack metadata pins required')
@@ -220,7 +346,9 @@ def _scope(context):
 def saved_metadata(root,token=None,template=None):
     import sha256_kat_device_profile as profile
     from linux_data_carrier import require
-    context=_ACTIVE.get();require(context is not None,'retained f39 template/variant requires reviewed remaining-pack context')
+    context=_ACTIVE.get()
+    if context is None:context=_DEVICE_READ.get()
+    require(context is not None,'retained f39 template/variant requires reviewed pack or device-read context')
     root=profile.private(root);generic=root==context['template'];row=context['generic'] if generic else context['report']
     require(generic or root==context['variant'],'remaining-pack may read only its exact saved template/variant')
     pin='template_report_sha256' if generic else 'variant_report_sha256'
@@ -292,6 +420,8 @@ def prepare(path,expected):
     from build_boot_test_packages import build
     from stage_phase2 import verify_packages
     context=load(path,expected);contract=context['contract'];old=context['old'];output=Path(contract['output'])
+    import class3_native_origin as origins
+    origins.live_host(contract['packaging_host_source_head'])
     typed.require(not output.exists(),'remaining-pack reservation already exists; cannot restart')
     output.mkdir(parents=True)
     # This reservation includes only the existing packer's saved-variant DATA read/validation.
@@ -342,10 +472,13 @@ def execution_context(row,plan_sha,packages,declared_version,host_head,path,expe
     device=json.loads(raw.decode('utf-8-sig'))
     keys={'schema','status','execution_version','producer_host_source_head','packaging_host_source_head','native_source_head','plan_sha256',
         'packages','package_result_sha256','bound_image_sha256','offline_contract_sha256','remaining_contract_sha256','output',
-        'minimum_battery','BOOT_write_max','reboot_max','user_availability_record_sha256'}
-    typed.require(type(device) is dict and set(device)==keys and device['schema']==DEVICE_SCHEMA and device['status']=='reviewed_ready' and
-        declared_version==device['execution_version']=='v110' and device['producer_host_source_head']==HEAD and
-        device['packaging_host_source_head']==host_head==contract['packaging_host_source_head'] and
+        'minimum_battery','BOOT_write_max','reboot_max','user_availability_record_sha256','execution_host_source_head','execution_host_source_sha256'}
+    import class3_native_origin as origins
+    origins.live_host(host_head);executing_host=profile.host_binding(host_head)
+    typed.require(type(device) is dict and set(device)==keys and device['schema']==DEVICE2_SCHEMA and device['status']=='reviewed_ready' and
+        declared_version==device['execution_version']=='v111' and device['producer_host_source_head']==HEAD and
+        device['packaging_host_source_head']==contract['packaging_host_source_head']==PACKAGING_HEAD and
+        device['execution_host_source_head']==host_head and device['execution_host_source_sha256']==executing_host['host_profile_source_sha256'] and
         device['native_source_head']==contract['native_source_head'] and device['plan_sha256']==plan_sha and
         device['packages']==str(profile.private(packages)) and execution_output is not None and
         device['output']==str(profile.private(execution_output)) and not profile.private(execution_output).is_relative_to(profile.private(packages)) and
@@ -356,7 +489,8 @@ def execution_context(row,plan_sha,packages,declared_version,host_head,path,expe
         'closed separate remaining-pack device/producer/live-host scope differs')
     typed.require(profile.sha(profile.private(packages)/'package-result.json')==device['package_result_sha256']==item['package_result_sha256'],
         'reviewed remaining-pack package manifest changed')
-    return dict(schema=CONTEXT_SCHEMA,declared_version=declared_version,host_source_head=host_head,plan_sha256=plan_sha,
+    return dict(schema=CONTEXT2_SCHEMA,declared_version=declared_version,host_source_head=host_head,
+        host_source_sha256=executing_host['host_profile_source_sha256'],plan_sha256=plan_sha,
         packages=str(profile.private(packages)),output=str(profile.private(execution_output)),contract_path=str(path),contract_sha256=expected,
         remaining_pack=row[FIELD])
 

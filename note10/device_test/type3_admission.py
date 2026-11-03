@@ -373,8 +373,8 @@ def require_context_directory(context,directory):
 def require_device_scope(row,ack_kernel_readonly_growth=False,context=None):
     if remaining.selected(row):
         require(ack_kernel_readonly_growth is True,'type3 requires explicit growth ACK before any device query')
-        keys={'schema','declared_version','host_source_head','plan_sha256','packages','output','contract_path','contract_sha256','remaining_pack'}
-        require(type(context) is dict and set(context)==keys and context.get('schema')==remaining.CONTEXT_SCHEMA,
+        keys={'schema','declared_version','host_source_head','host_source_sha256','plan_sha256','packages','output','contract_path','contract_sha256','remaining_pack'}
+        require(type(context) is dict and set(context)==keys and context.get('schema')==remaining.CONTEXT2_SCHEMA,
             'separate reviewed remaining-pack device context required before transport')
         require(remaining.FIELD not in row or row[remaining.FIELD]==context['remaining_pack'],'remaining package/context lineage differs')
         scoped=dict(row,**{remaining.FIELD:context['remaining_pack']})
