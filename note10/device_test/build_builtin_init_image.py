@@ -94,9 +94,10 @@ def retain_route_prerequisites(source, objects, out, compiler_include):
 
 
 def main(kind=None):
-    if kind not in (None, "sha256-stream-state", "cpu-affinity-binding", "early-fdt-binding", "native-memory-observation", "linux-data-carrier", "owned-contiguous-staging-pc", "current-owned-staging-pc", "readonly-input-pc", "kernel-readonly-candidate"):
+    if kind not in (None, "sha256-stream-state", "cpu-affinity-binding", "early-fdt-binding", "native-memory-observation", "linux-data-carrier", "owned-contiguous-staging-pc", "current-owned-staging-pc", "readonly-input-pc", "kernel-readonly-candidate", "kernel-readonly-span-pc"):
         raise ValueError("closed diagnostic task required")
-    kernel_ro = kind == "kernel-readonly-candidate"
+    span_pc = kind == "kernel-readonly-span-pc"
+    kernel_ro = kind in ("kernel-readonly-candidate", "kernel-readonly-span-pc")
     readonly = kind == "readonly-input-pc"
     stream = kind == "sha256-stream-state"
     affinity = kind == "cpu-affinity-binding"
@@ -104,7 +105,7 @@ def main(kind=None):
     native = kind == "native-memory-observation"
     current_owned = kind == "current-owned-staging-pc"
     owned = kind in ("owned-contiguous-staging-pc","current-owned-staging-pc")
-    data_task = kind in ("linux-data-carrier","owned-contiguous-staging-pc","current-owned-staging-pc","readonly-input-pc","kernel-readonly-candidate")
+    data_task = kind in ("linux-data-carrier","owned-contiguous-staging-pc","current-owned-staging-pc","readonly-input-pc","kernel-readonly-candidate","kernel-readonly-span-pc")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--archive', type=Path)
@@ -146,6 +147,9 @@ def main(kind=None):
     if kernel_ro:
         from kernel_readonly_input import SOURCES as kernel_ro_sources
         extra=(*extra,*kernel_ro_sources)
+        if span_pc:
+            from kernel_readonly_input import SPAN_SOURCES
+            extra=(*extra,*SPAN_SOURCES)
     if readonly:
         from readonly_input_pc import SOURCES as readonly_sources
         extra=(*extra,*readonly_sources)
@@ -290,6 +294,8 @@ def main(kind=None):
                             NOTE10_SHA256_STREAM_STATE='n', SMP='y', LOCALVERSION='"-v91-trusted-logical"')
         if kernel_ro:
             settings.update(NOTE10_KERNEL_READONLY_INPUT='y',NOTE10_READONLY_INPUT_PC='n',LOCALVERSION='"-v105-kernel-readonly"')
+        if span_pc:
+            settings.update(NOTE10_KERNEL_READONLY_SPAN_PC='y',LOCALVERSION='"-v106-kernel-span-pc"')
         if readonly:
             settings.update(NOTE10_READONLY_INPUT_PC='y',LOCALVERSION='"-v103-readonly-input-pc"')
         if owned:
@@ -313,6 +319,9 @@ def main(kind=None):
         kernel_ro_default_enabled=kernel_ro and any(line.startswith('CONFIG_NOTE10_KERNEL_READONLY_INPUT=') for line in (objects/'.config').read_text().splitlines())
         if kernel_ro_default_enabled:
             raise ValueError('kernel readonly candidate must be default off')
+        span_default_enabled=span_pc and any(line.startswith('CONFIG_NOTE10_KERNEL_READONLY_SPAN_PC=') for line in (objects/'.config').read_text().splitlines())
+        if span_default_enabled:
+            raise ValueError('PC span precondition must be default off')
         shutil.copyfile(objects/'.config', out/'public-baseline.config')
         for index, (name, value) in enumerate(settings.items()):
             if value in ('y', 'n'):
@@ -369,7 +378,7 @@ def main(kind=None):
         stable_archive(archive, before)
         if manifest != {name: sha(ROOT/name) for name in manifest}:
             raise ValueError('local first-use inputs changed during build')
-        result = dict(schema=1, version='v105' if kernel_ro else 'v103' if readonly else 'v96' if current_owned else 'v92' if owned else 'v91' if data_task else 'v82' if native else 'v81' if fdt else 'v78' if affinity else 'v73' if stream else 'v72', diagnostic_kind=kind, passed=True, kernel_commit=COMMIT,
+        result = dict(schema=1, version='v106' if span_pc else 'v105' if kernel_ro else 'v103' if readonly else 'v96' if current_owned else 'v92' if owned else 'v91' if data_task else 'v82' if native else 'v81' if fdt else 'v78' if affinity else 'v73' if stream else 'v72', diagnostic_kind=kind, passed=True, kernel_commit=COMMIT,
                       build_evidence_id=identity, ci_context=ci, source_sha256=manifest,
                       settings=settings, make_target='Image', integration_object=TARGET,
                       bootloader_cmdline_policy=cmdline_policy,
@@ -475,7 +484,16 @@ def main(kind=None):
                 external_initrd_capture=False,input_capture_source='late-kernel-readonly-class2',
                 permanent_input_storage_bytes=CAPACITY,permanent_descriptor_bytes=80,additional_linked_storage_bytes=CAPACITY+80,
                 physical_placement_review_required=True,requires_new_user_growth_scope=True,global_RAM_ownership=False)
-            result['kernel_readonly_candidate_contract']=producer_contract(result,os.environ.get('GITHUB_SHA',''))
+            if span_pc:
+                from kernel_readonly_input import span_footprint, span_producer_contract, SPAN_SCHEMA
+                if b'N10DATASPAN1' not in raw:
+                    raise ValueError('new PC span emitter missing')
+                result.update(PC_only=True,kernel_readonly_span_schema=SPAN_SCHEMA,
+                    kernel_readonly_span=span_footprint((objects/'System.map').read_text(),footprint,record),
+                    kernel_readonly_span_default_enabled=span_default_enabled)
+                result['kernel_readonly_span_contract']=span_producer_contract(result,os.environ.get('GITHUB_SHA',''))
+            else:
+                result['kernel_readonly_candidate_contract']=producer_contract(result,os.environ.get('GITHUB_SHA',''))
         result['files_sha256'] = {p.relative_to(out).as_posix(): sha(p) for p in out.rglob('*') if p.is_file()}
         save(out/'result.json', result)
     except Exception as error:

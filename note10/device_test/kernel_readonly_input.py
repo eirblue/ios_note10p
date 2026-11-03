@@ -32,6 +32,10 @@ STREAM_BYTES=4437203
 PAYLOAD_BYTES=19136512
 COMPACT_SCHEMA='n10-kernel-readonly-compact-v1'
 HISTORICAL_HEAD='e49ccf7fe46eb92b32c0b425a2e4da5fe667f9b4'
+HISTORICAL_BUILDER_SHA256='64d5b765604bfe3f4df0869ab088345e6de461006e125f78933e53e04cc36983'
+SPAN_KIND='kernel-readonly-span-pc'
+SPAN_SCHEMA='n10-kernel-readonly-span-v1'
+SPAN_SOURCES=('kernel_readonly_span.h','kernel_readonly_span_fixture.c','test_v106_kernel_readonly_span.py','build_kernel_readonly_span_pc.py')
 PACKING_SCHEMA='n10-kernel-readonly-compact-external-v1'
 PACKING_FIELDS=('kernel_readonly_packing_revision','kernel_readonly_external_choice','kernel_readonly_packing_host','kernel_readonly_reused_variant')
 IO_EVENTS=[]
@@ -49,11 +53,12 @@ def install(source,identity):
     composition=(data.HERE/'linux_data_carrier_composition.c').read_bytes()
     old=b'#define N10_DATA_COMPARE_EVIDENCE 1'
     data.require(composition.count(old)==1,'unique candidate late composition required')
-    composition=composition.replace(old,b'#ifdef CONFIG_NOTE10_KERNEL_READONLY_INPUT\n#define N10_DATA_KERNEL_READONLY 1\n#else\n'+old+b'\n#endif',1)
+    composition=composition.replace(old,b'#ifdef CONFIG_NOTE10_KERNEL_READONLY_INPUT\n#define N10_DATA_KERNEL_READONLY 1\n#ifdef CONFIG_NOTE10_KERNEL_READONLY_SPAN_PC\n#define N10_DATA_KERNEL_SPAN_PC 1\n#endif\n#else\n'+old+b'\n#endif',1)
     config=source/'drivers/misc/note10_sha256_kat.Kconfig'
-    config.write_bytes(config.read_bytes()+b'\nconfig NOTE10_KERNEL_READONLY_INPUT\n\tbool "Note10 kernel readonly candidate; new growth scope required"\n\tdepends on NOTE10_DATA_CARRIER\n\tdefault n\n')
+    config.write_bytes(config.read_bytes()+b'\nconfig NOTE10_KERNEL_READONLY_INPUT\n\tbool "Note10 kernel readonly candidate; new growth scope required"\n\tdepends on NOTE10_DATA_CARRIER\n\tdefault n\n\nconfig NOTE10_KERNEL_READONLY_SPAN_PC\n\tbool "Note10 PC-only logical kernel-span precondition"\n\tdepends on NOTE10_KERNEL_READONLY_INPUT\n\tdefault n\n')
     for name,raw in (('drivers/misc/note10_sha256_kat.c',composition),
-        ('drivers/misc/kernel_readonly_input.h',(data.HERE/'kernel_readonly_input.h').read_bytes())):
+        ('drivers/misc/kernel_readonly_input.h',(data.HERE/'kernel_readonly_input.h').read_bytes()),
+        ('drivers/misc/kernel_readonly_span.h',(data.HERE/'kernel_readonly_span.h').read_bytes())):
         (source/name).write_bytes(raw);result[name]=data.sha(raw)
     result['drivers/misc/note10_sha256_kat.Kconfig']=data.sha(config.read_bytes())
     return result
@@ -137,10 +142,9 @@ def producer_contract(result,source,*,producing_sources=None,historical_origin=N
         from sha256_kat_device_profile import V105_CANDIDATE_ORIGIN_PINS
         producing_sources={key:value for key,value in V105_CANDIDATE_ORIGIN_PINS.items() if key in
             {'note10/device_test/'+name for name in (*SOURCES,'linux_data_carrier.c','linux_data_carrier_composition.c','build_builtin_init_image.py')}}
-        # This intrinsic compiler helper is outside host-profile56 and is frozen
-        # in this host-only revision. Its live equality remains strict; if it
-        # changes later, retained admission fails instead of trusting row hashes.
-        producing_sources['note10/device_test/build_builtin_init_image.py']=data.sha((data.HERE/'build_builtin_init_image.py').read_bytes())
+        # Exact e49 builder pin from the already authenticated accepted CI
+        # source closure, outside profile56. New live builders stay strict.
+        producing_sources['note10/device_test/build_builtin_init_image.py']=HISTORICAL_BUILDER_SHA256
     else:
         data.require(source!=HISTORICAL_HEAD,'retained candidate cannot construct a new producer')
     pins=producing_sources if producing_sources is not None else {
@@ -162,10 +166,11 @@ def producer_contract(result,source,*,producing_sources=None,historical_origin=N
         result.get('kernel_readonly_image_bytes')==result.get('image_bytes') and
         type(result.get('data_footprint',{}).get('data_state_bytes')) is int and 0<result['data_footprint']['data_state_bytes']<=128 and
         result.get('settings',{}).get('NOTE10_KERNEL_READONLY_INPUT')=='y' and
+        result.get('settings',{}).get('NOTE10_KERNEL_READONLY_SPAN_PC')!='y' and
         all(result.get('settings',{}).get(key)=='n' for key in
             ('NOTE10_READONLY_INPUT_PC','NOTE10_OWNED_CONTIGUOUS_STAGING','NOTE10_CURRENT_OWNED_STAGING')) and
         not any(key in result for key in ('readonly_input_schema','readonly_input_slot','readonly_pc_contract',
-            'data_compare_schema','data_input_range_schema','data_early_prefix_schema',*data.GROWTH_FIELDS)) and
+            'data_compare_schema','data_input_range_schema','data_early_prefix_schema','kernel_readonly_span_schema',*data.GROWTH_FIELDS)) and
         re.fullmatch('[0-9a-f]{40}',source or '') and source!='e32ec501551b74b4cca5618ea25245f012656f29' and ci.get('GITHUB_SHA')==ci.get('GITHUB_WORKFLOW_SHA')==source and
         ci.get('GITHUB_JOB')=='linux-data-carrier' and ci.get('GITHUB_REPOSITORY')=='eirblue/ios_note10p' and
         ci.get('GITHUB_WORKFLOW_REF')=='eirblue/ios_note10p/'+WORKFLOW+'@refs/heads/main' and
@@ -177,6 +182,148 @@ def producer_contract(result,source,*,producing_sources=None,historical_origin=N
     return dict(candidate_only=True,physical_ready=False,requires_new_kernel_growth_scope=True,
         global_RAM_ownership=False,hardware_mapping_attested=False,linked_budget=BUDGET)
 
+
+
+def span_footprint(system_map,footprint,slot):
+    names={'_text','_stext','_end',SLOT,DESC};values={}
+    for line in system_map.splitlines():
+        row=line.split()
+        if len(row)==3 and row[2] in names:
+            data.require(row[2] not in values,'duplicate PC span symbol')
+            values[row[2]]=int(row[0],16)
+    data.require(set(values)==names,'PC span symbols missing')
+    text,start,end=values['_text'],values['_stext'],values['_end']
+    data.require(0<text<=start<end and end-text==footprint['linked_kernel_bytes']<=BUDGET,
+        'PC span linked domain differs')
+    for key,symbol in (('slot',SLOT),('descriptor',DESC)):
+        extent=slot[key]
+        data.require(values[symbol]==text+extent['offset'] and start<=values[symbol] and
+            values[symbol]+extent['bytes']<=end,'PC span full linked containment differs')
+    return dict(schema=SPAN_SCHEMA,kernel_bytes=end-start,text_prefix_bytes=start-text,
+        slot_contained=True,descriptor_contained=True,disjoint=True,
+        source='linked-kernel',phase='pre_descriptor',hardware=False,ownership=False)
+
+
+def span_producer_contract(result,source,*,producing_sources=None):
+    required=(*SOURCES,*SPAN_SOURCES,'linux_data_carrier.c','linux_data_carrier_composition.c','build_builtin_init_image.py')
+    pins=producing_sources if producing_sources is not None else {
+        'note10/device_test/'+name:data.sha((data.HERE/name).read_bytes()) for name in required}
+    metadata_contract(result.get('kernel_readonly_slot'),result.get('image_bytes'))
+    ci=result.get('ci_context',{});footprint=result.get('data_footprint',{});span=result.get('kernel_readonly_span',{})
+    data.require(type(span) is dict and set(span)=={'schema','kernel_bytes','text_prefix_bytes','slot_contained',
+        'descriptor_contained','disjoint','source','phase','hardware','ownership'} and span['schema']==SPAN_SCHEMA and
+        type(span['kernel_bytes']) is int and 0<span['kernel_bytes']<=BUDGET and
+        type(span['text_prefix_bytes']) is int and span['text_prefix_bytes']>=0 and
+        span['kernel_bytes']+span['text_prefix_bytes']==footprint.get('linked_kernel_bytes') and
+        all(span[key] is True for key in ('slot_contained','descriptor_contained','disjoint')) and
+        span['hardware'] is False and span['ownership'] is False and span['source']=='linked-kernel' and
+        span['phase']=='pre_descriptor','closed new PC linked span metadata required')
+    linked=footprint.get('linked_kernel_bytes')
+    data.require(result.get('version')=='v106' and result.get('diagnostic_kind')==SPAN_KIND and
+        result.get('data_input_kind')==KIND and result.get('kernel_readonly_schema')==SCHEMA and
+        result.get('kernel_readonly_span_schema')==SPAN_SCHEMA and result.get('kernel_readonly_span_default_enabled') is False and
+        result.get('kernel_readonly_default_enabled') is False and result.get('kernel_readonly_requires_ack') is True and
+        result.get('passed') is True and result.get('Image_built') is True and result.get('BOOT_built') is False and
+        result.get('PC_only') is True and result.get('physical_ready') is False and result.get('deployment_ready') is False and
+        result.get('device_authorized') is False and result.get('device_operations')==[] and
+        result.get('data_expectation_mode')==MODE and result.get('data_expectation_slot')==result['kernel_readonly_slot'] and
+        result.get('image_expectation_patched') is False and result.get('external_initrd_capture') is False and
+        result.get('input_capture_source')=='late-kernel-readonly-class2' and
+        result.get('permanent_input_storage_bytes')==CAPACITY and result.get('permanent_descriptor_bytes')==80 and
+        result.get('additional_linked_storage_bytes')==CAPACITY+80 and type(linked) is int and 0<linked<=BUDGET and
+        result.get('kernel_readonly_linked_bytes')==linked and result.get('kernel_readonly_image_bytes')==result.get('image_bytes') and
+        type(footprint.get('data_state_bytes')) is int and 0<footprint['data_state_bytes']<=128 and
+        all(result.get('settings',{}).get(key)=='y' for key in ('NOTE10_KERNEL_READONLY_INPUT','NOTE10_KERNEL_READONLY_SPAN_PC')) and
+        all(result.get('settings',{}).get(key)=='n' for key in ('NOTE10_READONLY_INPUT_PC','NOTE10_OWNED_CONTIGUOUS_STAGING','NOTE10_CURRENT_OWNED_STAGING')) and
+        not any(key in result for key in ('readonly_input_schema','readonly_input_slot','readonly_pc_contract',
+            'data_compare_schema','data_input_range_schema','data_early_prefix_schema',*data.GROWTH_FIELDS)) and
+        re.fullmatch('[0-9a-f]{40}',source or '') and source!=HISTORICAL_HEAD and
+        ci.get('GITHUB_SHA')==ci.get('GITHUB_WORKFLOW_SHA')==source and ci.get('GITHUB_JOB')=='linux-data-carrier' and
+        ci.get('GITHUB_REPOSITORY')=='eirblue/ios_note10p' and
+        ci.get('GITHUB_WORKFLOW_REF')=='eirblue/ios_note10p/'+WORKFLOW+'@refs/heads/main' and
+        all(re.fullmatch('[1-9][0-9]*',ci.get(key,'') or '') for key in ('GITHUB_RUN_ID','GITHUB_RUN_ATTEMPT')) and
+        type(pins) is dict and all('note10/device_test/'+name in pins for name in required) and
+        all(re.fullmatch('[0-9a-f]{64}',value or '') and result.get('source_sha256',{}).get(key)==value for key,value in pins.items()),
+        'distinct new PC span producer/source required')
+    for key in ('slot','descriptor'):
+        extent=result['kernel_readonly_slot'][key]
+        data.require(span['text_prefix_bytes']<=extent['offset'] and extent['offset']+extent['bytes']<=linked,
+            'PC span slot metadata differs')
+    return dict(PC_only=True,physical_ready=False,logical_source_only=True,hardware_mapping_attested=False,
+        global_RAM_ownership=False,linked_budget=BUDGET,span_scalar_bytes=16,outcome_bytes=128,
+        permanent_metadata_bytes=footprint['data_state_bytes'],additional_readonly_storage_bytes=CAPACITY+80)
+
+
+SPAN_KEYS=('id','cycle','kind','source','phase','state','attempted','kernel_checked','kernel_bytes',
+    'extents_checked','slot_contained','descriptor_contained','disjoint','admission_called','reasons','ownership','hardware','executed')
+
+
+def decode_span(text,identity,cycle,boot,expected_kernel_bytes):
+    from decode_reservation import checksum
+    data.require(type(expected_kernel_bytes) is int and 0<expected_kernel_bytes<=BUDGET,'bound PC span length required')
+    selected=[]
+    for line in text.splitlines():
+        if 'N10DATASPAN' not in line:continue
+        match=re.fullmatch(r'.*?N10BOOTLINK2 boot=([0-9a-f]{32}) N10DATASPAN1 (.+) checksum=([0-9a-f]{8})',line)
+        data.require(match is not None,'malformed PC span frame')
+        observed,body,digest=match.groups()
+        data.require(observed==boot and len(body.encode('ascii'))<=415 and checksum(body.encode('ascii'))==int(digest,16),'PC span frame binding differs')
+        tokens=body.split(' ')
+        data.require(len(tokens)==len(SPAN_KEYS) and all(token.count('=')==1 for token in tokens),'closed PC span fields required')
+        row=dict(token.split('=') for token in tokens)
+        data.require(tuple(row)==SPAN_KEYS and row['id']==identity and row['cycle']==cycle and row['kind']=='span' and
+            row['source']=='linked-kernel' and row['phase']=='pre_descriptor' and
+            row['ownership']==row['hardware']==row['executed']=='0' and re.fullmatch('[0-9a-f]{8}',row['reasons']),
+            'PC span scalar domain differs')
+        reasons=int(row['reasons'],16)
+        data.require(all(row[key] in ('0','1') for key in ('attempted','kernel_checked','extents_checked','admission_called')) and
+            all(row[key] in ('0','1','na') for key in ('slot_contained','descriptor_contained','disjoint')),
+            'PC span flags differ')
+        kernel_checked=row['kernel_checked']=='1';extents=row['extents_checked']=='1'
+        if kernel_checked:
+            data.require(re.fullmatch('[1-9][0-9]*',row['kernel_bytes']) and int(row['kernel_bytes'])==expected_kernel_bytes,'PC span linked length differs')
+        else:data.require(row['kernel_bytes']=='na' and not extents,'PC span unavailable length differs')
+        if row['state']=='checked':
+            data.require(reasons==0 and all(row[key]=='1' for key in ('attempted','kernel_checked','extents_checked','slot_contained','descriptor_contained','disjoint','admission_called')),'PC span checked flags differ')
+        elif row['state']=='not_reached':
+            data.require(reasons==1 and not kernel_checked and all(row[key]=='0' for key in ('attempted','extents_checked','admission_called')) and
+                all(row[key]=='na' for key in ('slot_contained','descriptor_contained','disjoint')),'PC span not-reached flags differ')
+        elif row['state']=='refused':
+            data.require(row['attempted']=='1' and row['admission_called']=='0','PC span refused attempt differs')
+            if not kernel_checked:data.require(reasons in (2,64),'PC span kernel refusal differs')
+            elif not extents:data.require(reasons in (4,8,128),'PC span extent refusal differs')
+            else:
+                data.require(all(row[key] in ('0','1') for key in ('slot_contained','descriptor_contained','disjoint')),'PC span checked extents missing')
+                want=(16 if row['slot_contained']=='0' or row['descriptor_contained']=='0' else 0)|(32 if row['disjoint']=='0' else 0)
+                data.require(reasons==want and want!=0,'PC span relation refusal differs')
+            if not extents:data.require(all(row[key]=='na' for key in ('slot_contained','descriptor_contained','disjoint')),'PC span unavailable relation differs')
+        else:data.require(False,'unknown PC span state')
+        selected.append(dict(row,boot_identity=observed,kernel_bytes=int(row['kernel_bytes']) if kernel_checked else None,
+            reasons=reasons,logical_source_only=True,hardware_mapping_attested=False,global_RAM_ownership=False))
+    data.require(len(selected)==1,'exactly one PC span companion required')
+    return selected[0]
+
+
+def decode_span_selected(raw,banner,identity,cycle,*,expected):
+    from builtin_init_profile import decode as baseline_decode
+    span_producer_contract(expected,expected.get('ci_context',{}).get('GITHUB_SHA'))
+    bound=expected['kernel_readonly_span']['kernel_bytes']
+    components=dict(pid1_validation='not_checked',return_validation='not_checked',return_boot_association='not_checked',
+        functional_acceptance=False,hardware_return_proven_by_frames=False)
+    def selected(text,rid):
+        row=data.decode(text,rid,cycle,_source_class=MODE)
+        components['kernel_readonly_data']=row;components['data_phase']=data.functional_phase(row['status'])
+        components['structural_presence']=data.structural_presence(text,rid,cycle,row['boot_identity'])
+        data.require(not any(marker in text for marker in ('N10DATA1 ','N10DATAPC','N10DATACMP','N10DATARANGE','N10DATAEARLY','N10DATAGROWTH')),
+            'PC span cannot claim external or other PC companions')
+        components['kernel_readonly_span']=decode_span(text,rid,cycle,row['boot_identity'],bound)
+        data.require(row['carrier']==CAPACITY and row['logical'] in (0,CAPACITY),'PC readonly extent differs')
+        data.require(False,'PC-only span observation cannot authorize functional or physical acceptance')
+    try:
+        baseline_decode(raw,banner,identity,cycle,digest_decoder=selected,digest_marker=b'N10DATARO1',component_evidence=components)
+    except ValueError as error:
+        raise data.ComponentObservationError(error,components) from error
+    raise ValueError('PC-only span observation cannot be accepted')
 
 def input_binding(result,lines,*,elf,archive,raw_inputs,historical_origin=None):
     from early_fdt_binding import fixed_route_relation
@@ -205,7 +352,7 @@ def candidate_scope(row,*,require_compact=True):
         row.get('data_relative_placement_admitted') is False and row.get('raw_input_binding') is False and
         type(row.get('image_expectation_patched')) is bool and not any(key in row for key in
             ('readonly_input_schema','readonly_input_slot','readonly_pc_contract','data_compare_schema',
-             'data_input_range_schema','data_linked_kernel_bytes','data_early_prefix_schema',*data.GROWTH_FIELDS)),
+             'data_input_range_schema','data_linked_kernel_bytes','data_early_prefix_schema','kernel_readonly_span_schema',*data.GROWTH_FIELDS)),
         'closed kernel-readonly profile/source class required')
     if require_compact:
         data.require(row.get('kernel_readonly_compact_bytes')==CAPACITY and
@@ -219,8 +366,8 @@ def candidate_scope(row,*,require_compact=True):
 def require_device_scope(row,ack_kernel_readonly_growth=False):
     # The original PC domain remains forbidden even when candidate flags/ACK are forged.
     data.require(row.get('PC_only') is not True and row.get('data_expectation_mode')!='kernel-readonly-slot-v1' and row.get('version')!='v103' and row.get('diagnostic_kind') not in
-        ('readonly-input-pc','owned-contiguous-staging-pc','current-owned-staging-pc') and not any(key in row for key in
-        ('readonly_input_schema','readonly_input_slot','readonly_pc_contract')),'PC-only source is permanently forbidden on device')
+        ('readonly-input-pc','owned-contiguous-staging-pc','current-owned-staging-pc',SPAN_KIND) and not any(key in row for key in
+        ('readonly_input_schema','readonly_input_slot','readonly_pc_contract','kernel_readonly_span_schema')),'PC-only source is permanently forbidden on device')
     if is_candidate(row):
         data.require(row.get('device_profile')==data.PROFILE and row.get('data_input_kind')==KIND and row.get('kernel_readonly_schema')==SCHEMA and
             row.get('data_expectation_mode')==MODE and row.get('kernel_readonly_requires_ack') is True and

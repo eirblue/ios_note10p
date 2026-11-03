@@ -78,8 +78,8 @@ def no_legacy(row):
 def physical_input_scope(result):
     require(result.get('PC_only') is not True and result.get('data_expectation_mode')!='kernel-readonly-slot-v1' and
             result.get('version')!='v103' and result.get('diagnostic_kind') not in
-            ('owned-contiguous-staging-pc','current-owned-staging-pc','readonly-input-pc') and
-            not any(key in result for key in ('readonly_input_schema','readonly_input_slot','readonly_pc_contract')),
+            ('owned-contiguous-staging-pc','current-owned-staging-pc','readonly-input-pc','kernel-readonly-span-pc') and
+            not any(key in result for key in ('readonly_input_schema','readonly_input_slot','readonly_pc_contract','kernel_readonly_span_schema')),
             'PC-only candidate cannot create a physical template/package')
 
 
@@ -671,7 +671,8 @@ def host_binding(source_head):
                       'readonly_input_pc_fixture.c','test_v103_readonly_input_pc.py',
                       'linux_data_growth.h','linux_data_growth_fixture.c','test_v104_growth_region.py',
                       'kernel_readonly_input.py','kernel_readonly_input.h','build_kernel_readonly_input.py',
-                      'kernel_readonly_input_fixture.c','test_v105_kernel_readonly.py','test_v105_packing_rev1.py','precheck_window_access.py','test_v105_battery5_policy.py')}
+                      'kernel_readonly_input_fixture.c','test_v105_kernel_readonly.py','test_v105_packing_rev1.py','precheck_window_access.py','test_v105_battery5_policy.py','kernel_readonly_span.h','kernel_readonly_span_fixture.c',
+                      'test_v106_kernel_readonly_span.py','build_kernel_readonly_span_pc.py')}
     return dict(host_profile_source_head=source_head, host_profile_source_sha256=dict(pins))
 
 
