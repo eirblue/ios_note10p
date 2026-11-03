@@ -139,6 +139,7 @@ def main(kind=None):
              'linux_data_input_probe_fixture.c','test_v100_carrier_input_probe.py',
              'linux_data_input_range.h','linux_data_input_range_fixture.c','test_v101_live_input_range.py',
              'linux_data_early_prefix.h','linux_data_early_prefix_fixture.c','test_v102_input_lifetime.py',
+             'linux_data_growth.h','linux_data_growth_fixture.c','test_v104_growth_region.py',
              'early_fdt_binding.py','sealed_affinity_artifact.cjs',
              'bundle_affinity_evidence.py') if data_task else ()
     if readonly:
@@ -287,6 +288,8 @@ def main(kind=None):
             settings.update(NOTE10_OWNED_CONTIGUOUS_STAGING='y',HAVE_MEMBLOCK='y',NO_BOOTMEM='y',LOCALVERSION='"-v92-owned-contiguous-pc"')
         if current_owned:
             settings.update(NOTE10_CURRENT_OWNED_STAGING='y',LOCALVERSION='"-v96-current-owned-pc"')
+        if data_task and not owned and not readonly:
+            settings.update(NOTE10_READONLY_INPUT_PC='n')
         if data_task and not owned:
             settings.update(NOTE10_OWNED_CONTIGUOUS_STAGING='n', NOTE10_CURRENT_OWNED_STAGING='n')
         run([*make, DEFCONFIG], 'build/01-defconfig.log')
@@ -338,6 +341,14 @@ def main(kind=None):
             raise ValueError('old SHA tasks must not be compiled into the new task')
         if data_task and any(marker in raw for marker in (b'N10SHA1',b'N10SHASTREAM1',b'N10AFF1',b'N10FDT1',b'N10MEMARGS1')):
             raise ValueError('old diagnostic callback compiled into DATA task')
+        normal_readonly_excluded=False
+        if data_task and not owned and not readonly:
+            if ('CONFIG_NOTE10_READONLY_INPUT_PC=y' in config or b'N10ROINPUTPCV1!!' in raw or
+                'n10_readonly_input' in (out/'new-object-symbols.log').read_text() or
+                'n10_readonly_descriptor' in (out/'new-object-symbols.log').read_text() or
+                '.rodata.n10_readonly_' in (out/'new-object-sections.log').read_text()):
+                raise ValueError('small normal DATA must not contain readonly PC slot')
+            normal_readonly_excluded=True
         if raw.count(archive_data) != 1:
             raise ValueError('exact raw builtin CPIO missing/duplicated in actual Image')
         shutil.copyfile(objects/'init/.main.o.cmd', out/'actual-init-main.cmd')
@@ -393,10 +404,13 @@ def main(kind=None):
             result.update(raw_input_binding=False,data_carrier_stage=STAGE,data_footprint=footprint,physical_placement_review_required=True,
                           data_expectation_mode=MODE,data_expectation_slot=slot,image_expectation_patched=False)
             if not owned:
-                from linux_data_carrier import COMPARE_SCHEMA, RANGE_SCHEMA, EARLY_SCHEMA
+                from linux_data_carrier import COMPARE_SCHEMA, RANGE_SCHEMA, EARLY_SCHEMA, GROWTH_BINDING, growth_declaration
                 result['data_compare_schema'] = COMPARE_SCHEMA
                 result.update(data_input_range_schema=RANGE_SCHEMA,data_linked_kernel_bytes=footprint['linked_kernel_bytes'])
                 result['data_early_prefix_schema']=EARLY_SCHEMA
+                result.update(GROWTH_BINDING,readonly_PC_disabled=normal_readonly_excluded,
+                    readonly_input_slot_absent=normal_readonly_excluded)
+                growth_declaration(result)
             result['files_sha256'] = {'minimal-init.elf':result['minimal_init_elf_sha256'],'initramfs.cpio':result['initramfs_cpio_sha256']}
             data_config=[x for x in config if not x.startswith(('CONFIG_NOTE10_OWNED_CONTIGUOUS_STAGING=','CONFIG_NOTE10_CURRENT_OWNED_STAGING=')) and x not in ('# CONFIG_NOTE10_OWNED_CONTIGUOUS_STAGING is not set','# CONFIG_NOTE10_CURRENT_OWNED_STAGING is not set')] if owned else config
             result['data_relative_placement'] = relative_admission(result,data_config,footprint,elf=init,archive=archive_data,

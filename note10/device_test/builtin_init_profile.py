@@ -52,6 +52,16 @@ def current_boot_binding(plan, pair, diagnostic):
             pair.get('data_input_range_schema') == 'n10-data-range-v1' and
             type(pair.get('data_linked_kernel_bytes')) is int and pair['data_linked_kernel_bytes']>0 and
             not any(key in pair for key in ('data_host_experiment','data_current_binding_sha256','data_early_prefix_schema')))
+        prior_source = prior_source or (
+            pair.get('source_head') == '27ae68950c208e4b9bafb7f12540a131dcabcccc' and
+            pair.get('host_profile_source_head') == '27ae68950c208e4b9bafb7f12540a131dcabcccc' and
+            pair.get('data_compare_schema') == 'n10-data-compare-v2' and
+            pair.get('data_input_range_schema') == 'n10-data-range-v1' and
+            pair.get('data_early_prefix_schema') == 'n10-data-early-prefix-v1' and
+            type(pair.get('data_linked_kernel_bytes')) is int and pair['data_linked_kernel_bytes']>0 and
+            not any(key in pair for key in ('data_host_experiment','data_current_binding_sha256',
+                'data_growth_schema','data_growth_target_source','data_growth_target_bytes','data_growth_budget_bytes',
+                'readonly_input_schema','readonly_input_slot','readonly_pc_contract')))
     require(pair.get('device_profile') == prior_profile and
             prior_source and
             re.fullmatch('[0-9a-f]{64}', plan.get('current_boot_payload_sha256', '')) and

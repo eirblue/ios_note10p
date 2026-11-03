@@ -38,9 +38,11 @@ static const struct n10_ro_descriptor n10_readonly_descriptor __used
 #ifdef CONFIG_HAVE_MEMBLOCK
 #define n10_data_region_memory(p,n) memblock_is_region_memory((phys_addr_t)(p),(phys_addr_t)(n))
 #define n10_data_map_memory(p) memblock_is_map_memory((phys_addr_t)(p))
+#define n10_data_region_reserved(p,n) memblock_is_region_reserved((phys_addr_t)(p),(phys_addr_t)(n))
 #else
 #define n10_data_region_memory(p,n) 0
 #define n10_data_map_memory(p) 0
+#define n10_data_region_reserved(p,n) 0
 #endif
 #endif
 #endif
@@ -56,6 +58,21 @@ static const struct n10_ro_descriptor n10_readonly_descriptor __used
 #undef N10_EARLY_LOCAL_COPY
 #endif
 #undef N10_EARLY_CLEAR
+#endif
+
+#ifdef N10_DATA_COMPARE_EVIDENCE
+#define N10_RANGE_CLEAR(p,n) n10_data_clear(p,n)
+#include "linux_data_input_range.h"
+#undef N10_RANGE_CLEAR
+#define N10_GROWTH_CLEAR(p,n) n10_data_clear(p,n)
+#define N10_GROWTH_MEMORY(p,n) n10_data_region_memory(p,n)
+#define N10_GROWTH_MAP(p) n10_data_map_memory(p)
+#define N10_GROWTH_RESERVED(p,n) n10_data_region_reserved(p,n)
+#include "linux_data_growth.h"
+#undef N10_GROWTH_CLEAR
+#undef N10_GROWTH_MEMORY
+#undef N10_GROWTH_MAP
+#undef N10_GROWTH_RESERVED
 #endif
 
 enum n10_data_reason {
@@ -111,11 +128,12 @@ static struct {
     unsigned char expected[32];
 #ifdef N10_DATA_EARLY_EVIDENCE
     struct n10_early_prefix early;
+    struct n10_data_growth growth;
 #endif
 } n10_data __used;
 _Static_assert(sizeof(n10_data) <= 128, "bounded permanent DATA metadata");
 #ifdef N10_DATA_EARLY_EVIDENCE
-_Static_assert(sizeof(n10_data)==104,"exact permanent early-flag DATA metadata");
+_Static_assert(sizeof(n10_data)==120,"exact permanent early/growth scalar DATA metadata");
 #endif
 #ifdef N10_DATA_CONTIGUOUS
 _Static_assert(sizeof(n10_data)+sizeof(n10_owned) <= 128, "combined permanent DATA/owned metadata");
@@ -146,6 +164,64 @@ __setup("n10.data_sha=", n10_data_parameter);
 #endif
 #endif
 
+#ifdef N10_DATA_COMPARE_EVIDENCE
+#ifndef N10_DATA_HOST_TEST
+#include <asm/sections.h>
+#endif
+
+static void n10_live_input_range(struct n10_data_range *out, uint64_t logical)
+{
+#if !defined(CONFIG_ARM64) || !defined(CONFIG_PHYS_ADDR_T_64BIT) || defined(CONFIG_DEBUG_VIRTUAL) || CONFIG_ARM64_VA_BITS != 39
+    (void)logical;
+    n10_range_unavailable(out,N10_RANGE_UNSUPPORTED);
+#else
+    struct n10_range_input input={0};
+    if (sizeof(unsigned long)!=8 || sizeof(phys_addr_t)!=8) {
+        n10_range_unavailable(out,N10_RANGE_UNSUPPORTED); return;
+    }
+    input.start=n10_data.start; input.end=n10_data.end;
+    input.native=n10_data.length; input.logical=logical;
+    /* Match __pa_symbol's RELOC_HIDE without calling debug/BUG translators. */
+    input.text=(uint64_t)RELOC_HIDE((unsigned long)_text,0);
+    input.image_end=(uint64_t)RELOC_HIDE((unsigned long)_end,0);
+    input.base=(uint64_t)READ_ONCE(memstart_addr);
+    input.offset=READ_ONCE(kimage_voffset);
+    input.page_offset=(uint64_t)PAGE_OFFSET;
+    input.linear_bit=(uint64_t)BIT(VA_BITS-1);
+    input.base_after=(uint64_t)READ_ONCE(memstart_addr);
+    input.offset_after=READ_ONCE(kimage_voffset); input.supported=1;
+    n10_range_evaluate(&input,out);
+    if ((uint64_t)READ_ONCE(memstart_addr)!=input.base || READ_ONCE(kimage_voffset)!=input.offset)
+        n10_range_unavailable(out,N10_RANGE_BASE);
+    if (READ_ONCE(initrd_start)!=input.start || READ_ONCE(initrd_end)!=input.end)
+        n10_range_unavailable(out,N10_RANGE_BOUNDS);
+    n10_data_clear(&input,sizeof(input));
+#endif
+}
+static void __init n10_growth_capture(void)
+{
+#if !defined(CONFIG_HAVE_MEMBLOCK) || !defined(CONFIG_ARM64) || !defined(CONFIG_PHYS_ADDR_T_64BIT) || defined(CONFIG_DEBUG_VIRTUAL) || CONFIG_ARM64_VA_BITS != 39
+    n10_growth_unavailable(&n10_data.growth,N10_GROWTH_RANGE);
+#else
+    struct n10_data_range range={0};
+    struct { uint64_t base,offset; } stable;
+    unsigned int queried;
+    stable.base=(uint64_t)READ_ONCE(memstart_addr); stable.offset=READ_ONCE(kimage_voffset);
+    n10_live_input_range(&range,n10_data.length);
+    n10_growth_observe(&n10_data.growth,&range,n10_data.captures,
+        stable.base==(uint64_t)READ_ONCE(memstart_addr) && stable.offset==READ_ONCE(kimage_voffset) &&
+        READ_ONCE(initrd_start)==n10_data.start && READ_ONCE(initrd_end)==n10_data.end);
+    if(stable.base!=(uint64_t)READ_ONCE(memstart_addr) || stable.offset!=READ_ONCE(kimage_voffset) ||
+        READ_ONCE(initrd_start)!=n10_data.start || READ_ONCE(initrd_end)!=n10_data.end || n10_data.captures!=1) {
+        queried=n10_data.growth.bits&N10_GROWTH_QUERIED;
+        n10_growth_unavailable(&n10_data.growth,N10_GROWTH_STABLE);
+        n10_data.growth.bits=queried;
+    }
+    n10_range_clear(&range); n10_data_clear(&stable,sizeof(stable));
+#endif
+}
+#endif
+
 #ifndef N10_DATA_READONLY_PC
 void __init n10_data_capture(unsigned long start, unsigned long end);
 void __init n10_data_capture(unsigned long start, unsigned long end)
@@ -159,11 +235,13 @@ void __init n10_data_capture(unsigned long start, unsigned long end)
         n10_data.invalid = 1; n10_data.reasons |= N10_DATA_CAPTURE_REPEAT;
 #ifdef N10_DATA_EARLY_EVIDENCE
         n10_early_unavailable(&n10_data.early,N10_EARLY_REPEAT);
+        n10_growth_unavailable(&n10_data.growth,N10_GROWTH_REPEAT);
 #endif
         return;
     }
 #ifdef N10_DATA_EARLY_EVIDENCE
     n10_early_unavailable(&n10_data.early,N10_EARLY_CAPTURE_INVALID);
+    n10_growth_unavailable(&n10_data.growth,N10_GROWTH_CAPTURE);
 #endif
     if (!start || end <= start) { n10_data.invalid = 1; n10_data.reasons |= N10_DATA_CAPTURE_INVALID; return; }
     length = end-start;
@@ -188,6 +266,7 @@ void __init n10_data_capture(unsigned long start, unsigned long end)
     ram_and_map=n10_data_region_memory(physical,length)==1 && n10_data_map_memory(physical)==1;
     n10_early_observe(&n10_data.early,n10_data.input,n10_data.captures,
         READ_ONCE(initrd_start)==start && READ_ONCE(initrd_end)==end,ram_and_map);
+    n10_growth_capture();
 #endif
 }
 
@@ -235,40 +314,7 @@ out:
 #define N10_COMPARE_CLEAR(p,n) n10_data_clear(p,n)
 #include "linux_data_compare_evidence.h"
 #undef N10_COMPARE_CLEAR
-#include <asm/sections.h>
-#define N10_RANGE_CLEAR(p,n) n10_data_clear(p,n)
-#include "linux_data_input_range.h"
-#undef N10_RANGE_CLEAR
 
-static void n10_live_input_range(struct n10_data_range *out, uint64_t logical)
-{
-#if !defined(CONFIG_ARM64) || !defined(CONFIG_PHYS_ADDR_T_64BIT) || defined(CONFIG_DEBUG_VIRTUAL) || CONFIG_ARM64_VA_BITS != 39
-    (void)logical;
-    n10_range_unavailable(out,N10_RANGE_UNSUPPORTED);
-#else
-    struct n10_range_input input={0};
-    if (sizeof(unsigned long)!=8 || sizeof(phys_addr_t)!=8) {
-        n10_range_unavailable(out,N10_RANGE_UNSUPPORTED); return;
-    }
-    input.start=n10_data.start; input.end=n10_data.end;
-    input.native=n10_data.length; input.logical=logical;
-    /* Match __pa_symbol's RELOC_HIDE without calling debug/BUG translators. */
-    input.text=(uint64_t)RELOC_HIDE((unsigned long)_text,0);
-    input.image_end=(uint64_t)RELOC_HIDE((unsigned long)_end,0);
-    input.base=(uint64_t)READ_ONCE(memstart_addr);
-    input.offset=READ_ONCE(kimage_voffset);
-    input.page_offset=(uint64_t)PAGE_OFFSET;
-    input.linear_bit=(uint64_t)BIT(VA_BITS-1);
-    input.base_after=(uint64_t)READ_ONCE(memstart_addr);
-    input.offset_after=READ_ONCE(kimage_voffset); input.supported=1;
-    n10_range_evaluate(&input,out);
-    if ((uint64_t)READ_ONCE(memstart_addr)!=input.base || READ_ONCE(kimage_voffset)!=input.offset)
-        n10_range_unavailable(out,N10_RANGE_BASE);
-    if (READ_ONCE(initrd_start)!=input.start || READ_ONCE(initrd_end)!=input.end)
-        n10_range_unavailable(out,N10_RANGE_BOUNDS);
-    n10_data_clear(&input,sizeof(input));
-#endif
-}
 #endif
 
 struct n10_data_outcome {
@@ -281,10 +327,11 @@ struct n10_data_outcome {
     struct n10_data_compare_evidence comparison;
     struct n10_data_range range;
     struct n10_early_prefix early;
+    struct n10_data_growth growth;
 #endif
 };
 #ifdef N10_DATA_COMPARE_EVIDENCE
-_Static_assert(sizeof(struct n10_data_outcome) == 264, "exact temporary normal DATA outcome");
+_Static_assert(sizeof(struct n10_data_outcome) == 280, "exact temporary normal DATA outcome");
 #endif
 
 static void n10_data_run(struct n10_data_outcome *out)
@@ -301,6 +348,7 @@ static void n10_data_run(struct n10_data_outcome *out)
 #ifdef N10_DATA_COMPARE_EVIDENCE
     n10_range_unavailable(&out->range,N10_RANGE_UNREACHED);
     n10_early_snapshot(&out->early,&n10_data.early);
+    n10_growth_snapshot(&out->growth,&n10_data.growth);
 #endif
 #ifdef N10_DATA_READONLY_PC
     /* New source is admitted only here in the ordinary late DATA consumer.
@@ -458,6 +506,11 @@ static int n10_data_emit(void)
     if(count)
         pr_info("N10DATAEARLY1 %s checksum=%08x\n",frame,n10_frame_checksum(frame,count));
     n10_early_clear(&outcome.early);
+    count=n10_growth_format(&outcome.growth,frame,sizeof(frame),N10_SHA256_KAT_ID,
+        (const char *)n10_cycle,outcome.captures);
+    if(count)
+        pr_info("N10DATAGROWTH1 %s checksum=%08x\n",frame,n10_frame_checksum(frame,count));
+    n10_data_clear(&outcome.growth,sizeof(outcome.growth));
     n10_data_clear(frame,sizeof(frame));
 #endif
     n10_data_clear(&outcome,sizeof(outcome)); n10_data_clear(digest,sizeof(digest));

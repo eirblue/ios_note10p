@@ -16,6 +16,13 @@ RANGE_SCHEMA = 'n10-data-range-v1'
 RANGE_SOURCES = ('linux_data_input_range.h',)
 EARLY_SCHEMA = 'n10-data-early-prefix-v1'
 EARLY_SOURCES = ('linux_data_early_prefix.h',)
+GROWTH_SCHEMA='n10-data-growth-v1'
+GROWTH_TARGET_SOURCE='e32ec501551b74b4cca5618ea25245f012656f29'
+GROWTH_TARGET_BYTES=59523072
+GROWTH_BUDGET_BYTES=59768832
+GROWTH_FIELDS=('data_growth_schema','data_growth_target_source','data_growth_target_bytes','data_growth_budget_bytes')
+GROWTH_BINDING=dict(zip(GROWTH_FIELDS,(GROWTH_SCHEMA,GROWTH_TARGET_SOURCE,GROWTH_TARGET_BYTES,GROWTH_BUDGET_BYTES)))
+GROWTH_SOURCES=('linux_data_growth.h',)
 COMPARE_SOURCES = ('linux_data_compare_evidence.h',)
 BOOT_PAGE = 2048
 SLOT_MAGIC = b'N10DATAEXPECTV2!'
@@ -68,7 +75,7 @@ def install(source, identity):
     result = baseline_install(source, identity)
     replacements = {'arch/arm64/kernel/setup.c': setup,
         'drivers/misc/note10_sha256_kat.c': (HERE/'linux_data_carrier_composition.c').read_bytes(),
-        **{'drivers/misc/'+n: (HERE/n).read_bytes() for n in ('linux_data_carrier.c', 'carrier_lzma.c', 'carrier_lzma.h', *COMPARE_SOURCES, *RANGE_SOURCES, *EARLY_SOURCES)}}
+        **{'drivers/misc/'+n: (HERE/n).read_bytes() for n in ('linux_data_carrier.c', 'carrier_lzma.c', 'carrier_lzma.h', *COMPARE_SOURCES, *RANGE_SOURCES, *EARLY_SOURCES, *GROWTH_SOURCES)}}
     config = source/'drivers/misc/note10_sha256_kat.Kconfig'
     config.write_bytes(config.read_bytes()+b'''
 config NOTE10_DATA_CARRIER
@@ -193,19 +200,23 @@ def input_binding(result, lines, *, elf, archive, raw_inputs, producing_sources=
     if producing_sources is None:
         require(result.get('data_compare_schema') == COMPARE_SCHEMA, 'new DATA comparison feature declaration required')
         require(result.get('data_early_prefix_schema') == EARLY_SCHEMA, 'new DATA early prefix declaration required')
+        growth_declaration(result)
+        require(result.get('readonly_PC_disabled') is True and result.get('readonly_input_slot_absent') is True,
+                'normal small DATA must exclude readonly PC slot')
         require(result.get('data_input_range_schema') == RANGE_SCHEMA and
                 type(result.get('data_linked_kernel_bytes')) is int and result['data_linked_kernel_bytes']>0 and
                 result['data_linked_kernel_bytes'] == result.get('data_footprint',{}).get('linked_kernel_bytes'),
                 'new DATA live range/accepted linked span declaration required')
         require(not {'CONFIG_NOTE10_OWNED_CONTIGUOUS_STAGING=y', 'CONFIG_NOTE10_CURRENT_OWNED_STAGING=y'} & set(lines),
                 'comparison DATA forbids early owned reservation')
-        for name in (*SOURCES, *COMPARE_SOURCES, *RANGE_SOURCES, *EARLY_SOURCES):
+        for name in (*SOURCES, *COMPARE_SOURCES, *RANGE_SOURCES, *EARLY_SOURCES, *GROWTH_SOURCES):
             require(result.get('source_sha256', {}).get('note10/device_test/'+name) == sha((HERE/name).read_bytes()),
                     'DATA Image source differs: '+name)
     else:
         from current_data_reuse import require_context
         require('data_compare_schema' not in result, 'historical reuse cannot declare new comparison feature')
         require('data_early_prefix_schema' not in result, 'historical reuse cannot declare early prefix feature')
+        require(not any(key in result for key in GROWTH_FIELDS),'historical reuse cannot declare growth feature')
         require(not any(key in result for key in ('data_input_range_schema','data_linked_kernel_bytes')),
                 'historical reuse cannot declare live range feature')
         require_context(producing_sources).verify_sources(result,SOURCES)
@@ -217,6 +228,7 @@ def input_binding(result, lines, *, elf, archive, raw_inputs, producing_sources=
         bound['data_compare_schema'] = COMPARE_SCHEMA
         bound.update(data_input_range_schema=RANGE_SCHEMA,data_linked_kernel_bytes=result['data_linked_kernel_bytes'])
         bound['data_early_prefix_schema']=EARLY_SCHEMA
+        bound.update(GROWTH_BINDING)
     return bound
 
 
@@ -560,6 +572,83 @@ def decode_early(text,identity,cycle,result,*,expected=None):
                 captures=int(row['captures']),global_RAM_ownership=False,hardware_mapping_attested=False)
 
 
+def growth_declaration(row):
+    require(all(row.get(key)==value and type(row.get(key)) is type(value) for key,value in GROWTH_BINDING.items()) and
+            type(row.get('data_linked_kernel_bytes')) is int and
+            0<row['data_linked_kernel_bytes']<GROWTH_TARGET_BYTES<=GROWTH_BUDGET_BYTES<=67108864,
+            'exact growth target/budget/current linked span required')
+    return dict(GROWTH_BINDING)
+
+
+def growth_retained_heads():
+    from sha256_kat_device_profile import (V97_PROFILE_ORIGIN_HEAD,V99_PROFILE_ORIGIN_HEAD,V100_PROFILE_ORIGIN_HEAD,
+        V101_PROFILE_ORIGIN_HEAD,V102_PROFILE_ORIGIN_HEAD,V88_HOST_HEAD,V89_IMAGE_HEAD,V89_HOST_HEAD,
+        V90_IMAGE_HEAD,V90_HOST_HEAD,V91_IMAGE_HEAD)
+    return (V97_PROFILE_ORIGIN_HEAD,V99_PROFILE_ORIGIN_HEAD,V100_PROFILE_ORIGIN_HEAD,V101_PROFILE_ORIGIN_HEAD,
+            V102_PROFILE_ORIGIN_HEAD,V88_HOST_HEAD,V89_IMAGE_HEAD,V89_HOST_HEAD,V90_IMAGE_HEAD,V90_HOST_HEAD,V91_IMAGE_HEAD)
+
+
+def expected_growth_schema(expected):
+    if expected is None: return GROWTH_SCHEMA
+    retired=growth_retained_heads()
+    if any(key in expected for key in GROWTH_FIELDS):
+        growth_declaration(expected)
+        require(expected.get('source_head') not in retired and expected.get('host_profile_source_head') not in retired,
+                'retained source cannot declare growth evidence')
+        return GROWTH_SCHEMA
+    from sha256_kat_device_profile import host_profile_origin
+    host_profile_origin(expected)
+    require(expected.get('host_profile_source_head') in retired,'new DATA growth declaration missing')
+    return None
+
+
+def decode_growth(text,identity,cycle,result,*,expected=None):
+    from decode_reservation import checksum
+    schema=expected_growth_schema(expected)
+    lines=[line for line in text.splitlines() if 'N10DATAGROWTH' in line]
+    if schema is None:
+        require(not lines,'retained producer cannot claim growth evidence')
+        return dict(schema=None,state='unsupported',hardware_mapping_attested=False,global_RAM_ownership=False)
+    require(type(expected) is dict,'growth evidence requires accepted producer linked span context')
+    growth_declaration(expected)
+    require(len(lines)==1,'one declared growth companion required')
+    match=re.search(r'N10BOOTLINK2 boot=([0-9a-f]{32}) N10DATAGROWTH1 ([^\r\n\x00]{1,415}) checksum=([0-9a-f]{8})$',lines[0])
+    require(match is not None and match[1]==result['boot_identity'] and match[1]!='0'*32 and
+            checksum(match[2].encode('ascii'))==int(match[3],16),'growth boot/checksum differs')
+    pairs=[part.split('=') for part in match[2].split(' ')]
+    keys=('id','cycle','kind','source','stage','captures','state','current','target','budget','proposal','queries',
+          'memory','map_start','reserved','initrd_overlap','reasons','ownership','executed')
+    require(all(len(pair)==2 for pair in pairs) and tuple(pair[0] for pair in pairs)==keys,'growth closed schema required')
+    row=dict(pairs)
+    require(row['id']==identity and row['cycle']==cycle and row['kind']=='growth' and
+            row['source']=='memblock-bookkeeping' and row['stage']=='post_paging' and row['ownership']==row['executed']=='0' and
+            row['target']==str(GROWTH_TARGET_BYTES) and row['budget']==str(GROWTH_BUDGET_BYTES) and row['proposal']==GROWTH_TARGET_SOURCE,
+            'growth identity/target/nonclaim differs')
+    require(row['captures'] in ('0','1','2') and int(row['captures'])==result['captures'] and row['queries'] in ('0','3') and
+            re.fullmatch('[0-9a-f]{8}',row['reasons']),'growth captures/queries/reasons differ')
+    prior=[line for line in text.splitlines() if 'N10DATAEARLY' in line]
+    require(len(prior)==1 and text.find(lines[0])>text.find(prior[0]),'growth companion order differs')
+    flags=('memory','map_start','reserved','initrd_overlap')
+    checked=row['state']=='checked';reason=int(row['reasons'],16)
+    if checked:
+        require(row['captures']=='1' and row['queries']=='3' and reason==0 and
+                row['current']==str(expected['data_linked_kernel_bytes']) and all(row[key] in ('0','1') for key in flags),
+                'growth checked source span/flags differ')
+    else:
+        require(row['state']=='unavailable' and row['current']=='na' and all(row[key]=='na' for key in flags) and
+                ((row['captures']=='0' and reason==1 and row['queries']=='0') or
+                 (row['captures']=='2' and reason==64 and row['queries']=='0') or
+                 (row['captures']=='1' and ((row['queries']=='0' and reason in (2,4,8,16)) or
+                                          (row['queries']=='3' and reason in (8,32))))),
+                'growth unavailable states must be explicit NA')
+    return dict(schema=GROWTH_SCHEMA,state=row['state'],stage='post_paging',captures=int(row['captures']),queries=int(row['queries']),
+        current_linked_span=int(row['current']) if checked else None,target_linked_span=GROWTH_TARGET_BYTES,
+        tested_budget=GROWTH_BUDGET_BYTES,proposal_source=GROWTH_TARGET_SOURCE,reasons=reason,
+        **{key:row[key]=='1' if checked else None for key in flags},
+        hardware_mapping_attested=False,global_RAM_ownership=False,future_placement_attested=False,
+        larger_footprint_physically_admitted=False)
+
+
 def require_functional(result, *, report_phase=False):
     prefix = ('DATA functional acceptance failed phase='+functional_phase(result['status'])+' status='
               if report_phase else 'DATA functional decode failed status=')
@@ -614,6 +703,10 @@ def decode_selected(data, banner, identity, cycle, *, expected=None):
         components['early_input_prefix']=early
         if early['schema'] is not None:
             result['early_input_prefix']=early
+        growth=decode_growth(text,rid,cycle,result,expected=expected)
+        components['growth_region']=growth
+        if growth['schema'] is not None:
+            result['growth_region']=growth
         require_functional(result, report_phase=True)
         return result
     try:

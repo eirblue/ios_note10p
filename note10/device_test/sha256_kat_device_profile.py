@@ -475,7 +475,8 @@ def host_binding(source_head):
                       'linux_data_input_range_fixture.c', 'test_v101_live_input_range.py',
                       'linux_data_early_prefix.h', 'linux_data_early_prefix_fixture.c', 'test_v102_input_lifetime.py',
                       'readonly_input_pc.py','readonly_input_pc.h','build_readonly_input_pc.py',
-                      'readonly_input_pc_fixture.c','test_v103_readonly_input_pc.py')}
+                      'readonly_input_pc_fixture.c','test_v103_readonly_input_pc.py',
+                      'linux_data_growth.h','linux_data_growth_fixture.c','test_v104_growth_region.py')}
     return dict(host_profile_source_head=source_head, host_profile_source_sha256=dict(pins))
 
 
@@ -763,6 +764,9 @@ def fields(row):
         keys = (*keys, 'data_input_range_schema', 'data_linked_kernel_bytes')
     if 'data_early_prefix_schema' in row:
         keys = (*keys, 'data_early_prefix_schema')
+    from linux_data_carrier import GROWTH_FIELDS
+    if any(key in row for key in GROWTH_FIELDS):
+        keys=(*keys,*GROWTH_FIELDS)
     return {key: row[key] for key in keys}
 
 
@@ -827,6 +831,15 @@ def package_scope(row, mode=None):
                     'new early prefix producer binding differs')
         else:
             require(row.get('host_profile_source_head') in early_retained, 'new DATA early prefix declaration missing')
+        from linux_data_carrier import GROWTH_FIELDS, growth_declaration, growth_retained_heads
+        growth_retained=growth_retained_heads()
+        if any(key in row for key in GROWTH_FIELDS):
+            growth_declaration(row)
+            require(row.get('source_head') not in growth_retained and row.get('host_profile_source_head') not in growth_retained and
+                    row.get('data_early_prefix_schema')==EARLY_SCHEMA and has_range,
+                    'new normal growth producer binding differs')
+        else:
+            require(row.get('host_profile_source_head') in growth_retained,'new DATA growth declaration missing')
         if 'data_compare_schema' in row:
             from linux_data_carrier import COMPARE_SCHEMA, COMPARE_SCHEMA_V1
             if row['data_compare_schema'] == COMPARE_SCHEMA_V1:
