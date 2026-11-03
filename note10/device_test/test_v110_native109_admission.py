@@ -1,5 +1,9 @@
 """One NEW native109/host110 integration method; all inputs and transport synthetic."""
 import argparse
+from contextlib import redirect_stdout
+import io
+import runpy
+import sys
 from contextlib import ExitStack
 import copy
 import hashlib
@@ -31,6 +35,8 @@ RECEIPT_METHOD='test_raw_context_copy_and_exact_receipt_regeneration'
 RECEIPT_SCOPE='v110-ci-context-byte-copy-rev1'
 PACK_METHOD='test_stage_kind_compact_dispatch_and_exact_remaining_pack_scope'
 PACK_SCOPE='v110-remaining-pack-dispatch-rev2'
+CLI_METHOD='test_script_main_uses_canonical_remaining_pack_context'
+CLI_SCOPE='v110-canonical-remaining-cli-rev4'
 OUTPUT=None
 IDENTITY,BOOT,HOST='1'*32,'3'*32,'8'*40
 
@@ -479,14 +485,59 @@ class Native109AdmissionTests(unittest.TestCase):
             old_methods_run=0,actual_private_inputs=0,actual_device_operations=[],Image_builds=0,CI=0,fixture_compiles=0,fixture_processes=0))
 
 
+    def test_script_main_uses_canonical_remaining_pack_context(self):
+        work=OUTPUT/'synthetic-cli';work.mkdir()
+        contract=work/'inert-contract.json';pin='9'*64;token='6'*32
+        variant=work/'saved-variant';template=work/'saved-template'
+        report=dict(synthetic_metadata_only=True)
+        context=dict(template=template,variant=variant,generic=dict(synthetic_generic=True),report=report,
+            contract=dict(variant_report_sha256='a'*64,template_report_sha256='b'*64,variant_config_sha256='c'*64,cycle=token))
+        calls=[]
+        def metadata_pin(path):
+            path=Path(path)
+            if path==variant/'build-result.json':return 'a'*64
+            if path==variant/'handoff.config':return 'c'*64
+            raise AssertionError('unexpected input read: '+str(path))
+        def canonical_prepare(path,expected):
+            calls.append((path,expected));self.assertEqual((path,expected),(contract,pin))
+            self.assertIs(typed.remaining,remaining);self.assertIs(profile.remaining,remaining)
+            self.assertIsNone(remaining._ACTIVE.get())
+            with remaining._scope(context):
+                self.assertIs(typed.remaining._ACTIVE.get(),context)
+                self.assertIs(profile.remaining._ACTIVE.get(),context)
+                # Exercise the same saved-metadata context guard reached by the failed script path.
+                with patch('sha256_kat_device_profile.private',side_effect=lambda value:Path(value)),\
+                     patch('sha256_kat_device_profile.sha',side_effect=metadata_pin):
+                    self.assertEqual(typed.remaining.saved_metadata(variant,token,template),report)
+                    with self.assertRaises(ValueError):typed.remaining.saved_metadata(variant,'7'*32,template)
+            self.assertIsNone(remaining._ACTIVE.get())
+            return dict(canonical_prepare_called=True,shared_active_context=True,actual_input_reads=0,packer_calls=0)
+        argv=[str(Path(remaining.__file__).resolve()),'--contract',str(contract),'--contract-sha256',pin]
+        captured=io.StringIO()
+        with patch.object(remaining,'prepare',side_effect=canonical_prepare) as canonical,patch.object(sys,'argv',argv),redirect_stdout(captured),\
+             patch('prepare_linux_boot.prepare',side_effect=AssertionError('no packing operation')),\
+             patch('type3_admission.prepare_template',side_effect=AssertionError('no template operation')),\
+             patch('materialize_auto_cycle.materialize',side_effect=AssertionError('no materialization operation')):
+            namespace=runpy.run_path(str(Path(remaining.__file__).resolve()),run_name='__main__')
+        self.assertEqual(canonical.call_count,1);self.assertEqual(calls,[(contract,pin)])
+        self.assertIsNot(namespace['_ACTIVE'],remaining._ACTIVE)
+        self.assertIsNone(namespace['_ACTIVE'].get());self.assertIsNone(remaining._ACTIVE.get())
+        self.assertEqual(json.loads(captured.getvalue()),dict(canonical_prepare_called=True,shared_active_context=True,actual_input_reads=0,packer_calls=0))
+        self.assertFalse(contract.exists());self.assertFalse(variant.exists());self.assertFalse(template.exists())
+        save(OUTPUT/'canonical-cli-summary.json',dict(script_main_route=True,canonical_prepare_calls=1,canonical_context_shared=True,
+            separate_script_namespace_not_used_for_transaction=True,real_saved_metadata_context_guard=True,
+            actual_private_inputs=0,actual_device_operations=[],packer_calls=0,compact_reads=0,fixture_compiles=0,fixture_processes=0,
+            Image_builds=0,CI=0,old_methods_run=0))
+
+
 if __name__=='__main__':
-    parser=argparse.ArgumentParser();parser.add_argument('--scope',required=True,choices=(PACK_SCOPE,));parser.add_argument('--output',type=Path,required=True)
+    parser=argparse.ArgumentParser();parser.add_argument('--scope',required=True,choices=(CLI_SCOPE,));parser.add_argument('--output',type=Path,required=True)
     args=parser.parse_args();OUTPUT=profile.private(args.output);OUTPUT.mkdir(parents=True,exist_ok=False)
     names=('class3_native_origin.py','type3_admission.py','sha256_kat_device_profile.py','kernel_readonly_span_candidate.py',
         'readonly_stage_witness.py','linux_data_carrier.py','kernel_readonly_input.py','auto_cycle.py','materialize_auto_cycle.py','test_v110_native109_admission.py','type3_remaining_pack.py','prepare_linux_boot.py')
     save(OUTPUT/'source-sha256.json',{name:digest((Path(__file__).resolve().parent/name).read_bytes()) for name in names})
-    result=unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite([Native109AdmissionTests(PACK_METHOD)]))
-    save(OUTPUT/'result.json',dict(schema='v110-remaining-pack-regression-v1',scope=args.scope,selected=[PACK_METHOD],run=result.testsRun,
+    result=unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite([Native109AdmissionTests(CLI_METHOD)]))
+    save(OUTPUT/'result.json',dict(schema='v110-canonical-remaining-cli-regression-v1',scope=args.scope,selected=[CLI_METHOD],run=result.testsRun,
         errors=len(result.errors),failures=len(result.failures),passed=result.wasSuccessful(),fixture_compiles=0,fixture_processes=0,Image_builds=0,CI=0,
         actual_private_inputs=0,actual_device_operations=[],old_methods_run=0,error_tracebacks=[dict(test=test.id(),traceback=trace) for test,trace in result.errors],
         failure_tracebacks=[dict(test=test.id(),traceback=trace) for test,trace in result.failures]))

@@ -363,4 +363,6 @@ def execution_context(row,plan_sha,packages,declared_version,host_head,path,expe
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--contract',type=Path,required=True);parser.add_argument('--contract-sha256',required=True)
-    args=parser.parse_args();print(json.dumps(prepare(args.contract,args.contract_sha256),indent=2))
+    # Call the canonical module so downstream imports share its transaction ContextVar.
+    from type3_remaining_pack import prepare as canonical_prepare
+    args=parser.parse_args();print(json.dumps(canonical_prepare(args.contract,args.contract_sha256),indent=2))
