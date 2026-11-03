@@ -134,7 +134,9 @@ def main(kind=None):
              'early_fdt_binding.py','sealed_affinity_artifact.cjs','bundle_affinity_evidence.py') if native else (
              'linux_data_carrier.py','linux_data_carrier.c','linux_data_carrier_composition.c',
              'build_linux_data_carrier.py','linux_data_carrier_fixture.c','test_linux_data_carrier.py',
-             'carrier_lzma.c','carrier_lzma.h','linux_data_compare_evidence.h','early_fdt_binding.py','sealed_affinity_artifact.cjs',
+             'carrier_lzma.c','carrier_lzma.h','linux_data_compare_evidence.h',
+             'linux_data_input_probe_fixture.c','test_v100_carrier_input_probe.py',
+             'early_fdt_binding.py','sealed_affinity_artifact.cjs',
              'bundle_affinity_evidence.py') if data_task else ()
     if owned:
         extra=(*extra,'owned_contiguous_staging.py','owned_contiguous_staging.c','owned_contiguous_staging_composition.c',

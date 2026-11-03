@@ -10,7 +10,8 @@ KIND = 'linux-data-carrier'
 PROFILE = KIND+'-v1'
 STAGE = 'late_linux_owned_virtual_decode'
 MODE = 'image-slot-logical-v2'
-COMPARE_SCHEMA = 'n10-data-compare-v1'
+COMPARE_SCHEMA_V1 = 'n10-data-compare-v1'
+COMPARE_SCHEMA = 'n10-data-compare-v2'
 COMPARE_SOURCES = ('linux_data_compare_evidence.h',)
 BOOT_PAGE = 2048
 SLOT_MAGIC = b'N10DATAEXPECTV2!'
@@ -332,19 +333,39 @@ def functional_phase(status):
             'payload_hash': 'payload_integrity', 'ok': 'complete'}.get(status, 'unknown')
 
 
-def decode_compare(text, identity, cycle, result, *, required=False):
+def expected_compare_schema(expected):
+    schema = None if expected is None else expected.get('data_compare_schema')
+    require(schema in (None, COMPARE_SCHEMA_V1, COMPARE_SCHEMA), 'unsupported DATA comparison feature')
+    if schema == COMPARE_SCHEMA_V1:
+        from sha256_kat_device_profile import host_profile_origin, V99_PROFILE_ORIGIN_HEAD
+        require(expected.get('source_head') == expected.get('host_profile_source_head') == V99_PROFILE_ORIGIN_HEAD,
+                'v1 comparison requires exact retained v99 origin')
+        host_profile_origin(expected)
+    return schema
+
+
+def decode_compare(text, identity, cycle, result, *, required=False, expected=None):
     from decode_reservation import checksum
+    schema = expected_compare_schema(expected)
+    required = required or schema is not None
     all_lines = text.splitlines()
     lines = [line for line in all_lines if 'N10DATACMP' in line]
     if not lines:
         require(not required, 'declared DATA comparison frame missing')
         return dict(schema=None, state='unsupported', comparison_observed=False)
     require(len(lines) == 1, 'one DATA comparison frame required')
-    match = re.search(r'N10BOOTLINK2 boot=([0-9a-f]{32}) N10DATACMP1 ([^\r\n\x00]{1,383}) checksum=([0-9a-f]{8})$', lines[0])
+    match = re.search(r'N10BOOTLINK2 boot=([0-9a-f]{32}) N10DATACMP([12]) ([^\r\n\x00]{1,415}) checksum=([0-9a-f]{8})$', lines[0])
     require(match is not None and match[1] == result['boot_identity'] and match[1] != '0'*32 and
-            checksum(match[2].encode('ascii')) == int(match[3], 16), 'DATA comparison boot/checksum differs')
-    pairs = [part.split('=') for part in match[2].split(' ')]
-    keys = ('id', 'cycle', 'kind', 'source', 'phase', 'state', 'logical', 'actual', 'expected', 'equal', 'ownership', 'executed')
+            checksum(match[3].encode('ascii')) == int(match[4], 16), 'DATA comparison boot/checksum differs')
+    version = match[2]
+    require((version == '1' and schema == COMPARE_SCHEMA_V1 and len(match[3]) <= 383) or
+            (version == '2' and schema in (None, COMPARE_SCHEMA) and (expected is None or schema == COMPARE_SCHEMA)),
+            'DATA comparison declared version differs')
+    pairs = [part.split('=') for part in match[3].split(' ')]
+    keys = ('id', 'cycle', 'kind', 'source', 'phase', 'state', 'logical', 'actual', 'expected', 'equal')
+    if version == '2':
+        keys = (*keys, 'sampled', 'magic_match', 'prefix_zero')
+    keys = (*keys, 'ownership', 'executed')
     require(all(len(part) == 2 for part in pairs) and tuple(part[0] for part in pairs) == keys,
             'DATA comparison closed schema required')
     row = dict(pairs)
@@ -373,7 +394,19 @@ def decode_compare(text, identity, cycle, result, *, required=False):
                 'DATA unavailable comparison inconsistent')
         require((result['status'] == 'carrier_crypto') == (result['carrier_rc'] != 0),
                 'DATA unavailable comparison crypto status differs')
-    return dict(schema=COMPARE_SCHEMA, state=row['state'], comparison_observed=row['state'] == 'compared',
+    probe = dict(state='unsupported', sampled=False, bytes=0, magic_match=None, prefix_zero=None)
+    if version == '2':
+        require(all(row[key] in ('0', '1') for key in ('sampled', 'magic_match', 'prefix_zero')) and
+                (row['sampled'] == '1') == (row['state'] == 'compared') and
+                not (row['magic_match'] == row['prefix_zero'] == '1') and
+                (row['sampled'] == '1' or row['magic_match'] == row['prefix_zero'] == '0'),
+                'DATA prefix sample inconsistent')
+        sampled = row['sampled'] == '1'
+        probe = dict(state='sampled' if sampled else 'unavailable', sampled=sampled, bytes=8 if sampled else 0,
+                     phase='post_carrier_hash_compare', magic_match=row['magic_match'] == '1' if sampled else None,
+                     prefix_zero=row['prefix_zero'] == '1' if sampled else None)
+    return dict(schema=COMPARE_SCHEMA_V1 if version == '1' else COMPARE_SCHEMA,
+                state=row['state'], comparison_observed=row['state'] == 'compared', input_probe=probe,
                 boot_identity=match[1], phase=row['phase'], logical=int(row['logical']),
                 actual_sha256=row['actual'], expected_sha256=row['expected'],
                 equal=None if row['equal'] == 'na' else row['equal'] == '1',
@@ -421,9 +454,7 @@ def decode_selected(data, banner, identity, cycle, *, expected=None):
         components['data'] = result
         components['data_phase'] = functional_phase(result['status'])
         components['structural_presence'] = structural_presence(text, rid, cycle, result['boot_identity'])
-        schema = None if expected is None else expected.get('data_compare_schema')
-        require(schema in (None, COMPARE_SCHEMA), 'unsupported DATA comparison feature')
-        comparison = decode_compare(text, rid, cycle, result, required=schema == COMPARE_SCHEMA)
+        comparison = decode_compare(text, rid, cycle, result, expected=expected, required=expected is None)
         components['carrier_comparison'] = comparison
         if comparison['schema'] is not None:
             result['carrier_comparison'] = comparison

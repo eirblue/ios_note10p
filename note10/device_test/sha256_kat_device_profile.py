@@ -332,7 +332,8 @@ def host_binding(source_head):
                       'linux_data_carrier.py', 'linux_data_carrier.c', 'linux_data_carrier_composition.c',
                       'test_linux_data_carrier.py', 'linux_data_carrier_fixture.c', 'carrier_lzma.c', 'carrier_lzma.h',
                       'linux_data_compare_evidence.h', 'linux_data_compare_evidence_fixture.c', 'test_v99_carrier_compare_evidence.py',
-                      'test_v99_host_profile_origin.py')}
+                      'test_v99_host_profile_origin.py', 'linux_data_input_probe_fixture.c',
+                      'test_v100_carrier_input_probe.py')}
     return dict(host_profile_source_head=source_head, host_profile_source_sha256=dict(pins))
 
 
@@ -634,10 +635,14 @@ def package_scope(row, mode=None):
     if row['device_profile'] == DATA_PROFILE:
         from linux_data_carrier import STAGE, MODE
         if 'data_compare_schema' in row:
-            from linux_data_carrier import COMPARE_SCHEMA
-            require(row['data_compare_schema'] == COMPARE_SCHEMA and
-                    row.get('source_head') not in (V88_HOST_HEAD,V89_IMAGE_HEAD,V90_IMAGE_HEAD,V91_IMAGE_HEAD),
-                    'new DATA comparison producer binding differs')
+            from linux_data_carrier import COMPARE_SCHEMA, COMPARE_SCHEMA_V1
+            if row['data_compare_schema'] == COMPARE_SCHEMA_V1:
+                require(row.get('source_head') == row.get('host_profile_source_head') == V99_PROFILE_ORIGIN_HEAD,
+                        'v1 comparison requires exact retained v99 origin')
+            else:
+                require(row['data_compare_schema'] == COMPARE_SCHEMA and
+                        row.get('source_head') not in (V88_HOST_HEAD,V89_IMAGE_HEAD,V90_IMAGE_HEAD,V91_IMAGE_HEAD,V99_PROFILE_ORIGIN_HEAD),
+                        'new DATA comparison producer binding differs')
         if row.get('source_head') == V90_IMAGE_HEAD:
             require(row.get('data_expectation_mode') == 'image-slot-v1' and row.get('image_expectation_patched') is True, 'historical Image expectation differs')
         elif row.get('source_head') not in (V88_HOST_HEAD,V89_IMAGE_HEAD):

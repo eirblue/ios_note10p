@@ -169,6 +169,9 @@ struct n10_data_outcome {
     struct n10_data_compare_evidence comparison;
 #endif
 };
+#ifdef N10_DATA_COMPARE_EVIDENCE
+_Static_assert(sizeof(struct n10_data_outcome) == 200, "exact temporary normal DATA outcome");
+#endif
 
 static void n10_data_run(struct n10_data_outcome *out)
 {
@@ -228,6 +231,7 @@ static void n10_data_run(struct n10_data_outcome *out)
 #ifdef N10_DATA_COMPARE_EVIDENCE
     status = memcmp(digest,expectation,32);
     n10_data_compare_capture(&out->comparison,digest,expectation,status);
+    n10_data_input_probe(&out->comparison,p);
     if (status) goto done;
 #else
     if (memcmp(digest,expectation,32)) goto done;
@@ -302,7 +306,7 @@ static int n10_data_emit(void)
     count = n10_data_compare_format(&outcome.comparison,frame,sizeof(frame),digest,expected,
         N10_SHA256_KAT_ID,(const char *)n10_cycle,(unsigned long long)outcome.logical);
     if (count)
-        pr_info("N10DATACMP1 %s checksum=%08x\n",frame,n10_frame_checksum(frame,count));
+        pr_info("N10DATACMP2 %s checksum=%08x\n",frame,n10_frame_checksum(frame,count));
     n10_data_compare_clear(&outcome.comparison);
     n10_data_clear(expected,sizeof(expected));
     n10_data_clear(frame,sizeof(frame));

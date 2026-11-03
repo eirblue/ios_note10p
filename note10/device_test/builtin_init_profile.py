@@ -25,7 +25,7 @@ def current_boot_binding(plan, pair, diagnostic):
     prior_host = '59bfd8d9f21047c9d943cd0dd4f4eb96fb5459e9' if data else '7490b4286417a6581be292de0ac1a5c3a6a079aa' if native else 'a0674c29eaa2bc8938023fc2be590b9a4a84374e' if fdt else '7e4a8c992f95f01429e824404378fa9271c0eb8e' if affinity else '149cb74c3f7640f2e26dfdcd1d775ec99f6c02ac' if stream else '5e233aa5f08473d716ca2e9b3d8937c1821d513f'
     prior_source = pair.get('source_head') == prior_head and pair.get('host_profile_source_head') == prior_host
     # Package-origin validation authenticates the complete retained host map.
-    # This predecessor rule adds only the exact v97 DATA tuple, never a BOOT pin.
+    # These predecessor cases are exact retained DATA tuples, never BOOT pins.
     if data:
         prior_source = prior_source or (
             pair.get('source_head') == '0696b4dbf157a2d51b68b26e4a5237a7c51daa80' and
@@ -34,6 +34,11 @@ def current_boot_binding(plan, pair, diagnostic):
             isinstance(pair.get('data_current_binding_sha256'), str) and
             re.fullmatch('[0-9a-f]{64}', pair['data_current_binding_sha256']) and
             'data_compare_schema' not in pair)
+        prior_source = prior_source or (
+            pair.get('source_head') == '4f9eb149bd116db77eaf3400a25f7454577268a9' and
+            pair.get('host_profile_source_head') == '4f9eb149bd116db77eaf3400a25f7454577268a9' and
+            pair.get('data_compare_schema') == 'n10-data-compare-v1' and
+            not any(key in pair for key in ('data_host_experiment','data_current_binding_sha256')))
     require(pair.get('device_profile') == prior_profile and
             prior_source and
             re.fullmatch('[0-9a-f]{64}', plan.get('current_boot_payload_sha256', '')) and
