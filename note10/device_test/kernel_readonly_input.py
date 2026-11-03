@@ -184,8 +184,8 @@ def producer_contract(result,source,*,producing_sources=None,historical_origin=N
 
 
 
-def span_footprint(system_map,footprint,slot):
-    names={'_text','_stext','_end',SLOT,DESC};values={}
+def span_footprint(system_map,footprint,slot,*,slot_symbol=SLOT,descriptor_symbol=DESC):
+    names={'_text','_stext','_end',slot_symbol,descriptor_symbol};values={}
     for line in system_map.splitlines():
         row=line.split()
         if len(row)==3 and row[2] in names:
@@ -195,7 +195,7 @@ def span_footprint(system_map,footprint,slot):
     text,start,end=values['_text'],values['_stext'],values['_end']
     data.require(0<text<=start<end and end-text==footprint['linked_kernel_bytes']<=BUDGET,
         'PC span linked domain differs')
-    for key,symbol in (('slot',SLOT),('descriptor',DESC)):
+    for key,symbol in (('slot',slot_symbol),('descriptor',descriptor_symbol)):
         extent=slot[key]
         data.require(values[symbol]==text+extent['offset'] and start<=values[symbol] and
             values[symbol]+extent['bytes']<=end,'PC span full linked containment differs')
@@ -368,6 +368,8 @@ def require_device_scope(row,ack_kernel_readonly_growth=False):
     data.require(row.get('PC_only') is not True and row.get('data_expectation_mode')!='kernel-readonly-slot-v1' and row.get('version')!='v103' and row.get('diagnostic_kind') not in
         ('readonly-input-pc','owned-contiguous-staging-pc','current-owned-staging-pc',SPAN_KIND) and not any(key in row for key in
         ('readonly_input_schema','readonly_input_slot','readonly_pc_contract','kernel_readonly_span_schema')),'PC-only source is permanently forbidden on device')
+    from kernel_readonly_span_candidate import is_candidate as is_type3, require_device_scope as require_type3
+    if is_type3(row):return require_type3(row,ack_kernel_readonly_growth)
     if is_candidate(row):
         data.require(row.get('device_profile')==data.PROFILE and row.get('data_input_kind')==KIND and row.get('kernel_readonly_schema')==SCHEMA and
             row.get('data_expectation_mode')==MODE and row.get('kernel_readonly_requires_ack') is True and

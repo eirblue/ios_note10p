@@ -6,6 +6,8 @@
 #endif
 #define N10_KRO_SPAN_BUDGET 59768832u
 #define N10_KRO_SPAN_BODY_MAX 415u
+#define N10_KRO_SPAN_CAPACITY 4440064u
+#define N10_KRO_SPAN_DESCRIPTOR_BYTES 80u
 enum n10_kro_span_reason {
     N10_KRO_SPAN_UNREACHED=1,N10_KRO_SPAN_KERNEL=2,N10_KRO_SPAN_NULL=4,
     N10_KRO_SPAN_OVERFLOW=8,N10_KRO_SPAN_OUTSIDE=16,N10_KRO_SPAN_OVERLAP=32,N10_KRO_SPAN_BUDGET_ERROR=64,N10_KRO_SPAN_EXTENT=128
@@ -18,15 +20,12 @@ static inline void n10_kro_span_unreached(struct n10_kro_span *out)
 {
     N10_KRO_SPAN_CLEAR(out,sizeof(*out));out->reasons=N10_KRO_SPAN_UNREACHED;
 }
-/* The composite admission performs no descriptor/input read until arithmetic
- * succeeds. Only then may the existing class2 descriptor admission read it. */
-static inline int n10_kro_span_admit(struct n10_kro_span *out,uintptr_t kernel_start,uintptr_t kernel_end,
-    const struct n10_kro_descriptor *descriptor,size_t descriptor_bytes,const unsigned char *slot,size_t capacity,
-    unsigned int source,const unsigned char **input,uint64_t *logical,unsigned char expected[32])
+/* Scalar-only shared precondition; no descriptor/input read or address export. */
+static inline int n10_kro_span_check(struct n10_kro_span *out,uintptr_t kernel_start,uintptr_t kernel_end,
+    uintptr_t descriptor,size_t descriptor_bytes,uintptr_t slot,size_t capacity)
 {
-    uintptr_t a=(uintptr_t)slot,b=(uintptr_t)descriptor,ae,be;
+    uintptr_t a=slot,b=descriptor,ae,be;
     N10_KRO_SPAN_CLEAR(out,sizeof(*out));out->bits=1;
-    *input=NULL;*logical=0;N10_KRO_SPAN_CLEAR(expected,32);
     out->reasons=N10_KRO_SPAN_KERNEL;
     if(!kernel_start || kernel_end<=kernel_start) return -1;
     out->reasons=N10_KRO_SPAN_BUDGET_ERROR;
@@ -35,7 +34,7 @@ static inline int n10_kro_span_admit(struct n10_kro_span *out,uintptr_t kernel_s
     out->reasons=N10_KRO_SPAN_NULL;
     if(!a || !b) return -1;
     out->reasons=N10_KRO_SPAN_EXTENT;
-    if(capacity!=N10_KRO_CAPACITY || descriptor_bytes!=N10_KRO_DESCRIPTOR_BYTES) return -1;
+    if(capacity!=N10_KRO_SPAN_CAPACITY || descriptor_bytes!=N10_KRO_SPAN_DESCRIPTOR_BYTES) return -1;
     out->reasons=N10_KRO_SPAN_OVERFLOW;
     if(a>UINTPTR_MAX-capacity || b>UINTPTR_MAX-descriptor_bytes) return -1;
     ae=a+capacity;be=b+descriptor_bytes;out->bits|=64;
@@ -47,8 +46,19 @@ static inline int n10_kro_span_admit(struct n10_kro_span *out,uintptr_t kernel_s
     if(!(out->bits&16)) out->reasons|=N10_KRO_SPAN_OVERLAP;
     if(out->reasons) return -1;
     out->bits|=32;
+    return 0;
+}
+#ifndef N10_KRO_SPAN_NO_CLASS2
+/* Original class2 adapter stays distinct from the new class3 descriptor ABI. */
+static inline int n10_kro_span_admit(struct n10_kro_span *out,uintptr_t kernel_start,uintptr_t kernel_end,
+    const struct n10_kro_descriptor *descriptor,size_t descriptor_bytes,const unsigned char *slot,size_t capacity,
+    unsigned int source,const unsigned char **input,uint64_t *logical,unsigned char expected[32])
+{
+    *input=NULL;*logical=0;N10_KRO_SPAN_CLEAR(expected,32);
+    if(n10_kro_span_check(out,kernel_start,kernel_end,(uintptr_t)descriptor,descriptor_bytes,(uintptr_t)slot,capacity)) return -1;
     return n10_kro_admit(descriptor,descriptor_bytes,slot,capacity,source,input,logical,expected);
 }
+#endif
 static inline int n10_kro_span_format(const struct n10_kro_span *out,char *frame,size_t capacity,
     const char *identity,const char *cycle)
 {

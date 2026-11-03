@@ -31,15 +31,34 @@ static const struct n10_ro_descriptor n10_readonly_descriptor __used
 };
 #endif
 #endif
+#if defined(N10_DATA_KERNEL_READONLY_V3) && (!defined(N10_DATA_KERNEL_READONLY) || defined(N10_DATA_KERNEL_SPAN_PC))
+#error "type3 readonly source cannot alias PC span or lack its distinct mode"
+#endif
 #ifdef N10_DATA_KERNEL_READONLY
 #if defined(N10_DATA_COMPARE_EVIDENCE) || defined(N10_DATA_CONTIGUOUS) || defined(N10_DATA_READONLY_PC) || !defined(N10_DATA_IMAGE_EXPECTATION)
 #error "kernel readonly candidate is a distinct late-only DATA source"
 #endif
-#include "kernel_readonly_input.h"
-#ifdef N10_DATA_KERNEL_SPAN_PC
+#if defined(N10_DATA_KERNEL_SPAN_PC) || defined(N10_DATA_KERNEL_READONLY_V3)
+#define N10_DATA_KERNEL_SPAN 1
 #ifndef N10_DATA_HOST_TEST
 #include <asm/sections.h>
 #endif
+#endif
+#ifdef N10_DATA_KERNEL_READONLY_V3
+#define N10_KRO_SPAN_CLEAR(p,n) n10_data_clear(p,n)
+#include "kernel_readonly_span_candidate.h"
+#undef N10_KRO_SPAN_CLEAR
+#ifndef N10_DATA_HOST_TEST
+static const unsigned char n10_kernel_readonly3_input[N10_KRO3_CAPACITY] __used
+    __attribute__((section(".rodata.n10_kernel_readonly3_input"),aligned(16)))={0};
+static const struct n10_kro3_descriptor n10_kernel_readonly3_descriptor __used
+    __attribute__((section(".rodata.n10_kernel_readonly3_descriptor"),aligned(16)))={
+    N10_KRO3_MAGIC,{3,0,0,0},{80,0,0,0},{0,192,67,0,0,0,0,0},{0},{0},{0}
+};
+#endif
+#else
+#include "kernel_readonly_input.h"
+#ifdef N10_DATA_KERNEL_SPAN_PC
 #define N10_KRO_SPAN_CLEAR(p,n) n10_data_clear(p,n)
 #include "kernel_readonly_span.h"
 #undef N10_KRO_SPAN_CLEAR
@@ -51,6 +70,7 @@ static const struct n10_kro_descriptor n10_kernel_readonly_descriptor __used
     __attribute__((section(".rodata.n10_kernel_readonly_descriptor"),aligned(16)))={
     N10_KRO_MAGIC,{2,0,0,0},{80,0,0,0},{0,192,67,0,0,0,0,0},{0},{0},{0}
 };
+#endif
 #endif
 #endif
 #ifdef N10_DATA_COMPARE_EVIDENCE
@@ -143,7 +163,11 @@ static int n10_image_expectation_read(unsigned char expected[32], uint64_t *logi
 #endif
 #ifdef N10_DATA_KERNEL_READONLY
 #undef N10_DATA_EXPECTATION_SOURCE
+#ifdef N10_DATA_KERNEL_READONLY_V3
+#define N10_DATA_EXPECTATION_SOURCE "kernel-readonly-span-candidate-v1"
+#else
 #define N10_DATA_EXPECTATION_SOURCE "kernel-readonly-candidate-v1"
+#endif
 #endif
 
 static struct {
@@ -349,7 +373,7 @@ struct n10_data_outcome {
     int carrier_rc;
     unsigned int decoded, reasons, expectations, captures, retained;
     unsigned char digest[32];
-#ifdef N10_DATA_KERNEL_SPAN_PC
+#ifdef N10_DATA_KERNEL_SPAN
     struct n10_kro_span source_span;
 #endif
 #ifdef N10_DATA_COMPARE_EVIDENCE
@@ -359,7 +383,7 @@ struct n10_data_outcome {
     struct n10_data_growth growth;
 #endif
 };
-#ifdef N10_DATA_KERNEL_SPAN_PC
+#ifdef N10_DATA_KERNEL_SPAN
 _Static_assert(sizeof(struct n10_data_outcome)==128,"exact PC span outcome");
 #endif
 #ifdef N10_DATA_COMPARE_EVIDENCE
@@ -377,7 +401,7 @@ static void n10_data_run(struct n10_data_outcome *out)
     struct n10_lzma_result result = {0};
     int status;
     memset(out, 0, sizeof(*out)); out->status = "unavailable";
-#ifdef N10_DATA_KERNEL_SPAN_PC
+#ifdef N10_DATA_KERNEL_SPAN
     n10_kro_span_unreached(&out->source_span);
 #endif
 #ifdef N10_DATA_COMPARE_EVIDENCE
@@ -389,13 +413,23 @@ static void n10_data_run(struct n10_data_outcome *out)
     /* New source is admitted only here in the ordinary late DATA consumer.
      * No external initrd capture, same-global fiction, or early source read. */
 #ifdef N10_DATA_KERNEL_READONLY
+#ifdef N10_DATA_KERNEL_READONLY_V3
+    out->carrier=N10_KRO3_CAPACITY;
+#else
     out->carrier=N10_KRO_CAPACITY;
+#endif
 #else
     out->carrier=N10_RO_CAPACITY;
 #endif
     if(n10_data.emitted++) { out->reasons=N10_DATA_EMIT_REPEAT; return; }
 #ifdef N10_DATA_KERNEL_READONLY
-#ifdef N10_DATA_KERNEL_SPAN_PC
+#ifdef N10_DATA_KERNEL_READONLY_V3
+    status=n10_kro3_span_admit(&out->source_span,
+        (uintptr_t)RELOC_HIDE((unsigned long)_stext,0),(uintptr_t)RELOC_HIDE((unsigned long)_end,0),
+        &n10_kernel_readonly3_descriptor,sizeof(n10_kernel_readonly3_descriptor),
+        (const unsigned char *)RELOC_HIDE((const unsigned char *)n10_kernel_readonly3_input,0),sizeof(n10_kernel_readonly3_input),
+        N10_KRO3_SOURCE,&p,&logical,expectation);
+#elif defined(N10_DATA_KERNEL_SPAN_PC)
     status=n10_kro_span_admit(&out->source_span,
         (uintptr_t)RELOC_HIDE((unsigned long)_stext,0),(uintptr_t)RELOC_HIDE((unsigned long)_end,0),
         &n10_kernel_readonly_descriptor,sizeof(n10_kernel_readonly_descriptor),
@@ -538,8 +572,12 @@ static int n10_data_emit(void)
         (unsigned long long)outcome.carrier,(unsigned long long)outcome.logical,outcome.carrier_rc,(unsigned long long)outcome.stream,(unsigned long long)outcome.payload,
         (unsigned long long)outcome.consumed,(unsigned long long)outcome.written,outcome.decoded,digest,outcome.reasons,outcome.expectations,outcome.captures,outcome.retained);
 #ifdef N10_DATA_KERNEL_READONLY
+#ifdef N10_DATA_KERNEL_READONLY_V3
+    pr_info("N10DATARO3 %s checksum=%08x\n",frame,n10_frame_checksum(frame,count));
+#else
     pr_info("N10DATARO1 %s checksum=%08x\n",frame,n10_frame_checksum(frame,count));
-#ifdef N10_DATA_KERNEL_SPAN_PC
+#endif
+#ifdef N10_DATA_KERNEL_SPAN
     count=n10_kro_span_format(&outcome.source_span,frame,sizeof(frame),N10_SHA256_KAT_ID,(const char *)n10_cycle);
     if(count) pr_info("N10DATASPAN1 %s checksum=%08x\n",frame,n10_frame_checksum(frame,count));
 #endif

@@ -338,9 +338,9 @@ def retained_pass(record):
 
 def decode(text, identity, cycle, *, _source_class='native-initrd'):
     from decode_reservation import checksum
-    require(_source_class in ('native-initrd','kernel-readonly-candidate-v1'),'closed DATA source class required')
-    readonly=_source_class=='kernel-readonly-candidate-v1'
-    marker='N10DATARO1' if readonly else 'N10DATA1'
+    require(_source_class in ('native-initrd','kernel-readonly-candidate-v1','kernel-readonly-span-candidate-v1'),'closed DATA source class required')
+    readonly=_source_class in ('kernel-readonly-candidate-v1','kernel-readonly-span-candidate-v1')
+    marker='N10DATARO3' if _source_class=='kernel-readonly-span-candidate-v1' else 'N10DATARO1' if readonly else 'N10DATA1'
     source=_source_class if readonly else MODE
     lines = [line for line in text.splitlines() if marker in line]
     require(len(lines) == 1, 'one DATA result required')
