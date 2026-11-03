@@ -138,10 +138,12 @@ def verify_packages(directory):
     return records
 
 
-def stage(directory,adb,*,ack_kernel_readonly_growth=False):
+def stage(directory,adb,*,ack_kernel_readonly_growth=False,type3_context=None):
     records=verify_packages(directory)
     from kernel_readonly_input import require_device_scope
-    require_device_scope(json.loads((Path(directory)/'package-result.json').read_text(encoding='utf-8-sig')),ack_kernel_readonly_growth)
+    from type3_admission import require_context_directory
+    require_context_directory(type3_context,directory)
+    require_device_scope(json.loads((Path(directory)/'package-result.json').read_text(encoding='utf-8-sig')),ack_kernel_readonly_growth,type3_context=type3_context)
     state=preflight(adb)
     bootloader=adb.text('shell','getprop','ro.bootloader')
     if not re.fullmatch(r'N976N[A-Z0-9]+',bootloader):raise ValueError('N976N bootloader required')

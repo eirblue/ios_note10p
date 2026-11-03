@@ -77,7 +77,9 @@ def no_legacy(row):
 
 def physical_input_scope(result):
     from kernel_readonly_span_candidate import is_candidate as is_type3
-    require(not is_type3(result),'type3 offline template composition needs its separate reviewed first-use contract')
+    if is_type3(result):
+        from kernel_readonly_span_candidate import physical_input_scope as type3_scope
+        type3_scope(result)
     require(result.get('PC_only') is not True and result.get('data_expectation_mode')!='kernel-readonly-slot-v1' and
             result.get('version')!='v103' and result.get('diagnostic_kind') not in
             ('owned-contiguous-staging-pc','current-owned-staging-pc','readonly-input-pc','kernel-readonly-span-pc') and
@@ -88,7 +90,7 @@ def physical_input_scope(result):
 def raw_binding(root, expected_result, expected_source, *, producing_sources=None, readonly_origin=None):
     root = private(root)
     if readonly_origin is not None:
-        require(readonly_origin==expected_source==V105_CANDIDATE_ORIGIN_HEAD and producing_sources is None,'exact read-side candidate origin only')
+        require(readonly_origin==expected_source and readonly_origin in (V105_CANDIDATE_ORIGIN_HEAD,__import__('kernel_readonly_span_candidate').NATIVE_HEAD) and producing_sources is None,'exact read-side native candidate origin only')
     else:
         require(expected_source!=V105_CANDIDATE_ORIGIN_HEAD,'retained candidate cannot construct a new template')
     require(re.fullmatch('[0-9a-f]{64}', expected_result or '') and
@@ -102,14 +104,19 @@ def raw_binding(root, expected_result, expected_source, *, producing_sources=Non
     stream = result.get('version') == 'v73'
     affinity = result.get('version') == 'v78'
     fdt = result.get('version') == 'v81'
+    type3=result.get('version')=='v107' and result.get('diagnostic_kind')=='kernel-readonly-span-candidate'
+    if type3:
+        from kernel_readonly_span_candidate import producer_contract as type3_producer,NATIVE_HEAD,NATIVE_RESULT_SHA256
+        require(readonly_origin==expected_source==NATIVE_HEAD and expected_result==NATIVE_RESULT_SHA256,'exact accepted native107 read-side result required')
+        type3_producer(result,expected_source,historical_origin=readonly_origin)
     kernel_ro = result.get('version')=='v105'
-    require(readonly_origin is None or kernel_ro and result.get('diagnostic_kind')=='kernel-readonly-candidate',
+    require(readonly_origin is None or kernel_ro and readonly_origin==V105_CANDIDATE_ORIGIN_HEAD and result.get('diagnostic_kind')=='kernel-readonly-candidate' or type3,
             'retained read-side exception is candidate-only')
-    data = result.get('version') in ('v88','v89','v90','v91','v105')
+    data = result.get('version') in ('v88','v89','v90','v91','v105','v107')
     native = result.get('version') == 'v82'
-    builtin = result.get('version') in ('v72', 'v73', 'v78', 'v81', 'v82', 'v88', 'v89', 'v90', 'v91', 'v105')
+    builtin = result.get('version') in ('v72', 'v73', 'v78', 'v81', 'v82', 'v88', 'v89', 'v90', 'v91', 'v105', 'v107')
     marker = DATA_PROFILE if data else NATIVE_PROFILE if native else FDT_PROFILE if fdt else AFFINITY_PROFILE if affinity else STREAM_PROFILE if stream else BUILTIN_PROFILE if builtin else PROFILE
-    require(result.get('version') in ('v71', 'v72', 'v73', 'v78', 'v81', 'v82', 'v88', 'v89', 'v90', 'v91', 'v105') and result.get('passed') is True and
+    require(result.get('version') in ('v71', 'v72', 'v73', 'v78', 'v81', 'v82', 'v88', 'v89', 'v90', 'v91', 'v105', 'v107') and result.get('passed') is True and
             result.get('Image_built') is True and result.get('BOOT_built') is False and
             result.get('cycle_slot_patched') is False and result.get('kernel_or_provider_executed') is False and
             result.get('ci_context', {}).get('GITHUB_SHA') == expected_source and
@@ -121,7 +128,7 @@ def raw_binding(root, expected_result, expected_source, *, producing_sources=Non
     require(not affinity or result.get('diagnostic_kind') == 'cpu-affinity-binding', 'new affinity task required')
     require(not fdt or result.get('diagnostic_kind') == 'early-fdt-binding', 'new FDT task required')
     require(not native or result.get('diagnostic_kind') == 'native-memory-observation', 'new native task required')
-    require(not data or result.get('diagnostic_kind') == ('kernel-readonly-candidate' if kernel_ro else 'linux-data-carrier'), 'new DATA task required')
+    require(not data or result.get('diagnostic_kind') == ('kernel-readonly-span-candidate' if type3 else 'kernel-readonly-candidate' if kernel_ro else 'linux-data-carrier'), 'new DATA task required')
     for name, digest in result['files_sha256'].items():
         path = root/name
         require(not Path(name).is_absolute() and '..' not in Path(name).parts and
@@ -136,13 +143,13 @@ def raw_binding(root, expected_result, expected_source, *, producing_sources=Non
             image[56:60] == b'ARM\x64' and image.count(SLOT+b'\0') == 1, 'Image/unique unarmed cycle slot differs')
     identity = result['build_evidence_id']
     require(re.fullmatch('[0-9a-f]{32}', identity or '') and identity.encode() in image and
-            all(x in image for x in (b'N10RET1', b'N10DATARO1' if kernel_ro else b'N10DATA1' if data else b'N10MEMARGS1' if native else b'N10FDT1' if fdt else b'N10AFF1' if affinity else b'N10SHASTREAM1' if stream else b'N10SHA1')) and
+            all(x in image for x in (b'N10RET1', b'N10DATARO3' if type3 else b'N10DATARO1' if kernel_ro else b'N10DATA1' if data else b'N10MEMARGS1' if native else b'N10FDT1' if fdt else b'N10AFF1' if affinity else b'N10SHASTREAM1' if stream else b'N10SHA1')) and
             (not stream or b'N10SHA1' not in image) and
             (not (affinity or fdt) or not any(marker in image for marker in (b'N10SHA1', b'N10SHASTREAM1'))) and
             (not fdt or b'N10AFF1' not in image) and
             (not native or not any(x in image for x in (b'N10SHA1',b'N10SHASTREAM1',b'N10AFF1',b'N10FDT1'))) and
             (not data or not any(x in image for x in (b'N10SHA1',b'N10SHASTREAM1',b'N10AFF1',b'N10FDT1',b'N10MEMARGS1'))), 'Image evidence identity differs')
-    banners = re.findall((rb'Linux version 4\.14\.113-v105-kernel-readonly [^\x00\r\n]+' if kernel_ro else rb'Linux version 4\.14\.113-v91-trusted-logical [^\x00\r\n]+' if result.get('version') == 'v91' else rb'Linux version 4\.14\.113-v90-image-expectation [^\x00\r\n]+' if result.get('version') == 'v90' else rb'Linux version 4\.14\.113-v89-data-guard [^\x00\r\n]+' if result.get('version') == 'v89' else rb'Linux version 4\.14\.113-v88-linux-data [^\x00\r\n]+' if data else rb'Linux version 4\.14\.113-v82-native-memory [^\x00\r\n]+' if native else rb'Linux version 4\.14\.113-v81-early-fdt [^\x00\r\n]+' if fdt else rb'Linux version 4\.14\.113-v78-cpu-affinity [^\x00\r\n]+' if affinity else rb'Linux version 4\.14\.113-v73-sha256-stream [^\x00\r\n]+' if stream else rb'Linux version 4\.14\.113-v72-builtin-init [^\x00\r\n]+' if builtin else rb'Linux version 4\.14\.113-v71-sha256-recovery [^\x00\r\n]+'), image)
+    banners = re.findall((rb'Linux version 4\.14\.113-v107-readonly-span-candidate [^\x00\r\n]+' if type3 else rb'Linux version 4\.14\.113-v105-kernel-readonly [^\x00\r\n]+' if kernel_ro else rb'Linux version 4\.14\.113-v91-trusted-logical [^\x00\r\n]+' if result.get('version') == 'v91' else rb'Linux version 4\.14\.113-v90-image-expectation [^\x00\r\n]+' if result.get('version') == 'v90' else rb'Linux version 4\.14\.113-v89-data-guard [^\x00\r\n]+' if result.get('version') == 'v89' else rb'Linux version 4\.14\.113-v88-linux-data [^\x00\r\n]+' if data else rb'Linux version 4\.14\.113-v82-native-memory [^\x00\r\n]+' if native else rb'Linux version 4\.14\.113-v81-early-fdt [^\x00\r\n]+' if fdt else rb'Linux version 4\.14\.113-v78-cpu-affinity [^\x00\r\n]+' if affinity else rb'Linux version 4\.14\.113-v73-sha256-stream [^\x00\r\n]+' if stream else rb'Linux version 4\.14\.113-v72-builtin-init [^\x00\r\n]+' if builtin else rb'Linux version 4\.14\.113-v71-sha256-recovery [^\x00\r\n]+'), image)
     require(len(banners) == 1, 'unique actual profile kernel banner required')
     config = root/'prerequisites/objects/.config'
     required = {'CONFIG_NOTE10_SHA256_KAT_RECOVERY=y', 'CONFIG_CRYPTO=y', 'CONFIG_CRYPTO_HASH=y',
@@ -195,7 +202,12 @@ def raw_binding(root, expected_result, expected_source, *, producing_sources=Non
         measured = data_footprint(map_text, object_text,
             struct.unpack_from('<Q',image,16)[0],struct.unpack_from('<Q',image,8)[0],struct.unpack_from('<Q',image,24)[0])
         require(measured == result.get('data_footprint'), 'DATA footprint differs')
-        if kernel_ro:
+        if type3:
+            from kernel_readonly_span_candidate import slot_metadata as type3_slot,span_metadata
+            require(type3_slot(image,map_text,object_text,(root/'new-object-sections.log').read_text(),
+                (root/'new-object-symbol-table.log').read_text())==result.get('kernel_readonly3_slot') and
+                span_metadata(map_text,measured,result['kernel_readonly3_slot'])==result.get('kernel_readonly3_span'),'native107 intrinsic class3 witnesses differ')
+        elif kernel_ro:
             from kernel_readonly_input import slot_metadata as kernel_slot
             require(kernel_slot(image,map_text,object_text,(root/'new-object-sections.log').read_text(),
                 (root/'new-object-symbol-table.log').read_text())==result.get('kernel_readonly_slot'),
@@ -654,7 +666,7 @@ V105_PACKING_ORIGIN_PINS = MappingProxyType({
 
 def host_binding(source_head):
     require(re.fullmatch('[0-9a-f]{40}', source_head or ''), 'exact host-profile publication source pin required')
-    require(source_head not in (V97_PROFILE_ORIGIN_HEAD, V99_PROFILE_ORIGIN_HEAD, V100_PROFILE_ORIGIN_HEAD, V101_PROFILE_ORIGIN_HEAD, V102_PROFILE_ORIGIN_HEAD, V104_PROFILE_ORIGIN_HEAD, V105_CANDIDATE_ORIGIN_HEAD, V105_PACKING_ORIGIN_HEAD, 'e32ec501551b74b4cca5618ea25245f012656f29'),
+    require(source_head not in (V97_PROFILE_ORIGIN_HEAD, V99_PROFILE_ORIGIN_HEAD, V100_PROFILE_ORIGIN_HEAD, V101_PROFILE_ORIGIN_HEAD, V102_PROFILE_ORIGIN_HEAD, V104_PROFILE_ORIGIN_HEAD, V105_CANDIDATE_ORIGIN_HEAD, V105_PACKING_ORIGIN_HEAD, __import__('kernel_readonly_span_candidate').NATIVE_HEAD, 'e32ec501551b74b4cca5618ea25245f012656f29'),
             'retained host origin cannot construct current host')
     pins = V71_HOST_PINS if source_head == V71_HOST_HEAD else V72_HOST_PINS if source_head == V72_HOST_HEAD else V73_HOST_PINS if source_head == V73_HOST_HEAD else V78_HOST_PINS if source_head == V78_HOST_HEAD else V81_IMAGE_HOST_PINS if source_head == V81_IMAGE_HEAD else V81_HOST_PINS if source_head == V81_HOST_HEAD else V82_HOST_PINS if source_head == V82_HOST_HEAD else V88_HOST_PINS if source_head == V88_HOST_HEAD else V89_HOST_PINS if source_head == V89_HOST_HEAD else V90_HOST_PINS if source_head == V90_HOST_HEAD else V91_HOST_PINS if source_head == V91_HOST_HEAD else {
         'note10/device_test/'+name: sha(Path(__file__).parent/name)
@@ -676,7 +688,8 @@ def host_binding(source_head):
                       'kernel_readonly_input_fixture.c','test_v105_kernel_readonly.py','test_v105_packing_rev1.py','precheck_window_access.py','test_v105_battery5_policy.py','kernel_readonly_span.h','kernel_readonly_span_fixture.c',
                       'test_v106_kernel_readonly_span.py','build_kernel_readonly_span_pc.py',
                       'kernel_readonly_span_candidate.py','kernel_readonly_span_candidate.h','kernel_readonly_span_candidate_fixture.c',
-                      'test_v107_readonly_span_candidate.py','build_kernel_readonly_span_candidate.py')}
+                      'test_v107_readonly_span_candidate.py','build_kernel_readonly_span_candidate.py',
+                      'type3_admission.py','test_v108_type3_admission.py')}
     return dict(host_profile_source_head=source_head, host_profile_source_sha256=dict(pins))
 
 
@@ -811,8 +824,8 @@ def ci_success_receipt(context, context_sha256, binding, producer):
             isinstance(context['build_evidence_id'], str) and re.fullmatch('[0-9a-f]{32}', context['build_evidence_id']),
             'CI-success context types/pins differ')
     ci = producer.get('ci_context', {})
-    require(producer.get('version') == ('v105' if binding.get('data_input_kind')=='kernel-readonly-candidate' else 'v91' if binding['device_profile']==DATA_PROFILE else 'v82' if binding['device_profile']==NATIVE_PROFILE else 'v81' if binding['device_profile']==FDT_PROFILE else 'v78') and
-            producer.get('diagnostic_kind') == ('kernel-readonly-candidate' if binding.get('data_input_kind')=='kernel-readonly-candidate' else 'linux-data-carrier' if binding['device_profile']==DATA_PROFILE else 'native-memory-observation' if binding['device_profile']==NATIVE_PROFILE else 'early-fdt-binding' if binding['device_profile']==FDT_PROFILE else 'cpu-affinity-binding') and
+    require(producer.get('version') == ('v107' if binding.get('data_input_kind')=='kernel-readonly-span-candidate' else 'v105' if binding.get('data_input_kind')=='kernel-readonly-candidate' else 'v91' if binding['device_profile']==DATA_PROFILE else 'v82' if binding['device_profile']==NATIVE_PROFILE else 'v81' if binding['device_profile']==FDT_PROFILE else 'v78') and
+            producer.get('diagnostic_kind') == ('kernel-readonly-span-candidate' if binding.get('data_input_kind')=='kernel-readonly-span-candidate' else 'kernel-readonly-candidate' if binding.get('data_input_kind')=='kernel-readonly-candidate' else 'linux-data-carrier' if binding['device_profile']==DATA_PROFILE else 'native-memory-observation' if binding['device_profile']==NATIVE_PROFILE else 'early-fdt-binding' if binding['device_profile']==FDT_PROFILE else 'cpu-affinity-binding') and
             producer.get('passed') is True and producer.get('Image_built') is True and
             context['producer_source_head'] == binding['source_head'] == ci.get('GITHUB_SHA') and
             str(context['run_id']) == ci.get('GITHUB_RUN_ID') and
@@ -825,7 +838,7 @@ def ci_success_receipt(context, context_sha256, binding, producer):
                 producer.get('files_sha256', {}).get('actual-effective.config') and
             context['build_evidence_id'] == binding['build_evidence_id'] == producer.get('build_evidence_id') and
             isinstance(binding.get('kernel_banner'), str) and
-            binding['kernel_banner'].startswith('Linux version 4.14.113-v105-kernel-readonly ' if binding.get('data_input_kind')=='kernel-readonly-candidate' else 'Linux version 4.14.113-v91-trusted-logical ' if binding['device_profile']==DATA_PROFILE else 'Linux version 4.14.113-v82-native-memory ' if binding['device_profile']==NATIVE_PROFILE else 'Linux version 4.14.113-v81-early-fdt ' if binding['device_profile']==FDT_PROFILE else 'Linux version 4.14.113-v78-cpu-affinity '),
+            binding['kernel_banner'].startswith('Linux version 4.14.113-v107-readonly-span-candidate ' if binding.get('data_input_kind')=='kernel-readonly-span-candidate' else 'Linux version 4.14.113-v105-kernel-readonly ' if binding.get('data_input_kind')=='kernel-readonly-candidate' else 'Linux version 4.14.113-v91-trusted-logical ' if binding['device_profile']==DATA_PROFILE else 'Linux version 4.14.113-v82-native-memory ' if binding['device_profile']==NATIVE_PROFILE else 'Linux version 4.14.113-v81-early-fdt ' if binding['device_profile']==FDT_PROFILE else 'Linux version 4.14.113-v78-cpu-affinity '),
             'CI-success context/producer/package tuple differs')
     # No banner is accepted from the context. Workflow/job/artifact IDs originate
     # in the explicitly hash-approved Root collection record, not Image guesses.
@@ -945,6 +958,9 @@ def prepare_template(build, output, accepted_result_sha256, source_head, *, root
 def validate_template(root):
     root = private(root)
     binding = read(root/'device-profile.json')
+    if binding.get('data_input_kind')=='kernel-readonly-span-candidate':
+        from type3_admission import validate_template as type3_template
+        return type3_template(root)
     physical_input_scope(binding)
     require(selected(binding), 'closed KAT profile required')
     origin=host_profile_origin(binding)
@@ -1010,7 +1026,10 @@ def fields(row):
     if any(key in row for key in GROWTH_FIELDS):
         keys=(*keys,*GROWTH_FIELDS)
     from kernel_readonly_input import FIELDS as kernel_fields, is_candidate
-    if is_candidate(row):keys=(*keys,*kernel_fields)
+    if row.get('data_input_kind')=='kernel-readonly-span-candidate':
+        from type3_admission import BINDING_FIELDS
+        keys=(*keys,*BINDING_FIELDS,*(('type3_materialization',) if 'type3_materialization' in row else ()))
+    elif is_candidate(row):keys=(*keys,*kernel_fields)
     from kernel_readonly_input import PACKING_FIELDS
     if any(key in row for key in PACKING_FIELDS):keys=(*keys,*PACKING_FIELDS)
     return {key: row[key] for key in keys}
@@ -1023,7 +1042,7 @@ def package_scope(row, mode=None):
     for key in ('profile_sha256', 'accepted_result_sha256', 'image_root_receipt_sha256', 'root_reader_result_sha256'):
         require(re.fullmatch('[0-9a-f]{64}', row.get(key, '')), 'KAT package result/profile pin missing')
     require(re.fullmatch('[0-9a-f]{32}', row.get('build_evidence_id', '')) and
-            row.get('kernel_banner', '').startswith(('Linux version 4.14.113-v105-kernel-readonly ' if row.get('data_input_kind')=='kernel-readonly-candidate' else 'Linux version 4.14.113-v88-linux-data ' if row.get('source_head') == V88_HOST_HEAD else 'Linux version 4.14.113-v89-data-guard ' if row.get('source_head') == V89_IMAGE_HEAD else 'Linux version 4.14.113-v90-image-expectation ' if row.get('source_head') == V90_IMAGE_HEAD else 'Linux version 4.14.113-v91-trusted-logical ') if row['device_profile']==DATA_PROFILE else 'Linux version 4.14.113-v82-native-memory ' if row['device_profile']==NATIVE_PROFILE else 'Linux version 4.14.113-v81-early-fdt ' if row['device_profile'] == FDT_PROFILE else 'Linux version 4.14.113-v78-cpu-affinity ' if row['device_profile'] == AFFINITY_PROFILE else 'Linux version 4.14.113-v73-sha256-stream ' if row['device_profile'] == STREAM_PROFILE else 'Linux version 4.14.113-v72-builtin-init ' if row['device_profile'] == BUILTIN_PROFILE else 'Linux version 4.14.113-v71-sha256-recovery '),
+            row.get('kernel_banner', '').startswith(('Linux version 4.14.113-v107-readonly-span-candidate ' if row.get('data_input_kind')=='kernel-readonly-span-candidate' else 'Linux version 4.14.113-v105-kernel-readonly ' if row.get('data_input_kind')=='kernel-readonly-candidate' else 'Linux version 4.14.113-v88-linux-data ' if row.get('source_head') == V88_HOST_HEAD else 'Linux version 4.14.113-v89-data-guard ' if row.get('source_head') == V89_IMAGE_HEAD else 'Linux version 4.14.113-v90-image-expectation ' if row.get('source_head') == V90_IMAGE_HEAD else 'Linux version 4.14.113-v91-trusted-logical ') if row['device_profile']==DATA_PROFILE else 'Linux version 4.14.113-v82-native-memory ' if row['device_profile']==NATIVE_PROFILE else 'Linux version 4.14.113-v81-early-fdt ' if row['device_profile'] == FDT_PROFILE else 'Linux version 4.14.113-v78-cpu-affinity ' if row['device_profile'] == AFFINITY_PROFILE else 'Linux version 4.14.113-v73-sha256-stream ' if row['device_profile'] == STREAM_PROFILE else 'Linux version 4.14.113-v72-builtin-init ' if row['device_profile'] == BUILTIN_PROFILE else 'Linux version 4.14.113-v71-sha256-recovery '),
             'KAT package identity missing')
     host_profile_origin(row)
     if row['device_profile'] in (BUILTIN_PROFILE, STREAM_PROFILE, AFFINITY_PROFILE, FDT_PROFILE, NATIVE_PROFILE, DATA_PROFILE):
@@ -1058,7 +1077,10 @@ def package_scope(row, mode=None):
                 row.get('native_relative_placement_admitted') is True,'native stage/source/nonclaim binding differs')
     if row['device_profile'] == DATA_PROFILE:
         from kernel_readonly_input import is_candidate,candidate_scope
-        if is_candidate(row):
+        if row.get('data_input_kind')=='kernel-readonly-span-candidate':
+            from type3_admission import candidate_scope as type3_scope
+            type3_scope(row,patched=True)
+        elif is_candidate(row):
             candidate_scope(row)
             require(row.get('image_expectation_patched') is True and
                 all(re.fullmatch('[0-9a-f]{64}',row.get(key,'')) for key in
@@ -1143,6 +1165,9 @@ def prepare_plan(kernel_build, backup, twrp, mkbootimg, current_packages, output
     require(cycles == 1, 'KAT profile permits exactly one cycle')
     kernel_build, backup, output = private(kernel_build), private(backup), private(output)
     template = validate_template(kernel_build)
+    if template.get('data_input_kind')=='kernel-readonly-span-candidate':
+        from type3_admission import require_plan_transaction
+        require_plan_transaction(template,output)
     current_records = verify_packages(private(current_packages))
     current_diagnostic = next(r for r in current_records if r['mode'] == 'diagnostic')
     require(not output.exists(), 'fresh KAT plan required')
@@ -1169,6 +1194,8 @@ def prepare_plan(kernel_build, backup, twrp, mkbootimg, current_packages, output
                 return_timeout_seconds=240, stages=[stage])
     if template['device_profile'] in (BUILTIN_PROFILE, STREAM_PROFILE, AFFINITY_PROFILE, FDT_PROFILE, NATIVE_PROFILE, DATA_PROFILE):
         plan['current_boot_payload_sha256'] = current_diagnostic['payload_sha256']
+    if template.get('data_input_kind')=='kernel-readonly-span-candidate':
+        plan.update(execution_version=template['execution_version'],executing_host_source_head=template['host_profile_source_head'],type3_contract_sha256=template['type3_contract_sha256'])
     save(output/'plan.json', plan)
     validate_plan(output/'plan.json', sha(output/'plan.json'))
     return dict(plan=str(output/'plan.json'), plan_sha256=sha(output/'plan.json'), cycles=1, device_operations=[],
@@ -1185,13 +1212,19 @@ def validate_plan(path, expected):
     plan = read(path)
     from kernel_readonly_input import PACKING_FIELDS
     packing_keys=set(PACKING_FIELDS) if any(key in plan for key in PACKING_FIELDS) else set()
-    require(set(plan)-packing_keys == (PLAN_KEYS | {'current_boot_payload_sha256'} if plan.get('device_profile') in (BUILTIN_PROFILE, STREAM_PROFILE, AFFINITY_PROFILE, FDT_PROFILE, NATIVE_PROFILE, DATA_PROFILE) else PLAN_KEYS) and selected(plan) and plan.get('kind') == 'note10-bounded-auto-cycle' and
+    from type3_admission import PLAN_FIELDS
+    type3_keys=set(PLAN_FIELDS) if any(key in plan for key in PLAN_FIELDS) else set()
+    require(set(plan)-packing_keys-type3_keys == (PLAN_KEYS | {'current_boot_payload_sha256'} if plan.get('device_profile') in (BUILTIN_PROFILE, STREAM_PROFILE, AFFINITY_PROFILE, FDT_PROFILE, NATIVE_PROFILE, DATA_PROFILE) else PLAN_KEYS) and selected(plan) and plan.get('kind') == 'note10-bounded-auto-cycle' and
             type(plan.get('schema')) is int and plan['schema'] == 1 and
             type(plan.get('minimum_battery')) is int and type(plan.get('return_timeout_seconds')) is int and
             plan.get('minimum_battery') == 10 and plan.get('return_timeout_seconds') == 240 and
             len(plan.get('stages', [])) == 1, 'closed single-cycle KAT plan required')
     root, backup = private(plan['kernel_build']), private(plan['backup'])
     report = validate_template(root)
+    if report.get('data_input_kind')=='kernel-readonly-span-candidate':
+        require(type3_keys==set(PLAN_FIELDS) and plan['execution_version']==report['execution_version'] and
+            plan['executing_host_source_head']==report['host_profile_source_head'] and plan['type3_contract_sha256']==report['type3_contract_sha256'],'type3 plan execution provenance differs')
+    else:require(not type3_keys,'unrelated plan cannot claim type3 execution scope')
     require(sha(root/'build-result.json') == plan['build_result_sha256'] and
             report['image_sha256'] == plan['image_sha256'] and report['build_evidence_id'] == plan['identity'] and
             sha(backup/'backup-manifest.json') == plan['backup_manifest_sha256'], 'KAT plan template/backup changed')
@@ -1253,9 +1286,9 @@ def validate_plan(path, expected):
     expected_cmdline = recovery_header['cmdline']
     if plan['device_profile'] == DATA_PROFILE:
         from linux_data_carrier import data_cmdline, MODE, BOOT_PAGE
-        if pair.get('data_expectation_mode') in (MODE,'kernel-readonly-candidate-v1'):
+        if pair.get('data_expectation_mode') in (MODE,'kernel-readonly-candidate-v1','kernel-readonly-span-candidate-v1'):
             require(header['page_size'] == BOOT_PAGE and pair['data_expectation_slot'].get('boot_page') == BOOT_PAGE, 'trusted logical DATA BOOT-page policy differs')
-        if pair.get('data_expectation_mode') not in (MODE,'image-slot-v1','kernel-readonly-candidate-v1'):
+        if pair.get('data_expectation_mode') not in (MODE,'image-slot-v1','kernel-readonly-candidate-v1','kernel-readonly-span-candidate-v1'):
             expected_cmdline = data_cmdline(expected_cmdline,pair['data_carrier_sha256'])
     require(all(header[k] == original_header[k] for k in
                 ('name', 'os_version', 'security_patch_month', 'kernel_addr', 'tags_addr', 'page_size')) and
@@ -1269,7 +1302,12 @@ def validate_plan(path, expected):
                        recovery_header['ramdisk_file_offset']+recovery_header['ramdisk_size']]
     actual_ramdisk = payload[header['ramdisk_file_offset']:header['ramdisk_file_offset']+header['ramdisk_size']]
     if plan['device_profile'] == DATA_PROFILE:
-        if pair.get('kernel_readonly_external_choice')=='compact-v1':
+        if pair.get('data_input_kind')=='kernel-readonly-span-candidate':
+            from type3_admission import candidate_scope as type3_scope
+            type3_scope(pair,patched=True)
+            require(len(ramdisk)==pair['data_carrier_bytes']==10962166 and len(actual_ramdisk)==4440064 and
+                hashlib.sha256(actual_ramdisk).hexdigest()==pair['type3_compact_sha256'],'actual typed class3 compact external carrier differs')
+        elif pair.get('kernel_readonly_external_choice')=='compact-v1':
             from kernel_readonly_input import packing_scope, CAPACITY, OLD_BYTES
             packing_scope(pair)
             require(len(ramdisk)==pair['data_carrier_bytes']==OLD_BYTES and len(actual_ramdisk)==CAPACITY and
@@ -1285,7 +1323,7 @@ def validate_plan(path, expected):
     return plan
 
 
-def precheck(packages, kernel_build, backup, adb, staged, *, ack_kernel_readonly_growth=False,battery_policy=None,receipt_path=None):
+def precheck(packages, kernel_build, backup, adb, staged, *, ack_kernel_readonly_growth=False,battery_policy=None,receipt_path=None,type3_context=None):
     from run_probe import preflight
     from stage_phase2 import verify_packages
     from prepare_linux_boot import read_verified_backup
@@ -1311,7 +1349,9 @@ def precheck(packages, kernel_build, backup, adb, staged, *, ack_kernel_readonly
         pair = read(packages/'package-result.json')
         package_scope(pair)
         from kernel_readonly_input import require_device_scope
-        require_device_scope(pair,ack_kernel_readonly_growth)
+        from type3_admission import require_context_directory
+        require_context_directory(type3_context,packages)
+        require_device_scope(pair,ack_kernel_readonly_growth,type3_context=type3_context)
         require_battery_policy_scope(battery_policy,pair,ack_kernel_readonly_growth)
         bound = variant(kernel_build, pair['auto_cycle_token'])
         require(all(pair.get(k) == bound[k] for k in fields(bound)) and
@@ -1399,16 +1439,18 @@ def log_probe_command(remote):
             '*) exit "$n10_probe_status";; esac')
 
 
-def collect(packages, kernel_build, adb, capture_parent=None, *, ack_kernel_readonly_growth=False):
+def collect(packages, kernel_build, adb, capture_parent=None, *, ack_kernel_readonly_growth=False,type3_context=None):
     # Return a failed observation after retaining raw logs, rather than raising
     # past run_plan's common post-return five-partition verification.
     from kernel_readonly_input import require_device_scope
-    require_device_scope(read(Path(packages)/'package-result.json'),ack_kernel_readonly_growth)
+    from type3_admission import require_context_directory
+    require_context_directory(type3_context,packages)
+    require_device_scope(read(Path(packages)/'package-result.json'),ack_kernel_readonly_growth,type3_context=type3_context)
     parent = private(capture_parent or ROOT/'note10/private/device-observations')
     out = private(parent/('kat-test-'+uuid.uuid4().hex[:12]))
     out.mkdir(parents=True)
     try:
-        return _collect_into(packages, kernel_build, adb, out,ack_kernel_readonly_growth=ack_kernel_readonly_growth)
+        return _collect_into(packages, kernel_build, adb, out,ack_kernel_readonly_growth=ack_kernel_readonly_growth,type3_context=type3_context)
     except Exception as error:
         index = read(out/'capture-index.json') if (out/'capture-index.json').is_file() else {}
         failed = dict(directory=str(out), device_profile=read(Path(packages)/'package-result.json').get('device_profile'), diagnostic_passed=False,
@@ -1419,13 +1461,15 @@ def collect(packages, kernel_build, adb, capture_parent=None, *, ack_kernel_read
         return failed
 
 
-def _collect_into(packages, kernel_build, adb, out, *, ack_kernel_readonly_growth=False):
+def _collect_into(packages, kernel_build, adb, out, *, ack_kernel_readonly_growth=False,type3_context=None):
     from run_probe import preflight
     from stage_phase2 import verify_packages
     verify_packages(private(packages))
     pair = read(Path(packages)/'package-result.json')
     from kernel_readonly_input import require_device_scope
-    require_device_scope(pair,ack_kernel_readonly_growth)
+    from type3_admission import require_context_directory
+    require_context_directory(type3_context,packages)
+    require_device_scope(pair,ack_kernel_readonly_growth,type3_context=type3_context)
     bound = variant(private(kernel_build), pair['auto_cycle_token'])
     require(all(pair.get(k) == bound[k] for k in fields(bound)), 'collection profile binding differs')
     preflight(adb)
@@ -1435,7 +1479,9 @@ def _collect_into(packages, kernel_build, adb, out, *, ack_kernel_readonly_growt
         if bound['device_profile'] == STREAM_PROFILE:
             from sha256_stream_state import decode_selected as decode_fn
         elif bound['device_profile'] == DATA_PROFILE:
-            if bound.get('data_input_kind')=='kernel-readonly-candidate':
+            if bound.get('data_input_kind')=='kernel-readonly-span-candidate':
+                from kernel_readonly_span_candidate import decode_selected as data_decode
+            elif bound.get('data_input_kind')=='kernel-readonly-candidate':
                 from kernel_readonly_input import decode_selected as data_decode
             else:
                 from linux_data_carrier import decode_selected as data_decode

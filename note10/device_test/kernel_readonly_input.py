@@ -363,13 +363,13 @@ def candidate_scope(row,*,require_compact=True):
     return True
 
 
-def require_device_scope(row,ack_kernel_readonly_growth=False):
+def require_device_scope(row,ack_kernel_readonly_growth=False,type3_context=None):
     # The original PC domain remains forbidden even when candidate flags/ACK are forged.
     data.require(row.get('PC_only') is not True and row.get('data_expectation_mode')!='kernel-readonly-slot-v1' and row.get('version')!='v103' and row.get('diagnostic_kind') not in
         ('readonly-input-pc','owned-contiguous-staging-pc','current-owned-staging-pc',SPAN_KIND) and not any(key in row for key in
         ('readonly_input_schema','readonly_input_slot','readonly_pc_contract','kernel_readonly_span_schema')),'PC-only source is permanently forbidden on device')
     from kernel_readonly_span_candidate import is_candidate as is_type3, require_device_scope as require_type3
-    if is_type3(row):return require_type3(row,ack_kernel_readonly_growth)
+    if is_type3(row):return require_type3(row,ack_kernel_readonly_growth,type3_context)
     if is_candidate(row):
         data.require(row.get('device_profile')==data.PROFILE and row.get('data_input_kind')==KIND and row.get('kernel_readonly_schema')==SCHEMA and
             row.get('data_expectation_mode')==MODE and row.get('kernel_readonly_requires_ack') is True and

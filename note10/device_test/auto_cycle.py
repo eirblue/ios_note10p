@@ -167,12 +167,23 @@ def wait_recovery(adb,previous_id,seconds,monotonic=time.monotonic,sleep=time.sl
         adb.call=original
 
 
-def run_plan(path,expected,output,*,execute=False,limit=1,adb=None,verified_roundtrip=None,roundtrip_sha256=None,ack_kernel_readonly_growth=False,v105_battery_5pct_exception=False,battery_exception_approval=None,battery_exception_approval_sha256=None,execution_host_source_head=None,declared_test_version=None):
+def run_plan(path,expected,output,*,execute=False,limit=1,adb=None,verified_roundtrip=None,roundtrip_sha256=None,ack_kernel_readonly_growth=False,v105_battery_5pct_exception=False,battery_exception_approval=None,battery_exception_approval_sha256=None,execution_host_source_head=None,declared_test_version=None,type3_device_contract=None,type3_device_contract_sha256=None):
     if not execute:raise ValueError('Preparation only: run requires explicit --execute; no device contacted')
     plan=validate_plan(path,expected)
     from kernel_readonly_input import require_device_scope,PACKING_FIELDS
     execution_build=read(Path(plan['kernel_build'])/'build-result.json')
-    require_device_scope(execution_build,ack_kernel_readonly_growth)
+    type3_context=None
+    if execution_build.get('data_input_kind')=='kernel-readonly-span-candidate':
+        from type3_admission import execution_context
+        if limit!=1 or v105_battery_5pct_exception:raise ValueError('Type3 permits one new cycle and default battery10 only')
+        item=plan['stages'][0]
+        execution_build=read(Path(item['kernel_build'])/'build-result.json')
+        type3_context=execution_context(execution_build,expected,item['packages'],declared_test_version,execution_host_source_head,
+            type3_device_contract,type3_device_contract_sha256,output)
+    elif type3_device_contract is not None or type3_device_contract_sha256 is not None:
+        raise ValueError('Type3 device contract cannot admit another source class')
+    require_device_scope(execution_build,ack_kernel_readonly_growth,type3_context=type3_context)
+    type3_options={'type3_context':type3_context} if type3_context is not None else {}
     from precheck_window_access import make_install_battery_policy
     battery_scope=None
     if v105_battery_5pct_exception:
@@ -181,7 +192,7 @@ def run_plan(path,expected,output,*,execute=False,limit=1,adb=None,verified_roun
         battery_scope.update(plan_sha256=expected,plan_declared_minimum_percent=plan.get('minimum_battery'))
     battery_policy=make_install_battery_policy(use_v105_5pct_exception=v105_battery_5pct_exception,
         approval_path=battery_exception_approval,approval_sha256=battery_exception_approval_sha256,scope=battery_scope,
-        growth_ack=ack_kernel_readonly_growth,execution_host_source_head=execution_host_source_head,declared_test_version=declared_test_version)
+        growth_ack=ack_kernel_readonly_growth,execution_host_source_head=execution_host_source_head if v105_battery_5pct_exception or type3_context is None else None,declared_test_version=declared_test_version)
     if limit not in range(1,len(plan['stages'])+1):raise ValueError('Cycle limit exceeds reviewed plan')
     proof=None
     if limit>1:
@@ -195,7 +206,7 @@ def run_plan(path,expected,output,*,execute=False,limit=1,adb=None,verified_roun
     output.mkdir(parents=True)
     journal=dict(plan_sha256=expected,kernel_image_sha256=plan['image_sha256'],backup_manifest_sha256=plan['backup_manifest_sha256'],single_cycle_verified=False,status='started',completed=[],partition_writes_attempted=False,reboots_attempted=False,partition_gate_evidence=[],kernel_readonly_growth_ack=ack_kernel_readonly_growth is True,
         battery_policy=battery_policy,declared_minimum_battery=plan.get('minimum_battery'),
-        effective_minimum_battery=battery_policy['effective_minimum_percent'])
+        effective_minimum_battery=battery_policy['effective_minimum_percent'],type3_execution_context=type3_context)
     def persist():save(output/'journal.json',journal)
     persist()
     try:
@@ -205,7 +216,7 @@ def run_plan(path,expected,output,*,execute=False,limit=1,adb=None,verified_roun
         for item in plan['stages'][:limit]:
             if item['index']>1 and not journal['completed'][-1]['passed']:raise ValueError('Previous cycle did not pass')
             packages=Path(item['packages']);records=verify_packages(packages);diag=next(r for r in records if r['mode']=='diagnostic')
-            staged=stage(packages,adb,ack_kernel_readonly_growth=ack_kernel_readonly_growth)
+            staged=stage(packages,adb,ack_kernel_readonly_growth=ack_kernel_readonly_growth,**type3_options)
             from sha256_kat_device_profile import selected,precheck as check_kat,collect as collect_kat
             kat=selected(plan)
             preinstall_evidence=None
@@ -214,7 +225,7 @@ def run_plan(path,expected,output,*,execute=False,limit=1,adb=None,verified_roun
                 preinstall_evidence=dict(phase='preinstall',index=item['index'],cycle=item['cycle'],
                     receipt_path=str(precheck_receipt or packages/'PREINSTALL-CHECK.json'),evidence=None)
                 journal['partition_gate_evidence'].append(preinstall_evidence)
-            ready=(check_kat(packages,Path(item['kernel_build']),Path(plan['backup']),adb,staged,ack_kernel_readonly_growth=ack_kernel_readonly_growth,battery_policy=battery_policy,receipt_path=precheck_receipt) if kat else
+            ready=(check_kat(packages,Path(item['kernel_build']),Path(plan['backup']),adb,staged,ack_kernel_readonly_growth=ack_kernel_readonly_growth,battery_policy=battery_policy,receipt_path=precheck_receipt,**type3_options) if kat else
                    check(packages,Path(item['kernel_build']),Path(plan['backup']),Path(plan['core_model']),Path(plan['gate_model']),Path(plan['init_model']),adb))
             if preinstall_evidence is not None:preinstall_evidence['evidence']=ready.get('partition_evidence')
             if ready.get('ready_for_manual_access_test') is not True:raise ValueError('Readiness did not pass')
@@ -260,7 +271,7 @@ def run_plan(path,expected,output,*,execute=False,limit=1,adb=None,verified_roun
             journal['observed_return_boot_id']=after;persist()
             if preflight(adb)['twrp_version']!=initial['twrp_version']:raise ValueError('Recovery version changed')
             # Preserve diagnostic logs immediately after return, even when tests failed.
-            captured=(collect_kat(packages,Path(item['kernel_build']),adb,ack_kernel_readonly_growth=ack_kernel_readonly_growth)
+            captured=(collect_kat(packages,Path(item['kernel_build']),adb,ack_kernel_readonly_growth=ack_kernel_readonly_growth,**type3_options)
                       if kat else collect(packages,Path(item['kernel_build']),adb))
             postreturn_evidence=dict(phase='postreturn',index=item['index'],cycle=item['cycle'])
             journal['partition_gate_evidence'].append(postreturn_evidence)
@@ -288,14 +299,14 @@ def main():
     p.add_argument('--cycles',type=int,default=1)
     for command in ('inspect','run'):
         p=sub.add_parser(command);p.add_argument('--plan',type=Path,required=True);p.add_argument('--plan-sha256',required=True)
-        if command=='run':p.add_argument('--output',type=Path,required=True);p.add_argument('--execute',action='store_true');p.add_argument('--limit',type=int,default=1);p.add_argument('--verified-roundtrip',type=Path);p.add_argument('--roundtrip-sha256');p.add_argument('--ack-kernel-readonly-growth',action='store_true');p.add_argument('--v105-battery-5pct-exception',action='store_true');p.add_argument('--battery-exception-approval',type=Path);p.add_argument('--battery-exception-approval-sha256');p.add_argument('--execution-host-source-head');p.add_argument('--declared-test-version')
+        if command=='run':p.add_argument('--output',type=Path,required=True);p.add_argument('--execute',action='store_true');p.add_argument('--limit',type=int,default=1);p.add_argument('--verified-roundtrip',type=Path);p.add_argument('--roundtrip-sha256');p.add_argument('--ack-kernel-readonly-growth',action='store_true');p.add_argument('--v105-battery-5pct-exception',action='store_true');p.add_argument('--battery-exception-approval',type=Path);p.add_argument('--battery-exception-approval-sha256');p.add_argument('--execution-host-source-head');p.add_argument('--declared-test-version');p.add_argument('--type3-device-contract',type=Path);p.add_argument('--type3-device-contract-sha256')
     args=vars(parser.parse_args());command=args.pop('command')
     if command=='prepare':result=prepare_plan(**args)
     elif command=='inspect':
         plan=validate_plan(args['plan'],args['plan_sha256']);result=dict(valid=True,cycles=len(plan['stages']),device_operations=[])
     else:result=run_plan(args['plan'],args['plan_sha256'],args['output'],execute=args['execute'],limit=args['limit'],verified_roundtrip=args['verified_roundtrip'],roundtrip_sha256=args['roundtrip_sha256'],ack_kernel_readonly_growth=args['ack_kernel_readonly_growth'],v105_battery_5pct_exception=args['v105_battery_5pct_exception'],
         battery_exception_approval=args['battery_exception_approval'],battery_exception_approval_sha256=args['battery_exception_approval_sha256'],
-        execution_host_source_head=args['execution_host_source_head'],declared_test_version=args['declared_test_version'])
+        execution_host_source_head=args['execution_host_source_head'],declared_test_version=args['declared_test_version'],type3_device_contract=args['type3_device_contract'],type3_device_contract_sha256=args['type3_device_contract_sha256'])
     print(json.dumps(result,indent=2))
 
 if __name__=='__main__':main()

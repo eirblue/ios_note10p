@@ -28,6 +28,11 @@ def template_bytes(root):
 
 def bound_image(data, report, token, *, template_root=None):
     mode = report.get('data_expectation_mode')
+    if mode=='kernel-readonly-span-candidate-v1':
+        from type3_admission import read_compact,patch_image
+        if template_root is None:raise ValueError('typed type3 template context required')
+        compact,_=read_compact(template_root,report)
+        return patch_image(data,report,token,SLOT,compact)
     if mode=='kernel-readonly-candidate-v1':
         from kernel_readonly_input import read_compact, patch_image, COMPACT_FIELDS
         if template_root is None:raise ValueError('readonly template source context required')
@@ -55,12 +60,18 @@ def materialize(template,output,token):
         auto_cycle_template_image_sha256=sha(data),image_sha256=sha(patched))
     if report.get('data_expectation_mode') is not None:
         report['image_expectation_patched'] = True
+    if report.get('data_expectation_mode')=='kernel-readonly-span-candidate-v1':
+        from type3_admission import materialization
+        report['type3_materialization']=materialization(report,token,sha(data),sha(patched),report['auto_cycle_template_report_sha256'])
     (output/'build-result.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
     validate(output,token,template)
     return report
 
 def validate(root,token,template=None):
     root=Path(root);report=read(root/'build-result.json')
+    if report.get('data_expectation_mode')=='kernel-readonly-span-candidate-v1':
+        from type3_admission import validate_variant
+        return validate_variant(root,token,template)
     if 'kernel_readonly_packing_revision' in report:
         from kernel_readonly_input import validate_resumed_variant
         return validate_resumed_variant(root,token,template)

@@ -193,6 +193,10 @@ def relative_admission(result, lines, footprint, *, elf, archive, raw_inputs):
 
 
 def input_binding(result, lines, *, elf, archive, raw_inputs, producing_sources=None, readonly_origin=None):
+    if result.get('diagnostic_kind')=='kernel-readonly-span-candidate':
+        from kernel_readonly_span_candidate import input_binding as type3_binding
+        require(producing_sources is None,'type3 cannot use historical current-data adapter')
+        return type3_binding(result,lines,elf=elf,archive=archive,raw_inputs=raw_inputs,historical_origin=readonly_origin)
     if result.get('diagnostic_kind')=='kernel-readonly-candidate':
         from kernel_readonly_input import input_binding as readonly_binding
         require(producing_sources is None,'readonly candidate cannot use historical reuse adapter')
@@ -303,6 +307,12 @@ def data_cmdline(original, digest):
 
 
 def package_data(build, reference, cmdline, raw):
+    if build.get('data_input_kind')=='kernel-readonly-span-candidate':
+        from type3_admission import candidate_scope
+        candidate_scope(build,patched=True)
+        require(len(reference)==build['data_carrier_bytes']==10962166 and len(raw)==4440064 and sha(raw)==build['type3_compact_sha256'],
+            'typed class3 compact external carrier differs')
+        return cmdline
     if build.get('kernel_readonly_external_choice')=='compact-v1':
         from kernel_readonly_input import candidate_scope, CAPACITY
         candidate_scope(build)

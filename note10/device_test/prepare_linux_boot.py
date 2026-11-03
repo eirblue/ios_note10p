@@ -200,10 +200,13 @@ def pack_verified(backup,kernel_build,official,mkbootimg,output,parts,build,conf
     data_command_line = None
     if data_mode:
         from linux_data_carrier import package_data, bounded_private_read, MODE, BOOT_PAGE
-        if build.get('data_expectation_mode') in (MODE,'kernel-readonly-candidate-v1') and boot['page_size'] != BOOT_PAGE:
+        if build.get('data_expectation_mode') in (MODE,'kernel-readonly-candidate-v1','kernel-readonly-span-candidate-v1') and boot['page_size'] != BOOT_PAGE:
             raise ValueError('Trusted logical DATA requires closed BOOT page policy')
         reference_ramdisk = ramdisk
-        if build.get('kernel_readonly_external_choice')=='compact-v1':
+        if build.get('data_input_kind')=='kernel-readonly-span-candidate':
+            from type3_admission import read_compact
+            ramdisk=read_compact(kernel_build,build)[0]
+        elif build.get('kernel_readonly_external_choice')=='compact-v1':
             from kernel_readonly_input import read_external
             ramdisk=read_external(kernel_build,build)
         else:
