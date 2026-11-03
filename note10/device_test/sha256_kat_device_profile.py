@@ -319,9 +319,51 @@ V99_PROFILE_ORIGIN_PINS = MappingProxyType({
 })
 
 
+V100_PROFILE_ORIGIN_HEAD = '566e0416fa0dcf87e70d556ba3c01e5c2f52b1df'
+V100_PROFILE_ORIGIN_PINS = MappingProxyType({
+    "note10/device_test/affinity_binding.py": "6d5b16d54a803c95bdd391a38efbd2bac5ef36baffe199f86cd83f878bf10678",
+    "note10/device_test/auto_cycle.py": "36793ff1964331b3a77b530fc1be5923d1807a3752ab0f7d4f68a51adde12812",
+    "note10/device_test/build_boot_test_packages.py": "17b973f54185521be6685acb5e019f8bf8b5f10897d01c0167929c97859cddef",
+    "note10/device_test/builtin_init_profile.py": "74dbbb2941ba85fd755a0ff1c1e9f189e1732335a5db9b711e8121250c6c0b4c",
+    "note10/device_test/builtin_init_route.py": "46b100dc95f11e344c11b8cb3fba5d34d17b2884385923426a42246699fda43d",
+    "note10/device_test/carrier_lzma.c": "e204732754f15929f7134885ec2740e1ed26f0291dd64c7df7957a4aee7b987a",
+    "note10/device_test/carrier_lzma.h": "6790aa17da94025e0bab175377573edb8df3f503c8cde86f8c919e33ee742974",
+    "note10/device_test/current_data_reuse.py": "15c7a5a55e22f4445c216904769d7ba9b6367f792122e5b936305c95ae031129",
+    "note10/device_test/early_fdt_binding.py": "d4f7099fb45eca31c83c9acd9fbfe0cd5c7ccc5c271c18180e3672e22f9a6b78",
+    "note10/device_test/linux_data_carrier.c": "317347c3b8ebbb094a0094daf3b74fe6a4e1c3d284d32bed3fd67a8ef7ac61a5",
+    "note10/device_test/linux_data_carrier.py": "d46c28de982baa9658b6e6955392f8492015d6d4f74b222ee5f1d4649742a601",
+    "note10/device_test/linux_data_carrier_composition.c": "2eb666597983d3a2dfb0a4f98da26dc02dff287db49d39756ada6edc90e0c667",
+    "note10/device_test/linux_data_carrier_fixture.c": "6b1b0e14184582c734a3154eeef6c0e2736fd1b8ef3491881b7decaacb5ecbe4",
+    "note10/device_test/linux_data_compare_evidence.h": "3383823cf1fd56f688ad9d6823d965fdda270a08acede17f6df8d87fa6199438",
+    "note10/device_test/linux_data_compare_evidence_fixture.c": "45a0cdfd8d4bd8df5ffbbb0e370cd05f768d522e96208881a7f7a02ee02fadc3",
+    "note10/device_test/linux_data_input_probe_fixture.c": "c7192b0515eb7de9526291913ef97737207844a45d266a4e1287437f49b3e0b4",
+    "note10/device_test/materialize_auto_cycle.py": "ca9bb27f8cf08fc61d2a7ea677e63edb620a99119c2ead871ebae2c29ac8c289",
+    "note10/device_test/native_memory_observation.py": "f4acd0f310989bfcd1b0c2039fef6e429e8ec4d4f41ebdb94fc483538fa26663",
+    "note10/device_test/prepare_linux_boot.py": "2dc0ddd51a68f3da30f58df6243bbc33d441a296bd141cc6b9da5dc7fa10b604",
+    "note10/device_test/sha256_kat_device_profile.py": "c2e1a4b7eb6d003889648b1ec33f64052205ed59d616010aa67c5161f1de6d78",
+    "note10/device_test/sha256_stream_state.py": "55de2735fb830ae8047bb4a8fa74325f51b766b1e885c482dbbc5ebabe3ea437",
+    "note10/device_test/sha256_stream_vectors.json": "5c379d1ef41a40b9a1262c985476e9dc0ba88dae7b1586f949bbe79686f2165f",
+    "note10/device_test/stage_phase2.py": "1ecc741d7517fc15a6043b1329b726e420791f06e712bfd1aaf901a7747db433",
+    "note10/device_test/test_affinity_binding.py": "bf602887c4437e0096473392789da33e3ef502297d8c060faf7d9da9ecd3eb89",
+    "note10/device_test/test_affinity_ci_context.py": "71aad30ab105a45efe2703fd7b222233836d6e7514560834daa71bfdd351dea9",
+    "note10/device_test/test_builtin_init_route.py": "9fa63dd55114472a748062447dd95c17bf4d4d7e743117f69f0bb6a7aca6ea42",
+    "note10/device_test/test_current_data_reuse.py": "c1a868d4f9669539aee3e4fca4868118db37071467325a85d73c279b2f1d29de",
+    "note10/device_test/test_early_fdt_binding.py": "2444d3d20b7cc42e705cb89c1d04de72599f7da2a5d1b9282636f3b9990ce1fa",
+    "note10/device_test/test_early_fdt_host_route.py": "75992eb3e8b1228d0ae3916d47306f0329b7947cb0dfae234ec25c1e737fef6a",
+    "note10/device_test/test_linux_data_carrier.py": "550344e818b42f8147ea1f688929feda322c68173f79f6e72850053dbc2e1ca7",
+    "note10/device_test/test_native_memory_observation.py": "d34e94fd5d964004c42dedd172ec07bd62826b675dcc9f4925ab4ac06c460599",
+    "note10/device_test/test_partition_gate_evidence.py": "b7dd52aa5c7747489a2713f805dbe15a6318f3d3776a8043700549e9383bcc72",
+    "note10/device_test/test_sha256_kat_device_profile.py": "c48400d5573695d217101806b8481e39aec38fd5382e64b85f999b4cee42c498",
+    "note10/device_test/test_sha256_stream_state.py": "088881f92037a9895b7947eb44692f51ecba1eb602a02dacc02ff3b94a836db8",
+    "note10/device_test/test_v100_carrier_input_probe.py": "f8e37cb2da1fc1efda5582079bb619d8853565d892a589872d0699277e8c4489",
+    "note10/device_test/test_v99_carrier_compare_evidence.py": "2b45c21197709706d3f3ffc23e1428084d5d50a93a1d9b5bd22c2693124cf20c",
+    "note10/device_test/test_v99_host_profile_origin.py": "fb4a1c349ca298b4f18ba64e0692c7a93e9f0877b2f7a7ec22fa2c8f29ac219a"
+})
+
+
 def host_binding(source_head):
     require(re.fullmatch('[0-9a-f]{40}', source_head or ''), 'exact host-profile publication source pin required')
-    require(source_head not in (V97_PROFILE_ORIGIN_HEAD, V99_PROFILE_ORIGIN_HEAD),
+    require(source_head not in (V97_PROFILE_ORIGIN_HEAD, V99_PROFILE_ORIGIN_HEAD, V100_PROFILE_ORIGIN_HEAD),
             'retained host origin cannot construct current host')
     pins = V71_HOST_PINS if source_head == V71_HOST_HEAD else V72_HOST_PINS if source_head == V72_HOST_HEAD else V73_HOST_PINS if source_head == V73_HOST_HEAD else V78_HOST_PINS if source_head == V78_HOST_HEAD else V81_IMAGE_HOST_PINS if source_head == V81_IMAGE_HEAD else V81_HOST_PINS if source_head == V81_HOST_HEAD else V82_HOST_PINS if source_head == V82_HOST_HEAD else V88_HOST_PINS if source_head == V88_HOST_HEAD else V89_HOST_PINS if source_head == V89_HOST_HEAD else V90_HOST_PINS if source_head == V90_HOST_HEAD else V91_HOST_PINS if source_head == V91_HOST_HEAD else {
         'note10/device_test/'+name: sha(Path(__file__).parent/name)
@@ -333,7 +375,8 @@ def host_binding(source_head):
                       'test_linux_data_carrier.py', 'linux_data_carrier_fixture.c', 'carrier_lzma.c', 'carrier_lzma.h',
                       'linux_data_compare_evidence.h', 'linux_data_compare_evidence_fixture.c', 'test_v99_carrier_compare_evidence.py',
                       'test_v99_host_profile_origin.py', 'linux_data_input_probe_fixture.c',
-                      'test_v100_carrier_input_probe.py')}
+                      'test_v100_carrier_input_probe.py', 'linux_data_input_range.h',
+                      'linux_data_input_range_fixture.c', 'test_v101_live_input_range.py')}
     return dict(host_profile_source_head=source_head, host_profile_source_sha256=dict(pins))
 
 
@@ -358,6 +401,14 @@ def host_profile_origin(binding):
                 not any(key in binding for key in ('data_host_experiment', 'data_current_binding_sha256')),
                 'retained v99 host origin scope differs')
         pins = V99_PROFILE_ORIGIN_PINS
+    elif head == V100_PROFILE_ORIGIN_HEAD:
+        require(binding.get('device_profile') == DATA_PROFILE and
+                binding.get('source_head') == V100_PROFILE_ORIGIN_HEAD and
+                binding.get('data_compare_schema') == 'n10-data-compare-v2' and
+                not any(key in binding for key in ('data_host_experiment', 'data_current_binding_sha256',
+                                                    'data_input_range_schema', 'data_linked_kernel_bytes')),
+                'retained v100 host origin scope differs')
+        pins = V100_PROFILE_ORIGIN_PINS
     else:
         pins = host_binding(head)['host_profile_source_sha256']
     require(binding.get('host_profile_source_sha256') == dict(pins), 'host-profile code identity differs')
@@ -590,6 +641,8 @@ def fields(row):
         keys=(*keys,'data_current_binding_sha256','data_host_experiment')
     if 'data_compare_schema' in row:
         keys = (*keys, 'data_compare_schema')
+    if 'data_input_range_schema' in row or 'data_linked_kernel_bytes' in row:
+        keys = (*keys, 'data_input_range_schema', 'data_linked_kernel_bytes')
     return {key: row[key] for key in keys}
 
 
@@ -633,7 +686,18 @@ def package_scope(row, mode=None):
                 type(row.get('native_memory_capacity')) is int and row['native_memory_capacity']==CAPACITY and
                 row.get('native_relative_placement_admitted') is True,'native stage/source/nonclaim binding differs')
     if row['device_profile'] == DATA_PROFILE:
-        from linux_data_carrier import STAGE, MODE
+        from linux_data_carrier import STAGE, MODE, RANGE_SCHEMA, COMPARE_SCHEMA
+        retained = (V97_PROFILE_ORIGIN_HEAD,V99_PROFILE_ORIGIN_HEAD,V100_PROFILE_ORIGIN_HEAD,
+                    V88_HOST_HEAD,V89_IMAGE_HEAD,V89_HOST_HEAD,V90_IMAGE_HEAD,V90_HOST_HEAD,V91_IMAGE_HEAD)
+        has_range = 'data_input_range_schema' in row or 'data_linked_kernel_bytes' in row
+        if has_range:
+            require(row.get('data_input_range_schema') == RANGE_SCHEMA and
+                    row.get('data_compare_schema') == COMPARE_SCHEMA and
+                    type(row.get('data_linked_kernel_bytes')) is int and 0 < row['data_linked_kernel_bytes'] < (1<<64) and
+                    row.get('source_head') not in retained and row.get('host_profile_source_head') not in retained,
+                    'new live range producer binding differs')
+        else:
+            require(row.get('host_profile_source_head') in retained, 'new DATA live range declaration missing')
         if 'data_compare_schema' in row:
             from linux_data_carrier import COMPARE_SCHEMA, COMPARE_SCHEMA_V1
             if row['data_compare_schema'] == COMPARE_SCHEMA_V1:

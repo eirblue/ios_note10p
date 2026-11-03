@@ -39,6 +39,12 @@ def current_boot_binding(plan, pair, diagnostic):
             pair.get('host_profile_source_head') == '4f9eb149bd116db77eaf3400a25f7454577268a9' and
             pair.get('data_compare_schema') == 'n10-data-compare-v1' and
             not any(key in pair for key in ('data_host_experiment','data_current_binding_sha256')))
+        prior_source = prior_source or (
+            pair.get('source_head') == '566e0416fa0dcf87e70d556ba3c01e5c2f52b1df' and
+            pair.get('host_profile_source_head') == '566e0416fa0dcf87e70d556ba3c01e5c2f52b1df' and
+            pair.get('data_compare_schema') == 'n10-data-compare-v2' and
+            not any(key in pair for key in ('data_host_experiment','data_current_binding_sha256',
+                                           'data_input_range_schema','data_linked_kernel_bytes')))
     require(pair.get('device_profile') == prior_profile and
             prior_source and
             re.fullmatch('[0-9a-f]{64}', plan.get('current_boot_payload_sha256', '')) and

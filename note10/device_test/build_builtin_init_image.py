@@ -136,6 +136,7 @@ def main(kind=None):
              'build_linux_data_carrier.py','linux_data_carrier_fixture.c','test_linux_data_carrier.py',
              'carrier_lzma.c','carrier_lzma.h','linux_data_compare_evidence.h',
              'linux_data_input_probe_fixture.c','test_v100_carrier_input_probe.py',
+             'linux_data_input_range.h','linux_data_input_range_fixture.c','test_v101_live_input_range.py',
              'early_fdt_binding.py','sealed_affinity_artifact.cjs',
              'bundle_affinity_evidence.py') if data_task else ()
     if owned:
@@ -378,8 +379,9 @@ def main(kind=None):
             result.update(raw_input_binding=False,data_carrier_stage=STAGE,data_footprint=footprint,physical_placement_review_required=True,
                           data_expectation_mode=MODE,data_expectation_slot=slot,image_expectation_patched=False)
             if not owned:
-                from linux_data_carrier import COMPARE_SCHEMA
+                from linux_data_carrier import COMPARE_SCHEMA, RANGE_SCHEMA
                 result['data_compare_schema'] = COMPARE_SCHEMA
+                result.update(data_input_range_schema=RANGE_SCHEMA,data_linked_kernel_bytes=footprint['linked_kernel_bytes'])
             result['files_sha256'] = {'minimal-init.elf':result['minimal_init_elf_sha256'],'initramfs.cpio':result['initramfs_cpio_sha256']}
             data_config=[x for x in config if not x.startswith(('CONFIG_NOTE10_OWNED_CONTIGUOUS_STAGING=','CONFIG_NOTE10_CURRENT_OWNED_STAGING=')) and x not in ('# CONFIG_NOTE10_OWNED_CONTIGUOUS_STAGING is not set','# CONFIG_NOTE10_CURRENT_OWNED_STAGING is not set')] if owned else config
             result['data_relative_placement'] = relative_admission(result,data_config,footprint,elf=init,archive=archive_data,

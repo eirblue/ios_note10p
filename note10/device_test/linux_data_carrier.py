@@ -12,6 +12,8 @@ STAGE = 'late_linux_owned_virtual_decode'
 MODE = 'image-slot-logical-v2'
 COMPARE_SCHEMA_V1 = 'n10-data-compare-v1'
 COMPARE_SCHEMA = 'n10-data-compare-v2'
+RANGE_SCHEMA = 'n10-data-range-v1'
+RANGE_SOURCES = ('linux_data_input_range.h',)
 COMPARE_SOURCES = ('linux_data_compare_evidence.h',)
 BOOT_PAGE = 2048
 SLOT_MAGIC = b'N10DATAEXPECTV2!'
@@ -64,7 +66,7 @@ def install(source, identity):
     result = baseline_install(source, identity)
     replacements = {'arch/arm64/kernel/setup.c': setup,
         'drivers/misc/note10_sha256_kat.c': (HERE/'linux_data_carrier_composition.c').read_bytes(),
-        **{'drivers/misc/'+n: (HERE/n).read_bytes() for n in ('linux_data_carrier.c', 'carrier_lzma.c', 'carrier_lzma.h', *COMPARE_SOURCES)}}
+        **{'drivers/misc/'+n: (HERE/n).read_bytes() for n in ('linux_data_carrier.c', 'carrier_lzma.c', 'carrier_lzma.h', *COMPARE_SOURCES, *RANGE_SOURCES)}}
     config = source/'drivers/misc/note10_sha256_kat.Kconfig'
     config.write_bytes(config.read_bytes()+b'''
 config NOTE10_DATA_CARRIER
@@ -188,14 +190,20 @@ def input_binding(result, lines, *, elf, archive, raw_inputs, producing_sources=
             'closed new DATA Image required')
     if producing_sources is None:
         require(result.get('data_compare_schema') == COMPARE_SCHEMA, 'new DATA comparison feature declaration required')
+        require(result.get('data_input_range_schema') == RANGE_SCHEMA and
+                type(result.get('data_linked_kernel_bytes')) is int and result['data_linked_kernel_bytes']>0 and
+                result['data_linked_kernel_bytes'] == result.get('data_footprint',{}).get('linked_kernel_bytes'),
+                'new DATA live range/accepted linked span declaration required')
         require(not {'CONFIG_NOTE10_OWNED_CONTIGUOUS_STAGING=y', 'CONFIG_NOTE10_CURRENT_OWNED_STAGING=y'} & set(lines),
                 'comparison DATA forbids early owned reservation')
-        for name in (*SOURCES, *COMPARE_SOURCES):
+        for name in (*SOURCES, *COMPARE_SOURCES, *RANGE_SOURCES):
             require(result.get('source_sha256', {}).get('note10/device_test/'+name) == sha((HERE/name).read_bytes()),
                     'DATA Image source differs: '+name)
     else:
         from current_data_reuse import require_context
         require('data_compare_schema' not in result, 'historical reuse cannot declare new comparison feature')
+        require(not any(key in result for key in ('data_input_range_schema','data_linked_kernel_bytes')),
+                'historical reuse cannot declare live range feature')
         require_context(producing_sources).verify_sources(result,SOURCES)
     admission = relative_admission(result, lines, result['data_footprint'], elf=elf, archive=archive, raw_inputs=raw_inputs)
     require(result.get('data_relative_placement') == admission and admission['eligible'], 'DATA relative placement unresolved')
@@ -203,6 +211,7 @@ def input_binding(result, lines, *, elf, archive, raw_inputs, producing_sources=
                 data_expectation_mode=MODE,data_expectation_slot=result['data_expectation_slot'],image_expectation_patched=False)
     if producing_sources is None:
         bound['data_compare_schema'] = COMPARE_SCHEMA
+        bound.update(data_input_range_schema=RANGE_SCHEMA,data_linked_kernel_bytes=result['data_linked_kernel_bytes'])
     return bound
 
 
@@ -413,6 +422,84 @@ def decode_compare(text, identity, cycle, result, *, required=False, expected=No
                 global_RAM_ownership=False, xnu_executed=False)
 
 
+def expected_range_schema(expected):
+    if expected is None:
+        return RANGE_SCHEMA, None
+    schema = expected.get('data_input_range_schema')
+    if 'data_input_range_schema' in expected or 'data_linked_kernel_bytes' in expected:
+        from sha256_kat_device_profile import V97_PROFILE_ORIGIN_HEAD, V99_PROFILE_ORIGIN_HEAD, V100_PROFILE_ORIGIN_HEAD
+        retired = (V97_PROFILE_ORIGIN_HEAD,V99_PROFILE_ORIGIN_HEAD,V100_PROFILE_ORIGIN_HEAD)
+        span = expected.get('data_linked_kernel_bytes')
+        require(schema == RANGE_SCHEMA and expected.get('data_compare_schema') == COMPARE_SCHEMA and
+                type(span) is int and 0 < span < (1<<64) and
+                expected.get('source_head') not in retired and expected.get('host_profile_source_head') not in retired,
+                'live RANGE declaration/accepted span differs')
+        return schema, span
+    from sha256_kat_device_profile import host_profile_origin, V97_PROFILE_ORIGIN_HEAD, V99_PROFILE_ORIGIN_HEAD, V100_PROFILE_ORIGIN_HEAD
+    host_profile_origin(expected)
+    head = expected.get('host_profile_source_head')
+    compare = expected.get('data_compare_schema')
+    require((head == V100_PROFILE_ORIGIN_HEAD and compare == COMPARE_SCHEMA) or
+            (head == V99_PROFILE_ORIGIN_HEAD and compare == COMPARE_SCHEMA_V1) or
+            (head == V97_PROFILE_ORIGIN_HEAD and compare is None), 'new DATA live RANGE declaration missing')
+    return None, None
+
+
+def decode_range(text, identity, cycle, result, *, expected=None):
+    from decode_reservation import checksum
+    schema, accepted_span = expected_range_schema(expected)
+    all_lines = text.splitlines()
+    lines = [line for line in all_lines if 'N10DATARANGE' in line]
+    if schema is None:
+        require(not lines, 'retained producer cannot claim live RANGE evidence')
+        return dict(schema=None,state='unsupported',checked=False)
+    require(len(lines) == 1, 'one declared live RANGE companion required')
+    match = re.search(r'N10BOOTLINK2 boot=([0-9a-f]{32}) N10DATARANGE1 ([^\r\n\x00]{1,383}) checksum=([0-9a-f]{8})$',lines[0])
+    require(match is not None and match[1] == result['boot_identity'] and match[1] != '0'*32 and
+            checksum(match[2].encode('ascii')) == int(match[3],16), 'live RANGE boot/checksum differs')
+    pairs = [part.split('=') for part in match[2].split(' ')]
+    keys = ('id','cycle','kind','source','extent','state','domain','logical','input_start','input_end',
+            'kernel_start','kernel_end','logical_overlap','native_overlap','reasons','ownership','executed')
+    require(all(len(part)==2 for part in pairs) and tuple(part[0] for part in pairs)==keys,
+            'live RANGE closed schema required')
+    row = dict(pairs)
+    require(row['id']==identity and row['cycle']==cycle and row['kind']=='range' and row['source']=='live-arm64' and
+            row['extent']=='native' and row['ownership']==row['executed']=='0', 'live RANGE identity/nonclaim differs')
+    require(re.fullmatch('0|[1-9][0-9]{0,8}',row['logical']) and
+            int(row['logical'])==result['logical']<=64*1024*1024 and re.fullmatch('[0-9a-f]{8}',row['reasons']) and
+            int(row['reasons'],16)<=127, 'live RANGE count/reasons differ')
+    comparison_lines = [line for line in all_lines if 'N10DATACMP' in line]
+    require(len(comparison_lines)==1 and text.find(lines[0])>text.find(comparison_lines[0]), 'live RANGE order differs')
+    bounds = None
+    logical_overlap = native_overlap = tail_only = None
+    checked = row['state']=='checked'
+    endpoint_keys = ('input_start','input_end','kernel_start','kernel_end')
+    if checked:
+        require(row['domain']=='physical' and row['reasons']=='00000000' and
+                all(re.fullmatch('[0-9a-f]{16}',row[key]) for key in endpoint_keys) and
+                row['logical_overlap'] in ('0','1') and row['native_overlap'] in ('0','1'), 'live RANGE checked fields differ')
+        start,end,kstart,kend = (int(row[key],16) for key in endpoint_keys)
+        logical = int(row['logical'])
+        require(type(accepted_span) is int and 0 < logical <= result['carrier'] <= 64*1024*1024 and
+                start<end and kstart<kend and end-start==result['carrier'] and kend-kstart==accepted_span and
+                start <= (1<<64)-1-logical, 'live RANGE bounds/accepted span differ')
+        logical_end = start+logical
+        logical_overlap = start<kend and kstart<logical_end
+        native_overlap = start<kend and kstart<end
+        require((row['logical_overlap']=='1')==logical_overlap and (row['native_overlap']=='1')==native_overlap and
+                (not logical_overlap or native_overlap), 'live RANGE overlap flags differ')
+        tail_only = native_overlap and not logical_overlap
+        bounds = {key:row[key] for key in endpoint_keys}
+    else:
+        require(row['state']=='unavailable' and row['domain']=='none' and int(row['reasons'],16)>0 and
+                all(row[key]=='na' for key in (*endpoint_keys,'logical_overlap','native_overlap')),
+                'live RANGE unavailable fields differ')
+    return dict(schema=RANGE_SCHEMA,state=row['state'],checked=checked,domain=row['domain'],
+                logical_overlap=logical_overlap,native_overlap=native_overlap,tail_only=tail_only,
+                reasons=int(row['reasons'],16),private_physical_bounds=bounds,
+                global_RAM_ownership=False,hardware_translation_attested=False,xnu_executed=False)
+
+
 def require_functional(result, *, report_phase=False):
     prefix = ('DATA functional acceptance failed phase='+functional_phase(result['status'])+' status='
               if report_phase else 'DATA functional decode failed status=')
@@ -458,6 +545,11 @@ def decode_selected(data, banner, identity, cycle, *, expected=None):
         components['carrier_comparison'] = comparison
         if comparison['schema'] is not None:
             result['carrier_comparison'] = comparison
+        # Preserve valid DATA/comparison/prefix components before the new gate.
+        relation = decode_range(text, rid, cycle, result, expected=expected)
+        components['live_input_range'] = relation
+        if relation['schema'] is not None:
+            result['live_input_range'] = relation
         require_functional(result, report_phase=True)
         return result
     try:

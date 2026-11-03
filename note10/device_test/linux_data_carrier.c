@@ -157,6 +157,40 @@ out:
 #define N10_COMPARE_CLEAR(p,n) n10_data_clear(p,n)
 #include "linux_data_compare_evidence.h"
 #undef N10_COMPARE_CLEAR
+#include <asm/sections.h>
+#define N10_RANGE_CLEAR(p,n) n10_data_clear(p,n)
+#include "linux_data_input_range.h"
+#undef N10_RANGE_CLEAR
+
+static void n10_live_input_range(struct n10_data_range *out, uint64_t logical)
+{
+#if !defined(CONFIG_ARM64) || !defined(CONFIG_PHYS_ADDR_T_64BIT) || defined(CONFIG_DEBUG_VIRTUAL) || CONFIG_ARM64_VA_BITS != 39
+    (void)logical;
+    n10_range_unavailable(out,N10_RANGE_UNSUPPORTED);
+#else
+    struct n10_range_input input={0};
+    if (sizeof(unsigned long)!=8 || sizeof(phys_addr_t)!=8) {
+        n10_range_unavailable(out,N10_RANGE_UNSUPPORTED); return;
+    }
+    input.start=n10_data.start; input.end=n10_data.end;
+    input.native=n10_data.length; input.logical=logical;
+    /* Match __pa_symbol's RELOC_HIDE without calling debug/BUG translators. */
+    input.text=(uint64_t)RELOC_HIDE((unsigned long)_text,0);
+    input.image_end=(uint64_t)RELOC_HIDE((unsigned long)_end,0);
+    input.base=(uint64_t)READ_ONCE(memstart_addr);
+    input.offset=READ_ONCE(kimage_voffset);
+    input.page_offset=(uint64_t)PAGE_OFFSET;
+    input.linear_bit=(uint64_t)BIT(VA_BITS-1);
+    input.base_after=(uint64_t)READ_ONCE(memstart_addr);
+    input.offset_after=READ_ONCE(kimage_voffset); input.supported=1;
+    n10_range_evaluate(&input,out);
+    if ((uint64_t)READ_ONCE(memstart_addr)!=input.base || READ_ONCE(kimage_voffset)!=input.offset)
+        n10_range_unavailable(out,N10_RANGE_BASE);
+    if (READ_ONCE(initrd_start)!=input.start || READ_ONCE(initrd_end)!=input.end)
+        n10_range_unavailable(out,N10_RANGE_BOUNDS);
+    n10_data_clear(&input,sizeof(input));
+#endif
+}
 #endif
 
 struct n10_data_outcome {
@@ -167,10 +201,11 @@ struct n10_data_outcome {
     unsigned char digest[32];
 #ifdef N10_DATA_COMPARE_EVIDENCE
     struct n10_data_compare_evidence comparison;
+    struct n10_data_range range;
 #endif
 };
 #ifdef N10_DATA_COMPARE_EVIDENCE
-_Static_assert(sizeof(struct n10_data_outcome) == 200, "exact temporary normal DATA outcome");
+_Static_assert(sizeof(struct n10_data_outcome) == 248, "exact temporary normal DATA outcome");
 #endif
 
 static void n10_data_run(struct n10_data_outcome *out)
@@ -184,6 +219,9 @@ static void n10_data_run(struct n10_data_outcome *out)
     struct n10_lzma_result result = {0};
     int status;
     memset(out, 0, sizeof(*out)); out->status = "unavailable";
+#ifdef N10_DATA_COMPARE_EVIDENCE
+    n10_range_unavailable(&out->range,N10_RANGE_UNREACHED);
+#endif
     out->reasons = n10_data.reasons;
 #ifndef N10_DATA_IMAGE_EXPECTATION
     out->expectations = n10_data.parameters > 1 ? 2 : n10_data.parameters;
@@ -232,6 +270,7 @@ static void n10_data_run(struct n10_data_outcome *out)
     status = memcmp(digest,expectation,32);
     n10_data_compare_capture(&out->comparison,digest,expectation,status);
     n10_data_input_probe(&out->comparison,p);
+    n10_live_input_range(&out->range,logical);
     if (status) goto done;
 #else
     if (memcmp(digest,expectation,32)) goto done;
@@ -309,6 +348,11 @@ static int n10_data_emit(void)
         pr_info("N10DATACMP2 %s checksum=%08x\n",frame,n10_frame_checksum(frame,count));
     n10_data_compare_clear(&outcome.comparison);
     n10_data_clear(expected,sizeof(expected));
+    count=n10_range_format(&outcome.range,frame,sizeof(frame),N10_SHA256_KAT_ID,
+        (const char *)n10_cycle,(unsigned long long)outcome.logical);
+    if (count)
+        pr_info("N10DATARANGE1 %s checksum=%08x\n",frame,n10_frame_checksum(frame,count));
+    n10_range_clear(&outcome.range);
     n10_data_clear(frame,sizeof(frame));
 #endif
     n10_data_clear(&outcome,sizeof(outcome)); n10_data_clear(digest,sizeof(digest));
