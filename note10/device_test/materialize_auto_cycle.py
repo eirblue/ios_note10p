@@ -52,6 +52,11 @@ def materialize(template,output,token):
     template=Path(template).resolve();output=Path(output).resolve()
     from retained_v108_origin import live
     live(read(template/'build-result.json').get('host_profile_source_head'))
+    from class3_native_origin import stage_selected
+    initial=read(template/'build-result.json')
+    if stage_selected(initial):
+        from type3_admission import require_materialization_transaction
+        require_materialization_transaction(initial,output)
     if not re.fullmatch('[0-9a-f]{32}',token) or output.exists():raise ValueError('Fresh variant and valid token required')
     report,data=template_bytes(template)
     shutil.copytree(template,output)

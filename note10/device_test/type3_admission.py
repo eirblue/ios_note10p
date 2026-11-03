@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 import shutil
 import retained_v108_origin as retained
+import class3_native_origin as origins
 
 import kernel_readonly_span_candidate as ro3
 import kernel_readonly_input as old
@@ -45,23 +46,26 @@ def version(value):
     return value
 
 
-def native_origin():
-    return dict(source_head=ro3.NATIVE_HEAD,accepted_result_sha256=ro3.NATIVE_RESULT_SHA256,source_sha256=dict(ro3.NATIVE_PINS),native_version='v107')
+def native_origin(head=None):
+    return origins.origin(head or ro3.NATIVE_HEAD)
 
 
 def load_offline(path,expected):
     path=private(path);raw=data.bounded_private_read(path,65536)
     require(re.fullmatch('[0-9a-f]{64}',expected or '') and sha(raw)==expected,'exact reviewed type3 offline contract SHA required')
     row=json.loads(raw.decode('utf-8-sig'))
+    require(type(row) is dict,'closed type3 offline object required')
+    item=origins.record(row.get('native_source_head'))
     require(type(row) is dict and set(row)==OFFLINE_KEYS and row['schema']==OFFLINE_SCHEMA and row['status']=='reviewed_ready' and
-        row['native_source_head']==ro3.NATIVE_HEAD and row['accepted_result_sha256']==ro3.NATIVE_RESULT_SHA256 and
+        row['native_source_head']==item['head'] and row['accepted_result_sha256']==item['result'] and
         type(row['caps']) is dict and row['caps']==OFFLINE_CAPS and all(type(v) is int for v in row['caps'].values()),'closed type3 single offline transaction required')
     version(row['execution_version'])
     from sha256_kat_device_profile import host_binding
-    if row['host_source_head']==retained.HEAD:
-        require(retained.reading() and row['execution_version']=='v108','consumed type3 contract is read-only')
-    else:host_binding(row['host_source_head'])
-    require(row['host_source_head']!=ro3.NATIVE_HEAD,'native107 cannot be relabeled executing host108')
+    if item['version']=='v107':
+        require(retained.reading() and row['host_source_head']==retained.HEAD and row['execution_version']=='v108','native107 contract is retained-read-only')
+    else:
+        require(row['execution_version']=='v110','native109 requires separately versioned host110')
+        origins.live_host(row['host_source_head']);host_binding(row['host_source_head'])
     for key in ('producer_root','ci_success_context','compact_manifest','backup','current_packages','reference_twrp','output'):
         require(type(row[key]) is str and str(private(row[key]))==row[key],'canonical private type3 path required')
     # Only this repository tool crosses the private boundary; payload paths do not.
@@ -87,12 +91,19 @@ def contract_binding(row):
 
 
 def candidate_scope(row,*,patched=None):
-    require(row.get('device_profile')==data.PROFILE and row.get('diagnostic_kind')==ro3.KIND and
-        row.get('data_input_kind')==row.get('storage_input_kind')==ro3.KIND and row.get('kernel_readonly3_schema')==ro3.SCHEMA and
+    item=origins.record(row.get('native_source_head'))
+    if item['version']=='v109':
+        origins.live_row(row)
+        require(all(row.get(key)==value for key,value in origins.stage_fields().items()),'native109 stage provenance differs')
+        require(row.get('kernel_readonly3_image_bytes')==item['image_bytes'] and
+            row.get('kernel_readonly3_linked_bytes')==item['linked_bytes'],'accepted native109 dimensions differ')
+    else:retained.origin(row)
+    require(row.get('device_profile')==data.PROFILE and row.get('diagnostic_kind')==item['kind'] and
+        row.get('data_input_kind')==row.get('storage_input_kind')==item['kind'] and row.get('kernel_readonly3_schema')==ro3.SCHEMA and
         row.get('data_expectation_mode')==ro3.MODE and row.get('kernel_readonly3_marker')=='N10DATARO3' and
         row.get('kernel_readonly3_span_schema')==old.SPAN_SCHEMA and row.get('kernel_readonly3_requires_ack') is True and
-        row.get('source_head')==row.get('native_source_head')==ro3.NATIVE_HEAD and row.get('native_producer_version')=='v107' and
-        row.get('type3_native_origin')==native_origin() and row.get('native_producer_PC_first_use') is True and row.get('PC_only') is not True and
+        row.get('source_head')==row.get('native_source_head')==item['head'] and row.get('native_producer_version')==item['version'] and
+        row.get('type3_native_origin')==native_origin(item['head']) and row.get('native_producer_PC_first_use') is True and row.get('PC_only') is not True and
         not any(key in row for key in (*old.FIELDS[1:],'kernel_readonly_span_schema','readonly_input_schema','readonly_pc_contract')),
         'exact retained native class3 and separate new host identity required')
     version(row.get('execution_version'))
@@ -157,12 +168,14 @@ def transaction(row,phase):
 
 
 def prepare_template(contract,path,expected):
-    retained.live(contract.get('host_source_head'))
+    item=origins.record(contract.get('native_source_head'))
+    require(item['version']=='v109' and contract.get('execution_version')=='v110','new templates require native109/host110')
+    origins.live_host(contract.get('host_source_head'))
     from sha256_kat_device_profile import raw_binding,host_binding,ci_success_receipt,write_ci_success_receipt,common_report,sha as file_sha
     transaction(contract,'template_reserved')
     source=Path(contract['producer_root']);output=Path(contract['output'])/'template'
     require(not output.exists(),'fresh type3 template required')
-    binding=raw_binding(source,ro3.NATIVE_RESULT_SHA256,ro3.NATIVE_HEAD,readonly_origin=ro3.NATIVE_HEAD)
+    binding=raw_binding(source,item['result'],item['head'],readonly_origin=item['head'])
     context_raw=data.bounded_private_read(Path(contract['ci_success_context']),65536)
     require(sha(context_raw)==contract['ci_success_context_sha256'],'type3 Root CI context changed')
     receipt=ci_success_receipt(json.loads(context_raw.decode('utf-8-sig')),contract['ci_success_context_sha256'],binding,read(source/'result.json'))
@@ -171,7 +184,7 @@ def prepare_template(contract,path,expected):
     compact=data.bounded_private_read(Path(contract['compact_manifest']).parent/'kernel-readonly.data',ro3.CAPACITY)
     fields=compact_binding(compact,manifest)
     binding.update(fields,**host_binding(contract['host_source_head']),version=contract['execution_version'],execution_version=contract['execution_version'],
-        native_producer_version='v107',native_source_head=ro3.NATIVE_HEAD,native_producer_PC_first_use=True,type3_native_origin=native_origin(),
+        native_producer_version=item['version'],native_source_head=item['head'],native_producer_PC_first_use=True,type3_native_origin=native_origin(item['head']),
         type3_generic_image_sha256=binding['image_sha256'],type3_contract_path=str(path),type3_contract_sha256=expected,type3_external_choice='compact-v1')
     shutil.copytree(source,output)
     for name,raw in (('kernel-readonly.data',compact),('kernel-readonly-compact.json',manifest),('type3-contract.json',Path(path).read_bytes())):
@@ -192,11 +205,11 @@ def prepare_template(contract,path,expected):
 def validate_template(root):
     from sha256_kat_device_profile import raw_binding,host_profile_origin,root_receipt_binding,common_report,ci_success_receipt,sha as file_sha
     root=private(root);binding=read(root/'device-profile.json')
-    contract=candidate_scope(binding,patched=False)
-    measured=raw_binding(root,ro3.NATIVE_RESULT_SHA256,ro3.NATIVE_HEAD,readonly_origin=ro3.NATIVE_HEAD)
+    contract=candidate_scope(binding,patched=False);item=origins.record(binding['native_source_head'])
+    measured=raw_binding(root,item['result'],item['head'],readonly_origin=item['head'])
     _,fields=read_compact(root,binding);measured.update(fields)
     measured.update(host_profile_origin(binding),version=binding['version'],execution_version=binding['execution_version'],
-        native_producer_version='v107',native_source_head=ro3.NATIVE_HEAD,native_producer_PC_first_use=True,type3_native_origin=native_origin(),
+        native_producer_version=item['version'],native_source_head=item['head'],native_producer_PC_first_use=True,type3_native_origin=native_origin(item['head']),
         type3_generic_image_sha256=measured['image_sha256'],type3_contract_path=binding['type3_contract_path'],
         type3_contract_sha256=binding['type3_contract_sha256'],type3_external_choice='compact-v1')
     context_raw=data.bounded_private_read(Path(contract['ci_success_context']),65536)
@@ -211,8 +224,9 @@ def validate_template(root):
 
 
 def patch_image(raw,report,token,cycle_slot,compact):
-    retained.live(report.get('host_profile_source_head'))
-    candidate_scope(report,patched=False)
+    origins.live_row(report)
+    contract=candidate_scope(report,patched=False)
+    transaction(dict(contract,_contract_sha256=report['type3_contract_sha256']),'plan_reserved')
     record=report['kernel_readonly3_slot'];a=record['slot']['offset'];b=record['descriptor']['offset']
     require(len(raw)==report['kernel_readonly3_image_bytes'] and sha(raw)==report['type3_generic_image_sha256']==report['image_sha256'] and
         len(compact)==ro3.CAPACITY and sha(compact)==report['type3_compact_sha256'] and
@@ -263,22 +277,33 @@ def validate_variant(root,token,template=None):
 
 
 def require_plan_transaction(template,output):
+    origins.live_row(template)
     contract=candidate_scope(template,patched=False)
     contract=dict(contract,_contract_sha256=template['type3_contract_sha256'])
     require(private(output)==Path(contract['output'])/'plan','type3 one plan output differs')
     transaction(contract,'plan_reserved')
 
 
+def require_materialization_transaction(template,output):
+    origins.live_row(template)
+    contract=candidate_scope(template,patched=False)
+    require(private(output)==Path(contract['output'])/'plan/cycle-01/kernel-build','one reviewed class3 variant output required')
+    transaction(dict(contract,_contract_sha256=template['type3_contract_sha256']),'plan_reserved')
+
+
 def prepare_offline(path,expected):
-    contract=load_offline(path,expected);retained.live(contract['host_source_head']);output=Path(contract['output'])
+    contract=load_offline(path,expected);item=origins.record(contract['native_source_head'])
+    require(item['version']=='v109' and contract['execution_version']=='v110','only native109/host110 may start new offline work')
+    origins.live_host(contract['host_source_head']);output=Path(contract['output'])
     require(not output.exists(),'type3 transaction already reserved; partial/completed transaction cannot restart')
     from sha256_kat_device_profile import sha as file_sha,prepare_plan
     require(file_sha(Path(contract['backup'])/'backup-manifest.json')==contract['backup_manifest_sha256'] and
         file_sha(Path(contract['current_packages'])/'package-result.json')==contract['current_package_result_sha256'],'type3 saved current/backup metadata changed')
     current=read(Path(contract['current_packages'])/'package-result.json')
-    require(current.get('source_head')=='392e0352715c60d96adc0ecbe860335547941dce' and
-        any(item.get('mode')=='diagnostic' and item.get('payload_sha256')==contract['current_boot_sha256'] for item in current.get('packages',[])),
-        'type3 first offline plan requires the saved current v104 full BOOT baseline')
+    with retained.read_scope():retained.origin(current)
+    require(current.get('backup_manifest_sha256')==contract['backup_manifest_sha256'] and
+        any(record.get('mode')=='diagnostic' and record.get('payload_sha256')==contract['current_boot_sha256'] for record in current.get('packages',[])),
+        'host110 requires the exact saved current v108 full BOOT/package/backup baseline')
     output.mkdir(parents=True)
     journal=dict(schema='type3-offline-journal-v1',status='started',phase='template_reserved',contract_sha256=expected,
         attempts=dict(templates=1,plans=0,materializations=0),device_operations=[])
@@ -290,14 +315,14 @@ def prepare_offline(path,expected):
             Path(contract['current_packages']),output/'plan',1)
         plan=read(result['plan']);require(plan.get('current_boot_payload_sha256')==contract['current_boot_sha256'],'type3 saved current BOOT differs')
         journal.update(status='complete',phase='complete',result=result,IO_events=list(IO_EVENTS));save(output/'transaction.json',journal)
-        return dict(result,transaction=str(output/'transaction.json'),native_version='v107',execution_version=contract['execution_version'],device_operations=[])
+        return dict(result,transaction=str(output/'transaction.json'),native_version=item['version'],execution_version=contract['execution_version'],device_operations=[])
     except BaseException as error:
         journal.update(status='failed_no_restart',error_type=type(error).__name__,IO_events=list(IO_EVENTS));save(output/'transaction.json',journal)
         raise
 
 
 def execution_context(row,plan_sha,packages,declared_version,host_head,path,expected,execution_output=None):
-    retained.live(row.get('host_profile_source_head'))
+    origins.live_row(row)
     offline=candidate_scope(row,patched=True)
     completed=read(Path(offline['output'])/'transaction.json')
     require(completed.get('status')=='complete' and completed.get('phase')=='complete' and completed.get('contract_sha256')==row['type3_contract_sha256'] and
@@ -311,7 +336,7 @@ def execution_context(row,plan_sha,packages,declared_version,host_head,path,expe
     keys={'schema','status','execution_version','host_source_head','native_source_head','plan_sha256','packages','package_result_sha256',
         'bound_image_sha256','offline_contract_sha256','output','minimum_battery','BOOT_write_max','reboot_max','user_availability_record_sha256'}
     require(type(contract) is dict and set(contract)==keys and contract['schema']==DEVICE_SCHEMA and contract['status']=='reviewed_ready' and
-        contract['execution_version']==declared_version and contract['host_source_head']==host_head and contract['native_source_head']==ro3.NATIVE_HEAD and
+        contract['execution_version']==declared_version and contract['host_source_head']==host_head and contract['native_source_head']==row['native_source_head'] and
         contract['plan_sha256']==plan_sha and contract['packages']==str(private(packages)) and
         execution_output is not None and contract['output']==str(private(execution_output)) and not private(execution_output).is_relative_to(private(packages)) and
         contract['bound_image_sha256']==row.get('image_sha256',row.get('kernel_image_sha256')) and contract['offline_contract_sha256']==row['type3_contract_sha256'] and
@@ -330,7 +355,7 @@ def require_context_directory(context,directory):
         require(type(context) is dict and context.get('packages')==str(private(directory)),'type3 actual package directory differs from reviewed execution context')
 
 def require_device_scope(row,ack_kernel_readonly_growth=False,context=None):
-    retained.live(row.get('host_profile_source_head'))
+    origins.live_row(row)
     require(ack_kernel_readonly_growth is True,'type3 requires explicit growth ACK before any device query')
     candidate_scope(row,patched=True)
     keys={'schema','declared_version','host_source_head','plan_sha256','packages','output','contract_path','contract_sha256'}

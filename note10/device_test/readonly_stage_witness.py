@@ -1,4 +1,4 @@
-"""PC-first class3 stage witness; no offline or device admission is provided."""
+"""Class3 stage witness and log join; typed admission lives in type3_admission."""
 from pathlib import Path
 import re
 import kernel_readonly_span_candidate as ro3
@@ -36,9 +36,13 @@ def install(source,identity):
     return result
 
 def decode(text,identity,cycle,*,expected_schema):
-    from decode_reservation import checksum
     data.require(expected_schema==SCHEMA,'explicit new stage producer schema required')
     legacy=data.decode(text,identity,cycle,_source_class=ro3.MODE)
+    return _decode_joined(text,identity,cycle,legacy,expected_schema=expected_schema)
+
+def _decode_joined(text,identity,cycle,legacy,*,expected_schema):
+    from decode_reservation import checksum
+    data.require(expected_schema==SCHEMA,'explicit new stage producer schema required')
     lines=[line for line in text.splitlines() if 'N10DATASTAGE1' in line]
     data.require(len(lines)==1,'one stage companion required')
     match=re.search(r'N10BOOTLINK2 boot=([0-9a-f]{32}) N10DATASTAGE1 ([^\r\n\x00]{1,447}) checksum=([0-9a-f]{8})$',lines[0])
@@ -84,3 +88,9 @@ def decode(text,identity,cycle,*,expected_schema):
     return dict(schema=SCHEMA,boot_identity=match[1],bits=bits,events=flags,passed=bits==ALL,
         cleanup_result=cleanup,cleanup_semantics='void_call_boundaries_only',input_retained=legacy['retained'],global_RAM_ownership=False,
         hardware=False,xnu_executed=False)
+
+
+def decode_selected(raw,banner,identity,cycle,*,expected):
+    data.require(selected(expected) and expected.get('readonly_stage_schema')==SCHEMA,'exact stage candidate selected-log scope required')
+    from kernel_readonly_span_candidate import decode_selected as class3_decode
+    return class3_decode(raw,banner,identity,cycle,expected=expected)

@@ -364,6 +364,10 @@ def candidate_scope(row,*,require_compact=True):
 
 
 def require_device_scope(row,ack_kernel_readonly_growth=False,type3_context=None):
+    from class3_native_origin import stage_selected
+    if stage_selected(row):
+        from type3_admission import require_device_scope
+        return require_device_scope(row,ack_kernel_readonly_growth,type3_context)
     from readonly_stage_witness import refuse
     refuse(row)
     # The original PC domain remains forbidden even when candidate flags/ACK are forged.

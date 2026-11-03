@@ -207,15 +207,19 @@ def physical_input_scope(row):
 
 def input_binding(result,lines,*,elf,archive,raw_inputs,historical_origin=None):
     from early_fdt_binding import fixed_route_relation
-    producer_contract(result,result.get('ci_context',{}).get('GITHUB_SHA'),historical_origin=historical_origin)
+    from class3_native_origin import stage_selected,producer,stage_fields,_NATIVE109
+    if stage_selected(result):
+        data.require(historical_origin==_NATIVE109['head'],'native109 input binding is exact read-origin only')
+        producer(result,historical_origin)
+    else:producer_contract(result,result.get('ci_context',{}).get('GITHUB_SHA'),historical_origin=historical_origin)
     data.require('CONFIG_NOTE10_KERNEL_READONLY_SPAN_CANDIDATE=y' in lines and not
         {'CONFIG_NOTE10_KERNEL_READONLY_INPUT=y','CONFIG_NOTE10_KERNEL_READONLY_SPAN_PC=y','CONFIG_NOTE10_READONLY_INPUT_PC=y',
          'CONFIG_NOTE10_OWNED_CONTIGUOUS_STAGING=y','CONFIG_NOTE10_CURRENT_OWNED_STAGING=y'} & set(lines),'distinct native107 type3 configuration required')
     fixed_route_relation(elf,archive,result,raw_inputs)
     return dict(data_carrier_stage=data.STAGE,data_relative_placement_admitted=False,raw_input_binding=False,
-        diagnostic_kind=KIND,data_input_kind=KIND,storage_input_kind=KIND,data_expectation_mode=MODE,
+        diagnostic_kind=result['diagnostic_kind'],data_input_kind=result['data_input_kind'],storage_input_kind=result['storage_input_kind'],data_expectation_mode=MODE,
         data_expectation_slot=result['kernel_readonly3_slot'],image_expectation_patched=False,
-        **{key:result[key] for key in FIELDS})
+        **{key:result[key] for key in FIELDS},**(stage_fields() if stage_selected(result) else {}))
 
 
 def require_device_scope(row,ack_kernel_readonly_growth=False,context=None):
@@ -226,10 +230,13 @@ def require_device_scope(row,ack_kernel_readonly_growth=False,context=None):
 @retained_reader
 def decode_selected(raw,banner,identity,cycle,*,expected):
     from builtin_init_profile import decode as baseline_decode
+    from class3_native_origin import stage_selected,producer
+    witness=stage_selected(expected)
     materialized='execution_version' in expected
     if materialized:
         from type3_admission import candidate_scope
         candidate_scope(expected,patched=True)
+    elif witness:producer(expected,expected.get('ci_context',{}).get('GITHUB_SHA'))
     else:producer_contract(expected,expected.get('ci_context',{}).get('GITHUB_SHA'),
         historical_origin=NATIVE_HEAD if expected.get('ci_context',{}).get('GITHUB_SHA')==NATIVE_HEAD else None)
     bound=expected['kernel_readonly3_span']['kernel_bytes']
@@ -242,6 +249,12 @@ def decode_selected(raw,banner,identity,cycle,*,expected):
         data.require(not any(marker in text for marker in ('N10DATA1 ','N10DATARO1','N10DATAPC','N10DATACMP','N10DATARANGE','N10DATAEARLY','N10DATAGROWTH')),
             'type3 cannot claim class2, PC or external companions')
         components['kernel_readonly3_span']=old.decode_span(text,rid,cycle,row['boot_identity'],bound)
+        if witness:
+            from readonly_stage_witness import _decode_joined,SCHEMA as stage_schema
+            try:components['readonly_stage_witness']=_decode_joined(text,rid,cycle,row,expected_schema=stage_schema)
+            except ValueError as error:
+                components['readonly_stage_witness']=dict(state='invalid_or_missing',error=str(error));raise
+            data.require(components['readonly_stage_witness']['passed'],'native109 stage witness did not complete')
         data.require(row['carrier']==CAPACITY and row['logical'] in (0,CAPACITY),'type3 extent differs')
         data.require(materialized,'generic type3 PC observation cannot authorize functional or physical acceptance')
         data.require(components['kernel_readonly3_span']['state']=='checked','type3 pre-descriptor span was not checked')
@@ -253,4 +266,7 @@ def decode_selected(raw,banner,identity,cycle,*,expected):
         clipped,observed=baseline_decode(raw,banner,identity,cycle,digest_decoder=selected,digest_marker=b'N10DATARO3',component_evidence=components)
         data.require(observed['kat']['boot_identity']==observed['boot_identity'],'type3 PID1/recovery boot differs')
     except ValueError as error:raise data.ComponentObservationError(error,components) from error
+    if witness:
+        components['functional_acceptance']=True
+        observed['component_evidence']=components
     return clipped,observed

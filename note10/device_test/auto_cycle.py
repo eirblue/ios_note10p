@@ -173,7 +173,8 @@ def run_plan(path,expected,output,*,execute=False,limit=1,adb=None,verified_roun
     from kernel_readonly_input import require_device_scope,PACKING_FIELDS
     execution_build=read(Path(plan['kernel_build'])/'build-result.json')
     type3_context=None
-    if execution_build.get('data_input_kind')=='kernel-readonly-span-candidate':
+    from class3_native_origin import selected as class3_selected
+    if class3_selected(execution_build):
         from type3_admission import execution_context
         if limit!=1 or v105_battery_5pct_exception:raise ValueError('Type3 permits one new cycle and default battery10 only')
         item=plan['stages'][0]
