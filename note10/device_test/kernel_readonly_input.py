@@ -393,13 +393,13 @@ def decode_selected(raw,banner,identity,cycle,*,expected):
 def packing_scope(row):
     present=any(key in row for key in PACKING_FIELDS)
     if not present:return None
-    from sha256_kat_device_profile import host_binding
+    from sha256_kat_device_profile import packing_host_origin
     data.require(all(key in row for key in PACKING_FIELDS) and row['kernel_readonly_packing_revision']==PACKING_SCHEMA and
         row['kernel_readonly_external_choice']=='compact-v1' and row.get('source_head')==HISTORICAL_HEAD and
         row.get('host_profile_source_head')==HISTORICAL_HEAD,'exact retained class2 compact-external revision required')
     host=row['kernel_readonly_packing_host'];reuse=row['kernel_readonly_reused_variant']
     data.require(type(host) is dict and set(host)=={'host_profile_source_head','host_profile_source_sha256'} and
-        host==host_binding(host.get('host_profile_source_head')),'new executing packing host identity differs')
+        host==packing_host_origin(host),'new or authenticated retained packing host identity differs')
     keys={'template','template_profile_sha256','source_variant','source_report_sha256','source_image_sha256','cycle',
           'operator_receipt','operator_receipt_sha256'}
     data.require(type(reuse) is dict and set(reuse)==keys and re.fullmatch('[0-9a-f]{32}',reuse.get('cycle','')) and

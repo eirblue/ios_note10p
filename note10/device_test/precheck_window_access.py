@@ -35,9 +35,105 @@ def pm_suspend_patch_bound(build,patch_model):
 
 MINIMUM_INSTALL_BATTERY = 10
 
-def require_install_battery(battery):
-    if not MINIMUM_INSTALL_BATTERY <= battery <= 100:
-        raise ValueError(f'Charge to at least {MINIMUM_INSTALL_BATTERY} percent before manual install')
+BATTERY_POLICY_SCHEMA='note10-explicit-install-battery-policy-v1'
+
+
+def _approval_record(path,expected):
+    raw_path=Path(path).absolute();private=(ROOT/'note10/private').resolve()
+    if raw_path.is_symlink() or raw_path.resolve()!=raw_path or not raw_path.is_relative_to(private) or not re.fullmatch('[0-9a-f]{64}',expected or ''):
+        raise ValueError('Exact private direct-approval record and SHA required')
+    if not raw_path.is_file() or not 0<raw_path.stat().st_size<=65536:raise ValueError('Bounded direct-approval record required')
+    raw=raw_path.read_bytes()
+    if hashlib.sha256(raw).hexdigest()!=expected:raise ValueError('Direct battery approval changed')
+    row=json.loads(raw.decode('utf-8-sig'))
+    from kernel_readonly_input import HISTORICAL_HEAD
+    if (row.get('schema')!='user-v105-only-temporary5percent-exception-v1' or row.get('version_scope')!='v105' or
+        row.get('exception_applies_to_version')!='v105' or row.get('native_v105_source_head')!=HISTORICAL_HEAD or
+        type(row.get('exception_minimum_percent')) is not int or row['exception_minimum_percent']!=5 or
+        type(row.get('v106_and_later_minimum_percent')) is not int or row['v106_and_later_minimum_percent']!=10 or
+        row.get('standing_5percent_exception') is not False or row.get('all_other_safety_gates_unchanged') is not True or
+        row.get('must_transfer_daily') is not True or row.get('below5_action_current_v105')!='PC-only new builds/tests' or
+        not isinstance(row.get('exact_user_instruction'),str) or not 0<len(row['exact_user_instruction'])<=4096 or
+        not re.fullmatch('[0-9a-f]{64}',row.get('exact_v105_plan_sha256',''))):
+        raise ValueError('Temporary approval is v105 only; v106+ retain minimum10')
+    return dict(path=str(raw_path),sha256=expected,record=row)
+
+
+def _battery_scope(row,growth_ack):
+    from kernel_readonly_input import KIND,SCHEMA,HISTORICAL_HEAD,PACKING_SCHEMA,require_device_scope
+    require_device_scope(row,growth_ack)
+    if (row.get('data_input_kind')!=KIND or row.get('kernel_readonly_schema')!=SCHEMA or
+        row.get('source_head')!=HISTORICAL_HEAD or row.get('host_profile_source_head')!=HISTORICAL_HEAD or
+        row.get('version','v105')!='v105' or row.get('kernel_readonly_packing_revision')!=PACKING_SCHEMA or
+        row.get('kernel_readonly_external_choice')!='compact-v1'):
+        raise ValueError('Temporary5 scope requires v105 native E49 class2 compact-external candidate')
+    return dict(candidate_kind=KIND,native_source_head=HISTORICAL_HEAD,packing_revision=PACKING_SCHEMA,external_choice='compact-v1')
+
+
+def make_install_battery_policy(*,use_v105_5pct_exception=False,approval_path=None,approval_sha256=None,
+    scope=None,growth_ack=False,execution_host_source_head=None,declared_test_version=None):
+    if type(use_v105_5pct_exception) is not bool:raise ValueError('Explicit v105 exception flag must be boolean')
+    if declared_test_version is not None and (type(declared_test_version) is not str or not re.fullmatch('v[1-9][0-9]*',declared_test_version)):
+        raise ValueError('Explicit declared test version required')
+    policy=dict(schema=BATTERY_POLICY_SCHEMA,default_minimum_percent=10,effective_minimum_percent=10,
+        plan_declared_minimum_percent=10,declared_test_version=declared_test_version,
+        five_percent_exception=False,approval_binding=None,scope=None,executing_host=None)
+    if not use_v105_5pct_exception:
+        if any(value is not None for value in (approval_path,approval_sha256,execution_host_source_head)):
+            raise ValueError('Approval/executing host arguments require --v105-battery-5pct-exception')
+        return policy
+    if declared_test_version!='v105':raise ValueError('Temporary5 exception excludes v106 and later, even with native E49')
+    if approval_path is None or approval_sha256 is None or execution_host_source_head is None or type(scope) is not dict:
+        raise ValueError('Explicit v105 exception requires approval, exact plan scope and new executing host')
+    key=_battery_scope(scope,growth_ack)
+    if type(scope.get('plan_declared_minimum_percent')) is not int or scope['plan_declared_minimum_percent']!=10 or not re.fullmatch('[0-9a-f]{64}',scope.get('plan_sha256','')):
+        raise ValueError('Preserved declared10 plan and exact SHA required; never fabricate plan5')
+    approval=_approval_record(approval_path,approval_sha256)
+    if approval['record']['exact_v105_plan_sha256']!=scope['plan_sha256']:raise ValueError('Temporary5 approval binds only its exact existing v105 plan')
+    from sha256_kat_device_profile import host_binding
+    policy.update(effective_minimum_percent=5,five_percent_exception=True,approval_binding=approval,
+        scope=dict(key,plan_sha256=scope['plan_sha256']),executing_host=host_binding(execution_host_source_head))
+    return policy
+
+
+def validate_install_battery_policy(policy=None):
+    if policy is None:return make_install_battery_policy()
+    keys={'schema','default_minimum_percent','effective_minimum_percent','plan_declared_minimum_percent',
+          'declared_test_version','five_percent_exception','approval_binding','scope','executing_host'}
+    if (type(policy) is not dict or set(policy)!=keys or policy['schema']!=BATTERY_POLICY_SCHEMA or
+        type(policy['five_percent_exception']) is not bool or any(type(policy[key]) is not int for key in
+        ('default_minimum_percent','effective_minimum_percent','plan_declared_minimum_percent')) or
+        policy['default_minimum_percent']!=10 or policy['plan_declared_minimum_percent']!=10):
+        raise ValueError('Closed explicit battery policy required')
+    if not policy['five_percent_exception']:
+        if policy!=make_install_battery_policy(declared_test_version=policy['declared_test_version']):raise ValueError('Default battery policy must remain10')
+        return policy
+    if policy['effective_minimum_percent']!=5 or policy['declared_test_version']!='v105':raise ValueError('Only temporary v105 minimum5 is supported')
+    approval=policy['approval_binding'];scope=policy['scope'];host=policy['executing_host']
+    if type(approval) is not dict or set(approval)!={'path','sha256','record'} or approval!=_approval_record(approval.get('path',''),approval.get('sha256')):
+        raise ValueError('Battery direct-approval binding differs')
+    from kernel_readonly_input import KIND,HISTORICAL_HEAD,PACKING_SCHEMA
+    expected=dict(candidate_kind=KIND,native_source_head=HISTORICAL_HEAD,packing_revision=PACKING_SCHEMA,external_choice='compact-v1')
+    if (type(scope) is not dict or set(scope)!={*expected,'plan_sha256'} or any(scope.get(key)!=value for key,value in expected.items()) or
+        scope.get('plan_sha256')!=approval['record']['exact_v105_plan_sha256']):raise ValueError('Temporary v105 plan scope differs')
+    from sha256_kat_device_profile import host_binding
+    if type(host) is not dict or host!=host_binding(host.get('host_profile_source_head')):raise ValueError('Battery executing-host code identity differs')
+    return policy
+
+
+def require_battery_policy_scope(policy,row,growth_ack=False):
+    checked=validate_install_battery_policy(policy)
+    if checked['five_percent_exception']:
+        key=_battery_scope(row,growth_ack)
+        if any(checked['scope'].get(name)!=value for name,value in key.items()):raise ValueError('Battery policy/profile scope differs')
+    return checked
+
+
+def require_install_battery(battery,*,policy=None):
+    checked=validate_install_battery_policy(policy)
+    if type(battery) is not int or not 0<=battery<=100:raise ValueError('Battery must be an integer percent in0..100')
+    minimum=checked['effective_minimum_percent']
+    if battery<minimum:raise ValueError(f'Charge to at least {minimum} percent before manual install')
 
 
 def check(packages,kernel_build,backup,core_model,gate_model,init_model,adb):
