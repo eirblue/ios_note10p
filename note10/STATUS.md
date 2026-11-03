@@ -1292,3 +1292,10 @@ No new native code, Linux Image, device operation, payload transform, or histori
 A single reviewed GitHub Actions run passed one new PC host test and its synthetic C fixture. The fixture covered five case groups and four guard cases; it recorded seven allocation attempts, seven successful allocations and frees, and ten copies totaling 4,172 bytes. All fixture counters were complete. No malloc failure was observed, so this run does not establish allocation-failure coverage.
 
 The writer remains a caller-discipline interface. The fixture does not establish source readability, verification authenticity, ownership, a security boundary, zeroization, physical readiness, or hardware behavior. No device, Image, private input, decoder, or Mach-O operation occurred. The v111 physical baseline is unchanged.
+
+
+## v115 host output content verification PC-only CI
+
+One reviewed PC-only hosted CI run passed a new host-output digest-seal test and its synthetic C fixture. The fixture hashed complete, fully written host-owned output through the hosted OpenSSL SHA-256 provider in the same process that recorded its compile-time and runtime provider versions. Across five case groups, five seals hashed 320 bytes: four outputs matched the 32-byte expected digest selected by the caller, and one deliberate mismatch was refused. Four successful matches led to internal finalization.
+
+This checks host-process digest equality against caller-selected expected bytes; it does not establish payload authenticity or a trusted manifest. The interface relies on valid caller-supplied memory extents and C API discipline, and does not attest immutable memory, security isolation, source readability, ownership, zeroization, physical readiness, or hardware behavior. Allocation/provider failure coverage was not observed or claimed. No device, Image, private input, decoder, or Mach-O operation occurred. The v111 physical baseline is unchanged.
