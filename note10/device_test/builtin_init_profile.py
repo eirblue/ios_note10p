@@ -27,6 +27,10 @@ def current_boot_binding(plan, pair, diagnostic):
     # Package-origin validation authenticates the complete retained host map.
     # These predecessor cases are exact retained DATA tuples, never BOOT pins.
     if data:
+        from retained_v108_origin import selected,origin,read_scope
+        if selected(pair):
+            with read_scope():origin(pair)
+            prior_source = True
         prior_source = prior_source or (
             pair.get('source_head') == '0696b4dbf157a2d51b68b26e4a5237a7c51daa80' and
             pair.get('host_profile_source_head') == 'bdd56f101e3e9bb83ecbadad03be24473f143447' and

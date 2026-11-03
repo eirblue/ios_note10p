@@ -94,9 +94,10 @@ def retain_route_prerequisites(source, objects, out, compiler_include):
 
 
 def main(kind=None):
-    if kind not in (None, "sha256-stream-state", "cpu-affinity-binding", "early-fdt-binding", "native-memory-observation", "linux-data-carrier", "owned-contiguous-staging-pc", "current-owned-staging-pc", "readonly-input-pc", "kernel-readonly-candidate", "kernel-readonly-span-pc", "kernel-readonly-span-candidate"):
+    if kind not in (None, "sha256-stream-state", "cpu-affinity-binding", "early-fdt-binding", "native-memory-observation", "linux-data-carrier", "owned-contiguous-staging-pc", "current-owned-staging-pc", "readonly-input-pc", "kernel-readonly-candidate", "kernel-readonly-span-pc", "kernel-readonly-span-candidate", "kernel-readonly-stage-witness-candidate"):
         raise ValueError("closed diagnostic task required")
-    type3 = kind == "kernel-readonly-span-candidate"
+    witness = kind == "kernel-readonly-stage-witness-candidate"
+    type3 = kind in ("kernel-readonly-span-candidate","kernel-readonly-stage-witness-candidate")
     span_pc = kind == "kernel-readonly-span-pc"
     kernel_ro = kind in ("kernel-readonly-candidate", "kernel-readonly-span-pc")
     readonly = kind == "readonly-input-pc"
@@ -106,7 +107,7 @@ def main(kind=None):
     native = kind == "native-memory-observation"
     current_owned = kind == "current-owned-staging-pc"
     owned = kind in ("owned-contiguous-staging-pc","current-owned-staging-pc")
-    data_task = kind in ("linux-data-carrier","owned-contiguous-staging-pc","current-owned-staging-pc","readonly-input-pc","kernel-readonly-candidate","kernel-readonly-span-pc","kernel-readonly-span-candidate")
+    data_task = kind in ("linux-data-carrier","owned-contiguous-staging-pc","current-owned-staging-pc","readonly-input-pc","kernel-readonly-candidate","kernel-readonly-span-pc","kernel-readonly-span-candidate","kernel-readonly-stage-witness-candidate")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--archive', type=Path)
@@ -148,6 +149,9 @@ def main(kind=None):
     if type3:
         from kernel_readonly_span_candidate import SOURCES as type3_sources
         extra=(*extra,*type3_sources,'kernel_readonly_input.py','kernel_readonly_span.h')
+        if witness:
+            from readonly_stage_witness import SOURCES as stage_sources
+            extra=(*extra,*stage_sources,'type3_admission.py','test_v108_type3_admission.py')
     if kernel_ro:
         from kernel_readonly_input import SOURCES as kernel_ro_sources
         extra=(*extra,*kernel_ro_sources)
@@ -192,6 +196,8 @@ def main(kind=None):
         from early_fdt_binding import install, API_PINS as extra_kernel_pins
     elif native:
         from native_memory_observation import install, API_PINS as extra_kernel_pins
+    elif witness:
+        from readonly_stage_witness import install, API_PINS as extra_kernel_pins
     elif type3:
         from kernel_readonly_span_candidate import install, API_PINS as extra_kernel_pins
     elif kernel_ro:
@@ -302,7 +308,7 @@ def main(kind=None):
             settings.update(NOTE10_KERNEL_READONLY_INPUT='y',NOTE10_READONLY_INPUT_PC='n',LOCALVERSION='"-v105-kernel-readonly"')
         if type3:
             settings.update(NOTE10_KERNEL_READONLY_SPAN_CANDIDATE='y',NOTE10_KERNEL_READONLY_INPUT='n',
-                NOTE10_KERNEL_READONLY_SPAN_PC='n',NOTE10_READONLY_INPUT_PC='n',LOCALVERSION='"-v107-readonly-span-candidate"')
+                NOTE10_KERNEL_READONLY_SPAN_PC='n',NOTE10_READONLY_INPUT_PC='n',LOCALVERSION='"-v109-readonly-stage-witness-candidate"' if witness else '"-v107-readonly-span-candidate"')
         if span_pc:
             settings.update(NOTE10_KERNEL_READONLY_SPAN_PC='y',LOCALVERSION='"-v106-kernel-span-pc"')
         if readonly:
@@ -390,7 +396,7 @@ def main(kind=None):
         stable_archive(archive, before)
         if manifest != {name: sha(ROOT/name) for name in manifest}:
             raise ValueError('local first-use inputs changed during build')
-        result = dict(schema=1, version='v107' if type3 else 'v106' if span_pc else 'v105' if kernel_ro else 'v103' if readonly else 'v96' if current_owned else 'v92' if owned else 'v91' if data_task else 'v82' if native else 'v81' if fdt else 'v78' if affinity else 'v73' if stream else 'v72', diagnostic_kind=kind, passed=True, kernel_commit=COMMIT,
+        result = dict(schema=1, version='v109' if witness else 'v107' if type3 else 'v106' if span_pc else 'v105' if kernel_ro else 'v103' if readonly else 'v96' if current_owned else 'v92' if owned else 'v91' if data_task else 'v82' if native else 'v81' if fdt else 'v78' if affinity else 'v73' if stream else 'v72', diagnostic_kind=kind, passed=True, kernel_commit=COMMIT,
                       build_evidence_id=identity, ci_context=ci, source_sha256=manifest,
                       settings=settings, make_target='Image', integration_object=TARGET,
                       bootloader_cmdline_policy=cmdline_policy,
@@ -515,7 +521,10 @@ def main(kind=None):
                 struct.unpack_from('<Q',raw,16)[0],struct.unpack_from('<Q',raw,8)[0],struct.unpack_from('<Q',raw,24)[0])
             if footprint['linked_kernel_bytes']>ro3.BUDGET or b'N10DATASPAN1' not in raw:
                 raise ValueError('actual type3 span emitter/budget differs')
-            result.update(PC_only=False,PC_first_use=True,physical_ready=False,data_input_kind=ro3.KIND,storage_input_kind=ro3.KIND,kernel_readonly3_schema=ro3.SCHEMA,
+            from readonly_stage_witness import KIND as STAGE_KIND,SCHEMA as STAGE_SCHEMA
+            if witness and b'N10DATASTAGE1' not in raw:raise ValueError('native stage companion emitter missing')
+            if witness:result.update(readonly_stage_schema=STAGE_SCHEMA,readonly_stage_marker='N10DATASTAGE1',operation_scope_PC_only=True,admission_blocked=True)
+            result.update(PC_only=False,PC_first_use=True,physical_ready=False,data_input_kind=STAGE_KIND if witness else ro3.KIND,storage_input_kind=STAGE_KIND if witness else ro3.KIND,kernel_readonly3_schema=ro3.SCHEMA,
                 kernel_readonly3_marker='N10DATARO3',
                 kernel_readonly3_slot=record,kernel_readonly3_linked_bytes=footprint['linked_kernel_bytes'],kernel_readonly3_image_bytes=len(raw),
                 kernel_readonly3_requires_ack=True,kernel_readonly3_default_enabled=type3_default_enabled,

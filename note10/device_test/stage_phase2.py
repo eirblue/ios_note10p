@@ -9,6 +9,9 @@ import zipfile
 from run_probe import Adb,ROOT,preflight
 
 
+from retained_v108_origin import reader as retained_reader
+
+@retained_reader
 def verify_packages(directory):
     result=json.loads((directory/'package-result.json').read_text())
     from sha256_kat_device_profile import selected,package_scope,fields
@@ -139,6 +142,8 @@ def verify_packages(directory):
 
 
 def stage(directory,adb,*,ack_kernel_readonly_growth=False,type3_context=None):
+    from retained_v108_origin import live
+    live(json.loads((directory/'package-result.json').read_text()).get('host_profile_source_head'))
     records=verify_packages(directory)
     from kernel_readonly_input import require_device_scope
     from type3_admission import require_context_directory

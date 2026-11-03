@@ -17,6 +17,15 @@
 #define n10_data_clear(p,n) memzero_explicit(p,n)
 #endif
 #include "carrier_lzma.h"
+#ifdef N10_DATA_STAGE_WITNESS
+#ifndef N10_DATA_KERNEL_READONLY_V3
+#error "stage witness requires its distinct class3 producer"
+#endif
+#include "readonly_stage_witness.h"
+#else
+#define N10_STAGE(out,event) do { } while(0)
+#define N10_STAGE_CALLS(out) ((out)->decoded)
+#endif
 #ifdef N10_DATA_READONLY_PC
 #if defined(N10_DATA_COMPARE_EVIDENCE) || defined(N10_DATA_CONTIGUOUS) || defined(N10_DATA_KERNEL_READONLY) || !defined(N10_DATA_IMAGE_EXPECTATION)
 #error "readonly PC source cannot mix external-input or owned modes"
@@ -182,6 +191,9 @@ static struct {
 #endif
 } n10_data __used;
 _Static_assert(sizeof(n10_data) <= 128, "bounded permanent DATA metadata");
+#ifdef N10_DATA_STAGE_WITNESS
+_Static_assert(sizeof(n10_data)==88,"stage witness preserves permanent DATA metadata");
+#endif
 #ifdef N10_DATA_EARLY_EVIDENCE
 _Static_assert(sizeof(n10_data)==120,"exact permanent early/growth scalar DATA metadata");
 #endif
@@ -507,6 +519,7 @@ static void n10_data_run(struct n10_data_outcome *out)
     if (memcmp(digest,expectation,32)) goto done;
 #endif
     out->status = "header";
+    N10_STAGE(out,N10_SW_HEADER_ENTER);
     if (memcmp(p,"N10DATA1",8) || n10_data_le(p+8,2) != 1 || n10_data_le(p+10,2) != 128 ||
         n10_data_le(p+12,4) || n10_data_le(p+16,8) != logical || n10_data_le(p+24,8) != 128)
         goto done;
@@ -516,8 +529,10 @@ static void n10_data_run(struct n10_data_outcome *out)
     for (i = 128+(size_t)count; i < logical; ++i) if (p[i]) goto done;
     if (p[128] != 0x5d || n10_data_le(p+129,4) != (1u << 23) || n10_data_le(p+133,8) != payload) goto done;
     out->stream = count; out->payload = payload;
+    N10_STAGE(out,N10_SW_HEADER_OK);
     out->status = "stream_hash";
     if (n10_data_hash(p+128,count,digest) || memcmp(digest,p+48,32)) goto done;
+    N10_STAGE(out,N10_SW_STREAM_OK);
     out->status = "allocation";
 #ifdef N10_DATA_CONTIGUOUS
     out->status = "owned_output";
@@ -532,20 +547,54 @@ static void n10_data_run(struct n10_data_outcome *out)
     workspace = n10_data_alloc(N10_LZMA_WORKSPACE);
     if (!output || !workspace) goto done;
     out->status = "decode";
+#ifdef N10_DATA_STAGE_WITNESS
+    N10_STAGE(out,N10_SW_DECODE_CALLED);
+#else
     out->decoded = 1;
+#endif
     status = n10_lzma_alone_decode(p+128,(size_t)count,output,(size_t)payload,
         workspace,N10_LZMA_WORKSPACE,&result);
+    N10_STAGE(out,N10_SW_DECODE_RETURNED);
     out->consumed = result.consumed; out->written = result.written;
+#ifdef N10_DATA_STAGE_WITNESS
+    if (status || result.version != 1 || result.status) goto done;
+    N10_STAGE(out,N10_SW_API_OK);
+    N10_STAGE(out,N10_SW_LENGTH_ENTER);
+    if (result.written != payload || result.consumed > count) goto done;
+    N10_STAGE(out,N10_SW_LENGTH_OK);
+#else
     if (status || result.version != 1 || result.status || result.written != payload || result.consumed > count) goto done;
+#endif
     out->status = "payload_hash";
+#ifdef N10_DATA_STAGE_WITNESS
+    N10_STAGE(out,N10_SW_HASH_CALLED);
+    status=n10_data_hash(output,payload,digest);
+    N10_STAGE(out,N10_SW_HASH_RETURNED);
+    if(status) goto done;
+    N10_STAGE(out,N10_SW_DIGEST_ENTER);
+    if(memcmp(digest,p+80,32)) goto done;
+    N10_STAGE(out,N10_SW_DIGEST_OK);
+#else
     if (n10_data_hash(output,payload,digest) || memcmp(digest,p+80,32)) goto done;
+#endif
     memcpy(out->digest,digest,32); out->status = "ok";
 done:
-    if (workspace) { n10_data_clear(workspace,N10_LZMA_WORKSPACE); n10_data_free(workspace); }
+    if (workspace) {
+        N10_STAGE(out,N10_SW_WORK_CLEAR_CALLED);
+        n10_data_clear(workspace,N10_LZMA_WORKSPACE);
+        N10_STAGE(out,N10_SW_WORK_CLEAR_RETURNED);
+        N10_STAGE(out,N10_SW_WORK_FREE_CALLED);
+        n10_data_free(workspace);
+        N10_STAGE(out,N10_SW_WORK_FREE_RETURNED);
+    }
     if (output) {
+        N10_STAGE(out,N10_SW_OUTPUT_CLEAR_CALLED);
         n10_data_clear(output,(size_t)out->payload);
+        N10_STAGE(out,N10_SW_OUTPUT_CLEAR_RETURNED);
 #ifndef N10_DATA_CONTIGUOUS
+        N10_STAGE(out,N10_SW_OUTPUT_FREE_CALLED);
         n10_data_free(output);
+        N10_STAGE(out,N10_SW_OUTPUT_FREE_RETURNED);
 #endif
     }
     n10_data_clear(digest,sizeof(digest));
@@ -570,7 +619,7 @@ static int n10_data_emit(void)
         "id=%s cycle=%s kind=result source=%s status=%s carrier=%llu logical=%llu carrier_rc=%d stream=%llu payload=%llu consumed=%llu written=%llu calls=%u digest=%s reasons=%08x expectations=%u captures=%u retained=%u ownership=0 executed=0",
         N10_SHA256_KAT_ID,(const char *)n10_cycle,N10_DATA_EXPECTATION_SOURCE,outcome.status,
         (unsigned long long)outcome.carrier,(unsigned long long)outcome.logical,outcome.carrier_rc,(unsigned long long)outcome.stream,(unsigned long long)outcome.payload,
-        (unsigned long long)outcome.consumed,(unsigned long long)outcome.written,outcome.decoded,digest,outcome.reasons,outcome.expectations,outcome.captures,outcome.retained);
+        (unsigned long long)outcome.consumed,(unsigned long long)outcome.written,N10_STAGE_CALLS(&outcome),digest,outcome.reasons,outcome.expectations,outcome.captures,outcome.retained);
 #ifdef N10_DATA_KERNEL_READONLY
 #ifdef N10_DATA_KERNEL_READONLY_V3
     pr_info("N10DATARO3 %s checksum=%08x\n",frame,n10_frame_checksum(frame,count));
@@ -580,6 +629,10 @@ static int n10_data_emit(void)
 #ifdef N10_DATA_KERNEL_SPAN
     count=n10_kro_span_format(&outcome.source_span,frame,sizeof(frame),N10_SHA256_KAT_ID,(const char *)n10_cycle);
     if(count) pr_info("N10DATASPAN1 %s checksum=%08x\n",frame,n10_frame_checksum(frame,count));
+#ifdef N10_DATA_STAGE_WITNESS
+    count=n10_stage_format(outcome.decoded,frame,sizeof(frame),N10_SHA256_KAT_ID,(const char *)n10_cycle);
+    if(count) pr_info("N10DATASTAGE1 %s checksum=%08x\n",frame,n10_frame_checksum(frame,count));
+#endif
 #endif
 #elif defined(N10_DATA_READONLY_PC)
     pr_info("N10DATAPC1 %s checksum=%08x\n",frame,n10_frame_checksum(frame,count));

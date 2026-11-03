@@ -76,6 +76,8 @@ def no_legacy(row):
 
 
 def physical_input_scope(result):
+    from readonly_stage_witness import refuse
+    refuse(result)
     from kernel_readonly_span_candidate import is_candidate as is_type3
     if is_type3(result):
         from kernel_readonly_span_candidate import physical_input_scope as type3_scope
@@ -665,6 +667,8 @@ V105_PACKING_ORIGIN_PINS = MappingProxyType({
 
 
 def host_binding(source_head):
+    from retained_v108_origin import live
+    live(source_head)
     require(re.fullmatch('[0-9a-f]{40}', source_head or ''), 'exact host-profile publication source pin required')
     require(source_head not in (V97_PROFILE_ORIGIN_HEAD, V99_PROFILE_ORIGIN_HEAD, V100_PROFILE_ORIGIN_HEAD, V101_PROFILE_ORIGIN_HEAD, V102_PROFILE_ORIGIN_HEAD, V104_PROFILE_ORIGIN_HEAD, V105_CANDIDATE_ORIGIN_HEAD, V105_PACKING_ORIGIN_HEAD, __import__('kernel_readonly_span_candidate').NATIVE_HEAD, 'e32ec501551b74b4cca5618ea25245f012656f29'),
             'retained host origin cannot construct current host')
@@ -689,7 +693,8 @@ def host_binding(source_head):
                       'test_v106_kernel_readonly_span.py','build_kernel_readonly_span_pc.py',
                       'kernel_readonly_span_candidate.py','kernel_readonly_span_candidate.h','kernel_readonly_span_candidate_fixture.c',
                       'test_v107_readonly_span_candidate.py','build_kernel_readonly_span_candidate.py',
-                      'type3_admission.py','test_v108_type3_admission.py')}
+                      'type3_admission.py','test_v108_type3_admission.py','retained_v108_origin.py',
+                      'readonly_stage_witness.py','readonly_stage_witness.h','readonly_stage_witness_fixture.c','test_v109_readonly_stage_witness.py')}
     return dict(host_profile_source_head=source_head, host_profile_source_sha256=dict(pins))
 
 
@@ -706,6 +711,8 @@ def packing_host_origin(binding):
 
 def host_profile_origin(binding):
     """Validate a producing profile origin without relabeling the live host."""
+    from retained_v108_origin import selected,origin
+    if selected(binding):return origin(binding)
     head = binding.get('host_profile_source_head')
     require(re.fullmatch('[0-9a-f]{40}', head or '') and
             re.fullmatch('[0-9a-f]{40}', binding.get('source_head', '')),
@@ -883,6 +890,8 @@ def common_report(binding, profile_sha):
 def prepare_template(build, output, accepted_result_sha256, source_head, *, root_receipt=None,
                      root_receipt_sha256=None, host_source_head, ci_success_context=None,
                      ci_success_context_sha256=None, carrier_manifest=None, carrier_manifest_sha256=None, producing_sources=None, readonly_compact_manifest=None, readonly_compact_manifest_sha256=None):
+    from retained_v108_origin import live
+    live(host_source_head)
     build, output = private(build), private(output)
     require(not output.exists() and not output.is_relative_to(build) and not build.is_relative_to(output),
             'fresh disjoint template required')
@@ -1153,6 +1162,8 @@ def package_scope(row, mode=None):
 def pack(backup, kernel_build, official, mkbootimg, output, parts, token):
     from prepare_linux_boot import pack_verified
     build = variant(kernel_build, token)
+    from retained_v108_origin import live
+    live(build.get('host_profile_source_head'))
     return pack_verified(backup, kernel_build, official, mkbootimg, output, parts, build,
                          (kernel_build/'handoff.config').read_bytes(), token, kat_profile=True)
 
@@ -1165,6 +1176,8 @@ def prepare_plan(kernel_build, backup, twrp, mkbootimg, current_packages, output
     require(cycles == 1, 'KAT profile permits exactly one cycle')
     kernel_build, backup, output = private(kernel_build), private(backup), private(output)
     template = validate_template(kernel_build)
+    from retained_v108_origin import live
+    live(template.get('host_profile_source_head'))
     if template.get('data_input_kind')=='kernel-readonly-span-candidate':
         from type3_admission import require_plan_transaction
         require_plan_transaction(template,output)
