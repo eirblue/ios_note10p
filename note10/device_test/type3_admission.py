@@ -59,8 +59,15 @@ def load_offline(path,expected):
     from sha256_kat_device_profile import host_binding
     host_binding(row['host_source_head'])
     require(row['host_source_head']!=ro3.NATIVE_HEAD,'native107 cannot be relabeled executing host108')
-    for key in ('producer_root','ci_success_context','compact_manifest','backup','current_packages','reference_twrp','mkbootimg','output'):
+    for key in ('producer_root','ci_success_context','compact_manifest','backup','current_packages','reference_twrp','output'):
         require(type(row[key]) is str and str(private(row[key]))==row[key],'canonical private type3 path required')
+    # Only this repository tool crosses the private boundary; payload paths do not.
+    from prepare_linux_boot import MKBOOTIMG_SHA256
+    from sha256_kat_device_profile import sha as file_sha
+    tool=Path(__file__).resolve().parents[2]/'research/twrp-d2x-reference/aosp-mkbootimg.py'
+    require(type(row['mkbootimg']) is str and row['mkbootimg']==str(tool) and
+        tool.is_file() and not tool.is_symlink() and tool.resolve()==tool,'exact canonical repository mkbootimg required')
+    require(file_sha(tool)==MKBOOTIMG_SHA256,'expected pinned Android 12 AOSP mkbootimg script')
     require(all(re.fullmatch('[0-9a-f]{64}',row[key] or '') for key in
         ('ci_success_context_sha256','compact_manifest_sha256','backup_manifest_sha256','current_package_result_sha256','current_boot_sha256')),'type3 input metadata pins required')
     output=Path(row['output'])

@@ -20,6 +20,7 @@ import type3_admission as typed
 
 OUTPUT=None
 METHOD='test_typed_native107_host108_transaction_patch_plan_and_pretransport_scope'
+PATH_METHOD='test_offline_mixed_private_paths_and_exact_pinned_repository_tool'
 
 
 def digest(raw):return hashlib.sha256(raw).hexdigest()
@@ -27,6 +28,64 @@ def save(path,row):Path(path).write_text(json.dumps(row,sort_keys=True,indent=2)
 
 
 class Type3AdmissionTests(unittest.TestCase):
+    def test_offline_mixed_private_paths_and_exact_pinned_repository_tool(self):
+        work=OUTPUT/'synthetic-path-gate';work.mkdir()
+        root=Path(__file__).resolve().parents[2]
+        tool=root/'research/twrp-d2x-reference/aosp-mkbootimg.py'
+        private_keys=('producer_root','ci_success_context','compact_manifest','backup','current_packages','reference_twrp','output')
+        contract=dict(schema=typed.OFFLINE_SCHEMA,status='reviewed_ready',execution_version='v108',host_source_head='8'*40,
+            native_source_head=ro3.NATIVE_HEAD,accepted_result_sha256=ro3.NATIVE_RESULT_SHA256,
+            **{key:str((work/key).resolve()) for key in private_keys},mkbootimg=str(tool),caps=dict(typed.OFFLINE_CAPS),
+            **{key:'a'*64 for key in ('ci_success_context_sha256','compact_manifest_sha256','backup_manifest_sha256',
+                'current_package_result_sha256','current_boot_sha256')})
+        contract_path=work/'offline.json';outside=root/'research/unreviewed-tool.py'
+        actual_read=typed.data.bounded_private_read;actual_sha=profile.sha
+        reads=[];hashes=[]
+        def contract_read(path,cap):
+            self.assertEqual(Path(path),contract_path)
+            reads.append(str(path));return actual_read(path,cap)
+        def tool_hash(path):
+            self.assertEqual(Path(path),tool)
+            hashes.append(str(path));return actual_sha(path)
+        def write_contract(row):
+            save(contract_path,row)
+            return digest(contract_path.read_bytes())
+        with ExitStack() as stack:
+            stack.enter_context(patch('sha256_kat_device_profile.host_binding',return_value={}))
+            stack.enter_context(patch('linux_data_carrier.bounded_private_read',side_effect=contract_read))
+            stack.enter_context(patch('sha256_kat_device_profile.sha',side_effect=tool_hash))
+            for target in ('type3_admission.prepare_template','type3_admission.transaction','sha256_kat_device_profile.prepare_plan',
+                'stage_phase2.preflight','run_probe.preflight'):
+                stack.enter_context(patch(target,side_effect=AssertionError('path gate must precede input/transaction/device')))
+            expected=write_contract(contract)
+            self.assertEqual(typed.load_offline(contract_path,expected),contract)
+            self.assertEqual(hashes,[str(tool)])
+            self.assertFalse(Path(contract['output']).exists())
+            # Every other path domain remains private, including reference and output.
+            cases=[(key,str(outside)) for key in private_keys]
+            cases.extend((('mkbootimg',str(outside)),('mkbootimg',str(work/'aosp-mkbootimg.py')),
+                ('mkbootimg',str(tool.parent/'..'/tool.parent.name/tool.name)),('mkbootimg',None)))
+            for key,value in cases:
+                with self.subTest(key=key,value=value):
+                    bad=dict(contract);bad[key]=value;expected=write_contract(bad)
+                    before=len(hashes)
+                    with self.assertRaises(ValueError):typed.prepare_offline(contract_path,expected)
+                    self.assertEqual(len(hashes),before)
+                    self.assertFalse(Path(contract['output']).exists())
+            # Exercise the real canonical file's pin gate without altering that file.
+            expected=write_contract(contract)
+            with patch('prepare_linux_boot.MKBOOTIMG_SHA256','0'*64):
+                with self.assertRaises(ValueError):typed.prepare_offline(contract_path,expected)
+            self.assertEqual(hashes,[str(tool),str(tool)])
+            self.assertFalse(Path(contract['output']).exists())
+            # A private path with noncanonical spelling also fails before tool/input I/O.
+            bad=dict(contract,output=str(work/'..'/work.name/'output'));expected=write_contract(bad)
+            with self.assertRaises(ValueError):typed.prepare_offline(contract_path,expected)
+            self.assertEqual(hashes,[str(tool),str(tool)])
+        save(OUTPUT/'path-gate-summary.json',dict(selected=PATH_METHOD,contract_reads=len(reads),public_tool_hashes=len(hashes),
+            synthetic_private_paths_accepted=True,private_input_reads=0,transactions=0,actual_device_operations=[],
+            old_test_methods_run=0,C_compiles=0,Image_builds=0,CI=0))
+
     def test_typed_native107_host108_transaction_patch_plan_and_pretransport_scope(self):
         work=OUTPUT/'synthetic';work.mkdir();source=work/'producer';source.mkdir();backup=work/'backup';backup.mkdir()
         prior=work/'current';prior.mkdir();derived=work/'retained-compact';derived.mkdir()
@@ -226,11 +285,12 @@ class Type3AdmissionTests(unittest.TestCase):
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser();parser.add_argument('--output',type=Path,required=True)
+    parser.add_argument('--method',choices=(METHOD,PATH_METHOD),default=METHOD)
     args=parser.parse_args();OUTPUT=profile.private(args.output);OUTPUT.mkdir(parents=True,exist_ok=False)
     names=('kernel_readonly_span_candidate.py','kernel_readonly_input.py','sha256_kat_device_profile.py','linux_data_carrier.py',
         'materialize_auto_cycle.py','auto_cycle.py','prepare_linux_boot.py','stage_phase2.py','type3_admission.py','test_v108_type3_admission.py')
     save(OUTPUT/'source-sha256.json',{name:digest((Path(__file__).resolve().parent/name).read_bytes()) for name in names})
-    result=unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite([Type3AdmissionTests(METHOD)]))
-    save(OUTPUT/'result.json',dict(schema='v108-new-host-admission-tests-v1',selected=[METHOD],run=result.testsRun,failures=len(result.failures),errors=len(result.errors),
+    result=unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite([Type3AdmissionTests(args.method)]))
+    save(OUTPUT/'result.json',dict(schema='v108-new-host-admission-tests-v1',selected=[args.method],run=result.testsRun,failures=len(result.failures),errors=len(result.errors),
         passed=result.wasSuccessful(),old_test_methods_run=0,fixture_compiles=0,Image_builds=0,CI=0,actual_device_operations=[]))
     raise SystemExit(0 if result.wasSuccessful() else 1)
