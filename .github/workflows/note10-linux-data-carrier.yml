@@ -1,22 +1,27 @@
-name: Note10 v109 rev1 failed host method and first native Image
+name: Note10 v116 PC-first scoped output native candidate
+run-name: "v116 scoped output native candidate | ${{ inputs.expected_source_head }}"
 on:
   workflow_dispatch:
     inputs:
-      new_scope:
-        description: Only fixed host method and first Image; earlier fixture PASS is not replayed
+      expected_source_head:
+        description: Exact reviewed public source commit; must equal GITHUB_SHA before fixture or build
+        required: true
+        type: string
+      test_scope:
+        description: Only the one NEW native scoped-output fixture and fresh candidate Image; no old fixtures
         required: true
         type: choice
         options:
-          - v109-rev1-retained-host-only
+          - v116-native-scoped-output-candidate-pc-first
       recipient_public_key_b64:
-        description: Fresh RSA3072 public recipient key only; private key stays local
+        description: Existing approved RSA3072 public recipient key only; private key stays local
         required: true
         type: string
 permissions:
   contents: read
 jobs:
   linux-data-carrier:
-    if: ${{ inputs.new_scope == 'v109-rev1-retained-host-only' }}
+    if: ${{ inputs.test_scope == 'v116-native-scoped-output-candidate-pc-first' }}
     runs-on: ubuntu-22.04
     timeout-minutes: 110
     steps:
@@ -29,6 +34,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+      - name: Bind exact reviewed source and new scope
+        shell: bash --noprofile --norc -euo pipefail {0}
+        env:
+          N10_EXPECTED_SOURCE_HEAD: ${{ inputs.expected_source_head }}
+          N10_TEST_SCOPE: ${{ inputs.test_scope }}
+        run: |
+          [[ "$N10_EXPECTED_SOURCE_HEAD" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$GITHUB_SHA" == "$N10_EXPECTED_SOURCE_HEAD" ]]
+          [[ "$N10_TEST_SCOPE" == "v116-native-scoped-output-candidate-pc-first" ]]
       - name: Validate public recipient only
         env:
           N10_RECIPIENT_PUBLIC_KEY_B64: ${{ inputs.recipient_public_key_b64 }}
@@ -50,26 +64,26 @@ jobs:
             sudo -n env DEBIAN_FRONTEND=noninteractive timeout --kill-after=30s 180s apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
             sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a timeout --kill-after=30s 480s apt-get -o Dpkg::Use-Pty=0 -o DPkg::Lock::Timeout=60 -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install --no-install-recommends -y "${missing[@]}"
           fi
-      - name: Only fixed retained host method; no fixture compile or process
+      - name: One NEW native run-to-emit scoped output fixture
         env:
           PYTHONDONTWRITEBYTECODE: '1'
-        run: python -B note10/device_test/test_v109_readonly_stage_witness.py --scope v109-rev1-retained-host-only --output note10/private/v109-rev1-ci-host-test
-      - name: Compile minimal Linux PID1 and build first v109 candidate Image
+        run: python -B note10/device_test/test_v116_native_scoped_output.py --scope v116-native-scoped-output-candidate-pc-first --output note10/private/v116-ci-scoped-output-test
+      - name: Compile minimal Linux PID1 and build one fresh v116 scoped output candidate Image
         env:
           PYTHONDONTWRITEBYTECODE: '1'
-        run: python -B note10/device_test/build_kernel_readonly_span_candidate.py --producer v109-readonly-stage-witness-pc --output note10/private/v109-rev1-ci-linux-data-carrier --jobs 4
+        run: python -B note10/device_test/build_kernel_readonly_span_candidate.py --producer v116-native-scoped-output-candidate-pc-first --output note10/private/v116-ci-scoped-output-candidate --jobs 4
       - name: Bundle and seal private producer evidence including failures
         if: always()
         env:
           N10_RECIPIENT_PUBLIC_KEY_B64: ${{ inputs.recipient_public_key_b64 }}
         run: |
-          python -B note10/device_test/bundle_affinity_evidence.py --tests note10/private/v109-rev1-ci-host-test --build note10/private/v109-rev1-ci-linux-data-carrier --output note10/private/v109-rev1-evidence.zip --source "$GITHUB_SHA"
-          node note10/device_test/sealed_affinity_artifact.cjs seal note10/private/v109-rev1-evidence.zip note10/private/v109-rev1-sealed-evidence.n10sealed "$GITHUB_SHA"
+          python -B note10/device_test/bundle_affinity_evidence.py --tests note10/private/v116-ci-scoped-output-test --build note10/private/v116-ci-scoped-output-candidate --output note10/private/v116-scoped-output-evidence.zip --source "$GITHUB_SHA"
+          node note10/device_test/sealed_affinity_artifact.cjs seal note10/private/v116-scoped-output-evidence.zip note10/private/v116-scoped-output-sealed-evidence.n10sealed "$GITHUB_SHA"
       - name: Upload ciphertext only
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: note10-v109-rev1-sealed-evidence
+          name: note10-v116-scoped-output-candidate-sealed-evidence
           if-no-files-found: error
           retention-days: 7
-          path: note10/private/v109-rev1-sealed-evidence.n10sealed
+          path: note10/private/v116-scoped-output-sealed-evidence.n10sealed

@@ -94,10 +94,11 @@ def retain_route_prerequisites(source, objects, out, compiler_include):
 
 
 def main(kind=None):
-    if kind not in (None, "sha256-stream-state", "cpu-affinity-binding", "early-fdt-binding", "native-memory-observation", "linux-data-carrier", "owned-contiguous-staging-pc", "current-owned-staging-pc", "readonly-input-pc", "kernel-readonly-candidate", "kernel-readonly-span-pc", "kernel-readonly-span-candidate", "kernel-readonly-stage-witness-candidate"):
+    if kind not in (None, "sha256-stream-state", "cpu-affinity-binding", "early-fdt-binding", "native-memory-observation", "linux-data-carrier", "owned-contiguous-staging-pc", "current-owned-staging-pc", "readonly-input-pc", "kernel-readonly-candidate", "kernel-readonly-span-pc", "kernel-readonly-span-candidate", "kernel-readonly-stage-witness-candidate", "kernel-scoped-verified-output-candidate"):
         raise ValueError("closed diagnostic task required")
-    witness = kind == "kernel-readonly-stage-witness-candidate"
-    type3 = kind in ("kernel-readonly-span-candidate","kernel-readonly-stage-witness-candidate")
+    scoped = kind == "kernel-scoped-verified-output-candidate"
+    witness = kind == "kernel-readonly-stage-witness-candidate" or scoped
+    type3 = kind in ("kernel-readonly-span-candidate","kernel-readonly-stage-witness-candidate","kernel-scoped-verified-output-candidate")
     span_pc = kind == "kernel-readonly-span-pc"
     kernel_ro = kind in ("kernel-readonly-candidate", "kernel-readonly-span-pc")
     readonly = kind == "readonly-input-pc"
@@ -107,7 +108,7 @@ def main(kind=None):
     native = kind == "native-memory-observation"
     current_owned = kind == "current-owned-staging-pc"
     owned = kind in ("owned-contiguous-staging-pc","current-owned-staging-pc")
-    data_task = kind in ("linux-data-carrier","owned-contiguous-staging-pc","current-owned-staging-pc","readonly-input-pc","kernel-readonly-candidate","kernel-readonly-span-pc","kernel-readonly-span-candidate","kernel-readonly-stage-witness-candidate")
+    data_task = kind in ("linux-data-carrier","owned-contiguous-staging-pc","current-owned-staging-pc","readonly-input-pc","kernel-readonly-candidate","kernel-readonly-span-pc","kernel-readonly-span-candidate","kernel-readonly-stage-witness-candidate","kernel-scoped-verified-output-candidate")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--archive', type=Path)
@@ -152,6 +153,9 @@ def main(kind=None):
         if witness:
             from readonly_stage_witness import SOURCES as stage_sources
             extra=(*extra,*stage_sources,'type3_admission.py','test_v108_type3_admission.py')
+        if scoped:
+            from native_scoped_output import SOURCES as scoped_sources
+            extra=(*extra,*scoped_sources)
     if kernel_ro:
         from kernel_readonly_input import SOURCES as kernel_ro_sources
         extra=(*extra,*kernel_ro_sources)
@@ -196,6 +200,8 @@ def main(kind=None):
         from early_fdt_binding import install, API_PINS as extra_kernel_pins
     elif native:
         from native_memory_observation import install, API_PINS as extra_kernel_pins
+    elif scoped:
+        from native_scoped_output import install, API_PINS as extra_kernel_pins
     elif witness:
         from readonly_stage_witness import install, API_PINS as extra_kernel_pins
     elif type3:
@@ -309,6 +315,8 @@ def main(kind=None):
         if type3:
             settings.update(NOTE10_KERNEL_READONLY_SPAN_CANDIDATE='y',NOTE10_KERNEL_READONLY_INPUT='n',
                 NOTE10_KERNEL_READONLY_SPAN_PC='n',NOTE10_READONLY_INPUT_PC='n',LOCALVERSION='"-v109-readonly-stage-witness-candidate"' if witness else '"-v107-readonly-span-candidate"')
+        if scoped:
+            settings.update(NOTE10_SCOPED_OUTPUT_LEASE='y',LOCALVERSION='"-v116-scoped-output-candidate"')
         if span_pc:
             settings.update(NOTE10_KERNEL_READONLY_SPAN_PC='y',LOCALVERSION='"-v106-kernel-span-pc"')
         if readonly:
@@ -337,6 +345,8 @@ def main(kind=None):
         span_default_enabled=span_pc and any(line.startswith('CONFIG_NOTE10_KERNEL_READONLY_SPAN_PC=') for line in (objects/'.config').read_text().splitlines())
         if span_default_enabled:
             raise ValueError('PC span precondition must be default off')
+        scoped_default_enabled=scoped and any(line.startswith('CONFIG_NOTE10_SCOPED_OUTPUT_LEASE=') for line in (objects/'.config').read_text().splitlines())
+        if scoped_default_enabled:raise ValueError('scoped output must be default off')
         type3_default_enabled=type3 and any(line.startswith('CONFIG_NOTE10_KERNEL_READONLY_SPAN_CANDIDATE=') for line in (objects/'.config').read_text().splitlines())
         if type3_default_enabled:
             raise ValueError('distinct type3 candidate must be default off')
@@ -396,7 +406,7 @@ def main(kind=None):
         stable_archive(archive, before)
         if manifest != {name: sha(ROOT/name) for name in manifest}:
             raise ValueError('local first-use inputs changed during build')
-        result = dict(schema=1, version='v109' if witness else 'v107' if type3 else 'v106' if span_pc else 'v105' if kernel_ro else 'v103' if readonly else 'v96' if current_owned else 'v92' if owned else 'v91' if data_task else 'v82' if native else 'v81' if fdt else 'v78' if affinity else 'v73' if stream else 'v72', diagnostic_kind=kind, passed=True, kernel_commit=COMMIT,
+        result = dict(schema=1, version='v116' if scoped else 'v109' if witness else 'v107' if type3 else 'v106' if span_pc else 'v105' if kernel_ro else 'v103' if readonly else 'v96' if current_owned else 'v92' if owned else 'v91' if data_task else 'v82' if native else 'v81' if fdt else 'v78' if affinity else 'v73' if stream else 'v72', diagnostic_kind=kind, passed=True, kernel_commit=COMMIT,
                       build_evidence_id=identity, ci_context=ci, source_sha256=manifest,
                       settings=settings, make_target='Image', integration_object=TARGET,
                       bootloader_cmdline_policy=cmdline_policy,
@@ -524,7 +534,14 @@ def main(kind=None):
             from readonly_stage_witness import KIND as STAGE_KIND,SCHEMA as STAGE_SCHEMA
             if witness and b'N10DATASTAGE1' not in raw:raise ValueError('native stage companion emitter missing')
             if witness:result.update(readonly_stage_schema=STAGE_SCHEMA,readonly_stage_marker='N10DATASTAGE1',operation_scope_PC_only=True,admission_blocked=True)
-            result.update(PC_only=False,PC_first_use=True,physical_ready=False,data_input_kind=STAGE_KIND if witness else ro3.KIND,storage_input_kind=STAGE_KIND if witness else ro3.KIND,kernel_readonly3_schema=ro3.SCHEMA,
+            if scoped:
+                from native_scoped_output import KIND as SCOPED_KIND,SCHEMA as SCOPED_SCHEMA,REFERENCE_LINKED_BYTES
+                if b'N10OUTPUTLEASE1' not in raw:raise ValueError('native scoped output companion missing')
+                result.update(scoped_output_schema=SCOPED_SCHEMA,scoped_output_marker='N10OUTPUTLEASE1',scoped_output_handle_bytes=24,
+                    scoped_output_payload_bytes=ro3.old.PAYLOAD_BYTES,scoped_output_default_enabled=scoped_default_enabled,
+                    scoped_output_reference_linked_bytes=REFERENCE_LINKED_BYTES,scoped_output_linked_delta_bytes=footprint['linked_kernel_bytes']-REFERENCE_LINKED_BYTES,
+                    scoped_output_reads_per_success=2,scoped_output_retained_after_emit=False)
+            result.update(PC_only=False,PC_first_use=True,physical_ready=False,data_input_kind=SCOPED_KIND if scoped else STAGE_KIND if witness else ro3.KIND,storage_input_kind=SCOPED_KIND if scoped else STAGE_KIND if witness else ro3.KIND,kernel_readonly3_schema=ro3.SCHEMA,
                 kernel_readonly3_marker='N10DATARO3',
                 kernel_readonly3_slot=record,kernel_readonly3_linked_bytes=footprint['linked_kernel_bytes'],kernel_readonly3_image_bytes=len(raw),
                 kernel_readonly3_requires_ack=True,kernel_readonly3_default_enabled=type3_default_enabled,

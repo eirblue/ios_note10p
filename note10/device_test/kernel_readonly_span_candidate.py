@@ -130,13 +130,23 @@ def span_metadata(system_map,footprint,slot):
 
 def producer_contract(result,source,*,producing_sources=None,historical_origin=None):
     from readonly_stage_witness import KIND as STAGE_KIND,SCHEMA as STAGE_SCHEMA,SOURCES as STAGE_SOURCES
-    witness=result.get('diagnostic_kind')==STAGE_KIND
-    wanted_kind=STAGE_KIND if witness else KIND
-    required=(*SOURCES,*(STAGE_SOURCES if witness else ()),'kernel_readonly_input.py','kernel_readonly_span.h','linux_data_carrier.py',
+    from native_scoped_output import KIND as SCOPED_KIND,SCHEMA as SCOPED_SCHEMA,SOURCES as SCOPED_SOURCES,REFERENCE_LINKED_BYTES
+    scoped=result.get('diagnostic_kind')==SCOPED_KIND
+    witness=result.get('diagnostic_kind')==STAGE_KIND or scoped
+    wanted_kind=SCOPED_KIND if scoped else STAGE_KIND if witness else KIND
+    required=(*SOURCES,*(STAGE_SOURCES if witness else ()),*(SCOPED_SOURCES if scoped else ()),'kernel_readonly_input.py','kernel_readonly_span.h','linux_data_carrier.py',
         'linux_data_carrier.c','linux_data_carrier_composition.c','build_builtin_init_image.py')
     data.require(not witness or historical_origin is None and result.get('readonly_stage_schema')==STAGE_SCHEMA and
         result.get('readonly_stage_marker')=='N10DATASTAGE1' and result.get('operation_scope_PC_only') is True and
         result.get('admission_blocked') is True,'new witness producer cannot use native107 history')
+    data.require(not scoped or historical_origin is None and result.get('scoped_output_schema')==SCOPED_SCHEMA and
+        result.get('scoped_output_marker')=='N10OUTPUTLEASE1' and result.get('scoped_output_handle_bytes')==24 and
+        result.get('scoped_output_payload_bytes')==old.PAYLOAD_BYTES and result.get('scoped_output_default_enabled') is False and
+        result.get('scoped_output_reads_per_success')==2 and result.get('scoped_output_retained_after_emit') is False and
+        result.get('scoped_output_reference_linked_bytes')==REFERENCE_LINKED_BYTES and
+        result.get('scoped_output_linked_delta_bytes')==result.get('data_footprint',{}).get('linked_kernel_bytes',0)-REFERENCE_LINKED_BYTES and
+        result.get('data_footprint',{}).get('data_state_bytes')==88 and result.get('settings',{}).get('NOTE10_SCOPED_OUTPUT_LEASE')=='y',
+        'closed new native scoped-output producer required')
     if historical_origin is not None:
         data.require(historical_origin==source==NATIVE_HEAD and producing_sources is None and
             result.get('source_sha256')==NATIVE_SOURCE59,'exact retained native107 source59 required')
@@ -154,7 +164,7 @@ def producer_contract(result,source,*,producing_sources=None,historical_origin=N
         all(span[key] is True for key in ('slot_contained','descriptor_contained','disjoint')) and
         span['hardware'] is False and span['ownership'] is False and span['source']=='linked-kernel' and span['phase']=='pre_descriptor',
         'closed type3 linked span metadata required')
-    data.require(result.get('version')==('v109' if witness else 'v107') and result.get('diagnostic_kind')==result.get('data_input_kind')==result.get('storage_input_kind')==wanted_kind and
+    data.require(result.get('version')==('v116' if scoped else 'v109' if witness else 'v107') and result.get('diagnostic_kind')==result.get('data_input_kind')==result.get('storage_input_kind')==wanted_kind and
         result.get('kernel_readonly3_marker')=='N10DATARO3' and result.get('kernel_readonly3_schema')==SCHEMA and result.get('kernel_readonly3_span_schema')==old.SPAN_SCHEMA and
         result.get('kernel_readonly3_default_enabled') is False and result.get('kernel_readonly3_requires_ack') is True and
         result.get('passed') is True and result.get('Image_built') is True and result.get('BOOT_built') is False and
@@ -185,6 +195,8 @@ def producer_contract(result,source,*,producing_sources=None,historical_origin=N
         data.require(span['text_prefix_bytes']<=extent['offset'] and extent['offset']+extent['bytes']<=linked,'type3 span extent differs')
     return dict(candidate_kind=wanted_kind,storage_input_kind=wanted_kind,descriptor_class=3,PC_first_use=True,physical_ready=False,
         **(dict(PC_only=False,operation_scope_PC_only=True,admission_blocked=True,stage_witness_schema=STAGE_SCHEMA) if witness else {}),
+        **(dict(scoped_output_schema=SCOPED_SCHEMA,caller_local_handle_bytes=24,reads_per_success=2,retained_after_emit=False,
+            linked_reference_bytes=REFERENCE_LINKED_BYTES,actual_linked_extent_delta_bytes=linked-REFERENCE_LINKED_BYTES) if scoped else {}),
         slot_count=1,descriptor_count=1,additional_readonly_storage_bytes=CAPACITY+80,linked_budget=BUDGET,
         scalar_bytes=footprint['data_state_bytes'],range_scalar_bytes=16,temporary_outcome_bytes=128,
         hardware_mapping_attested=False,global_RAM_ownership=False,offline_composition_admitted=False)

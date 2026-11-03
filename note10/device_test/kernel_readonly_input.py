@@ -364,6 +364,8 @@ def candidate_scope(row,*,require_compact=True):
 
 
 def require_device_scope(row,ack_kernel_readonly_growth=False,type3_context=None):
+    from native_scoped_output import refuse as refuse_scoped_output
+    refuse_scoped_output(row)
     data.require(row.get('diagnostic_kind') not in ('output-lifetime-lease-pc','host-owned-output-adapter-pc','host-output-writer-pc','host-output-content-verification-pc') and
         row.get('output_lease_schema')!='n10-output-lifetime-lease-pc-v1' and
         row.get('output_adapter_schema')!='n10-host-owned-output-adapter-pc-v1' and

@@ -26,6 +26,12 @@
 #define N10_STAGE(out,event) do { } while(0)
 #define N10_STAGE_CALLS(out) ((out)->decoded)
 #endif
+#ifdef N10_DATA_SCOPED_OUTPUT
+#if !defined(N10_DATA_KERNEL_READONLY_V3) || !defined(N10_DATA_STAGE_WITNESS) || defined(N10_DATA_CONTIGUOUS)
+#error "scoped output requires a distinct stage-witness class3 producer"
+#endif
+#include "native_scoped_output.h"
+#endif
 #ifdef N10_DATA_READONLY_PC
 #if defined(N10_DATA_COMPARE_EVIDENCE) || defined(N10_DATA_CONTIGUOUS) || defined(N10_DATA_KERNEL_READONLY) || !defined(N10_DATA_IMAGE_EXPECTATION)
 #error "readonly PC source cannot mix external-input or owned modes"
@@ -402,7 +408,11 @@ _Static_assert(sizeof(struct n10_data_outcome)==128,"exact PC span outcome");
 _Static_assert(sizeof(struct n10_data_outcome) == 280, "exact temporary normal DATA outcome");
 #endif
 
-static void n10_data_run(struct n10_data_outcome *out)
+static void n10_data_run(struct n10_data_outcome *out
+#ifdef N10_DATA_SCOPED_OUTPUT
+    ,struct n10_output_handle *lease
+#endif
+)
 {
     const unsigned char *p = n10_data.input;
     unsigned char digest[32] = {0}, expectation[32] = {0};
@@ -578,6 +588,10 @@ static void n10_data_run(struct n10_data_outcome *out)
     if (n10_data_hash(output,payload,digest) || memcmp(digest,p+80,32)) goto done;
 #endif
     memcpy(out->digest,digest,32); out->status = "ok";
+#ifdef N10_DATA_SCOPED_OUTPUT
+    if(n10_output_offer(lease,output,(size_t)payload)) { out->status="output_offer"; goto done; }
+    output=NULL; /* Ownership moves only after the existing verified digest. */
+#endif
 done:
     if (workspace) {
         N10_STAGE(out,N10_SW_WORK_CLEAR_CALLED);
@@ -601,7 +615,24 @@ done:
     n10_data_clear(expectation,sizeof(expectation));
 }
 
-#ifndef N10_DATA_HOST_TEST
+#ifdef N10_DATA_SCOPED_OUTPUT
+/* The emitter owns the returned allocation only inside this lexical scope. */
+static void n10_scoped_output_finish(struct n10_data_outcome *out,struct n10_output_handle *lease)
+{
+    if(!lease->data) return;
+    if(n10_output_read_and_release(lease)) out->status="output_consumer";
+    lease->flags|=N10_OUT_RETIRED;
+    N10_STAGE(out,N10_SW_OUTPUT_CLEAR_CALLED);lease->flags|=N10_OUT_CLEAR_CALLED;
+    n10_data_clear(lease->data,lease->bytes);
+    N10_STAGE(out,N10_SW_OUTPUT_CLEAR_RETURNED);lease->flags|=N10_OUT_CLEAR_RETURNED;
+    N10_STAGE(out,N10_SW_OUTPUT_FREE_CALLED);lease->flags|=N10_OUT_FREE_CALLED;
+    n10_data_free(lease->data);
+    N10_STAGE(out,N10_SW_OUTPUT_FREE_RETURNED);lease->flags|=N10_OUT_FREE_RETURNED;
+    lease->data=NULL;lease->bytes=0;
+}
+#endif
+
+#if !defined(N10_DATA_HOST_TEST) || defined(N10_SCOPED_OUTPUT_EMIT_FIXTURE)
 static int n10_data_emit(void)
 {
     struct n10_data_outcome outcome;
@@ -612,7 +643,13 @@ static int n10_data_emit(void)
     unsigned int i;
     int count;
     static const char digits[] = "0123456789abcdef";
+#ifdef N10_DATA_SCOPED_OUTPUT
+    struct n10_output_handle lease={0};
+    n10_data_run(&outcome,&lease);
+    n10_scoped_output_finish(&outcome,&lease);
+#else
     n10_data_run(&outcome);
+#endif
     for (i = 0; i < 32; ++i) { digest[2*i] = digits[outcome.digest[i] >> 4]; digest[2*i+1] = digits[outcome.digest[i]&15]; }
     digest[64] = 0;
     count = scnprintf(frame,sizeof(frame),
@@ -632,6 +669,10 @@ static int n10_data_emit(void)
 #ifdef N10_DATA_STAGE_WITNESS
     count=n10_stage_format(outcome.decoded,frame,sizeof(frame),N10_SHA256_KAT_ID,(const char *)n10_cycle);
     if(count) pr_info("N10DATASTAGE1 %s checksum=%08x\n",frame,n10_frame_checksum(frame,count));
+#ifdef N10_DATA_SCOPED_OUTPUT
+    count=n10_output_format(&lease,frame,sizeof(frame),N10_SHA256_KAT_ID,(const char *)n10_cycle);
+    if(count) pr_info("N10OUTPUTLEASE1 %s checksum=%08x\n",frame,n10_frame_checksum(frame,count));
+#endif
 #endif
 #endif
 #elif defined(N10_DATA_READONLY_PC)
