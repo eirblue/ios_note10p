@@ -252,6 +252,9 @@ def no_pc(row):
 
 
 def live_row(row):
+    from type3_remaining_plan import selected as saved_selected,origin as saved_origin
+    if saved_selected(row):
+        no_pc(row);return saved_origin(row)
     no_pc(row)
     item=record()
     require(row.get('source_head')==row.get('native_source_head')==item['head'] and
@@ -381,6 +384,8 @@ def growth_ack():
 
 
 def execution_context(row,plan_sha,packages,declared_version,host_head,path,expected,execution_output):
+    from type3_remaining_plan import selected as saved_selected,execution_context as saved_execution
+    if saved_selected(row):return saved_execution(row,plan_sha,packages,declared_version,host_head,path,expected,execution_output)
     import type3_admission as typed
     from sha256_kat_device_profile import host_binding
     live_row(row);offline=typed.candidate_scope(row,patched=True)
@@ -421,6 +426,8 @@ def execution_context(row,plan_sha,packages,declared_version,host_head,path,expe
 
 
 def require_device_scope(row,ack,context):
+    from type3_remaining_plan import selected as saved_selected,require_device_scope as saved_scope
+    if saved_selected(row):return saved_scope(row,ack,context)
     require(ack is True,'host117 requires explicit measured growth ACK before device query')
     keys={'schema','declared_version','host_source_head','host_source_sha256','plan_sha256','packages','output',
         'contract_path','contract_sha256','linked_growth_ack'}
@@ -440,6 +447,8 @@ def device_reader(function):
         import sha256_kat_device_profile as profile
         row=profile.read(profile.private(packages)/'package-result.json')
         if not scoped.selected(row):return function(packages,kernel_build,*args,**kwargs)
+        from type3_remaining_plan import selected as saved_selected,device_reader as saved_reader
+        if saved_selected(row):return saved_reader(function,packages,kernel_build,*args,**kwargs)
         context=kwargs.get('type3_context')
         typed.require_context_directory(context,packages)
         require_device_scope(row,kwargs.get('ack_kernel_readonly_growth',False),context)
@@ -470,6 +479,8 @@ def device_metadata(root,token=None,template=None):
 
 
 def device_precheck_receipt(context,path):
+    from type3_remaining_plan import CONTEXT_SCHEMA as saved_schema,precheck_receipt
+    if context is not None and context.get('schema')==saved_schema:return precheck_receipt(context,path)
     import type3_admission as typed
     require(_DEVICE_READ.get() is not None and context.get('schema')==CONTEXT_SCHEMA,
         'validated host117 read scope required before precheck output')
@@ -518,6 +529,8 @@ def decode_joined(text,identity,cycle,legacy,stages):
 def require_pack_transaction(root,output,token):
     """Device read scope cannot authorize a new packing operation."""
     import type3_admission as typed
+    from type3_remaining_plan import selected as saved_selected
+    require(not saved_selected(typed.read(typed.private(root)/'build-result.json')),'retained117 metadata is read-only; packing refused')
     require(_DEVICE_READ.get() is None,'host117 device metadata scope is read-only; packing refused')
     root=typed.private(root);row=typed.read(root/'build-result.json');contract=typed.candidate_scope(row,patched=True)
     typed.transaction(dict(contract,_contract_sha256=row['type3_contract_sha256']),'plan_reserved')

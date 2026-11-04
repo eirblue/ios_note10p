@@ -167,6 +167,7 @@ def wait_recovery(adb,previous_id,seconds,monotonic=time.monotonic,sleep=time.sl
         adb.call=original
 
 
+@__import__('type3_remaining_plan').device_plan_reader
 def run_plan(path,expected,output,*,execute=False,limit=1,adb=None,verified_roundtrip=None,roundtrip_sha256=None,ack_kernel_readonly_growth=False,v105_battery_5pct_exception=False,battery_exception_approval=None,battery_exception_approval_sha256=None,execution_host_source_head=None,declared_test_version=None,type3_device_contract=None,type3_device_contract_sha256=None):
     if not execute:raise ValueError('Preparation only: run requires explicit --execute; no device contacted')
     plan=validate_plan(path,expected)
@@ -223,7 +224,7 @@ def run_plan(path,expected,output,*,execute=False,limit=1,adb=None,verified_roun
             from sha256_kat_device_profile import selected,precheck as check_kat,collect as collect_kat
             kat=selected(plan)
             preinstall_evidence=None
-            precheck_receipt=output/f'PREINSTALL-CHECK-{item["index"]:02d}.json' if battery_policy['five_percent_exception'] or type3_context is not None and type3_context.get('schema') in ('type3-remaining-pack-execution-v2','type3-scoped-output-execution-v1') else None
+            precheck_receipt=output/f'PREINSTALL-CHECK-{item["index"]:02d}.json' if battery_policy['five_percent_exception'] or type3_context is not None and type3_context.get('schema') in ('type3-remaining-pack-execution-v2','type3-scoped-output-execution-v1','type3-saved117-execution-v1') else None
             if kat:
                 preinstall_evidence=dict(phase='preinstall',index=item['index'],cycle=item['cycle'],
                     receipt_path=str(precheck_receipt or packages/'PREINSTALL-CHECK.json'),evidence=None)

@@ -8,6 +8,7 @@ import shutil
 import retained_v108_origin as retained
 import class3_native_origin as origins
 import type3_remaining_pack as remaining
+import type3_remaining_plan as saved117
 
 import kernel_readonly_span_candidate as ro3
 import kernel_readonly_input as old
@@ -66,7 +67,8 @@ def load_offline(path,expected):
         require(retained.reading() and row['host_source_head']==retained.HEAD and row['execution_version']=='v108','native107 contract is retained-read-only')
     elif item['version']=='v116':
         require(row['execution_version']=='v117','native116 requires separately versioned host117')
-        origins.live_host(row['host_source_head']);host_binding(row['host_source_head'])
+        if row['host_source_head']==saved117.HEAD:saved117.require_original_contract(row,path,expected)
+        else:origins.live_host(row['host_source_head']);host_binding(row['host_source_head'])
     else:
         require(row['execution_version']=='v110','native109 requires separately versioned host110')
         if row['host_source_head']==remaining.HEAD:
@@ -115,7 +117,7 @@ def candidate_scope(row,*,patched=None):
         'exact retained native class3 and separate new host identity required')
     version(row.get('execution_version'))
     from sha256_kat_device_profile import host_binding
-    host=remaining.origin(row) if remaining.selected(row) else retained.origin(row) if retained.selected(row) else host_binding(row.get('host_profile_source_head'))
+    host=saved117.origin(row) if saved117.selected(row) else remaining.origin(row) if remaining.selected(row) else retained.origin(row) if retained.selected(row) else host_binding(row.get('host_profile_source_head'))
     require(row.get('host_profile_source_sha256')==host['host_profile_source_sha256'],'type3 current host closure differs')
     ro3.metadata_contract(row.get('kernel_readonly3_slot'),row.get('kernel_readonly3_image_bytes'))
     span=row.get('kernel_readonly3_span')
@@ -220,6 +222,7 @@ def prepare_template(contract,path,expected):
 def validate_template(root):
     from sha256_kat_device_profile import raw_binding,host_profile_origin,root_receipt_binding,common_report,ci_success_receipt,sha as file_sha
     root=private(root);binding=read(root/'device-profile.json')
+    if saved117.selected(binding):return saved117.saved_metadata(root)
     if remaining.selected(binding):return remaining.saved_metadata(root)
     contract=candidate_scope(binding,patched=False);item=origins.record(binding['native_source_head'])
     measured=raw_binding(root,item['result'],item['head'],readonly_origin=item['head'])
@@ -269,6 +272,7 @@ def materialization(report,token,generic_sha,bound_sha,template_report_sha):
 def validate_variant(root,token,template=None):
     from materialize_auto_cycle import template_bytes,SLOT
     root=private(root);report=read(root/'build-result.json')
+    if saved117.selected(report):return saved117.saved_metadata(root,token,template)
     from native_scoped_output_admission import _DEVICE_READ,device_metadata
     from native_scoped_output import selected as scoped_selected
     if scoped_selected(report) and _DEVICE_READ.get() is not None:return device_metadata(root,token,template)

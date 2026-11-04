@@ -13,6 +13,7 @@ import uuid
 import class3_native_origin as origins
 import type3_remaining_pack as remaining
 import native_scoped_output_admission as scoped_admission
+import type3_remaining_plan as saved117
 
 PROFILE = 'sha256-kat-recovery-v1'
 BUILTIN_PROFILE = 'sha256-kat-builtin-init-v2'
@@ -693,6 +694,7 @@ V105_PACKING_ORIGIN_PINS = MappingProxyType({
 
 def host_binding(source_head):
     from retained_v108_origin import live
+    require(source_head!=saved117.HEAD,'producing117 host is retained read-origin only')
     live(source_head);origins.live_host(source_head)
     require(re.fullmatch('[0-9a-f]{40}', source_head or ''), 'exact host-profile publication source pin required')
     require(source_head not in (V97_PROFILE_ORIGIN_HEAD, V99_PROFILE_ORIGIN_HEAD, V100_PROFILE_ORIGIN_HEAD, V101_PROFILE_ORIGIN_HEAD, V102_PROFILE_ORIGIN_HEAD, V104_PROFILE_ORIGIN_HEAD, V105_CANDIDATE_ORIGIN_HEAD, V105_PACKING_ORIGIN_HEAD, __import__('kernel_readonly_span_candidate').NATIVE_HEAD, 'e32ec501551b74b4cca5618ea25245f012656f29'),
@@ -720,7 +722,8 @@ def host_binding(source_head):
                       'test_v107_readonly_span_candidate.py','build_kernel_readonly_span_candidate.py',
                       'type3_admission.py','test_v108_type3_admission.py','retained_v108_origin.py',
                       'readonly_stage_witness.py','readonly_stage_witness.h','readonly_stage_witness_fixture.c','test_v109_readonly_stage_witness.py','class3_native_origin.py','test_v110_native109_admission.py','type3_remaining_pack.py','test_v111_device_read_context.py','native_scoped_output.py','test_v116_native_scoped_output.py',
-                     'native_scoped_output_admission.py','test_v117_native_scoped_output_admission.py')}
+                     'native_scoped_output_admission.py','test_v117_native_scoped_output_admission.py',
+                     'type3_remaining_plan.py','test_v118_saved117_remaining_plan.py')}
     return dict(host_profile_source_head=source_head, host_profile_source_sha256=dict(pins))
 
 
@@ -739,6 +742,7 @@ def host_profile_origin(binding):
     """Validate a producing profile origin without relabeling the live host."""
     from retained_v108_origin import selected,origin
     if selected(binding):return origin(binding)
+    if saved117.selected(binding):return saved117.origin(binding)
     if remaining.selected(binding):return remaining.origin(binding)
     head = binding.get('host_profile_source_head')
     require(re.fullmatch('[0-9a-f]{40}', head or '') and
@@ -997,6 +1001,7 @@ def prepare_template(build, output, accepted_result_sha256, source_head, *, root
 def validate_template(root):
     root = private(root)
     binding = read(root/'device-profile.json')
+    if saved117.in_scope(root) or saved117.selected(binding):return saved117.saved_metadata(root)
     if origins.selected(binding):
         from type3_admission import validate_template as type3_template
         return type3_template(root)
@@ -1029,7 +1034,9 @@ def validate_template(root):
 
 def variant(root, token):
     from materialize_auto_cycle import validate
-    report = validate(private(root), token)
+    root=private(root)
+    if saved117.in_scope(root) or saved117.selected(read(root/'build-result.json')):report=saved117.saved_metadata(root,token)
+    else:report = validate(root, token)
     require(selected(report), 'KAT variant required')
     no_legacy(report)
     return report
@@ -1262,6 +1269,8 @@ def finish_plan(kernel_build,backup,twrp,mkbootimg,current_packages,output,templ
 
 @remaining.plan_reader
 def validate_plan(path, expected):
+    from type3_remaining_plan import selected_plan,accepted_plan
+    if selected_plan(path):return accepted_plan(path,expected)
     from stage_phase2 import verify_packages
     from prepare_linux_boot import boot_header, read_verified_backup
     from prepare_linux_boot import TWRP_SHA256, MKBOOTIMG_SHA256
@@ -1316,17 +1325,28 @@ def validate_plan(path, expected):
         prior_pair = read(previous/'package-result.json')
         from builtin_init_profile import current_boot_binding
         current_boot_binding(plan, prior_pair, prior)
+    return _validate_plan_tail(plan,bound,pair,records,prior,backup,packages)
+
+
+def _validate_plan_tail(plan,bound,pair,records,prior,backup,packages):
+    """Existing suffix only; callers must supply their separately validated scope."""
+    from prepare_linux_boot import boot_header,read_verified_backup,TWRP_SHA256,MKBOOTIMG_SHA256
+    from build_boot_test_packages import updater
+    from kernel_readonly_input import PACKING_FIELDS
+    from type3_remaining_plan import report_section
     parts = read_verified_backup(backup)
     require(sha(plan['reference_twrp']) == TWRP_SHA256 and sha(plan['mkbootimg']) == MKBOOTIMG_SHA256,
             'private reference TWRP/mkbootimg input changed')
     official = Path(plan['reference_twrp']).read_bytes()
     require(parts['recovery'].startswith(official), 'paired recovery differs from reference')
+    report_section('backup_reference_complete')
     original_header, recovery_header = boot_header(parts['boot']), boot_header(official)
     rollback = next(r for r in records if r['mode'] == 'rollback')
     require(pair['expected_current_boot_sha256'] == prior['payload_sha256'] and
             prior['payload_size'] == len(parts['boot']) and
             rollback['payload_sha256'] == hashlib.sha256(parts['boot']).hexdigest() and
             rollback['payload_size'] == len(parts['boot']), 'paired rollback/current BOOT chain differs')
+    report_section('rollback_current_chain_complete')
     import zipfile
     diagnostic = next(r for r in records if r['mode'] == 'diagnostic')
     baseline = read(backup/'backup-manifest.json')
@@ -1340,6 +1360,7 @@ def validate_plan(path, expected):
             require(archive.read('META-INF/com/google/android/update-binary') == expected_writer,
                     'package differs from unchanged common BOOT writer')
             require(len(archive.read('boot.img')) == len(parts['boot']), 'actual padded BOOT size differs')
+    report_section('package_writer_and_size_complete')
     with zipfile.ZipFile(packages/diagnostic['file']) as archive:
         payload = archive.read('boot.img')
         header = boot_header(payload)
@@ -1360,6 +1381,7 @@ def validate_plan(path, expected):
             header['ramdisk_addr'] == recovery_header['ramdisk_addr'] and
             header['arm64_text_offset'] == recovery_header['arm64_text_offset'],
             'actual BOOT metadata/bootloader command line differs')
+    report_section('diagnostic_BOOT_header_complete')
     ramdisk = official[recovery_header['ramdisk_file_offset']:
                        recovery_header['ramdisk_file_offset']+recovery_header['ramdisk_size']]
     actual_ramdisk = payload[header['ramdisk_file_offset']:header['ramdisk_file_offset']+header['ramdisk_size']]
@@ -1382,6 +1404,7 @@ def validate_plan(path, expected):
     end, trailer = header['second_file_offset'], b'SEANDROIDENFORCE'
     require(payload[end:end+len(trailer)] == trailer and not any(payload[end+len(trailer):]),
             'Samsung trailer/full-partition zero padding differs')
+    report_section('compact_ramdisk_trailer_complete')
     return plan
 
 
