@@ -1356,3 +1356,10 @@ This is synthetic host evidence plus native build provenance; it does not establ
 The v122 host test passed all five sections and the reviewed source was published. One offline first-use attempt attached and intrinsically validated the compact input once, then stopped during template validation when the generated receipt did not match the expected schema. No materialization, package pair, plan, or cycle was produced. The attempt is spent and will not be replayed.
 
 No device query, BOOT write, reboot, CI dispatch, or new Image build occurred in v122. The v111 physical baseline remains unchanged. This does not establish device readiness or a hardware output-zero observation.
+
+
+## 2026-11-04: v123 remaining-template validation stopped
+
+The v123 selected host test passed all four sections and the reviewed source was published. One remaining-template attempt completed the saved template-tail validation, materialization, and variant validation. It generated a BOOT image, then stopped because package-scope validation found that the generated metadata differed from the preserved v122/native121 template fields. No package pair or plan was produced. This attempt is spent and will not be replayed.
+
+No v123 device query, device BOOT write, or reboot occurred. No v123 CI dispatch or new Image build occurred. The v111 physical baseline remains unchanged. This result does not establish device readiness or a hardware output-zero observation.
