@@ -1308,3 +1308,10 @@ One reviewed CI run passed the new synthetic scoped-output method and built the 
 The native producer reports one class-3 descriptor and one slot. The linked kernel extent is 59,588,608 bytes, within the 59,768,832-byte budget, with a reported linked-extent delta of zero. The resulting candidate remains PC-first and PC-operation-scoped, admission-blocked, and not physically ready.
 
 This CI result does not establish hardware behavior, global RAM ownership, hardware mapping, source authenticity, zeroization, or persistence after emit. No device, boot, or actual private input operation occurred. The v111 physical baseline remains unchanged.
+
+
+## 2026-11-04: v117 offline plan validation stopped
+
+The remaining host admission test passed its five continuation sections after carrying the earlier completed prefix; no test prefix was replayed. The first offline attempt stopped before input work, and one corrected offline attempt wrote the template, materialized the accepted v116 Image, created the package pair and wrote a plan. Final plan validation stopped on a predecessor current-BOOT binding mismatch, so no plan was accepted.
+
+No device query, BOOT write, reboot, CI run, or new Image build occurred in v117. The v111 physical baseline remains unchanged. This result does not establish device readiness.
