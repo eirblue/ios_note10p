@@ -173,6 +173,8 @@ def applies(row):
     return selected(row) or ctx is not None and row.get('host_profile_source_head')==HEAD and row.get('native_source_head')==native.record()['head']
 
 def candidate(row,patched=None):
+    import type3_remaining_packages as packages
+    if packages.handles(row):return packages.candidate(row,patched)
     import native_scoped_output_admission as shared
     ctx=_context(row);shared.no_pc(row)
     if not selected(row):require(row in (ctx['binding'],ctx['report']) and _ACTIVE.get() is not None,'retained122 origin is read-only in exact remaining transaction')

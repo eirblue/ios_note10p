@@ -96,13 +96,18 @@ unzip -p "$ZIP" boot.img > "$WORK/boot.img" || abort "Cannot extract BOOT payloa
 def build(backup,prototype,output,current_packages=None):
     if not output.resolve().is_relative_to((ROOT/'note10/private').resolve()):raise ValueError('Private output required')
     if output.exists():raise ValueError('Package directory already exists')
+    from type3_remaining_packages import builder_entry
+    builder_entry(backup,prototype,output,current_packages)
     parts=read_verified_backup(backup)
     manifest=json.loads((backup/'backup-manifest.json').read_text())
     metadata=json.loads(prototype.with_suffix('.json').read_text())
     from sha256_kat_device_profile import selected,fields,package_scope
     kat=selected(metadata)
     kat_fields=fields(metadata) if kat else {}
-    if kat:package_scope(metadata,'diagnostic')
+    if kat:
+        package_scope(metadata,'diagnostic')
+        from type3_remaining_packages import package_fields
+        kat_fields=package_fields(metadata,kat_fields)
     raw=prototype.read_bytes()
     original=hashlib.sha256(parts['boot']).hexdigest()
     if metadata.get('prototype_created') is not True or metadata.get('kind')!='temporary Linux diagnostic boot; not XNU/iOS':
@@ -294,6 +299,8 @@ def build(backup,prototype,output,current_packages=None):
     result.update(scratch_metadata)
     for mode,payload in (('diagnostic',padded),('rollback',parts['boot'])):
         digest=hashlib.sha256(payload).hexdigest()
+        from type3_remaining_packages import note_payload
+        note_payload(mode,digest,len(payload))
         script=updater(mode=mode,bootloader=manifest['bootloader'],partitions=manifest['partitions'],
                        payload_sha=digest,current_boot_sha=current_boot,reservation=reservation,
                        window_access=window_access,xnu_stage=xnu_stage and mode=='diagnostic',

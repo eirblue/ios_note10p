@@ -707,6 +707,7 @@ def host_binding(source_head):
     from retained_v108_origin import live
     require(source_head!=saved117.HEAD,'producing117 host is retained read-origin only')
     require(source_head!=__import__('type3_remaining_template').HEAD,'composing122 host is retained read-origin only')
+    require(source_head!=__import__('type3_remaining_packages').HEAD,'variant/BOOT producer123 is retained read-origin only')
     live(source_head);origins.live_host(source_head)
     require(re.fullmatch('[0-9a-f]{40}', source_head or ''), 'exact host-profile publication source pin required')
     require(source_head not in (V97_PROFILE_ORIGIN_HEAD, V99_PROFILE_ORIGIN_HEAD, V100_PROFILE_ORIGIN_HEAD, V101_PROFILE_ORIGIN_HEAD, V102_PROFILE_ORIGIN_HEAD, V104_PROFILE_ORIGIN_HEAD, V105_CANDIDATE_ORIGIN_HEAD, V105_PACKING_ORIGIN_HEAD, __import__('kernel_readonly_span_candidate').NATIVE_HEAD, 'e32ec501551b74b4cca5618ea25245f012656f29'),
@@ -734,7 +735,7 @@ def host_binding(source_head):
                       'test_v107_readonly_span_candidate.py','build_kernel_readonly_span_candidate.py',
                       'type3_admission.py','test_v108_type3_admission.py','retained_v108_origin.py',
                       'readonly_stage_witness.py','readonly_stage_witness.h','readonly_stage_witness_fixture.c','test_v109_readonly_stage_witness.py','class3_native_origin.py','test_v110_native109_admission.py','type3_remaining_pack.py','test_v111_device_read_context.py','native_scoped_output.py','test_v116_native_scoped_output.py',
-                     'native_scoped_output_admission.py','test_v117_native_scoped_output_admission.py','native_prefree_output_admission.py','native_prefree_output_zero.py','test_v122_native_prefree_output_admission.py','type3_remaining_template.py','test_v123_native121_remaining_template.py',
+                     'native_scoped_output_admission.py','test_v117_native_scoped_output_admission.py','native_prefree_output_admission.py','native_prefree_output_zero.py','test_v122_native_prefree_output_admission.py','type3_remaining_template.py','test_v123_native121_remaining_template.py','type3_remaining_packages.py','test_v124_saved123_package_tail.py',
                      'type3_remaining_plan.py','test_v118_saved117_remaining_plan.py','test_v119_saved118_device_entry.py')}
     return dict(host_profile_source_head=source_head, host_profile_source_sha256=dict(pins))
 
@@ -1103,6 +1104,8 @@ def fields(row):
     if remaining.FIELD in row:keys=(*keys,remaining.FIELD)
     from type3_remaining_template import FIELD as tail_field
     if tail_field in row:keys=(*keys,tail_field)
+    from type3_remaining_packages import FIELD as packages_field
+    if packages_field in row:keys=(*keys,packages_field)
     return {key: row[key] for key in keys}
 
 
@@ -1307,15 +1310,20 @@ def validate_plan(path, expected):
     type3_keys=set(PLAN_FIELDS) if any(key in plan for key in PLAN_FIELDS) else set()
     from type3_remaining_template import FIELD as tail_field
     tail_keys={tail_field} if tail_field in plan else set()
+    from type3_remaining_packages import FIELD as packages_field,plan_binding as packages_plan_binding
+    packages_keys={packages_field} if packages_field in plan else set()
     remaining_keys={remaining.FIELD} if remaining.FIELD in plan else set()
-    require(set(plan)-packing_keys-type3_keys-remaining_keys-tail_keys == (PLAN_KEYS | {'current_boot_payload_sha256'} if plan.get('device_profile') in (BUILTIN_PROFILE, STREAM_PROFILE, AFFINITY_PROFILE, FDT_PROFILE, NATIVE_PROFILE, DATA_PROFILE) else PLAN_KEYS) and selected(plan) and plan.get('kind') == 'note10-bounded-auto-cycle' and
+    require(set(plan)-packing_keys-type3_keys-remaining_keys-tail_keys-packages_keys == (PLAN_KEYS | {'current_boot_payload_sha256'} if plan.get('device_profile') in (BUILTIN_PROFILE, STREAM_PROFILE, AFFINITY_PROFILE, FDT_PROFILE, NATIVE_PROFILE, DATA_PROFILE) else PLAN_KEYS) and selected(plan) and plan.get('kind') == 'note10-bounded-auto-cycle' and
             type(plan.get('schema')) is int and plan['schema'] == 1 and
             type(plan.get('minimum_battery')) is int and type(plan.get('return_timeout_seconds')) is int and
             plan.get('minimum_battery') == 10 and plan.get('return_timeout_seconds') == 240 and
             len(plan.get('stages', [])) == 1, 'closed single-cycle KAT plan required')
     root, backup = private(plan['kernel_build']), private(plan['backup'])
     report = validate_template(root)
-    if origins.selected(report):
+    if packages_keys:
+        require(type3_keys==set(PLAN_FIELDS),'closed124 plan execution fields required')
+        packages_plan_binding(plan,report)
+    elif origins.selected(report):
         require(type3_keys==set(PLAN_FIELDS) and plan['execution_version']==report['execution_version'] and
             plan['executing_host_source_head']==report['host_profile_source_head'] and plan['type3_contract_sha256']==report['type3_contract_sha256'],'type3 plan execution provenance differs')
     else:require(not type3_keys,'unrelated plan cannot claim type3 execution scope')

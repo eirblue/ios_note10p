@@ -242,6 +242,9 @@ def plan_reader(function):
     def checked(path,expected):
         import type3_admission as typed
         plan=typed.read(typed.private(path))
+        import type3_remaining_packages as packages
+        if packages.selected(plan):
+            with packages.plan_scope(plan,path,expected):return function(path,expected)
         import type3_remaining_template as tail
         if tail.selected(plan):
             with tail.plan_scope(plan,path,expected):return function(path,expected)
