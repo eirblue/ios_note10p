@@ -735,7 +735,7 @@ def host_binding(source_head):
                       'test_v107_readonly_span_candidate.py','build_kernel_readonly_span_candidate.py',
                       'type3_admission.py','test_v108_type3_admission.py','retained_v108_origin.py',
                       'readonly_stage_witness.py','readonly_stage_witness.h','readonly_stage_witness_fixture.c','test_v109_readonly_stage_witness.py','class3_native_origin.py','test_v110_native109_admission.py','type3_remaining_pack.py','test_v111_device_read_context.py','native_scoped_output.py','test_v116_native_scoped_output.py',
-                     'native_scoped_output_admission.py','test_v117_native_scoped_output_admission.py','native_prefree_output_admission.py','native_prefree_output_zero.py','test_v122_native_prefree_output_admission.py','type3_remaining_template.py','test_v123_native121_remaining_template.py','type3_remaining_packages.py','test_v124_saved123_package_tail.py','v125_device_entry.py','test_v125_saved124_device_entry.py',
+                     'native_scoped_output_admission.py','test_v117_native_scoped_output_admission.py','native_prefree_output_admission.py','native_prefree_output_zero.py','test_v122_native_prefree_output_admission.py','type3_remaining_template.py','test_v123_native121_remaining_template.py','type3_remaining_packages.py','test_v124_saved123_package_tail.py','v125_device_entry.py','test_v125_saved124_device_entry.py','test_v126_saved124_plan_roles.py',
                      'type3_remaining_plan.py','test_v118_saved117_remaining_plan.py','test_v119_saved118_device_entry.py')}
     return dict(host_profile_source_head=source_head, host_profile_source_sha256=dict(pins))
 

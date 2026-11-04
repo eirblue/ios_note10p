@@ -404,7 +404,7 @@ def execution_context(row,plan_sha,packages,declared_version,host_head,path,expe
     import type3_remaining_template as tail
     import type3_remaining_packages as package_tail
     import v125_device_entry as device125
-    if declared_version=='v125':return device125.execution_context(row,plan_sha,packages,declared_version,host_head,path,expected,execution_output)
+    if declared_version in ('v125','v126'):return device125.execution_context(row,plan_sha,packages,declared_version,host_head,path,expected,execution_output)
     packaged=package_tail.selected(row);resumed=tail.selected(row)
     execution_version='v124' if packaged else 'v123' if resumed else item['host_version']
     authority_sha=row[package_tail.FIELD]['contract_sha256'] if packaged else row[tail.FIELD]['contract_sha256'] if resumed else row['type3_contract_sha256']
