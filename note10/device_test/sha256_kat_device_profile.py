@@ -80,6 +80,8 @@ def no_legacy(row):
 
 
 def physical_input_scope(result,*,readonly_origin=None):
+    from native_prefree_output_zero import refuse as refuse_prefree
+    refuse_prefree(result)
     from native_scoped_output import selected as scoped_selected
     if scoped_selected(result):
         from native_scoped_output_admission import is_head,producer,no_pc

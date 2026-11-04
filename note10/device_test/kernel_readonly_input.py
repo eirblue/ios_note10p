@@ -364,6 +364,8 @@ def candidate_scope(row,*,require_compact=True):
 
 
 def require_device_scope(row,ack_kernel_readonly_growth=False,type3_context=None):
+    from native_prefree_output_zero import refuse as refuse_prefree
+    refuse_prefree(row)
     data.require(row.get('diagnostic_kind')!='host-output-retirement-zero-pc' and
         row.get('schema')!='n10-host-output-retirement-zero-pc-v1' and
         row.get('output_retirement_schema')!='n10-host-output-retirement-zero-pc-v1',

@@ -30,7 +30,14 @@
 #if !defined(N10_DATA_KERNEL_READONLY_V3) || !defined(N10_DATA_STAGE_WITNESS) || defined(N10_DATA_CONTIGUOUS)
 #error "scoped output requires a distinct stage-witness class3 producer"
 #endif
+#ifdef N10_DATA_PREFREE_OUTPUT_ZERO
+#if !defined(N10_DATA_SCOPED_OUTPUT)
+#error "prefree observer requires scoped native output"
+#endif
+#include "native_prefree_output_zero.h"
+#else
 #include "native_scoped_output.h"
+#endif
 #endif
 #ifdef N10_DATA_READONLY_PC
 #if defined(N10_DATA_COMPARE_EVIDENCE) || defined(N10_DATA_CONTIGUOUS) || defined(N10_DATA_KERNEL_READONLY) || !defined(N10_DATA_IMAGE_EXPECTATION)
@@ -605,10 +612,18 @@ done:
         N10_STAGE(out,N10_SW_OUTPUT_CLEAR_CALLED);
         n10_data_clear(output,(size_t)out->payload);
         N10_STAGE(out,N10_SW_OUTPUT_CLEAR_RETURNED);
+#ifdef N10_DATA_PREFREE_OUTPUT_ZERO
+        lease->flags|=N10_OUT_CLEAR_CALLED|N10_OUT_CLEAR_RETURNED;
+        if(n10_output_observe_prefree(lease,output,(size_t)out->payload)) out->status="output_zero_observation";
+        lease->flags|=N10_OUT_FREE_CALLED;
+#endif
 #ifndef N10_DATA_CONTIGUOUS
         N10_STAGE(out,N10_SW_OUTPUT_FREE_CALLED);
         n10_data_free(output);
         N10_STAGE(out,N10_SW_OUTPUT_FREE_RETURNED);
+#ifdef N10_DATA_PREFREE_OUTPUT_ZERO
+        lease->flags|=N10_OUT_FREE_RETURNED;
+#endif
 #endif
     }
     n10_data_clear(digest,sizeof(digest));
@@ -625,10 +640,16 @@ static void n10_scoped_output_finish(struct n10_data_outcome *out,struct n10_out
     N10_STAGE(out,N10_SW_OUTPUT_CLEAR_CALLED);lease->flags|=N10_OUT_CLEAR_CALLED;
     n10_data_clear(lease->data,lease->bytes);
     N10_STAGE(out,N10_SW_OUTPUT_CLEAR_RETURNED);lease->flags|=N10_OUT_CLEAR_RETURNED;
+#ifdef N10_DATA_PREFREE_OUTPUT_ZERO
+    if(n10_output_observe_prefree(lease,lease->data,lease->bytes)) out->status="output_zero_observation";
+#endif
     N10_STAGE(out,N10_SW_OUTPUT_FREE_CALLED);lease->flags|=N10_OUT_FREE_CALLED;
     n10_data_free(lease->data);
     N10_STAGE(out,N10_SW_OUTPUT_FREE_RETURNED);lease->flags|=N10_OUT_FREE_RETURNED;
-    lease->data=NULL;lease->bytes=0;
+    lease->data=NULL;
+#ifndef N10_DATA_PREFREE_OUTPUT_ZERO
+    lease->bytes=0;
+#endif
 }
 #endif
 
@@ -672,6 +693,10 @@ static int n10_data_emit(void)
 #ifdef N10_DATA_SCOPED_OUTPUT
     count=n10_output_format(&lease,frame,sizeof(frame),N10_SHA256_KAT_ID,(const char *)n10_cycle);
     if(count) pr_info("N10OUTPUTLEASE1 %s checksum=%08x\n",frame,n10_frame_checksum(frame,count));
+#ifdef N10_DATA_PREFREE_OUTPUT_ZERO
+    count=n10_output_zero_format(&lease,frame,sizeof(frame),N10_SHA256_KAT_ID,(const char *)n10_cycle);
+    if(count) pr_info("N10OUTPUTZERO1 %s checksum=%08x\n",frame,n10_frame_checksum(frame,count));
+#endif
 #endif
 #endif
 #endif

@@ -1,5 +1,5 @@
-name: Note10 v116 PC-first scoped output native candidate
-run-name: "v116 scoped output native candidate | ${{ inputs.expected_source_head }}"
+name: Note10 v121 PC-first prefree output zero observation native candidate
+run-name: "v121 prefree output zero observation native candidate | ${{ inputs.expected_source_head }}"
 on:
   workflow_dispatch:
     inputs:
@@ -8,11 +8,11 @@ on:
         required: true
         type: string
       test_scope:
-        description: Only the one NEW native scoped-output fixture and fresh candidate Image; no old fixtures
+        description: Only the one NEW native prefree-output-zero fixture and fresh candidate Image; no old fixtures
         required: true
         type: choice
         options:
-          - v116-native-scoped-output-candidate-pc-first
+          - v121-native-prefree-output-zero-candidate-pc-first
       recipient_public_key_b64:
         description: Existing approved RSA3072 public recipient key only; private key stays local
         required: true
@@ -21,7 +21,7 @@ permissions:
   contents: read
 jobs:
   linux-data-carrier:
-    if: ${{ inputs.test_scope == 'v116-native-scoped-output-candidate-pc-first' }}
+    if: ${{ inputs.test_scope == 'v121-native-prefree-output-zero-candidate-pc-first' }}
     runs-on: ubuntu-22.04
     timeout-minutes: 110
     steps:
@@ -42,7 +42,7 @@ jobs:
         run: |
           [[ "$N10_EXPECTED_SOURCE_HEAD" =~ ^[0-9a-f]{40}$ ]]
           [[ "$GITHUB_SHA" == "$N10_EXPECTED_SOURCE_HEAD" ]]
-          [[ "$N10_TEST_SCOPE" == "v116-native-scoped-output-candidate-pc-first" ]]
+          [[ "$N10_TEST_SCOPE" == "v121-native-prefree-output-zero-candidate-pc-first" ]]
       - name: Validate public recipient only
         env:
           N10_RECIPIENT_PUBLIC_KEY_B64: ${{ inputs.recipient_public_key_b64 }}
@@ -64,26 +64,26 @@ jobs:
             sudo -n env DEBIAN_FRONTEND=noninteractive timeout --kill-after=30s 180s apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
             sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a timeout --kill-after=30s 480s apt-get -o Dpkg::Use-Pty=0 -o DPkg::Lock::Timeout=60 -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install --no-install-recommends -y "${missing[@]}"
           fi
-      - name: One NEW native run-to-emit scoped output fixture
+      - name: One NEW native run-to-emit prefree output zero observation fixture
         env:
           PYTHONDONTWRITEBYTECODE: '1'
-        run: python -B note10/device_test/test_v116_native_scoped_output.py --scope v116-native-scoped-output-candidate-pc-first --output note10/private/v116-ci-scoped-output-test
-      - name: Compile minimal Linux PID1 and build one fresh v116 scoped output candidate Image
+        run: python -B note10/device_test/test_v121_native_prefree_output_zero.py --scope v121-native-prefree-output-zero-candidate-pc-first --output note10/private/v121-ci-prefree-output-zero-test
+      - name: Compile minimal Linux PID1 and build one fresh v121 prefree output zero observation candidate Image
         env:
           PYTHONDONTWRITEBYTECODE: '1'
-        run: python -B note10/device_test/build_kernel_readonly_span_candidate.py --producer v116-native-scoped-output-candidate-pc-first --output note10/private/v116-ci-scoped-output-candidate --jobs 4
+        run: python -B note10/device_test/build_kernel_readonly_span_candidate.py --producer v121-native-prefree-output-zero-candidate-pc-first --output note10/private/v121-ci-prefree-output-zero-candidate --jobs 4
       - name: Bundle and seal private producer evidence including failures
         if: always()
         env:
           N10_RECIPIENT_PUBLIC_KEY_B64: ${{ inputs.recipient_public_key_b64 }}
         run: |
-          python -B note10/device_test/bundle_affinity_evidence.py --tests note10/private/v116-ci-scoped-output-test --build note10/private/v116-ci-scoped-output-candidate --output note10/private/v116-scoped-output-evidence.zip --source "$GITHUB_SHA"
-          node note10/device_test/sealed_affinity_artifact.cjs seal note10/private/v116-scoped-output-evidence.zip note10/private/v116-scoped-output-sealed-evidence.n10sealed "$GITHUB_SHA"
+          python -B note10/device_test/bundle_affinity_evidence.py --tests note10/private/v121-ci-prefree-output-zero-test --build note10/private/v121-ci-prefree-output-zero-candidate --output note10/private/v121-prefree-output-zero-evidence.zip --source "$GITHUB_SHA"
+          node note10/device_test/sealed_affinity_artifact.cjs seal note10/private/v121-prefree-output-zero-evidence.zip note10/private/v121-prefree-output-zero-sealed-evidence.n10sealed "$GITHUB_SHA"
       - name: Upload ciphertext only
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: note10-v116-scoped-output-candidate-sealed-evidence
+          name: note10-v121-prefree-output-zero-candidate-sealed-evidence
           if-no-files-found: error
           retention-days: 7
-          path: note10/private/v116-scoped-output-sealed-evidence.n10sealed
+          path: note10/private/v121-prefree-output-zero-sealed-evidence.n10sealed
