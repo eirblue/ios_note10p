@@ -402,16 +402,18 @@ def execution_context(row,plan_sha,packages,declared_version,host_head,path,expe
     from sha256_kat_device_profile import host_binding
     item=record(row.get('native_source_head'))
     import type3_remaining_template as tail
-    import type3_remaining_packages as packages
-    packaged=packages.selected(row);resumed=tail.selected(row)
+    import type3_remaining_packages as package_tail
+    import v125_device_entry as device125
+    if declared_version=='v125':return device125.execution_context(row,plan_sha,packages,declared_version,host_head,path,expected,execution_output)
+    packaged=package_tail.selected(row);resumed=tail.selected(row)
     execution_version='v124' if packaged else 'v123' if resumed else item['host_version']
-    authority_sha=row[packages.FIELD]['contract_sha256'] if packaged else row[tail.FIELD]['contract_sha256'] if resumed else row['type3_contract_sha256']
+    authority_sha=row[package_tail.FIELD]['contract_sha256'] if packaged else row[tail.FIELD]['contract_sha256'] if resumed else row['type3_contract_sha256']
     live_row(row);offline=typed.candidate_scope(row,patched=True)
     completed=typed.read(Path(offline['output'])/'transaction.json')
     require(completed.get('status')=='complete' and completed.get('phase')=='complete' and
         completed.get('contract_sha256')==authority_sha and
         completed.get('result',{}).get('plan_sha256')==plan_sha,'complete fresh native116 offline transaction required')
-    require(declared_version==execution_version and host_head==(packages.execution_host(row) if packaged else row['host_profile_source_head']) and
+    require(declared_version==execution_version and host_head==(package_tail.execution_host(row) if packaged else row['host_profile_source_head']) and
         re.fullmatch('[0-9a-f]{64}',plan_sha or '') and path is not None and
         re.fullmatch('[0-9a-f]{64}',expected or ''),'explicit reviewed host117 device scope required')
     path=typed.private(path);raw=data.bounded_private_read(path,65536)
@@ -424,7 +426,7 @@ def execution_context(row,plan_sha,packages,declared_version,host_head,path,expe
     require(packages is None or typed.private(packages)==effective,'explicit packages contradict closed device contract')
     packages=effective
     host=host_binding(host_head)
-    require(type(contract) is dict and set(contract)==keys and contract['schema']==(packages.DEVICE_SCHEMA if packaged else tail.DEVICE_SCHEMA if resumed else device_schema(item['head'])) and
+    require(type(contract) is dict and set(contract)==keys and contract['schema']==(package_tail.DEVICE_SCHEMA if packaged else tail.DEVICE_SCHEMA if resumed else device_schema(item['head'])) and
         contract['status']=='reviewed_ready' and contract['execution_version']==declared_version and
         contract['host_source_head']==host_head and contract['host_source_sha256']==host['host_profile_source_sha256'] and
         contract['native_source_head']==item['head'] and contract['plan_sha256']==plan_sha and
@@ -442,13 +444,15 @@ def execution_context(row,plan_sha,packages,declared_version,host_head,path,expe
         'closed host117 device contract/plan/growth scope differs')
     require(data.sha(data.bounded_private_read(typed.private(packages)/'package-result.json',4*1024*1024))==
         contract['package_result_sha256'],'reviewed host117 package metadata changed')
-    return dict(schema=packages.CONTEXT_SCHEMA if packaged else tail.CONTEXT_SCHEMA if resumed else context_schema(item['head']),declared_version=execution_version,host_source_head=host_head,
+    return dict(schema=package_tail.CONTEXT_SCHEMA if packaged else tail.CONTEXT_SCHEMA if resumed else context_schema(item['head']),declared_version=execution_version,host_source_head=host_head,
         host_source_sha256=host['host_profile_source_sha256'],plan_sha256=plan_sha,packages=str(typed.private(packages)),
         output=str(typed.private(execution_output)),contract_path=str(path),contract_sha256=expected,
         linked_growth_ack=contract['linked_growth_ack'])
 
 
 def require_device_scope(row,ack,context):
+    import v125_device_entry as device125
+    if type(context) is dict and context.get('schema')==device125.CONTEXT_SCHEMA:return device125.require_scope(row,ack,context)
     from type3_remaining_plan import selected as saved_selected,require_device_scope as saved_scope
     if saved_selected(row):return saved_scope(row,ack,context)
     require(ack is True,'host117 requires explicit measured growth ACK before device query')
@@ -471,6 +475,11 @@ def device_reader(function):
         import sha256_kat_device_profile as profile
         row=profile.read(profile.private(packages)/'package-result.json')
         import type3_remaining_packages as packages_scope
+        import v125_device_entry as device125
+        context=kwargs.get('type3_context')
+        if type(context) is dict and context.get('schema')==device125.CONTEXT_SCHEMA and device125._READ.get() is None:
+            with device125.reader_scope(row,kwargs.get('ack_kernel_readonly_growth',False),context):
+                return checked(packages,kernel_build,*args,**kwargs)
         if packages_scope.selected(row) and packages_scope._SCOPE.get() is None:
             with packages_scope.device_scope(row,kwargs.get('ack_kernel_readonly_growth',False),kwargs.get('type3_context')):
                 return checked(packages,kernel_build,*args,**kwargs)
@@ -510,7 +519,7 @@ def device_precheck_receipt(context,path):
     from type3_remaining_plan import CONTEXT119_SCHEMA as saved_schema,precheck_receipt
     if context is not None and context.get('schema')==saved_schema:return precheck_receipt(context,path)
     import type3_admission as typed
-    require(_DEVICE_READ.get() is not None and context is not None and context.get('schema') in (CONTEXT_SCHEMA,'type3-prefree-output-execution-v1',__import__('type3_remaining_template').CONTEXT_SCHEMA,__import__('type3_remaining_packages').CONTEXT_SCHEMA),
+    require(_DEVICE_READ.get() is not None and context is not None and context.get('schema') in (__import__('v125_device_entry').CONTEXT_SCHEMA,CONTEXT_SCHEMA,'type3-prefree-output-execution-v1',__import__('type3_remaining_template').CONTEXT_SCHEMA,__import__('type3_remaining_packages').CONTEXT_SCHEMA),
         'validated host117 read scope required before precheck output')
     target=typed.private(context['output'])/'PREINSTALL-CHECK-01.json'
     require((path is None or typed.private(path)==target) and not target.exists() and

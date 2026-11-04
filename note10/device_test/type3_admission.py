@@ -103,6 +103,8 @@ def contract_binding(row):
 
 
 def candidate_scope(row,*,patched=None):
+    import v125_device_entry as device125
+    if device125.handles(row):return device125.candidate(row,patched)
     import type3_remaining_template as tail
     if tail.applies(row):return tail.candidate(row,patched)
     item=origins.record(row.get('native_source_head'))

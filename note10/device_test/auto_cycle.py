@@ -167,6 +167,7 @@ def wait_recovery(adb,previous_id,seconds,monotonic=time.monotonic,sleep=time.sl
         adb.call=original
 
 
+@__import__('v125_device_entry').device_plan_reader
 @__import__('type3_remaining_plan').device_plan_reader
 def run_plan(path,expected,output,*,execute=False,limit=1,adb=None,verified_roundtrip=None,roundtrip_sha256=None,ack_kernel_readonly_growth=False,v105_battery_5pct_exception=False,battery_exception_approval=None,battery_exception_approval_sha256=None,execution_host_source_head=None,declared_test_version=None,type3_device_contract=None,type3_device_contract_sha256=None):
     if not execute:raise ValueError('Preparation only: run requires explicit --execute; no device contacted')

@@ -439,7 +439,8 @@ def load(path,expected):
     import sha256_kat_device_profile as profile
     path=private(path);require(sha(path)==expected,'exact reviewed124 package-tail contract SHA required');c=read(path)
     require(type(c) is dict and set(c)==KEYS and c['schema']==SCHEMA and c['status']=='reviewed_ready' and c['execution_version']=='v124' and c['caps']==CAPS and all(type(x) is int for x in c['caps'].values()),'closed124 package-tail contract required')
-    host=profile.host_binding(c['execution_host_source_head']);require(host['host_profile_source_sha256']==c['execution_host_source_sha256'] and host['host_profile_source_head']!=HEAD,'separate live124 code closure required')
+    import v125_device_entry as device125
+    host=device125.retained_binding(c) if device125._AUTH.get() is not None else profile.host_binding(c['execution_host_source_head']);require(host['host_profile_source_sha256']==c['execution_host_source_sha256'] and host['host_profile_source_head']!=HEAD,'separate live124 code closure required')
     old=read(_pin(c['prior_contract']));j=read(_pin(c['prior_transaction']));operator=read(_pin(c['prior_operator']));trace=_pin(c['prior_trace']).read_text(encoding='utf-8')
     require(set(old)==prior.KEYS and old.get('schema')==prior.SCHEMA and old.get('status')=='reviewed_ready' and old.get('execution_version')=='v123' and old.get('execution_host_source_head')==HEAD and old.get('execution_host_source_sha256')==dict(PINS) and old.get('caps')==prior.CAPS,'exact retained123 composing/materializing origin91 required')
     require(j.get('schema')=='saved122-template-remaining-journal-v1' and j.get('status')=='failed_no_restart' and j.get('phase')=='plan_reserved' and j.get('contract_sha256')==c['prior_contract']['sha256'] and j.get('counts')==dict(template_tail=1,materializations=1,variant_validations=1,packs=1,plans=1),'exact spent123 attempt counters required; not completed pairs/plan')

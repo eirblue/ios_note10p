@@ -240,6 +240,9 @@ def plan_reader(function):
     from functools import wraps
     @wraps(function)
     def checked(path,expected):
+        from v125_device_entry import accepted_plan
+        accepted=accepted_plan(path,expected)
+        if accepted is not None:return accepted
         import type3_admission as typed
         plan=typed.read(typed.private(path))
         import type3_remaining_packages as packages
