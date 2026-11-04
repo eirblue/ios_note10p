@@ -1315,3 +1315,11 @@ This CI result does not establish hardware behavior, global RAM ownership, hardw
 The remaining host admission test passed its five continuation sections after carrying the earlier completed prefix; no test prefix was replayed. The first offline attempt stopped before input work, and one corrected offline attempt wrote the template, materialized the accepted v116 Image, created the package pair and wrote a plan. Final plan validation stopped on a predecessor current-BOOT binding mismatch, so no plan was accepted.
 
 No device query, BOOT write, reboot, CI run, or new Image build occurred in v117. The v111 physical baseline remains unchanged. This result does not establish device readiness.
+
+## 2026-11-04: v118 device preflight stopped
+
+The v118 local-test sequence used three single-attempt methods: two stopped after partial progress, and the final remaining-only method passed its three new sections while carrying the earlier three completed sections. Six unique sections were completed; no test prefix was replayed. One saved-plan remaining validation completed all six sections without creating another plan or cycle.
+
+The separate v118 device operator was invoked once and stopped in host-side saved-plan context validation before device preflight. No device query, partition write, or reboot occurred. No v118 CI run or Image build occurred. The v111 physical baseline remains unchanged. This result does not establish v118 device readiness or a hardware re-entry witness.
+
+The v118 auto_cycle attempt is spent and will not be replayed.
