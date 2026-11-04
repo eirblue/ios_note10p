@@ -1299,3 +1299,12 @@ The writer remains a caller-discipline interface. The fixture does not establish
 One reviewed PC-only hosted CI run passed a new host-output digest-seal test and its synthetic C fixture. The fixture hashed complete, fully written host-owned output through the hosted OpenSSL SHA-256 provider in the same process that recorded its compile-time and runtime provider versions. Across five case groups, five seals hashed 320 bytes: four outputs matched the 32-byte expected digest selected by the caller, and one deliberate mismatch was refused. Four successful matches led to internal finalization.
 
 This checks host-process digest equality against caller-selected expected bytes; it does not establish payload authenticity or a trusted manifest. The interface relies on valid caller-supplied memory extents and C API discipline, and does not attest immutable memory, security isolation, source readability, ownership, zeroization, physical readiness, or hardware behavior. Allocation/provider failure coverage was not observed or claimed. No device, Image, private input, decoder, or Mach-O operation occurred. The v111 physical baseline is unchanged.
+
+
+## v116 scoped output native candidate PC-first CI
+
+One reviewed CI run passed the new synthetic scoped-output method and built the native candidate. Its six fixture case groups recorded 12 allocation attempts, 10 successful allocations and 10 frees, with two output reads, 16 hash-stub calls and four decoder-stub calls. The fixture used synthetic inputs and stubs; no real decoder or native runtime was executed.
+
+The native producer reports one class-3 descriptor and one slot. The linked kernel extent is 59,588,608 bytes, within the 59,768,832-byte budget, with a reported linked-extent delta of zero. The resulting candidate remains PC-first and PC-operation-scoped, admission-blocked, and not physically ready.
+
+This CI result does not establish hardware behavior, global RAM ownership, hardware mapping, source authenticity, zeroization, or persistence after emit. No device, boot, or actual private input operation occurred. The v111 physical baseline remains unchanged.
