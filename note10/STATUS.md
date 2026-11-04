@@ -1,3 +1,8 @@
+## 2026-11-05: v127 PC-only current94 entry and leaf-mapper case passed
+
+- One new synthetic PC case followed the retained transfer branch, current startup path and actual 0012 leaf mapper, then stopped before the first MMU-enable instruction. The mapper returned to its link register; all 1,171 kernel and metadata pages checked, with no writes outside its ten-page table pool.
+- The new case passed once. It invoked the entry once and rejected seven changed-contract variants. No prior cases were replayed; no build, CI, decoder, materialization or device operation occurred.
+- This result does not establish sufficient working RAM, ownership, MMU transition, full XNU entry, hardware execution or boot readiness. The existing physical-device baseline is unchanged.
 ## 2026-11-04: v113 PC 전용 host allocation adapter CI 통과
 
 - 검토된 CI에서 새 합성 호스트 시험 1개와 실제 hosted malloc/free를 사용하는 C 픽스처 컴파일·실행 1회가 통과했다. 5개 사례 그룹과 4개 영구 PC 전용 가드가 통과했다. 계측은 할당 시도 9회, 할당 9회, 해제 9회를 기록했고 카운터가 완전했다. malloc 실패는 관찰되지 않아 OOM 또는 할당 실패 보장은 주장하지 않는다.
