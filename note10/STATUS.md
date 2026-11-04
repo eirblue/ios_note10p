@@ -1323,3 +1323,11 @@ The v118 local-test sequence used three single-attempt methods: two stopped afte
 The separate v118 device operator was invoked once and stopped in host-side saved-plan context validation before device preflight. No device query, partition write, or reboot occurred. No v118 CI run or Image build occurred. The v111 physical baseline remains unchanged. This result does not establish v118 device readiness or a hardware re-entry witness.
 
 The v118 auto_cycle attempt is spent and will not be replayed.
+
+
+## v119 device preflight safe stop
+
+- The v119 host test passed and the source was published.
+- One device attempt reached the fresh battery preflight. The device reported 1%, below the required 10%, so execution stopped before any partition write or reboot.
+- The five-partition hash gates and restore checks did not complete. No v119 device cycle completed; the v111 physical baseline remains current.
+- This v119 auto_cycle attempt is spent and will not be replayed. No automatic resume or additional device query is authorized.
