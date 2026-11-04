@@ -19,7 +19,9 @@ def selected(row):
 
 
 def refuse(row):
-    data.require(not selected(row),'new scoped-output native candidate has no current offline/device admission')
+    if selected(row):
+        from type3_admission import candidate_scope
+        candidate_scope(row)
 
 
 def install(source,identity):

@@ -40,7 +40,7 @@ def decode(text,identity,cycle,*,expected_schema):
     legacy=data.decode(text,identity,cycle,_source_class=ro3.MODE)
     return _decode_joined(text,identity,cycle,legacy,expected_schema=expected_schema)
 
-def _decode_joined(text,identity,cycle,legacy,*,expected_schema):
+def _decode_joined(text,identity,cycle,legacy,*,expected_schema,producer_kind=None):
     from decode_reservation import checksum
     data.require(expected_schema==SCHEMA,'explicit new stage producer schema required')
     lines=[line for line in text.splitlines() if 'N10DATASTAGE1' in line]
@@ -71,7 +71,9 @@ def _decode_joined(text,identity,cycle,legacy,*,expected_schema):
         implies('decode_called',f'{resource}_free_returned')
     data.require(legacy['calls']==int(flags['decode_called']),'stage/legacy decoder call differs')
     data.require(not flags['header_ok'] or legacy['stream']>0 and legacy['payload']>0,'stage/header counts differ')
-    data.require(flags['header_enter']==(legacy['status'] in ('header','stream_hash','allocation','decode','payload_hash','ok')),
+    from native_scoped_output import KIND as scoped_kind
+    scoped_failure=producer_kind==scoped_kind and legacy['status'] in ('output_offer','output_consumer')
+    data.require(flags['header_enter']==(legacy['status'] in ('header','stream_hash','allocation','decode','payload_hash','ok') or scoped_failure),
         'stage/legacy header phase differs')
     phase=legacy['status']
     if phase in ('unavailable','carrier_crypto','carrier_mismatch'):data.require(bits==0,'unreached stage evidence differs')
@@ -80,8 +82,9 @@ def _decode_joined(text,identity,cycle,legacy,*,expected_schema):
     elif phase=='allocation':data.require(flags['stream_ok'] and not flags['decode_called'],'allocation stage evidence differs')
     elif phase=='decode':data.require(flags['decode_called'] and not flags['length_ok'],'failed decode evidence differs')
     elif phase=='payload_hash':data.require(flags['length_ok'] and not flags['digest_ok'],'failed digest evidence differs')
+    elif scoped_failure:data.require(bits==ALL and legacy['passed'] is False,'scoped failure must retain verified stage and failure outcome')
     else:data.require(phase=='ok','unknown stage phase')
-    data.require(flags['digest_ok']==(legacy['status']=='ok') and (legacy['status']!='ok' or bits==ALL and legacy['passed']),
+    data.require(flags['digest_ok']==(legacy['status']=='ok' or scoped_failure) and (legacy['status']!='ok' or bits==ALL and legacy['passed']),
         'stage/legacy successful outcome differs')
     cleanup={resource:'void_returned' if flags[f'{resource}_free_returned'] else 'not_called' for resource in ('work','output')}
     data.require(text_cleanup==cleanup,'stage textual cleanup contradicts call boundaries')

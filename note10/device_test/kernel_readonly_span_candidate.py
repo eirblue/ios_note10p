@@ -219,9 +219,9 @@ def physical_input_scope(row):
 
 def input_binding(result,lines,*,elf,archive,raw_inputs,historical_origin=None):
     from early_fdt_binding import fixed_route_relation
-    from class3_native_origin import stage_selected,producer,stage_fields,_NATIVE109
+    from class3_native_origin import stage_selected,producer,stage_fields,record
     if stage_selected(result):
-        data.require(historical_origin==_NATIVE109['head'],'native109 input binding is exact read-origin only')
+        data.require(historical_origin==result.get('ci_context',{}).get('GITHUB_SHA')==record(historical_origin)['head'],'stage input binding is exact read-origin only')
         producer(result,historical_origin)
     else:producer_contract(result,result.get('ci_context',{}).get('GITHUB_SHA'),historical_origin=historical_origin)
     data.require('CONFIG_NOTE10_KERNEL_READONLY_SPAN_CANDIDATE=y' in lines and not
@@ -231,7 +231,7 @@ def input_binding(result,lines,*,elf,archive,raw_inputs,historical_origin=None):
     return dict(data_carrier_stage=data.STAGE,data_relative_placement_admitted=False,raw_input_binding=False,
         diagnostic_kind=result['diagnostic_kind'],data_input_kind=result['data_input_kind'],storage_input_kind=result['storage_input_kind'],data_expectation_mode=MODE,
         data_expectation_slot=result['kernel_readonly3_slot'],image_expectation_patched=False,
-        **{key:result[key] for key in FIELDS},**(stage_fields() if stage_selected(result) else {}))
+        **{key:result[key] for key in FIELDS},**(stage_fields(historical_origin) if stage_selected(result) else {}))
 
 
 def require_device_scope(row,ack_kernel_readonly_growth=False,context=None):
@@ -244,6 +244,8 @@ def decode_selected(raw,banner,identity,cycle,*,expected):
     from builtin_init_profile import decode as baseline_decode
     from class3_native_origin import stage_selected,producer
     witness=stage_selected(expected)
+    from native_scoped_output import selected as scoped_selected
+    scoped=scoped_selected(expected)
     materialized='execution_version' in expected
     if materialized:
         from type3_admission import candidate_scope
@@ -256,17 +258,24 @@ def decode_selected(raw,banner,identity,cycle,*,expected):
         functional_acceptance=False,hardware_return_proven_by_frames=False)
     def selected(text,rid):
         row=data.decode(text,rid,cycle,_source_class=MODE)
-        components['kernel_readonly3_data']=row;components['data_phase']=data.functional_phase(row['status'])
+        components['kernel_readonly3_data']=row;components['data_phase']=({'output_offer':'output_transfer','output_consumer':'output_consumer'}[row['status']] if scoped and row['status'] in ('output_offer','output_consumer') else data.functional_phase(row['status']))
         components['structural_presence']=data.structural_presence(text,rid,cycle,row['boot_identity'])
         data.require(not any(marker in text for marker in ('N10DATA1 ','N10DATARO1','N10DATAPC','N10DATACMP','N10DATARANGE','N10DATAEARLY','N10DATAGROWTH')),
             'type3 cannot claim class2, PC or external companions')
         components['kernel_readonly3_span']=old.decode_span(text,rid,cycle,row['boot_identity'],bound)
         if witness:
             from readonly_stage_witness import _decode_joined,SCHEMA as stage_schema
-            try:components['readonly_stage_witness']=_decode_joined(text,rid,cycle,row,expected_schema=stage_schema)
+            try:components['readonly_stage_witness']=_decode_joined(text,rid,cycle,row,expected_schema=stage_schema,
+                producer_kind=expected.get('diagnostic_kind') if scoped else None)
             except ValueError as error:
                 components['readonly_stage_witness']=dict(state='invalid_or_missing',error=str(error));raise
-            data.require(components['readonly_stage_witness']['passed'],'native109 stage witness did not complete')
+            if scoped:
+                from native_scoped_output_admission import decode_joined as decode_output
+                try:components['native_scoped_output']=decode_output(text,rid,cycle,row,components['readonly_stage_witness'])
+                except ValueError as error:
+                    components['native_scoped_output']=dict(state='invalid_or_missing',error=str(error));raise
+                data.require(components['native_scoped_output']['passed'],'native116 output-scope witness did not complete')
+            data.require(components['readonly_stage_witness']['passed'],'native stage witness did not complete')
         data.require(row['carrier']==CAPACITY and row['logical'] in (0,CAPACITY),'type3 extent differs')
         data.require(materialized,'generic type3 PC observation cannot authorize functional or physical acceptance')
         data.require(components['kernel_readonly3_span']['state']=='checked','type3 pre-descriptor span was not checked')

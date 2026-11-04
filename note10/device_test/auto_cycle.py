@@ -223,7 +223,7 @@ def run_plan(path,expected,output,*,execute=False,limit=1,adb=None,verified_roun
             from sha256_kat_device_profile import selected,precheck as check_kat,collect as collect_kat
             kat=selected(plan)
             preinstall_evidence=None
-            precheck_receipt=output/f'PREINSTALL-CHECK-{item["index"]:02d}.json' if battery_policy['five_percent_exception'] or type3_context is not None and type3_context.get('schema')=='type3-remaining-pack-execution-v2' else None
+            precheck_receipt=output/f'PREINSTALL-CHECK-{item["index"]:02d}.json' if battery_policy['five_percent_exception'] or type3_context is not None and type3_context.get('schema') in ('type3-remaining-pack-execution-v2','type3-scoped-output-execution-v1') else None
             if kat:
                 preinstall_evidence=dict(phase='preinstall',index=item['index'],cycle=item['cycle'],
                     receipt_path=str(precheck_receipt or packages/'PREINSTALL-CHECK.json'),evidence=None)

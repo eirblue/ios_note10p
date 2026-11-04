@@ -98,6 +98,8 @@ def stage_selected(row):
 def selected(row):return stage_selected(row) or row.get('data_input_kind')==ro3.KIND
 
 def record(head):
+    from native_scoped_output_admission import is_head,record as scoped_record
+    if is_head(head):return scoped_record()
     if head==_NATIVE109['head']:return _NATIVE109
     data.require(head==ro3.NATIVE_HEAD,'unaccepted native class3 source')
     return dict(head=ro3.NATIVE_HEAD,version='v107',result=ro3.NATIVE_RESULT_SHA256,pins=dict(ro3.NATIVE_PINS),kind=ro3.KIND)
@@ -109,7 +111,9 @@ def origin(head):
 def provenance():
     return dict(version='v109',PC_first_use=True,PC_only=False,operation_scope_PC_only=True,physical_ready=False,admission_blocked=True)
 
-def stage_fields():
+def stage_fields(head=None):
+    from native_scoped_output_admission import is_head,stage_fields as scoped_fields
+    if is_head(head):return scoped_fields()
     return dict(readonly_stage_schema=_NATIVE109['witness_schema'],readonly_stage_marker='N10DATASTAGE1',native_producer_provenance=provenance())
 
 def live_host(head):
@@ -120,12 +124,20 @@ def live_host(head):
     data.require(head not in (_NATIVE109['head'],ro3.NATIVE_HEAD),'native producer cannot be relabeled live host110')
 
 def live_row(row):
+    from native_scoped_output import selected as scoped_selected
+    if scoped_selected(row):
+        from native_scoped_output_admission import live_row as scoped_live
+        return scoped_live(row)
     data.require(row.get('native_source_head')==_NATIVE109['head'] and row.get('source_head')==_NATIVE109['head'] and
         row.get('execution_version')==row.get('version')=='v110' and row.get('data_input_kind')==new_kind(),
         'live host110 requires the exact accepted native109 candidate')
     live_host(row.get('host_profile_source_head'))
 
 def producer(result,head):
+    from native_scoped_output import selected as scoped_selected
+    if scoped_selected(result):
+        from native_scoped_output_admission import producer as scoped_producer
+        return scoped_producer(result,head)
     item=record(head)
     data.require(head==_NATIVE109['head'] and result.get('source_sha256')==dict(item['pins']) and
         result.get('version')==item['version'] and result.get('diagnostic_kind')==item['kind'] and
@@ -138,9 +150,15 @@ def producer(result,head):
     return accepted
 
 def banner(row):
+    from native_scoped_output import selected as scoped_selected
+    if scoped_selected(row):return 'Linux version 4.14.113-v116-scoped-output-candidate '
     return 'Linux version 4.14.113-v109-readonly-stage-witness-candidate ' if stage_selected(row) else 'Linux version 4.14.113-v107-readonly-span-candidate '
 
 def ci_receipt(context,context_sha,binding,result):
+    from native_scoped_output import selected as scoped_selected
+    if scoped_selected(binding):
+        from native_scoped_output_admission import ci_receipt as scoped_receipt
+        return scoped_receipt(context,context_sha,binding,result)
     item=_NATIVE109;producer(result,item['head'])
     data.require(type(context) is dict and set(context)==_CONTEXT_KEYS and
         context['schema']=='note10-root-native109-ci-success-context-v1' and context['native_version']=='v109' and
@@ -181,6 +199,9 @@ def ci_receipt(context,context_sha,binding,result):
 
 
 def receipt_binding(root,row,expected,binding):
+    if row.get('schema')=='native116-root-ci-receipt-v1':
+        from native_scoped_output_admission import receipt_binding as scoped_receipt_binding
+        return scoped_receipt_binding(root,row,expected,binding)
     from sha256_kat_device_profile import read,sha
     context=read(root/'ci-success-context.json');context_sha=sha(root/'ci-success-context.json')
     data.require(row==ci_receipt(context,context_sha,binding,read(root/'result.json')),'native109 stored CI receipt differs')

@@ -64,6 +64,9 @@ def load_offline(path,expected):
     from sha256_kat_device_profile import host_binding
     if item['version']=='v107':
         require(retained.reading() and row['host_source_head']==retained.HEAD and row['execution_version']=='v108','native107 contract is retained-read-only')
+    elif item['version']=='v116':
+        require(row['execution_version']=='v117','native116 requires separately versioned host117')
+        origins.live_host(row['host_source_head']);host_binding(row['host_source_head'])
     else:
         require(row['execution_version']=='v110','native109 requires separately versioned host110')
         if row['host_source_head']==remaining.HEAD:
@@ -95,10 +98,10 @@ def contract_binding(row):
 
 def candidate_scope(row,*,patched=None):
     item=origins.record(row.get('native_source_head'))
-    if item['version']=='v109':
+    if item['version'] in ('v109','v116'):
         if remaining.selected(row):remaining.origin(row)
         else:origins.live_row(row)
-        require(all(row.get(key)==value for key,value in origins.stage_fields().items()),'native109 stage provenance differs')
+        require(all(row.get(key)==value for key,value in origins.stage_fields(item['head']).items()),'native109 stage provenance differs')
         require(row.get('kernel_readonly3_image_bytes')==item['image_bytes'] and
             row.get('kernel_readonly3_linked_bytes')==item['linked_bytes'],'accepted native109 dimensions differ')
     else:retained.origin(row)
@@ -181,7 +184,7 @@ def _copy_ci_context(output,raw):
 
 def prepare_template(contract,path,expected):
     item=origins.record(contract.get('native_source_head'))
-    require(item['version']=='v109' and contract.get('execution_version')=='v110','new templates require native109/host110')
+    require(item['version']=='v116' and contract.get('execution_version')=='v117','new templates require accepted native116/host117; old origins are read-only')
     origins.live_host(contract.get('host_source_head'))
     from sha256_kat_device_profile import raw_binding,host_binding,ci_success_receipt,write_ci_success_receipt,common_report,sha as file_sha
     transaction(contract,'template_reserved')
@@ -266,6 +269,9 @@ def materialization(report,token,generic_sha,bound_sha,template_report_sha):
 def validate_variant(root,token,template=None):
     from materialize_auto_cycle import template_bytes,SLOT
     root=private(root);report=read(root/'build-result.json')
+    from native_scoped_output_admission import _DEVICE_READ,device_metadata
+    from native_scoped_output import selected as scoped_selected
+    if scoped_selected(report) and _DEVICE_READ.get() is not None:return device_metadata(root,token,template)
     if remaining.selected(report):return remaining.saved_metadata(root,token,template)
     candidate_scope(report,patched=True)
     require(report.get('auto_cycle_variant') is True and report.get('auto_cycle_token')==token,'type3 cycle differs')
@@ -308,14 +314,18 @@ def require_materialization_transaction(template,output):
 
 def prepare_offline(path,expected):
     contract=load_offline(path,expected);item=origins.record(contract['native_source_head'])
-    require(item['version']=='v109' and contract['execution_version']=='v110','only native109/host110 may start new offline work')
+    require(item['version']=='v116' and contract['execution_version']=='v117','only accepted native116/host117 may start new offline work')
     origins.live_host(contract['host_source_head']);output=Path(contract['output'])
     require(not output.exists(),'type3 transaction already reserved; partial/completed transaction cannot restart')
     from sha256_kat_device_profile import sha as file_sha,prepare_plan
     require(file_sha(Path(contract['backup'])/'backup-manifest.json')==contract['backup_manifest_sha256'] and
         file_sha(Path(contract['current_packages'])/'package-result.json')==contract['current_package_result_sha256'],'type3 saved current/backup metadata changed')
     current=read(Path(contract['current_packages'])/'package-result.json')
-    with retained.read_scope():retained.origin(current)
+    if item['version']=='v116':
+        from native_scoped_output_admission import predecessor
+        predecessor(contract)
+    else:
+        with retained.read_scope():retained.origin(current)
     require(current.get('backup_manifest_sha256')==contract['backup_manifest_sha256'] and
         any(record.get('mode')=='diagnostic' and record.get('payload_sha256')==contract['current_boot_sha256'] for record in current.get('packages',[])),
         'host110 requires the exact saved current v108 full BOOT/package/backup baseline')
@@ -337,6 +347,10 @@ def prepare_offline(path,expected):
 
 
 def execution_context(row,plan_sha,packages,declared_version,host_head,path,expected,execution_output=None):
+    from native_scoped_output import selected as scoped_selected
+    if scoped_selected(row):
+        from native_scoped_output_admission import execution_context as scoped_execution
+        return scoped_execution(row,plan_sha,packages,declared_version,host_head,path,expected,execution_output)
     if remaining.selected(row):return remaining.execution_context(row,plan_sha,packages,declared_version,host_head,path,expected,execution_output)
     origins.live_row(row)
     offline=candidate_scope(row,patched=True)
@@ -371,6 +385,10 @@ def require_context_directory(context,directory):
         require(type(context) is dict and context.get('packages')==str(private(directory)),'type3 actual package directory differs from reviewed execution context')
 
 def require_device_scope(row,ack_kernel_readonly_growth=False,context=None):
+    from native_scoped_output import selected as scoped_selected
+    if scoped_selected(row):
+        from native_scoped_output_admission import require_device_scope as scoped_device
+        return scoped_device(row,ack_kernel_readonly_growth,context)
     if remaining.selected(row):
         require(ack_kernel_readonly_growth is True,'type3 requires explicit growth ACK before any device query')
         keys={'schema','declared_version','host_source_head','host_source_sha256','plan_sha256','packages','output','contract_path','contract_sha256','remaining_pack'}
