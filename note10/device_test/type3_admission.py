@@ -67,7 +67,8 @@ def load_offline(path,expected):
         require(retained.reading() and row['host_source_head']==retained.HEAD and row['execution_version']=='v108','native107 contract is retained-read-only')
     elif item['version']=='v121':
         require(row['execution_version']=='v122','native121 requires separately versioned host122')
-        origins.live_host(row['host_source_head']);host_binding(row['host_source_head'])
+        from type3_remaining_template import original_scope
+        if not original_scope(row,path,expected):origins.live_host(row['host_source_head']);host_binding(row['host_source_head'])
     elif item['version']=='v116':
         require(row['execution_version']=='v117','native116 requires separately versioned host117')
         if row['host_source_head']==saved117.HEAD:saved117.require_original_contract(row,path,expected)
@@ -102,6 +103,8 @@ def contract_binding(row):
 
 
 def candidate_scope(row,*,patched=None):
+    import type3_remaining_template as tail
+    if tail.applies(row):return tail.candidate(row,patched)
     item=origins.record(row.get('native_source_head'))
     if item['version'] in ('v109','v116','v121'):
         if remaining.selected(row):remaining.origin(row)
@@ -173,6 +176,8 @@ def read_compact(root,row):
 
 
 def transaction(row,phase):
+    import type3_remaining_template as tail
+    if tail._ACTIVE.get() is not None:return tail.transaction(row,phase)
     output=Path(row['output']);journal=read(output/'transaction.json')
     require(journal.get('schema')=='type3-offline-journal-v1' and journal.get('status')=='started' and journal.get('phase')==phase and
         journal.get('contract_sha256')==row['_contract_sha256'],'unfinished exact type3 transaction reservation required')
@@ -222,6 +227,7 @@ def prepare_template(contract,path,expected):
     return output
 
 
+@__import__('type3_remaining_template').template_reader
 @__import__('native_prefree_output_admission').composition_reader
 @retained.reader
 def validate_template(root):
@@ -273,6 +279,7 @@ def materialization(report,token,generic_sha,bound_sha,template_report_sha):
         template_report_sha256=template_report_sha,cycle=token)
 
 
+@__import__('type3_remaining_template').variant_reader
 @retained.reader
 @__import__('native_prefree_output_admission').composition_reader
 def validate_variant(root,token,template=None):
@@ -302,6 +309,8 @@ def validate_variant(root,token,template=None):
         auto_cycle_template_report_sha256=report['auto_cycle_template_report_sha256'],auto_cycle_template_image_sha256=sha(generic),
         image_sha256=sha(actual),image_expectation_patched=True)
     allowed['type3_materialization']=materialization(original,token,sha(generic),sha(actual),report['auto_cycle_template_report_sha256'])
+    import type3_remaining_template as tail
+    if tail.selected(report):allowed=tail.project(allowed)
     require(report==allowed,'type3 variant report differs outside intrinsic binding')
     IO_EVENTS.append(dict(operation='validate_existing_variant_without_repatch',actual_Image_reads=1,generic_Image_reads='existing template_bytes',fixed_patch_transactions=0,decoder_calls=0))
     return report
@@ -316,6 +325,9 @@ def require_plan_transaction(template,output):
 
 
 def require_materialization_transaction(template,output):
+    import type3_remaining_template as tail
+    if tail.applies(template):
+        tail.candidate(template,False);return tail.require_materialization(output)
     origins.live_row(template)
     contract=candidate_scope(template,patched=False)
     require(private(output)==Path(contract['output'])/'plan/cycle-01/kernel-build','one reviewed class3 variant output required')

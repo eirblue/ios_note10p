@@ -59,7 +59,9 @@ def materialize(template,output,token):
         require_materialization_transaction(initial,output)
     if not re.fullmatch('[0-9a-f]{32}',token) or output.exists():raise ValueError('Fresh variant and valid token required')
     report,data=template_bytes(template)
-    shutil.copytree(template,output)
+    import type3_remaining_template as tail
+    if tail.in_scope(template):tail.copy_variant(template,output)
+    else:shutil.copytree(template,output)
     patched=bound_image(data,report,token,template_root=template)
     (output/'Image').write_bytes(patched)
     report.update(auto_cycle_variant=True,auto_cycle_token=token,auto_cycle_template=str(template),
@@ -70,6 +72,7 @@ def materialize(template,output,token):
     if report.get('data_expectation_mode')=='kernel-readonly-span-candidate-v1':
         from type3_admission import materialization
         report['type3_materialization']=materialization(report,token,sha(data),sha(patched),report['auto_cycle_template_report_sha256'])
+    if tail.in_scope(template):report=tail.project(report)
     (output/'build-result.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
     validate(output,token,template)
     return report

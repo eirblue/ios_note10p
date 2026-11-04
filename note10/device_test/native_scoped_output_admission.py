@@ -257,6 +257,8 @@ def no_pc(row):
 
 
 def live_row(row):
+    import type3_remaining_template as tail
+    if tail.applies(row):return tail.candidate(row)
     from type3_remaining_plan import selected as saved_selected,origin as saved_origin
     if saved_selected(row):
         no_pc(row);return saved_origin(row)
@@ -399,12 +401,15 @@ def execution_context(row,plan_sha,packages,declared_version,host_head,path,expe
     import type3_admission as typed
     from sha256_kat_device_profile import host_binding
     item=record(row.get('native_source_head'))
+    import type3_remaining_template as tail
+    resumed=tail.selected(row);execution_version='v123' if resumed else item['host_version']
+    authority_sha=row[tail.FIELD]['contract_sha256'] if resumed else row['type3_contract_sha256']
     live_row(row);offline=typed.candidate_scope(row,patched=True)
     completed=typed.read(Path(offline['output'])/'transaction.json')
     require(completed.get('status')=='complete' and completed.get('phase')=='complete' and
-        completed.get('contract_sha256')==row['type3_contract_sha256'] and
+        completed.get('contract_sha256')==authority_sha and
         completed.get('result',{}).get('plan_sha256')==plan_sha,'complete fresh native116 offline transaction required')
-    require(declared_version==item['host_version'] and host_head==row['host_profile_source_head'] and
+    require(declared_version==execution_version and host_head==row['host_profile_source_head'] and
         re.fullmatch('[0-9a-f]{64}',plan_sha or '') and path is not None and
         re.fullmatch('[0-9a-f]{64}',expected or ''),'explicit reviewed host117 device scope required')
     path=typed.private(path);raw=data.bounded_private_read(path,65536)
@@ -417,7 +422,7 @@ def execution_context(row,plan_sha,packages,declared_version,host_head,path,expe
     require(packages is None or typed.private(packages)==effective,'explicit packages contradict closed device contract')
     packages=effective
     host=host_binding(host_head)
-    require(type(contract) is dict and set(contract)==keys and contract['schema']==device_schema(item['head']) and
+    require(type(contract) is dict and set(contract)==keys and contract['schema']==(tail.DEVICE_SCHEMA if resumed else device_schema(item['head'])) and
         contract['status']=='reviewed_ready' and contract['execution_version']==declared_version and
         contract['host_source_head']==host_head and contract['host_source_sha256']==host['host_profile_source_sha256'] and
         contract['native_source_head']==item['head'] and contract['plan_sha256']==plan_sha and
@@ -425,7 +430,7 @@ def execution_context(row,plan_sha,packages,declared_version,host_head,path,expe
         contract['output']==str(typed.private(execution_output)) and
         not typed.private(execution_output).is_relative_to(typed.private(packages)) and
         contract['bound_image_sha256']==row.get('image_sha256',row.get('kernel_image_sha256')) and
-        contract['offline_contract_sha256']==row['type3_contract_sha256'] and
+        contract['offline_contract_sha256']==authority_sha and
         contract['linked_growth_ack']==growth_ack(item['head']) and type(contract['linked_growth_ack']) is dict and
         contract['linked_growth_ack'].get('acknowledged') is True and
         all(type(contract['linked_growth_ack'][k]) is int for k in ('reference_linked_bytes','accepted_linked_bytes','delta_bytes')) and
@@ -435,7 +440,7 @@ def execution_context(row,plan_sha,packages,declared_version,host_head,path,expe
         'closed host117 device contract/plan/growth scope differs')
     require(data.sha(data.bounded_private_read(typed.private(packages)/'package-result.json',4*1024*1024))==
         contract['package_result_sha256'],'reviewed host117 package metadata changed')
-    return dict(schema=context_schema(item['head']),declared_version=item['host_version'],host_source_head=host_head,
+    return dict(schema=tail.CONTEXT_SCHEMA if resumed else context_schema(item['head']),declared_version=execution_version,host_source_head=host_head,
         host_source_sha256=host['host_profile_source_sha256'],plan_sha256=plan_sha,packages=str(typed.private(packages)),
         output=str(typed.private(execution_output)),contract_path=str(path),contract_sha256=expected,
         linked_growth_ack=contract['linked_growth_ack'])
@@ -448,7 +453,7 @@ def require_device_scope(row,ack,context):
     keys={'schema','declared_version','host_source_head','host_source_sha256','plan_sha256','packages','output',
         'contract_path','contract_sha256','linked_growth_ack'}
     from native_prefree_output_admission import context_schema
-    require(type(context) is dict and set(context)==keys and context.get('schema')==context_schema(row.get('native_source_head')),
+    require(type(context) is dict and set(context)==keys and context.get('schema')==(__import__('type3_remaining_template').CONTEXT_SCHEMA if __import__('type3_remaining_template').selected(row) else context_schema(row.get('native_source_head'))),
         'separate exact host117 execution context required before transport')
     expected=execution_context(row,context['plan_sha256'],context['packages'],context['declared_version'],
         context['host_source_head'],context['contract_path'],context['contract_sha256'],context['output'])
@@ -499,7 +504,7 @@ def device_precheck_receipt(context,path):
     from type3_remaining_plan import CONTEXT119_SCHEMA as saved_schema,precheck_receipt
     if context is not None and context.get('schema')==saved_schema:return precheck_receipt(context,path)
     import type3_admission as typed
-    require(_DEVICE_READ.get() is not None and context is not None and context.get('schema') in (CONTEXT_SCHEMA,'type3-prefree-output-execution-v1'),
+    require(_DEVICE_READ.get() is not None and context is not None and context.get('schema') in (CONTEXT_SCHEMA,'type3-prefree-output-execution-v1',__import__('type3_remaining_template').CONTEXT_SCHEMA),
         'validated host117 read scope required before precheck output')
     target=typed.private(context['output'])/'PREINSTALL-CHECK-01.json'
     require((path is None or typed.private(path)==target) and not target.exists() and
@@ -549,6 +554,8 @@ def decode_joined(text,identity,cycle,legacy,stages,*,producer_kind=None):
 
 
 def require_pack_transaction(root,output,token):
+    import type3_remaining_template as tail
+    if tail.selected(__import__('type3_admission').read(Path(root)/'build-result.json')):return tail.require_pack(root,output,token)
     """Device read scope cannot authorize a new packing operation."""
     import type3_admission as typed
     from type3_remaining_plan import selected as saved_selected

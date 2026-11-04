@@ -706,6 +706,7 @@ V105_PACKING_ORIGIN_PINS = MappingProxyType({
 def host_binding(source_head):
     from retained_v108_origin import live
     require(source_head!=saved117.HEAD,'producing117 host is retained read-origin only')
+    require(source_head!=__import__('type3_remaining_template').HEAD,'composing122 host is retained read-origin only')
     live(source_head);origins.live_host(source_head)
     require(re.fullmatch('[0-9a-f]{40}', source_head or ''), 'exact host-profile publication source pin required')
     require(source_head not in (V97_PROFILE_ORIGIN_HEAD, V99_PROFILE_ORIGIN_HEAD, V100_PROFILE_ORIGIN_HEAD, V101_PROFILE_ORIGIN_HEAD, V102_PROFILE_ORIGIN_HEAD, V104_PROFILE_ORIGIN_HEAD, V105_CANDIDATE_ORIGIN_HEAD, V105_PACKING_ORIGIN_HEAD, __import__('kernel_readonly_span_candidate').NATIVE_HEAD, 'e32ec501551b74b4cca5618ea25245f012656f29'),
@@ -733,7 +734,7 @@ def host_binding(source_head):
                       'test_v107_readonly_span_candidate.py','build_kernel_readonly_span_candidate.py',
                       'type3_admission.py','test_v108_type3_admission.py','retained_v108_origin.py',
                       'readonly_stage_witness.py','readonly_stage_witness.h','readonly_stage_witness_fixture.c','test_v109_readonly_stage_witness.py','class3_native_origin.py','test_v110_native109_admission.py','type3_remaining_pack.py','test_v111_device_read_context.py','native_scoped_output.py','test_v116_native_scoped_output.py',
-                     'native_scoped_output_admission.py','test_v117_native_scoped_output_admission.py','native_prefree_output_admission.py','native_prefree_output_zero.py','test_v122_native_prefree_output_admission.py',
+                     'native_scoped_output_admission.py','test_v117_native_scoped_output_admission.py','native_prefree_output_admission.py','native_prefree_output_zero.py','test_v122_native_prefree_output_admission.py','type3_remaining_template.py','test_v123_native121_remaining_template.py',
                      'type3_remaining_plan.py','test_v118_saved117_remaining_plan.py','test_v119_saved118_device_entry.py')}
     return dict(host_profile_source_head=source_head, host_profile_source_sha256=dict(pins))
 
@@ -750,6 +751,10 @@ def packing_host_origin(binding):
 
 
 def host_profile_origin(binding):
+    import type3_remaining_template as tail
+    if tail.applies(binding):
+        tail.candidate(binding)
+        return dict(host_profile_source_head=binding['host_profile_source_head'],host_profile_source_sha256=binding['host_profile_source_sha256'])
     """Validate a producing profile origin without relabeling the live host."""
     from retained_v108_origin import selected,origin
     if selected(binding):return origin(binding)
@@ -829,7 +834,7 @@ def root_receipt_binding(root, receipt, expected_sha, binding):
             'exact reviewed Image-root receipt SHA required')
     row = read(receipt)
     require(type(row) is dict,'closed Image-root receipt object required')
-    if row.get('schema') in ('native109-root-ci-receipt-v1','native116-root-ci-receipt-v1'):return origins.receipt_binding(Path(root),row,expected_sha,binding)
+    if row.get('schema') in ('native109-root-ci-receipt-v1','native116-root-ci-receipt-v1','native121-root-ci-receipt-v1'):return origins.receipt_binding(Path(root),row,expected_sha,binding)
     keys = {'schema', 'kind', 'accepted', 'root_reader_result_sha256', 'producer_source_head',
             'ci_result_sha256', 'image_sha256', 'image_bytes', 'effective_config_sha256',
             'build_evidence_id', 'kernel_banner', 'run_id', 'attempt', 'workflow_id', 'job_id',
@@ -1096,6 +1101,8 @@ def fields(row):
         from native_prefree_output_admission import selected as prefree_selected,FIELDS as PREFREE_FIELDS
         if prefree_selected(row):keys=(*keys,*PREFREE_FIELDS)
     if remaining.FIELD in row:keys=(*keys,remaining.FIELD)
+    from type3_remaining_template import FIELD as tail_field
+    if tail_field in row:keys=(*keys,tail_field)
     return {key: row[key] for key in keys}
 
 
@@ -1273,6 +1280,8 @@ def finish_plan(kernel_build,backup,twrp,mkbootimg,current_packages,output,templ
         plan['current_boot_payload_sha256'] = current_diagnostic['payload_sha256']
     if origins.selected(template):
         plan.update(execution_version=template['execution_version'],executing_host_source_head=template['host_profile_source_head'],type3_contract_sha256=template['type3_contract_sha256'])
+    from type3_remaining_template import FIELD as tail_field
+    if tail_field in template:plan[tail_field]=template[tail_field]
     if extra is not None:plan.update(extra)
     save(output/'plan.json', plan)
     validate_plan(output/'plan.json', sha(output/'plan.json'))
@@ -1296,8 +1305,10 @@ def validate_plan(path, expected):
     packing_keys=set(PACKING_FIELDS) if any(key in plan for key in PACKING_FIELDS) else set()
     from type3_admission import PLAN_FIELDS
     type3_keys=set(PLAN_FIELDS) if any(key in plan for key in PLAN_FIELDS) else set()
+    from type3_remaining_template import FIELD as tail_field
+    tail_keys={tail_field} if tail_field in plan else set()
     remaining_keys={remaining.FIELD} if remaining.FIELD in plan else set()
-    require(set(plan)-packing_keys-type3_keys-remaining_keys == (PLAN_KEYS | {'current_boot_payload_sha256'} if plan.get('device_profile') in (BUILTIN_PROFILE, STREAM_PROFILE, AFFINITY_PROFILE, FDT_PROFILE, NATIVE_PROFILE, DATA_PROFILE) else PLAN_KEYS) and selected(plan) and plan.get('kind') == 'note10-bounded-auto-cycle' and
+    require(set(plan)-packing_keys-type3_keys-remaining_keys-tail_keys == (PLAN_KEYS | {'current_boot_payload_sha256'} if plan.get('device_profile') in (BUILTIN_PROFILE, STREAM_PROFILE, AFFINITY_PROFILE, FDT_PROFILE, NATIVE_PROFILE, DATA_PROFILE) else PLAN_KEYS) and selected(plan) and plan.get('kind') == 'note10-bounded-auto-cycle' and
             type(plan.get('schema')) is int and plan['schema'] == 1 and
             type(plan.get('minimum_battery')) is int and type(plan.get('return_timeout_seconds')) is int and
             plan.get('minimum_battery') == 10 and plan.get('return_timeout_seconds') == 240 and

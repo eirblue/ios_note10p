@@ -220,6 +220,8 @@ def composition_reader(function):
         root=typed.private(root)
         meta=root/'device-profile.json' if (root/'device-profile.json').is_file() else root/'build-result.json'
         row=typed.read(meta)
+        import type3_remaining_template as tail
+        if tail.in_scope(root) or tail.selected(row):return function(root,*args,**kwargs)
         if not selected(row):return function(root,*args,**kwargs)
         contract=typed.load_offline(row.get('type3_contract_path',''),row.get('type3_contract_sha256'))
         data.require(row.get('native_source_head')==record()['head'] and row.get('execution_version')=='v122' and
@@ -239,7 +241,11 @@ def plan_reader(function):
     @wraps(function)
     def checked(path,expected):
         import type3_admission as typed
-        plan=typed.read(typed.private(path));row=typed.read(typed.private(plan['kernel_build'])/'build-result.json')
+        plan=typed.read(typed.private(path))
+        import type3_remaining_template as tail
+        if tail.selected(plan):
+            with tail.plan_scope(plan,path,expected):return function(path,expected)
+        row=typed.read(typed.private(plan['kernel_build'])/'build-result.json')
         if not selected(row):return function(path,expected)
         data.require(data.sha(data.bounded_private_read(typed.private(path),4*1024*1024))==expected,'exact122 plan SHA before predecessor read scope')
         contract=typed.load_offline(row['type3_contract_path'],row['type3_contract_sha256'])
