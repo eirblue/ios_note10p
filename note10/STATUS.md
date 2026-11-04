@@ -1378,3 +1378,13 @@ The reviewed v125 source was published, and its remaining-only host test passed 
 One authorized device-entry invocation stopped during saved-plan image-binding checks, before device preflight, because the generic saved template image and stage-specific variant image did not agree. No device query, partition write, BOOT write, or reboot occurred, and no cycle journal or output was created. The attempt is spent and will not be replayed.
 
 No v125 CI run, new image build, offline materialization, package or plan generation, or XNU execution occurred. The v111 physical baseline remains unchanged. The native pre-free output-zero witness was not observed; this result does not establish physical readiness, hardware re-entry, post-free erasure or reclamation, or global RAM ownership.
+
+## 2026-11-04: v126 bounded physical diagnostic completed
+
+One reviewed v126 device cycle completed. The preinstall check recorded 89% battery and passed five partition geometry and hash checks. Five full-stream partition hashes passed after installation before reboot and after return. The cycle performed one BOOT write and one reboot, then returned to normal TWRP within 148.05 seconds.
+
+The original operator wrapper stopped while assembling its receipt because it expected the PREINSTALL partition evidence under an extra nested key. The saved journal contains that evidence directly. A metadata-only recovery used the existing journal, PREINSTALL receipt, and collector result; no device operation was repeated.
+
+The same selected observation joins kernel-readonly DATA, the stage witness, the native output lease, and the pre-free output-zero scan. The scan read all 19,136,512 allocated bytes before free and observed zero nonzero bytes; the free call returned. This records a pre-free observation only. It does not establish secure erasure or reclamation after free, global RAM ownership, hardware recovery re-entry, or XNU behavior.
+
+No new Image was built and no CI run was dispatched. The v126 post-return five-partition hashes are the current recorded physical baseline. This diagnostic does not establish general device readiness.
