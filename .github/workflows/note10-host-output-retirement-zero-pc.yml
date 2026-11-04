@@ -1,0 +1,72 @@
+name: Note10 v120 output retirement zero observation PC-only
+run-name: "v120 output retirement zero observation PC | ${{ inputs.expected_source_head }}"
+on:
+  workflow_dispatch:
+    inputs:
+      expected_source_head:
+        description: Exact reviewed public source commit; must equal GITHUB_SHA before compile or test
+        required: true
+        type: string
+      test_scope:
+        description: Only the one NEW actual full-capacity retirement zero observation method; no old fixture or KAT replay
+        required: true
+        type: choice
+        default: v120-host-output-retirement-zero-pc
+        options:
+          - v120-host-output-retirement-zero-pc
+permissions:
+  contents: read
+jobs:
+  host-output-retirement-zero-pc:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Bind exact reviewed source and new scope
+        shell: bash --noprofile --norc -euo pipefail {0}
+        env:
+          N10_EXPECTED_SOURCE_HEAD: ${{ inputs.expected_source_head }}
+          N10_TEST_SCOPE: ${{ inputs.test_scope }}
+        run: |
+          [[ "$N10_EXPECTED_SOURCE_HEAD" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$GITHUB_SHA" == "$N10_EXPECTED_SOURCE_HEAD" ]]
+          [[ "$N10_TEST_SCOPE" == "v120-host-output-retirement-zero-pc" ]]
+      - name: Existing Ubuntu hosted compiler setup
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          packages=(clang-14)
+          missing=()
+          for package in "${packages[@]}"; do
+            if [ "$(dpkg-query -W -f='${Status}' "$package" 2>/dev/null || true)" != "install ok installed" ]; then
+              missing+=("$package")
+            fi
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            sudo -n env DEBIAN_FRONTEND=noninteractive timeout --kill-after=30s 180s apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
+            sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a timeout --kill-after=30s 480s apt-get -o Dpkg::Use-Pty=0 -o DPkg::Lock::Timeout=60 -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install --no-install-recommends -y "${missing[@]}"
+          fi
+      - name: One NEW grouped actual retirement zero observation PC method
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+          N10_TEST_SCOPE: ${{ inputs.test_scope }}
+        run: python -B note10/device_test/test_v120_host_output_retirement.py --scope "$N10_TEST_SCOPE" --output note10/private/v120-ci-host-output-retirement
+      - name: Upload synthetic JSON and text only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: note10-v120-host-output-retirement-zero-pc-synthetic
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            note10/private/v120-ci-host-output-retirement/result.json
+            note10/private/v120-ci-host-output-retirement/source-sha256.json
+            note10/private/v120-ci-host-output-retirement/fixture-command.json
+            note10/private/v120-ci-host-output-retirement/fixture-compile.txt
+            note10/private/v120-ci-host-output-retirement/fixture-output.json
+            note10/private/v120-ci-host-output-retirement/fixture-stderr.txt
+            note10/private/v120-ci-host-output-retirement/guard-summary.json

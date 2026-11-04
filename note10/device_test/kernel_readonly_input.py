@@ -364,6 +364,10 @@ def candidate_scope(row,*,require_compact=True):
 
 
 def require_device_scope(row,ack_kernel_readonly_growth=False,type3_context=None):
+    data.require(row.get('diagnostic_kind')!='host-output-retirement-zero-pc' and
+        row.get('schema')!='n10-host-output-retirement-zero-pc-v1' and
+        row.get('output_retirement_schema')!='n10-host-output-retirement-zero-pc-v1',
+        'PC-only output retirement format is permanently forbidden on device')
     from native_scoped_output import selected as scoped_selected
     if scoped_selected(row):
         from native_scoped_output_admission import require_device_scope as scoped_device
