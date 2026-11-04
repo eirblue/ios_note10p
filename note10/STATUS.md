@@ -1331,3 +1331,12 @@ The v118 auto_cycle attempt is spent and will not be replayed.
 - One device attempt reached the fresh battery preflight. The device reported 1%, below the required 10%, so execution stopped before any partition write or reboot.
 - The five-partition hash gates and restore checks did not complete. No v119 device cycle completed; the v111 physical baseline remains current.
 - This v119 auto_cycle attempt is spent and will not be replayed. No automatic resume or additional device query is authorized.
+
+
+## 2026-11-04: v120 host output retirement zero observation (PC-only)
+
+One synthetic CI method passed. Its five fixture cases recorded seven allocation attempts, seven successful owner allocations, and seven matching real frees. The fixture observed 4,339 bytes zeroed and scanned while still owned and live, before the matching free; no nonzero bytes remained at that observed free boundary. Four guard cases passed.
+
+This is a host fixture observation only. It did not read memory after free and does not establish secure erasure, global RAM ownership, native runtime behavior, or physical readiness. No device operation, native Image build, native execution, or actual private input occurred. The v111 physical baseline remains unchanged.
+
+The artifact was downloaded, authenticated, hashed, opened, and extracted once. Its receipt was recovered from the already-extracted JSON/text metadata after receipt serialization failed; no transport or test was repeated.
