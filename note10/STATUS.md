@@ -1340,3 +1340,12 @@ One synthetic CI method passed. Its five fixture cases recorded seven allocation
 This is a host fixture observation only. It did not read memory after free and does not establish secure erasure, global RAM ownership, native runtime behavior, or physical readiness. No device operation, native Image build, native execution, or actual private input occurred. The v111 physical baseline remains unchanged.
 
 The artifact was downloaded, authenticated, hashed, opened, and extracted once. Its receipt was recovered from the already-extracted JSON/text metadata after receipt serialization failed; no transport or test was repeated.
+
+
+## 2026-11-04: v121 pre-free output observation candidate
+
+The v121 CI run passed its selected host method, compiled and ran the new synthetic fixture once, and built an encrypted native candidate received once. The fixture covered five cases, with nine successful allocations and matching frees, 128 scan reads, 128 independent free-boundary reads, and 20 synthetic emitted frames. Its negative case deliberately contained two nonzero bytes. The fixture made no reads after free.
+
+The native candidate is default-off and admission-blocked. Its operation scope remains PC-first, and it is not physically ready. Reported linked size was 59,588,608 bytes, unchanged from the reference and below the 59,768,832-byte budget.
+
+This is synthetic host evidence plus native build provenance; it does not establish native runtime zero observation, secure erasure, free reclamation, global RAM ownership, or hardware behavior. No device operation or XNU execution occurred. The v111 physical baseline remains unchanged.
