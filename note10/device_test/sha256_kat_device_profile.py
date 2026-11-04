@@ -723,7 +723,7 @@ def host_binding(source_head):
                       'type3_admission.py','test_v108_type3_admission.py','retained_v108_origin.py',
                       'readonly_stage_witness.py','readonly_stage_witness.h','readonly_stage_witness_fixture.c','test_v109_readonly_stage_witness.py','class3_native_origin.py','test_v110_native109_admission.py','type3_remaining_pack.py','test_v111_device_read_context.py','native_scoped_output.py','test_v116_native_scoped_output.py',
                      'native_scoped_output_admission.py','test_v117_native_scoped_output_admission.py',
-                     'type3_remaining_plan.py','test_v118_saved117_remaining_plan.py')}
+                     'type3_remaining_plan.py','test_v118_saved117_remaining_plan.py','test_v119_saved118_device_entry.py')}
     return dict(host_profile_source_head=source_head, host_profile_source_sha256=dict(pins))
 
 

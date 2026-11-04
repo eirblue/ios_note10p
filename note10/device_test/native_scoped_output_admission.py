@@ -479,7 +479,7 @@ def device_metadata(root,token=None,template=None):
 
 
 def device_precheck_receipt(context,path):
-    from type3_remaining_plan import CONTEXT_SCHEMA as saved_schema,precheck_receipt
+    from type3_remaining_plan import CONTEXT119_SCHEMA as saved_schema,precheck_receipt
     if context is not None and context.get('schema')==saved_schema:return precheck_receipt(context,path)
     import type3_admission as typed
     require(_DEVICE_READ.get() is not None and context.get('schema')==CONTEXT_SCHEMA,
