@@ -99,7 +99,7 @@ def selected(row):return stage_selected(row) or row.get('data_input_kind')==ro3.
 
 def record(head):
     from native_scoped_output_admission import is_head,record as scoped_record
-    if is_head(head):return scoped_record()
+    if is_head(head):return scoped_record(head)
     if head==_NATIVE109['head']:return _NATIVE109
     data.require(head==ro3.NATIVE_HEAD,'unaccepted native class3 source')
     return dict(head=ro3.NATIVE_HEAD,version='v107',result=ro3.NATIVE_RESULT_SHA256,pins=dict(ro3.NATIVE_PINS),kind=ro3.KIND)
@@ -113,7 +113,7 @@ def provenance():
 
 def stage_fields(head=None):
     from native_scoped_output_admission import is_head,stage_fields as scoped_fields
-    if is_head(head):return scoped_fields()
+    if is_head(head):return scoped_fields(head)
     return dict(readonly_stage_schema=_NATIVE109['witness_schema'],readonly_stage_marker='N10DATASTAGE1',native_producer_provenance=provenance())
 
 def live_host(head):
@@ -150,6 +150,8 @@ def producer(result,head):
     return accepted
 
 def banner(row):
+    from native_prefree_output_admission import selected as prefree_selected
+    if prefree_selected(row):return 'Linux version 4.14.113-v121-prefree-output-zero-candidate '
     from native_scoped_output import selected as scoped_selected
     if scoped_selected(row):return 'Linux version 4.14.113-v116-scoped-output-candidate '
     return 'Linux version 4.14.113-v109-readonly-stage-witness-candidate ' if stage_selected(row) else 'Linux version 4.14.113-v107-readonly-span-candidate '
@@ -199,7 +201,7 @@ def ci_receipt(context,context_sha,binding,result):
 
 
 def receipt_binding(root,row,expected,binding):
-    if row.get('schema')=='native116-root-ci-receipt-v1':
+    if row.get('schema') in ('native116-root-ci-receipt-v1','native121-root-ci-receipt-v1'):
         from native_scoped_output_admission import receipt_binding as scoped_receipt_binding
         return scoped_receipt_binding(root,row,expected,binding)
     from sha256_kat_device_profile import read,sha

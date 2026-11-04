@@ -65,6 +65,9 @@ def load_offline(path,expected):
     from sha256_kat_device_profile import host_binding
     if item['version']=='v107':
         require(retained.reading() and row['host_source_head']==retained.HEAD and row['execution_version']=='v108','native107 contract is retained-read-only')
+    elif item['version']=='v121':
+        require(row['execution_version']=='v122','native121 requires separately versioned host122')
+        origins.live_host(row['host_source_head']);host_binding(row['host_source_head'])
     elif item['version']=='v116':
         require(row['execution_version']=='v117','native116 requires separately versioned host117')
         if row['host_source_head']==saved117.HEAD:saved117.require_original_contract(row,path,expected)
@@ -100,7 +103,7 @@ def contract_binding(row):
 
 def candidate_scope(row,*,patched=None):
     item=origins.record(row.get('native_source_head'))
-    if item['version'] in ('v109','v116'):
+    if item['version'] in ('v109','v116','v121'):
         if remaining.selected(row):remaining.origin(row)
         else:origins.live_row(row)
         require(all(row.get(key)==value for key,value in origins.stage_fields(item['head']).items()),'native109 stage provenance differs')
@@ -184,9 +187,10 @@ def _copy_ci_context(output,raw):
     with (output/'ci-success-context.json').open('xb') as stream:stream.write(raw)
 
 
+@__import__('native_prefree_output_admission').composition_template
 def prepare_template(contract,path,expected):
     item=origins.record(contract.get('native_source_head'))
-    require(item['version']=='v116' and contract.get('execution_version')=='v117','new templates require accepted native116/host117; old origins are read-only')
+    require((item['version'],contract.get('execution_version')) in (('v116','v117'),('v121','v122')),'new templates require accepted native116/host117; old origins are read-only')
     origins.live_host(contract.get('host_source_head'))
     from sha256_kat_device_profile import raw_binding,host_binding,ci_success_receipt,write_ci_success_receipt,common_report,sha as file_sha
     transaction(contract,'template_reserved')
@@ -218,6 +222,7 @@ def prepare_template(contract,path,expected):
     return output
 
 
+@__import__('native_prefree_output_admission').composition_reader
 @retained.reader
 def validate_template(root):
     from sha256_kat_device_profile import raw_binding,host_profile_origin,root_receipt_binding,common_report,ci_success_receipt,sha as file_sha
@@ -269,6 +274,7 @@ def materialization(report,token,generic_sha,bound_sha,template_report_sha):
 
 
 @retained.reader
+@__import__('native_prefree_output_admission').composition_reader
 def validate_variant(root,token,template=None):
     from materialize_auto_cycle import template_bytes,SLOT
     root=private(root);report=read(root/'build-result.json')
@@ -318,14 +324,14 @@ def require_materialization_transaction(template,output):
 
 def prepare_offline(path,expected):
     contract=load_offline(path,expected);item=origins.record(contract['native_source_head'])
-    require(item['version']=='v116' and contract['execution_version']=='v117','only accepted native116/host117 may start new offline work')
+    require((item['version'],contract['execution_version']) in (('v116','v117'),('v121','v122')),'only accepted native116/host117 may start new offline work')
     origins.live_host(contract['host_source_head']);output=Path(contract['output'])
     require(not output.exists(),'type3 transaction already reserved; partial/completed transaction cannot restart')
     from sha256_kat_device_profile import sha as file_sha,prepare_plan
     require(file_sha(Path(contract['backup'])/'backup-manifest.json')==contract['backup_manifest_sha256'] and
         file_sha(Path(contract['current_packages'])/'package-result.json')==contract['current_package_result_sha256'],'type3 saved current/backup metadata changed')
     current=read(Path(contract['current_packages'])/'package-result.json')
-    if item['version']=='v116':
+    if item['version'] in ('v116','v121'):
         from native_scoped_output_admission import predecessor
         predecessor(contract)
     else:
@@ -340,8 +346,11 @@ def prepare_offline(path,expected):
     try:
         template=prepare_template(scoped,private(path),expected)
         journal.update(phase='plan_reserved');journal['attempts'].update(plans=1,materializations=1);save(output/'transaction.json',journal)
-        result=prepare_plan(template,Path(contract['backup']),Path(contract['reference_twrp']),Path(contract['mkbootimg']),
-            Path(contract['current_packages']),output/'plan',1)
+        from contextlib import nullcontext
+        from native_prefree_output_admission import predecessor_scope
+        with predecessor_scope(contract) if item['version']=='v121' else nullcontext():
+            result=prepare_plan(template,Path(contract['backup']),Path(contract['reference_twrp']),Path(contract['mkbootimg']),
+                Path(contract['current_packages']),output/'plan',1)
         plan=read(result['plan']);require(plan.get('current_boot_payload_sha256')==contract['current_boot_sha256'],'type3 saved current BOOT differs')
         journal.update(status='complete',phase='complete',result=result,IO_events=list(IO_EVENTS));save(output/'transaction.json',journal)
         return dict(result,transaction=str(output/'transaction.json'),native_version=item['version'],execution_version=contract['execution_version'],device_operations=[])

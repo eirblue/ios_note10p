@@ -80,8 +80,16 @@ def no_legacy(row):
 
 
 def physical_input_scope(result,*,readonly_origin=None):
-    from native_prefree_output_zero import refuse as refuse_prefree
-    refuse_prefree(result)
+    from native_prefree_output_admission import selected as prefree_selected,is_head as prefree_head
+    if prefree_selected(result):
+        from native_scoped_output_admission import producer
+        if prefree_head(readonly_origin):
+            from native_prefree_output_admission import require_composition
+            require_composition();producer(result,readonly_origin)
+        else:
+            from type3_admission import candidate_scope
+            candidate_scope(result)
+        return
     from native_scoped_output import selected as scoped_selected
     if scoped_selected(result):
         from native_scoped_output_admission import is_head,producer,no_pc
@@ -128,7 +136,7 @@ def raw_binding(root, expected_result, expected_source, *, producing_sources=Non
     stream = result.get('version') == 'v73'
     affinity = result.get('version') == 'v78'
     fdt = result.get('version') == 'v81'
-    type3=(result.get('version')=='v107' and result.get('diagnostic_kind')=='kernel-readonly-span-candidate') or (result.get('version') in ('v109','v116') and origins.stage_selected(result))
+    type3=(result.get('version')=='v107' and result.get('diagnostic_kind')=='kernel-readonly-span-candidate') or (result.get('version') in ('v109','v116','v121') and origins.stage_selected(result))
     if type3:
         from kernel_readonly_span_candidate import producer_contract as type3_producer,NATIVE_HEAD,NATIVE_RESULT_SHA256
         if origins.stage_selected(result):
@@ -140,11 +148,11 @@ def raw_binding(root, expected_result, expected_source, *, producing_sources=Non
     kernel_ro = result.get('version')=='v105'
     require(readonly_origin is None or kernel_ro and readonly_origin==V105_CANDIDATE_ORIGIN_HEAD and result.get('diagnostic_kind')=='kernel-readonly-candidate' or type3,
             'retained read-side exception is candidate-only')
-    data = result.get('version') in ('v88','v89','v90','v91','v105','v107','v109','v116')
+    data = result.get('version') in ('v88','v89','v90','v91','v105','v107','v109','v116','v121')
     native = result.get('version') == 'v82'
-    builtin = result.get('version') in ('v72', 'v73', 'v78', 'v81', 'v82', 'v88', 'v89', 'v90', 'v91', 'v105', 'v107', 'v109', 'v116')
+    builtin = result.get('version') in ('v72', 'v73', 'v78', 'v81', 'v82', 'v88', 'v89', 'v90', 'v91', 'v105', 'v107', 'v109', 'v116', 'v121')
     marker = DATA_PROFILE if data else NATIVE_PROFILE if native else FDT_PROFILE if fdt else AFFINITY_PROFILE if affinity else STREAM_PROFILE if stream else BUILTIN_PROFILE if builtin else PROFILE
-    require(result.get('version') in ('v71', 'v72', 'v73', 'v78', 'v81', 'v82', 'v88', 'v89', 'v90', 'v91', 'v105', 'v107', 'v109', 'v116') and result.get('passed') is True and
+    require(result.get('version') in ('v71', 'v72', 'v73', 'v78', 'v81', 'v82', 'v88', 'v89', 'v90', 'v91', 'v105', 'v107', 'v109', 'v116', 'v121') and result.get('passed') is True and
             result.get('Image_built') is True and result.get('BOOT_built') is False and
             result.get('cycle_slot_patched') is False and result.get('kernel_or_provider_executed') is False and
             result.get('ci_context', {}).get('GITHUB_SHA') == expected_source and
@@ -174,12 +182,13 @@ def raw_binding(root, expected_result, expected_source, *, producing_sources=Non
             all(x in image for x in (b'N10RET1', b'N10DATARO3' if type3 else b'N10DATARO1' if kernel_ro else b'N10DATA1' if data else b'N10MEMARGS1' if native else b'N10FDT1' if fdt else b'N10AFF1' if affinity else b'N10SHASTREAM1' if stream else b'N10SHA1')) and
             (not origins.stage_selected(result) or b'N10DATASTAGE1' in image) and
             (not scoped_head(expected_source) or b'N10OUTPUTLEASE1' in image) and
+            (not __import__('native_prefree_output_admission').is_head(expected_source) or b'N10OUTPUTZERO1' in image) and
             (not stream or b'N10SHA1' not in image) and
             (not (affinity or fdt) or not any(marker in image for marker in (b'N10SHA1', b'N10SHASTREAM1'))) and
             (not fdt or b'N10AFF1' not in image) and
             (not native or not any(x in image for x in (b'N10SHA1',b'N10SHASTREAM1',b'N10AFF1',b'N10FDT1'))) and
             (not data or not any(x in image for x in (b'N10SHA1',b'N10SHASTREAM1',b'N10AFF1',b'N10FDT1',b'N10MEMARGS1'))), 'Image evidence identity differs')
-    banners = re.findall((rb'Linux version 4\.14\.113-v116-scoped-output-candidate [^\x00\r\n]+' if scoped_head(expected_source) else rb'Linux version 4\.14\.113-v109-readonly-stage-witness-candidate [^\x00\r\n]+' if origins.stage_selected(result) else rb'Linux version 4\.14\.113-v107-readonly-span-candidate [^\x00\r\n]+' if type3 else rb'Linux version 4\.14\.113-v105-kernel-readonly [^\x00\r\n]+' if kernel_ro else rb'Linux version 4\.14\.113-v91-trusted-logical [^\x00\r\n]+' if result.get('version') == 'v91' else rb'Linux version 4\.14\.113-v90-image-expectation [^\x00\r\n]+' if result.get('version') == 'v90' else rb'Linux version 4\.14\.113-v89-data-guard [^\x00\r\n]+' if result.get('version') == 'v89' else rb'Linux version 4\.14\.113-v88-linux-data [^\x00\r\n]+' if data else rb'Linux version 4\.14\.113-v82-native-memory [^\x00\r\n]+' if native else rb'Linux version 4\.14\.113-v81-early-fdt [^\x00\r\n]+' if fdt else rb'Linux version 4\.14\.113-v78-cpu-affinity [^\x00\r\n]+' if affinity else rb'Linux version 4\.14\.113-v73-sha256-stream [^\x00\r\n]+' if stream else rb'Linux version 4\.14\.113-v72-builtin-init [^\x00\r\n]+' if builtin else rb'Linux version 4\.14\.113-v71-sha256-recovery [^\x00\r\n]+'), image)
+    banners = re.findall((rb'Linux version 4\.14\.113-v121-prefree-output-zero-candidate [^\x00\r\n]+' if __import__('native_prefree_output_admission').is_head(expected_source) else rb'Linux version 4\.14\.113-v116-scoped-output-candidate [^\x00\r\n]+' if scoped_head(expected_source) else rb'Linux version 4\.14\.113-v109-readonly-stage-witness-candidate [^\x00\r\n]+' if origins.stage_selected(result) else rb'Linux version 4\.14\.113-v107-readonly-span-candidate [^\x00\r\n]+' if type3 else rb'Linux version 4\.14\.113-v105-kernel-readonly [^\x00\r\n]+' if kernel_ro else rb'Linux version 4\.14\.113-v91-trusted-logical [^\x00\r\n]+' if result.get('version') == 'v91' else rb'Linux version 4\.14\.113-v90-image-expectation [^\x00\r\n]+' if result.get('version') == 'v90' else rb'Linux version 4\.14\.113-v89-data-guard [^\x00\r\n]+' if result.get('version') == 'v89' else rb'Linux version 4\.14\.113-v88-linux-data [^\x00\r\n]+' if data else rb'Linux version 4\.14\.113-v82-native-memory [^\x00\r\n]+' if native else rb'Linux version 4\.14\.113-v81-early-fdt [^\x00\r\n]+' if fdt else rb'Linux version 4\.14\.113-v78-cpu-affinity [^\x00\r\n]+' if affinity else rb'Linux version 4\.14\.113-v73-sha256-stream [^\x00\r\n]+' if stream else rb'Linux version 4\.14\.113-v72-builtin-init [^\x00\r\n]+' if builtin else rb'Linux version 4\.14\.113-v71-sha256-recovery [^\x00\r\n]+'), image)
     require(len(banners) == 1, 'unique actual profile kernel banner required')
     config = root/'prerequisites/objects/.config'
     required = {'CONFIG_NOTE10_SHA256_KAT_RECOVERY=y', 'CONFIG_CRYPTO=y', 'CONFIG_CRYPTO_HASH=y',
@@ -724,7 +733,7 @@ def host_binding(source_head):
                       'test_v107_readonly_span_candidate.py','build_kernel_readonly_span_candidate.py',
                       'type3_admission.py','test_v108_type3_admission.py','retained_v108_origin.py',
                       'readonly_stage_witness.py','readonly_stage_witness.h','readonly_stage_witness_fixture.c','test_v109_readonly_stage_witness.py','class3_native_origin.py','test_v110_native109_admission.py','type3_remaining_pack.py','test_v111_device_read_context.py','native_scoped_output.py','test_v116_native_scoped_output.py',
-                     'native_scoped_output_admission.py','test_v117_native_scoped_output_admission.py',
+                     'native_scoped_output_admission.py','test_v117_native_scoped_output_admission.py','native_prefree_output_admission.py','native_prefree_output_zero.py','test_v122_native_prefree_output_admission.py',
                      'type3_remaining_plan.py','test_v118_saved117_remaining_plan.py','test_v119_saved118_device_entry.py')}
     return dict(host_profile_source_head=source_head, host_profile_source_sha256=dict(pins))
 
@@ -1084,6 +1093,8 @@ def fields(row):
     if scoped_selected(row):
         from native_scoped_output_admission import SCOPED_FIELDS
         keys=(*keys,*SCOPED_FIELDS)
+        from native_prefree_output_admission import selected as prefree_selected,FIELDS as PREFREE_FIELDS
+        if prefree_selected(row):keys=(*keys,*PREFREE_FIELDS)
     if remaining.FIELD in row:keys=(*keys,remaining.FIELD)
     return {key: row[key] for key in keys}
 
@@ -1270,6 +1281,7 @@ def finish_plan(kernel_build,backup,twrp,mkbootimg,current_packages,output,templ
 
 
 @remaining.plan_reader
+@__import__('native_prefree_output_admission').plan_reader
 def validate_plan(path, expected):
     from type3_remaining_plan import selected_plan,accepted_plan
     if selected_plan(path):return accepted_plan(path,expected)

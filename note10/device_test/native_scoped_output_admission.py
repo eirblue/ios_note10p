@@ -210,7 +210,9 @@ _DEVICE_READ=ContextVar('native116_device_read',default=None)
 def require(value,message):data.require(value,message)
 
 
-def record():
+def record(head=None):
+    from native_prefree_output_admission import is_head,record as prefree_record
+    if is_head(head):return prefree_record()
     item=_NATIVE116
     require(type(item) is dict and set(item)==ORIGIN_KEYS,'native116 origin not bound by root acceptance')
     require(re.fullmatch('[0-9a-f]{40}',item['head'] or '') and
@@ -223,30 +225,33 @@ def record():
             ('image_bytes','linked_bytes','run_id','attempt','job_id','artifact_id','workflow_id')) and
         item['linked_bytes']<=ro3.BUDGET and item['state_bytes']==88 and item['outcome_bytes']==128,
         'closed exact native116 accepted origin required')
-    return dict(item,kind=scoped.KIND,version='v116',witness_schema='n10-readonly-stage-witness-candidate-v1')
+    return dict(item,kind=scoped.KIND,version='v116',host_version='v117',witness_schema='n10-readonly-stage-witness-candidate-v1')
 
 
 def is_head(head):
-    return _NATIVE116 is not None and head==record()['head']
+    from native_prefree_output_admission import is_head as prefree_head
+    return prefree_head(head) or _NATIVE116 is not None and head==record()['head']
 
 
-def provenance():
-    return dict(version='v116',PC_first_use=True,PC_only=False,operation_scope_PC_only=True,
+def provenance(head=None):
+    return dict(version=record(head)['version'],PC_first_use=True,PC_only=False,operation_scope_PC_only=True,
         physical_ready=False,admission_blocked=True)
 
 
-def stage_fields():
-    return dict(readonly_stage_schema='n10-readonly-stage-witness-candidate-v1',readonly_stage_marker='N10DATASTAGE1',
-        native_producer_provenance=provenance(),scoped_output_schema=scoped.SCHEMA,
+def stage_fields(head=None):
+    from native_prefree_output_admission import is_head,fields
+    return dict(**(fields() if is_head(head) else {}),readonly_stage_schema='n10-readonly-stage-witness-candidate-v1',readonly_stage_marker='N10DATASTAGE1',
+        native_producer_provenance=provenance(head),scoped_output_schema=scoped.SCHEMA,
         scoped_output_marker='N10OUTPUTLEASE1',scoped_output_handle_bytes=24,
         scoped_output_reads_per_success=2,scoped_output_retained_after_emit=False)
 
 
 def no_pc(row):
+    require(row.get('schema') not in ('n10-output-lifetime-lease-pc-v1','n10-host-owned-output-adapter-pc-v1','n10-host-output-writer-pc-v1','n10-host-output-content-verification-pc-v1','n10-host-output-retirement-zero-pc-v1'),'PC schema permanently forbidden')
     require(row.get('PC_only') is not True and row.get('diagnostic_kind') not in
-        ('output-lifetime-lease-pc','host-owned-output-adapter-pc','host-output-writer-pc','host-output-content-verification-pc',
+        ('output-lifetime-lease-pc','host-owned-output-adapter-pc','host-output-writer-pc','host-output-content-verification-pc','host-output-retirement-zero-pc',
          'readonly-input-pc','owned-contiguous-staging-pc','current-owned-staging-pc','kernel-readonly-span-pc') and
-        not any(key in row for key in ('output_lease_schema','output_adapter_schema','output_writer_schema','output_verification_schema',
+        not any(key in row for key in ('output_lease_schema','output_adapter_schema','output_writer_schema','output_verification_schema','output_retirement_schema',
             'readonly_input_schema','readonly_input_slot','readonly_pc_contract','kernel_readonly_span_schema')),
         'PC formats remain permanently forbidden for native116 admission')
 
@@ -256,22 +261,22 @@ def live_row(row):
     if saved_selected(row):
         no_pc(row);return saved_origin(row)
     no_pc(row)
-    item=record()
+    item=record(row.get('native_source_head'))
     require(row.get('source_head')==row.get('native_source_head')==item['head'] and
-        row.get('native_producer_version')=='v116' and row.get('execution_version')==row.get('version')=='v117' and
-        all(row.get(key)==scoped.KIND for key in ('diagnostic_kind','data_input_kind','storage_input_kind')) and
-        all(row.get(key)==value for key,value in stage_fields().items()),'native116 requires separate exact live host117')
+        row.get('native_producer_version')==item['version'] and row.get('execution_version')==row.get('version')==item['host_version'] and
+        all(row.get(key)==item['kind'] for key in ('diagnostic_kind','data_input_kind','storage_input_kind')) and
+        all(row.get(key)==value for key,value in stage_fields(item['head']).items()),'native116 requires separate exact live host117')
     from class3_native_origin import live_host
     live_host(row.get('host_profile_source_head'))
-    require(row.get('host_profile_source_head') not in (item['head'],'669f25ae9e164d6e079620d890e0b377fca75ce5'),
+    require(row.get('host_profile_source_head') not in (item['head'],_NATIVE116['head'],'669f25ae9e164d6e079620d890e0b377fca75ce5'),
         'native producer/current111 host cannot become live host117')
 
 
 def producer(result,head):
     no_pc(result)
-    item=record()
+    item=record(head)
     require(head==item['head'] and result.get('source_sha256')==item['pins'] and
-        result.get('version')=='v116' and result.get('diagnostic_kind')==scoped.KIND and
+        result.get('version')==item['version'] and result.get('diagnostic_kind')==item['kind'] and
         result.get('image_bytes')==item['image_bytes'] and result.get('image_sha256')==item['image_sha256'] and
         result.get('kernel_readonly3_linked_bytes')==item['linked_bytes'] and result.get('passed') is True and
         result.get('Image_built') is True and result.get('kernel_or_provider_executed') is False and
@@ -287,10 +292,10 @@ def producer(result,head):
 
 
 def ci_receipt(context,context_sha,binding,result):
-    item=record();producer(result,item['head'])
+    item=record(context.get('native_source_head') if type(context) is dict else None);producer(result,item['head'])
     keys=CI_CONTEXT_KEYS
-    require(type(context) is dict and set(context)==keys and context['schema']=='note10-root-native116-ci-success-context-v1' and
-        context['native_version']=='v116' and context['native_source_head']==item['head'] and
+    require(type(context) is dict and set(context)==keys and context['schema']==f"note10-root-native{item['version'][1:]}-ci-success-context-v1" and
+        context['native_version']==item['version'] and context['native_source_head']==item['head'] and
         context['accepted_result_sha256']==item['result'] and context['source_sha256']==item['pins'] and
         context['source_manifest_sha256']==item['source_manifest_sha256'] and context['producer_ci_context']==item['producer_ci_context'] and
         context['generic_image_sha256']==item['image_sha256'] and context['Image_bytes']==item['image_bytes'] and
@@ -300,26 +305,27 @@ def ci_receipt(context,context_sha,binding,result):
         binding.get('image_sha256')==item['image_sha256'] and binding.get('image_size')==item['image_bytes'] and
         binding.get('effective_config_sha256')==result.get('files_sha256',{}).get('actual-effective.config') and
         binding.get('build_evidence_id')==result.get('build_evidence_id') and
-        binding.get('kernel_banner','').startswith('Linux version 4.14.113-v116-scoped-output-candidate '),
+        binding.get('kernel_banner','').startswith(__import__('class3_native_origin').banner(binding)),
         'exact root native116 CI context/package binding differs')
     method=context['new_grouped_method'];fixture=context['new_fixture'];artifact=context['artifact']
     require(type(method) is dict and set(method)=={'source_head','result_sha256','selected','run','errors','failures','fixture_compiles','fixture_processes'} and
         method['source_head']==item['head'] and method['result_sha256']==item['test_result_sha256'] and
-        method['selected']==['test_actual_native_scoped_output_transfer_emit_and_exact_cleanup'] and
+        method['selected']==(['test_actual_native_prefree_output_scan_and_cleanup'] if item['version']=='v121' else ['test_actual_native_scoped_output_transfer_emit_and_exact_cleanup']) and
         method['run']==1 and method['errors']==method['failures']==0 and method['fixture_compiles']==method['fixture_processes']==1 and
+        (fixture==__import__('native_prefree_output_admission').FIXTURE_EVIDENCE if item['version']=='v121' else (
         type(fixture) is dict and set(fixture)=={'source_head','result_sha256','schema','cases','allocation_attempts','allocation_successes','free_calls','output_reads','hash_stub_calls','decoder_stub_calls','emit_frames'} and
         fixture==dict(source_head=item['head'],result_sha256=item['fixture_result_sha256'],schema='n10-native-scoped-output-fixture-v1',
-            cases=6,allocation_attempts=12,allocation_successes=10,free_calls=10,output_reads=2,hash_stub_calls=16,decoder_stub_calls=4,emit_frames=16) and
+            cases=6,allocation_attempts=12,allocation_successes=10,free_calls=10,output_reads=2,hash_stub_calls=16,decoder_stub_calls=4,emit_frames=16))) and
         type(artifact) is dict and artifact==dict(run_id=item['run_id'],attempt=item['attempt'],job_id=item['job_id'],
             workflow_id=item['workflow_id'],artifact_id=item['artifact_id'],plaintext_zip_sha256=item['plaintext_zip_sha256']),
         'native116 accepted single-source fixture/producer CI evidence differs')
     _baseline_context(context['current_predecessor'])
     from class3_native_origin import origin
-    return dict(schema='native116-root-ci-receipt-v1',kind=binding['device_profile']+'-accepted-image',accepted=True,
+    return dict(schema=f"native{item['version'][1:]}-root-ci-receipt-v1",kind=binding['device_profile']+'-accepted-image',accepted=True,
         root_reader_result_sha256=context_sha,producer_source_head=item['head'],ci_result_sha256=item['result'],
         image_sha256=item['image_sha256'],image_bytes=item['image_bytes'],
         effective_config_sha256=binding['effective_config_sha256'],build_evidence_id=binding['build_evidence_id'],
-        kernel_banner=binding['kernel_banner'],native_origin=origin(item['head']),native_producer_provenance=provenance(),
+        kernel_banner=binding['kernel_banner'],native_origin=origin(item['head']),native_producer_provenance=provenance(item['head']),
         run_id=item['run_id'],attempt=item['attempt'],job_id=item['job_id'],workflow_id=item['workflow_id'],
         artifact_id=item['artifact_id'])
 
@@ -343,14 +349,14 @@ def _baseline_context(item):
     return item
 
 
-def predecessor(contract):
+def _predecessor_context(contract):
     """Read private reviewed111 provenance; never acquire old execution privilege."""
     import type3_admission as typed
     raw=data.bounded_private_read(typed.private(contract['ci_success_context']),65536)
     require(data.sha(raw)==contract['ci_success_context_sha256'],'reviewed private native116 context changed')
-    context=json.loads(raw.decode('utf-8-sig'));native=record()
+    context=json.loads(raw.decode('utf-8-sig'));native=record(contract.get('native_source_head'))
     require(type(context) is dict and set(context)==CI_CONTEXT_KEYS and
-        context['schema']=='note10-root-native116-ci-success-context-v1' and context['native_version']=='v116' and
+        context['schema']==f"note10-root-native{native['version'][1:]}-ci-success-context-v1" and context['native_version']==native['version'] and
         context['native_source_head']==native['head'] and context['accepted_result_sha256']==native['result'] and
         context['source_sha256']==native['pins'] and context['source_manifest_sha256']==native['source_manifest_sha256'] and
         context['producer_ci_context']==native['producer_ci_context'] and context['generic_image_sha256']==native['image_sha256'] and
@@ -374,11 +380,15 @@ def predecessor(contract):
         row.get(FIELD,{}).get('packaging_host')==dict(host_profile_source_head=PACKAGING_HEAD,host_profile_source_sha256=dict(PACKAGING_PINS)) and
         any(p.get('mode')=='diagnostic' and p.get('payload_sha256')==item['boot_sha256'] for p in row.get('packages',[])),
         'saved current111 package/plan/terminal evidence differs')
-    return row
+    return row,item
 
 
-def growth_ack():
-    item=record()
+def predecessor(contract):
+    return _predecessor_context(contract)[0]
+
+
+def growth_ack(head=None):
+    item=record(head)
     return dict(reference_linked_bytes=scoped.REFERENCE_LINKED_BYTES,accepted_linked_bytes=item['linked_bytes'],
         delta_bytes=item['linked_bytes']-scoped.REFERENCE_LINKED_BYTES,acknowledged=True)
 
@@ -388,29 +398,35 @@ def execution_context(row,plan_sha,packages,declared_version,host_head,path,expe
     if saved_selected(row):return saved_execution(row,plan_sha,packages,declared_version,host_head,path,expected,execution_output)
     import type3_admission as typed
     from sha256_kat_device_profile import host_binding
+    item=record(row.get('native_source_head'))
     live_row(row);offline=typed.candidate_scope(row,patched=True)
     completed=typed.read(Path(offline['output'])/'transaction.json')
     require(completed.get('status')=='complete' and completed.get('phase')=='complete' and
         completed.get('contract_sha256')==row['type3_contract_sha256'] and
         completed.get('result',{}).get('plan_sha256')==plan_sha,'complete fresh native116 offline transaction required')
-    require(declared_version=='v117' and host_head==row['host_profile_source_head'] and
+    require(declared_version==item['host_version'] and host_head==row['host_profile_source_head'] and
         re.fullmatch('[0-9a-f]{64}',plan_sha or '') and path is not None and
         re.fullmatch('[0-9a-f]{64}',expected or ''),'explicit reviewed host117 device scope required')
     path=typed.private(path);raw=data.bounded_private_read(path,65536)
     require(data.sha(raw)==expected,'exact host117 device contract SHA required')
     contract=json.loads(raw.decode('utf-8-sig'))
     keys=DEVICE_KEYS
+    from native_prefree_output_admission import device_schema,context_schema
+    require(type(contract) is dict and set(contract)==keys,'closed native device object required')
+    effective=typed.private(contract['packages'])
+    require(packages is None or typed.private(packages)==effective,'explicit packages contradict closed device contract')
+    packages=effective
     host=host_binding(host_head)
-    require(type(contract) is dict and set(contract)==keys and contract['schema']==DEVICE_SCHEMA and
+    require(type(contract) is dict and set(contract)==keys and contract['schema']==device_schema(item['head']) and
         contract['status']=='reviewed_ready' and contract['execution_version']==declared_version and
         contract['host_source_head']==host_head and contract['host_source_sha256']==host['host_profile_source_sha256'] and
-        contract['native_source_head']==record()['head'] and contract['plan_sha256']==plan_sha and
+        contract['native_source_head']==item['head'] and contract['plan_sha256']==plan_sha and
         contract['packages']==str(typed.private(packages)) and execution_output is not None and
         contract['output']==str(typed.private(execution_output)) and
         not typed.private(execution_output).is_relative_to(typed.private(packages)) and
         contract['bound_image_sha256']==row.get('image_sha256',row.get('kernel_image_sha256')) and
         contract['offline_contract_sha256']==row['type3_contract_sha256'] and
-        contract['linked_growth_ack']==growth_ack() and type(contract['linked_growth_ack']) is dict and
+        contract['linked_growth_ack']==growth_ack(item['head']) and type(contract['linked_growth_ack']) is dict and
         contract['linked_growth_ack'].get('acknowledged') is True and
         all(type(contract['linked_growth_ack'][k]) is int for k in ('reference_linked_bytes','accepted_linked_bytes','delta_bytes')) and
         all(type(contract[k]) is int and contract[k]==v for k,v in
@@ -419,7 +435,7 @@ def execution_context(row,plan_sha,packages,declared_version,host_head,path,expe
         'closed host117 device contract/plan/growth scope differs')
     require(data.sha(data.bounded_private_read(typed.private(packages)/'package-result.json',4*1024*1024))==
         contract['package_result_sha256'],'reviewed host117 package metadata changed')
-    return dict(schema=CONTEXT_SCHEMA,declared_version='v117',host_source_head=host_head,
+    return dict(schema=context_schema(item['head']),declared_version=item['host_version'],host_source_head=host_head,
         host_source_sha256=host['host_profile_source_sha256'],plan_sha256=plan_sha,packages=str(typed.private(packages)),
         output=str(typed.private(execution_output)),contract_path=str(path),contract_sha256=expected,
         linked_growth_ack=contract['linked_growth_ack'])
@@ -431,7 +447,8 @@ def require_device_scope(row,ack,context):
     require(ack is True,'host117 requires explicit measured growth ACK before device query')
     keys={'schema','declared_version','host_source_head','host_source_sha256','plan_sha256','packages','output',
         'contract_path','contract_sha256','linked_growth_ack'}
-    require(type(context) is dict and set(context)==keys and context.get('schema')==CONTEXT_SCHEMA,
+    from native_prefree_output_admission import context_schema
+    require(type(context) is dict and set(context)==keys and context.get('schema')==context_schema(row.get('native_source_head')),
         'separate exact host117 execution context required before transport')
     expected=execution_context(row,context['plan_sha256'],context['packages'],context['declared_version'],
         context['host_source_head'],context['contract_path'],context['contract_sha256'],context['output'])
@@ -482,7 +499,7 @@ def device_precheck_receipt(context,path):
     from type3_remaining_plan import CONTEXT119_SCHEMA as saved_schema,precheck_receipt
     if context is not None and context.get('schema')==saved_schema:return precheck_receipt(context,path)
     import type3_admission as typed
-    require(_DEVICE_READ.get() is not None and context.get('schema')==CONTEXT_SCHEMA,
+    require(_DEVICE_READ.get() is not None and context is not None and context.get('schema') in (CONTEXT_SCHEMA,'type3-prefree-output-execution-v1'),
         'validated host117 read scope required before precheck output')
     target=typed.private(context['output'])/'PREINSTALL-CHECK-01.json'
     require((path is None or typed.private(path)==target) and not target.exists() and
@@ -490,8 +507,10 @@ def device_precheck_receipt(context,path):
     return target
 
 
-def decode_joined(text,identity,cycle,legacy,stages):
+def decode_joined(text,identity,cycle,legacy,stages,*,producer_kind=None):
     from decode_reservation import checksum
+    from native_prefree_output_zero import KIND as prefree_kind
+    prefree=producer_kind==prefree_kind
     lines=[line for line in text.splitlines() if 'N10OUTPUTLEASE' in line]
     require(len(lines)==1,'one native116 output-scope companion required')
     match=re.search(r'N10BOOTLINK2 boot=([0-9a-f]{32}) N10OUTPUTLEASE1 ([^\r\n\x00]{1,447}) checksum=([0-9a-f]{8})$',lines[0])
@@ -507,7 +526,7 @@ def decode_joined(text,identity,cycle,legacy,stages):
     require(reads==int(flags['first_returned'])+int(flags['last_returned']),'output-scope read count contradicts flags')
     for a,b in (('borrowed','offered'),('first_returned','borrowed'),('last_returned','first_returned'),
         ('released','last_returned'),('retired','offered'),('clear_called','retired'),('free_called','clear_returned')):
-        require(not flags[a] or flags[b],'contradictory output-scope sequence')
+        require(prefree and a=='clear_called' and not flags['offered'] or not flags[a] or flags[b],'contradictory output-scope sequence')
     for op in ('clear','free'):
         require(flags[op+'_called']==flags[op+'_returned'],'incomplete output-scope cleanup return')
     require(flags['clear_called']==flags['free_called'] and fields[3]==('void_returned' if flags['free_returned'] else 'not_called'),
@@ -520,7 +539,10 @@ def decode_joined(text,identity,cycle,legacy,stages):
     if phase=='ok':require(legacy['passed'] and stages['passed'] and bits==0x3ff and reads==2,'successful output scope incomplete')
     elif phase=='output_consumer':require(flags['offered'] and flags['refused'] and flags['retired'] and
         flags['free_returned'] and not flags['released'] and reads==0 and not legacy['passed'],'consumer refusal scope differs')
-    else:require(bits==0 and reads==0,'unoffered output cannot claim scoped lifetime')
+    elif prefree and phase=='output_zero_observation' and flags['offered']:
+        require(flags['free_returned'] and not legacy['passed'],'failed prefree observation cannot pass')
+    else:require(bits in ((0,0x3c0) if prefree else (0,)) and reads==0 and
+        (not prefree or flags['free_returned']==stages['events']['output_free_returned']),'unoffered output cannot claim scoped lifetime')
     return dict(schema=scoped.WIRE_SCHEMA,boot_identity=match[1],flags=bits,events=flags,reads=reads,
         passed=phase=='ok' and bits==0x3ff,cleanup_result=fields[3],cleanup_semantics='void_call_boundaries_only',
         retained_after_emit=False,global_RAM_ownership=False,hardware=False,xnu_executed=False)

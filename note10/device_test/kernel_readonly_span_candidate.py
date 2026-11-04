@@ -268,7 +268,7 @@ def decode_selected(raw,banner,identity,cycle,*,expected):
         functional_acceptance=False,hardware_return_proven_by_frames=False)
     def selected(text,rid):
         row=data.decode(text,rid,cycle,_source_class=MODE)
-        components['kernel_readonly3_data']=row;components['data_phase']=({'output_offer':'output_transfer','output_consumer':'output_consumer'}[row['status']] if scoped and row['status'] in ('output_offer','output_consumer') else data.functional_phase(row['status']))
+        components['kernel_readonly3_data']=row;components['data_phase']=({'output_offer':'output_transfer','output_consumer':'output_consumer','output_zero_observation':'prefree_observation'}[row['status']] if scoped and row['status'] in ('output_offer','output_consumer','output_zero_observation') else data.functional_phase(row['status']))
         components['structural_presence']=data.structural_presence(text,rid,cycle,row['boot_identity'])
         data.require(not any(marker in text for marker in ('N10DATA1 ','N10DATARO1','N10DATAPC','N10DATACMP','N10DATARANGE','N10DATAEARLY','N10DATAGROWTH')),
             'type3 cannot claim class2, PC or external companions')
@@ -281,9 +281,15 @@ def decode_selected(raw,banner,identity,cycle,*,expected):
                 components['readonly_stage_witness']=dict(state='invalid_or_missing',error=str(error));raise
             if scoped:
                 from native_scoped_output_admission import decode_joined as decode_output
-                try:components['native_scoped_output']=decode_output(text,rid,cycle,row,components['readonly_stage_witness'])
+                try:components['native_scoped_output']=decode_output(text,rid,cycle,row,components['readonly_stage_witness'],producer_kind=expected.get('diagnostic_kind'))
                 except ValueError as error:
                     components['native_scoped_output']=dict(state='invalid_or_missing',error=str(error));raise
+                from native_prefree_output_admission import selected as prefree_selected,decode_joined as decode_zero
+                if prefree_selected(expected):
+                    try:components['native_prefree_output_zero']=decode_zero(text,rid,cycle,row,components['readonly_stage_witness'],components['native_scoped_output'])
+                    except ValueError as error:
+                        components['native_prefree_output_zero']=dict(state='invalid_or_missing',error=str(error));raise
+                    data.require(components['native_prefree_output_zero']['passed'],'native121 prefree witness did not complete')
                 data.require(components['native_scoped_output']['passed'],'native116 output-scope witness did not complete')
             data.require(components['readonly_stage_witness']['passed'],'native stage witness did not complete')
         data.require(row['carrier']==CAPACITY and row['logical'] in (0,CAPACITY),'type3 extent differs')
