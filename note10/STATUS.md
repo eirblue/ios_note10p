@@ -1349,3 +1349,10 @@ The v121 CI run passed its selected host method, compiled and ran the new synthe
 The native candidate is default-off and admission-blocked. Its operation scope remains PC-first, and it is not physically ready. Reported linked size was 59,588,608 bytes, unchanged from the reference and below the 59,768,832-byte budget.
 
 This is synthetic host evidence plus native build provenance; it does not establish native runtime zero observation, secure erasure, free reclamation, global RAM ownership, or hardware behavior. No device operation or XNU execution occurred. The v111 physical baseline remains unchanged.
+
+
+## 2026-11-04: v122 offline template validation stopped
+
+The v122 host test passed all five sections and the reviewed source was published. One offline first-use attempt attached and intrinsically validated the compact input once, then stopped during template validation when the generated receipt did not match the expected schema. No materialization, package pair, plan, or cycle was produced. The attempt is spent and will not be replayed.
+
+No device query, BOOT write, reboot, CI dispatch, or new Image build occurred in v122. The v111 physical baseline remains unchanged. This does not establish device readiness or a hardware output-zero observation.
