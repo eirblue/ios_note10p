@@ -1370,3 +1370,11 @@ No v123 device query, device BOOT write, or reboot occurred. No v123 CI dispatch
 The v124 selected host test passed its three sections, and the reviewed source was published. One remaining package-tail operation consumed the saved v123 BOOT through the existing packager and completed the diagnostic/rollback package pair and final plan once. The package-tail step did not regenerate BOOT, rebuild an Image, run CI, or perform a device operation.
 
 This is PC-only package and plan evidence. It does not establish device readiness or a hardware output-zero observation. The v111 physical baseline remains unchanged.
+
+## 2026-11-04: v125 device-entry attempt stopped before device preflight
+
+The reviewed v125 source was published, and its remaining-only host test passed two sections. Across three local test invocations, the initial and rev1 attempts stopped after partial progress; the final remaining-only attempt passed. This covers four unique sections. The original grouped method did not pass as a whole.
+
+One authorized device-entry invocation stopped during saved-plan image-binding checks, before device preflight, because the generic saved template image and stage-specific variant image did not agree. No device query, partition write, BOOT write, or reboot occurred, and no cycle journal or output was created. The attempt is spent and will not be replayed.
+
+No v125 CI run, new image build, offline materialization, package or plan generation, or XNU execution occurred. The v111 physical baseline remains unchanged. The native pre-free output-zero witness was not observed; this result does not establish physical readiness, hardware re-entry, post-free erasure or reclamation, or global RAM ownership.
