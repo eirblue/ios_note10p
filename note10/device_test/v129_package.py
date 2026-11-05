@@ -16,8 +16,13 @@ ARCHIVE_SHA='46d6a563af04e0c2ed9c96c2a1af8cab2344b458c9554b09098e6a9e7219ae4c'
 DEFCONFIG='exynos9820-d2x_defconfig'
 MKBOOTIMG_SHA='2a8d05d34110f66c463668f43fc812ce2e46e66459c347eaadb080271df69aa8'
 TWRP_SHA='e8de29b03fc3eab95f51663b08b2f848e168854a15f8a598a1f80d216f4794df'
-SCHEMA='note10-v129-proof-package-v1'
-PLAN_SCHEMA='note10-v129-proof-cycle-v1'
+SCHEMA='note10-v129-proof-package-v2'
+PLAN_SCHEMA='note10-v129-proof-cycle-v2'
+BUILD_SOURCE_HEAD='155ea9dcccc019fb8f785673c589eb9f01ace1ec'
+BUILD_SOURCE_MANIFEST=ROOT/'note10/private/device-test/v129-kexec-proof-package-recovery-20261105/frozen-source/MANIFEST.json'
+BUILD_SOURCE_MANIFEST_SHA256='f026bd91b51f71edb00d0b0ece67dabbf4d41732238a3fa6e762512482e103f1'
+PACKAGE_PRODUCER_FILES=('note10/device_test/v129_package.py','note10/device_test/v129_cycle.py',
+                        'note10/device_test/v129_inputs.py','note10/device_test/test_v129_reference_header.py')
 DISABLED=b'!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
 PARTITIONS={'boot','recovery','dtb','dtbo','vbmeta'}
 
@@ -45,7 +50,27 @@ def verify_pins(row):
             raise ValueError('producer source changed: '+name)
 
 
-def header(raw):
+def package_producer_pins():return {name:sha(ROOT/name) for name in PACKAGE_PRODUCER_FILES}
+
+
+def verify_build_source_domain(build):
+    manifest=private(BUILD_SOURCE_MANIFEST)
+    if sha(manifest)!=BUILD_SOURCE_MANIFEST_SHA256:raise ValueError('immutable129 build source manifest changed')
+    frozen=read(manifest)
+    if (frozen.get('schema')!='v129-exact-source-freeze-v1' or frozen.get('head')!=BUILD_SOURCE_HEAD or
+        len(frozen.get('files',{}))!=9 or build.get('ci_context',{}).get('GITHUB_SHA')!=BUILD_SOURCE_HEAD):
+        raise ValueError('immutable accepted129 build source domain differs')
+    expected={name:row['sha256'] for name,row in frozen['files'].items()}
+    if build.get('source_sha256')!=expected:raise ValueError('build source map differs from frozen129 source')
+    for name,row in frozen['files'].items():
+        path=manifest.parent/name
+        if (not path.resolve().is_relative_to(manifest.parent) or path.is_symlink() or
+            str(path.resolve())!=row['path'] or path.stat().st_size!=row['bytes'] or sha(path)!=hexid(row['sha256'],64)):
+            raise ValueError('frozen129 source bytes differ: '+name)
+    return expected
+
+
+def header(raw,*,reference=False,file_size=None):
     if len(raw)<1660 or raw[:8]!=b'ANDROID!':raise ValueError('Android BOOT header required')
     keys=('kernel_size','kernel_addr','ramdisk_size','ramdisk_addr','second_size','second_addr','tags_addr','page_size','header_version','encoded_os')
     row=dict(zip(keys,struct.unpack_from('<10I',raw,8)));page=row['page_size']
@@ -54,8 +79,17 @@ def header(raw):
     row.update(name=z(raw[48:64]),cmdline=z(raw[64:576])+z(raw[608:1632]),kernel_offset=page)
     row['ramdisk_offset']=page+(row['kernel_size']+page-1)//page*page
     row['payload_end']=row['ramdisk_offset']+(row['ramdisk_size']+page-1)//page*page
-    row['recovery_dtbo_size']=struct.unpack_from('<I',raw,1632)[0]
-    if row['second_size'] or row['recovery_dtbo_size'] or row['payload_end']>len(raw):raise ValueError('unexpected BOOT payload layout')
+    row['recovery_dtbo_size'],row['recovery_dtbo_offset'],row['header_size']=struct.unpack_from('<IQI',raw,1632)
+    total=len(raw) if file_size is None else file_size
+    if (type(total) is not int or not len(raw)<=total<=128*1024*1024 or
+        (not reference and total!=len(raw)) or not row['kernel_size'] or row['second_size'] or
+        row['header_size']!=1648 or row['payload_end']>total):raise ValueError('unexpected BOOT payload layout')
+    if row['recovery_dtbo_size']:
+        if (not reference or row['recovery_dtbo_offset']!=row['payload_end'] or
+            row['recovery_dtbo_offset']%page or row['recovery_dtbo_offset']+row['recovery_dtbo_size']>total):
+            raise ValueError('unexpected reference recovery DTBO extent')
+    elif row['recovery_dtbo_offset']:
+        raise ValueError('empty recovery DTBO must have zero offset')
     return row
 
 
@@ -90,7 +124,7 @@ def validate_build(folder):
         row.get('common_PID1_RESTART2_recovery') is not True or row.get('early_recovery_marker_before_shutdown') is not True or
         row.get('marker_failure_aborts_shutdown') is not True or row.get('XNU_execution_allowed') is not False):
         raise ValueError('fresh source129 disabled proof build required')
-    verify_pins(row['source_sha256']);hexid(row['build_evidence_id'],32)
+    verify_build_source_domain(row);hexid(row['build_evidence_id'],32)
     for file,key in [('Image','Image_sha256'),('actual-effective.config','effective_config_sha256'),('minimal-init.elf','PID1_sha256'),('park.bin','park_sha256'),('initramfs.cpio','initramfs_cpio_sha256')]:
         if sha(folder/file)!=hexid(row[key],64):raise ValueError('build bytes differ: '+file)
     config=(folder/'actual-effective.config').read_text().splitlines()
@@ -118,7 +152,7 @@ def prepare(build,backup_dir,twrp,mkbootimg,output,current_boot_sha):
     require_paired_BOOT(current_boot_sha,parts['boot'])
     if digest(official)!=TWRP_SHA or not parts['recovery'].startswith(official) or sha(mkbootimg)!=MKBOOTIMG_SHA:
         raise ValueError('pinned recovery/mkbootimg required')
-    stock=header(parts['boot']);reference=header(official)
+    stock=header(parts['boot']);reference=header(official,reference=True)
     if stock['page_size']!=reference['page_size'] or any(stock[k]!=reference[k] for k in ('kernel_addr','tags_addr')):
         raise ValueError('paired BOOT/recovery load fields differ')
     if struct.unpack_from('<Q',image,8)[0]!=struct.unpack_from('<Q',official,reference['kernel_offset']+8)[0]:
@@ -152,9 +186,12 @@ def prepare(build,backup_dir,twrp,mkbootimg,output,current_boot_sha):
         rollback_BOOT_sha256=digest(parts['boot']),expected_current_BOOT_sha256=current_boot_sha,
         build=str(build),build_result_sha256=sha(build/'result.json'),backup=str(backup_dir),
         backup_manifest_sha256=sha(backup_dir/'backup-manifest.json'),partitions=manifest['partitions'],bootloader=manifest['bootloader'],
-        source_sha256=row['source_sha256'],immutable_input_commit=INPUT_COMMIT,immutable_input_sha256=INPUT_PINS,
+        source_sha256=package_producer_pins(),build_source_sha256=row['source_sha256'],
+        build_source_manifest_sha256=BUILD_SOURCE_MANIFEST_SHA256,immutable_input_commit=INPUT_COMMIT,immutable_input_sha256=INPUT_PINS,
         cmdline_source='pinned official recovery v1 BOOT header; kernel CMDLINE_EXTEND retains incoming chosen/bootargs',
         BOOT_cmdline=reference['cmdline'],bare_skip_builtin_preserved=True,external_ramdisk_included=False,
+        reference_recovery_dtbo_included=False,reference_recovery_dtbo_size=reference['recovery_dtbo_size'],
+        reference_recovery_dtbo_offset=reference['recovery_dtbo_offset'],
         XNU_execution_allowed=False,physical_gate_open=False)
     zip_package(output/'proof.zip',diagnostic,dict(schema=SCHEMA,cycle=cycle,mode='proof',BOOT_sha256=digest(diagnostic)))
     zip_package(output/'rollback.zip',parts['boot'],dict(schema=SCHEMA,cycle=cycle,mode='rollback',BOOT_sha256=digest(parts['boot'])))
@@ -164,7 +201,8 @@ def prepare(build,backup_dir,twrp,mkbootimg,output,current_boot_sha):
               package_result_sha256=sha(output/'package-result.json'),minimum_battery=10,return_timeout_seconds=240,
               host_BOOT_write_limit=1,host_reboot_limit=1,internal_kexec_load_limit=1,internal_kexec_REBOOT_limit=1,
               normal_recovery_fallback='pretransfer/failure only',watchdog_automatic_reset='observed separately',
-              XNU_execution_allowed=False,source_sha256=row['source_sha256'])
+              XNU_execution_allowed=False,source_sha256=package['source_sha256'],build_source_sha256=row['source_sha256'],
+              build_source_manifest_sha256=BUILD_SOURCE_MANIFEST_SHA256)
     save(output/'plan.json',plan)
     return dict(plan=str(output/'plan.json'),plan_sha256=sha(output/'plan.json'),device_operations=[])
 
@@ -176,13 +214,18 @@ def validate_plan(path,expected):
     if (plan.get('schema')!=PLAN_SCHEMA or plan.get('version')!='v129' or plan.get('minimum_battery')!=10 or
         plan.get('return_timeout_seconds')!=240 or any(plan.get(k)!=1 for k in ('host_BOOT_write_limit','host_reboot_limit','internal_kexec_load_limit','internal_kexec_REBOOT_limit')) or
         plan.get('XNU_execution_allowed') is not False):raise ValueError('bounded proof-only plan required')
-    hexid(plan['cycle'],32);hexid(plan['build_evidence_id'],32);verify_pins(plan['source_sha256'])
+    hexid(plan['cycle'],32);hexid(plan['build_evidence_id'],32)
+    if plan.get('source_sha256')!=package_producer_pins():raise ValueError('exact current package producer domain required')
+    verify_pins(plan['source_sha256'])
     folder=private(plan['packages'])
     if sha(folder/'package-result.json')!=hexid(plan['package_result_sha256'],64):raise ValueError('package manifest changed')
     package=read(folder/'package-result.json')
     if package.get('schema')!=SCHEMA or any(package.get(k)!=plan[k] for k in ('cycle','build_evidence_id','source_sha256')) or package.get('XNU_execution_allowed') is not False:
         raise ValueError('package scope differs')
     build,raw=validate_build(package['build']);manifest,parts=backup(package['backup'])
+    if (package.get('build_source_sha256')!=build['source_sha256'] or plan.get('build_source_sha256')!=build['source_sha256'] or
+        package.get('build_source_manifest_sha256')!=BUILD_SOURCE_MANIFEST_SHA256 or plan.get('build_source_manifest_sha256')!=BUILD_SOURCE_MANIFEST_SHA256):
+        raise ValueError('plan/package immutable build-source domain differs')
     require_paired_BOOT(package['expected_current_BOOT_sha256'],parts['boot'])
     if sha(Path(package['build'])/'result.json')!=package['build_result_sha256'] or sha(Path(package['backup'])/'backup-manifest.json')!=package['backup_manifest_sha256'] or package['partitions']!=manifest['partitions']:
         raise ValueError('build/backup manifest changed')
