@@ -30,13 +30,14 @@ OWN={
  'drivers/scsi/ufs/v130_ufs.inc':'v130_ufs.inc',
  'drivers/dma/v130_dmaengine.inc':'v130_dmaengine.inc',
  'drivers/dma/v130_pl330.inc':'v130_pl330.inc'}
+PINS.update({'drivers/usb/notify/Kconfig': 'c46d7458ce23c535d0601ed027c224b3e8815d532f18952b3bde48a798e673cc', 'drivers/usb/notify/Makefile': 'c4937b008a1aa15060b57549104736984fc7f90d090d26ebff10437fc9a2d5b9', 'drivers/usb/notify/usb_power_notify.c': '9d79464fc5a8bf868970783d0b538428e8e295565ed3777a536cd6df68db27a6', 'drivers/usb/notify/usb_power_notify.h': 'd0173762b2f35338f62f33908153136959454ed3d06c73662a323b8f684f66c8'})
 KCONFIG=b'''
 config NOTE10_XNU_KEXEC_HANDOFF
  bool "Note10 bounded actual-XNU legacy-kexec handoff"
  depends on ARM64 && ARM64_4K_PAGES && OF && SYSFS && KEXEC && SMP && HOTPLUG_CPU
  depends on SEC_REBOOT && EXYNOS_PMU && S3C2410_WATCHDOG && S3C2410_SHUTDOWN_REBOOT
  depends on ARM_GIC && ARM_ARCH_TIMER && USB_DWC3_GADGET && SCSI_UFSHCD && EXYNOS_IOMMU && PL330_DMA
- depends on !USB_XHCI_HCD && !SND_USB_AUDIO && !SND_EXYNOS_USB_AUDIO && !LINK_FORWARD && !USB_CONFIGFS
+ depends on !USB_XHCI_HCD && !SND_USB_AUDIO && !SND_EXYNOS_USB_AUDIO && !LINK_FORWARD && !USB_CONFIGFS && !USB_PORT_POWER_OPTIMIZATION
  default n
  help
    Source-bound owned32MiB placement, full-parcel/PID1 admission, EL1-preserving

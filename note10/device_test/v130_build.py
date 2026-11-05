@@ -17,14 +17,14 @@ from v130_slot import generic
 import v130_prepare as prepare
 HERE=Path(__file__).resolve().parent
 WORKFLOW='.github/workflows/note10-v130-actual-xnu.yml'
-SOURCES=('v130_archive.py', 'v130_build.py', 'v130_contract.py', 'v130_cycle.py', 'v130_dmaengine.inc', 'v130_fixture.c', 'v130_gate_core.h', 'v130_gic.inc', 'v130_handoff_core.c', 'v130_handoff_core.h', 'v130_iommu.inc', 'v130_kernel.c', 'v130_kernel_api.h', 'v130_loader.c', 'v130_package.py', 'v130_payload.py', 'v130_pl330.inc', 'v130_platform.py', 'v130_prepare.py', 'v130_slot.py', 'v130_sources.py', 'v130_timer.inc', 'v130_ufs.inc', 'v130_usb.inc', 'v130_usb_gadget.inc', 'test_v130_handoff.py', 'test_v130_pid1_write_return.py', 'test_v130_return_order_ufs.py', 'test_v130_composite_include_contract.py', 'test_v130_gadget_link_contract.py')
+SOURCES=('v130_archive.py', 'v130_build.py', 'v130_contract.py', 'v130_cycle.py', 'v130_dmaengine.inc', 'v130_fixture.c', 'v130_gate_core.h', 'v130_gic.inc', 'v130_handoff_core.c', 'v130_handoff_core.h', 'v130_iommu.inc', 'v130_kernel.c', 'v130_kernel_api.h', 'v130_loader.c', 'v130_package.py', 'v130_payload.py', 'v130_pl330.inc', 'v130_platform.py', 'v130_prepare.py', 'v130_slot.py', 'v130_sources.py', 'v130_timer.inc', 'v130_ufs.inc', 'v130_usb.inc', 'v130_usb_gadget.inc', 'test_v130_handoff.py', 'test_v130_pid1_write_return.py', 'test_v130_return_order_ufs.py', 'test_v130_composite_include_contract.py', 'test_v130_gadget_link_contract.py', 'test_v130_host_power_contract.py')
 FILES=tuple('note10/device_test/'+name for name in SOURCES)+('note10/xnu26/boot_adt.py',WORKFLOW)
 SETTINGS=dict(KEXEC='y',KEXEC_JUMP='n',SMP='y',HOTPLUG_CPU='y',PM_SLEEP_SMP='y',ARM64_4K_PAGES='y',
     KVM='n',KVM_ARM_HOST='n',ARM64_VHE='n',SYSFS='y',OF='y',SEC_REBOOT='y',EXYNOS_PMU='y',
     S3C2410_WATCHDOG='y',S3C2410_SHUTDOWN_REBOOT='y',NOTE10_XNU_KEXEC_HANDOFF='y',
     NOTE10_LEGACY_KEXEC_RECOVERY_PROOF='n',EXYNOS_IOMMU='y',PL330_DMA='y',ARM_GIC='y',ARM_ARCH_TIMER='y',
     USB_GADGET='y',USB_DWC3='y',USB_DWC3_EXYNOS='y',USB_DWC3_GADGET='y',USB_DWC3_HOST='n',USB_DWC3_DUAL_ROLE='n',
-    USB_XHCI_HCD='n',USB_XHCI_PCI='n',USB_XHCI_PLATFORM='n',SND_USB_AUDIO='n',SND_EXYNOS_USB_AUDIO='n',LINK_FORWARD='n',
+    USB_XHCI_HCD='n',USB_XHCI_PCI='n',USB_XHCI_PLATFORM='n',USB_PORT_POWER_OPTIMIZATION='n',SND_USB_AUDIO='n',SND_EXYNOS_USB_AUDIO='n',LINK_FORWARD='n',
     USB_CONFIGFS='n',USB_G_ANDROID='n',USB_GADGETFS='n',USB_ZERO='n',USB_MASS_STORAGE='n',
     USB_G_SERIAL='n',USB_ETH='n',USB_G_NCM='n',USB_G_ACM_MS='n',USB_G_MULTI='n',USB_G_HID='n',
     SCSI_UFSHCD='y',CRYPTO='y',CRYPTO_SHA256='y',CRYPTO_HASH='y',CRYPTO_USER_API='y',CRYPTO_USER_API_HASH='y',
@@ -140,10 +140,35 @@ def gadget_link_context(row,current):
     hexid(contract['result_sha256']);return row
 
 
+GADGET_SOURCE_COMMIT = 'cf22017c6f1bbb0e2aba243f925f7cf5e2e0e2b1'
+GADGET_SOURCE_SHA256 = {'note10/device_test/v130_archive.py': 'bc49ffef72f73769de77a55432253f57f14d20433933ac56570f0ebfc3a1bce4', 'note10/device_test/v130_build.py': '93de31873a9f67668fda42a231db0afd02be810fdbf6b1df55a39a1f8e541bed', 'note10/device_test/v130_contract.py': 'd3336dccb8edf2366d4cc8233cd83d18b27f4d65c7dd3a3627807ddd0858c929', 'note10/device_test/v130_cycle.py': 'b1a5dd876b02c3680a1f789e19d21d6cf5cd4750a39241b20eb1a7adb5d6f360', 'note10/device_test/v130_dmaengine.inc': '4c1be828c50a1e42ad169afac07a32533680009caf1f2b6ad64f8517af9ba7c7', 'note10/device_test/v130_fixture.c': '1895ee818cf274e9e9d134f0c38658f83392f689004f0e3aa180e9396f6035c5', 'note10/device_test/v130_gate_core.h': '12b36033bda6976deba188099b5b6d1bd32748e84ea2edd796a4463faca7f543', 'note10/device_test/v130_gic.inc': 'ace8aed4e9f6880ef1744602b366c2dddbbd51a29d5b3414e13f7bd01d7276ee', 'note10/device_test/v130_handoff_core.c': '4cf36f2a3e95c537f95db521f0b1626f303bf85c2ee1071624182faa78c8793a', 'note10/device_test/v130_handoff_core.h': 'f424e9c6db1641d54e052ac14f2a0077016745d8aeb93c51d9941eaac53384de', 'note10/device_test/v130_iommu.inc': '25d3b471b5635af652993ae0601d5e42feb0da9fa4dafeb9dae7831433a61e81', 'note10/device_test/v130_kernel.c': 'e6a4747d461670a517059b75f211bd500bcbe2a69c26044c67178dd7c356e3f1', 'note10/device_test/v130_kernel_api.h': 'aa61dfffd257e94e2cb84a00085635a5133736512729c252cd680e73eefba77d', 'note10/device_test/v130_loader.c': '2663f22b3109b17f300fd80d2999b6aa18f052891b6157c63c5c020c69bc9b55', 'note10/device_test/v130_package.py': '7c12214b4a27c0ec8a5dd25c89adc74e39c135aa44816ea0a517a1ccc851e3df', 'note10/device_test/v130_payload.py': '45be7127de95f7a1ab60e3b0031d62bb8431b22906304da77af6e2e0c4fd1ac6', 'note10/device_test/v130_pl330.inc': '330583a2d4597c6f3d2d06ecca459c7379d898ab0f2fa3227824792d76940a21', 'note10/device_test/v130_platform.py': '62d727ab69abfa05e7427d5f332361ef52d25e537b26042b7d19465b5db2ec22', 'note10/device_test/v130_prepare.py': 'd4981f587709561c161ad62fe593fd445e9119a60d4f450bb216c903bfab431e', 'note10/device_test/v130_slot.py': '07c05bc1507120ec8a184457a416e4b716283f54403967ff1c024e65a8563317', 'note10/device_test/v130_sources.py': 'ce40fcf158008ed9185ecba56ed902e4b57b70f80cdadaa377e6767f2969aae7', 'note10/device_test/v130_timer.inc': '8cb43fb5600759875a9c7a76610b69af2b13daea4823e5f09ad398de74892a31', 'note10/device_test/v130_ufs.inc': 'bfdf905f17ad2d35c966444f5d235a42ed5eb09ce0f6f52a7fea74fadc7551ac', 'note10/device_test/v130_usb.inc': '83ed2649607d4806bd77fce0f0a56e510ed5cdbd71079d458c5150a026ce1e02', 'note10/device_test/v130_usb_gadget.inc': 'f4ffc9f17d49d6b5a749ca4a39ff1aec2b2b959d6dae81d7e282ac014bd17b19', 'note10/device_test/test_v130_handoff.py': 'c878db51459f2461289f41064c5c51f27966d95c45fe0e29552bbb907228a1b5', 'note10/device_test/test_v130_pid1_write_return.py': 'b92c4658fc282d33364846b8983e4753e99a66a5b98133927ee4807244549b3d', 'note10/device_test/test_v130_return_order_ufs.py': '733fa71bd4bf8f2ad1f2e9598fd7fa0205aa09a3ba4f5fde98d140e89c2846c3', 'note10/device_test/test_v130_composite_include_contract.py': '3739093076c9451ded680dde711a757232ceac7a16f6e3c445d876aecf683a78', 'note10/device_test/test_v130_gadget_link_contract.py': '0c1a762f8558c9c34dac3cf7122dbebb848190e8697659e206efdf818051a279', 'note10/xnu26/boot_adt.py': 'b64ceac3651957485e734ef9053f368f9238adb8d88b2adc5e5622c7ff974b33', '.github/workflows/note10-v130-actual-xnu.yml': 'fc78e86a052cd455a151a6b5148edf91d9d4a6376edc6c621cde558c9269be16'}
+GADGET_PASS_CANONICAL_SHA256 = '0ee1b0cb3bf98abd41250b410dfd6d98909318528f211f910f5f464a259a887a'
+HOST_POWER_SCOPE = 'v130-host-port-power-dependency-only'
+HOST_POWER_FILES = ('note10/device_test/v130_prepare.py','note10/device_test/v130_build.py','note10/device_test/test_v130_host_power_contract.py')
+
+
+def host_power_context(row,current):
+    keys={'schema','scope','source_contract_passed','native_link_status','retained_source_commit','retained_gadget_link_continuation','source_contract_PASS','source_sha256'}
+    if (not isinstance(row,dict) or set(row)!=keys or row['schema']!='note10-v130-public-host-power-continuation-v1' or row['scope']!=HOST_POWER_SCOPE or
+        row['source_contract_passed'] is not True or row['native_link_status']!='pending' or row['retained_source_commit']!=GADGET_SOURCE_COMMIT or row['source_sha256']!=current):
+        raise ValueError('host-port dependency admission must keep native link pending')
+    prior=row['retained_gadget_link_continuation'];gadget_link_context(prior,GADGET_SOURCE_SHA256)
+    if digest(json.dumps(prior,separators=(',',':'),sort_keys=True).encode())!=GADGET_PASS_CANONICAL_SHA256:
+        raise ValueError('retained source32 gadget PASS chain changed')
+    if set(current)!=set(GADGET_SOURCE_SHA256)|set(HOST_POWER_FILES) or any(current[k]!=pin for k,pin in GADGET_SOURCE_SHA256.items() if k not in HOST_POWER_FILES):
+        raise ValueError('unapproved source changed outside host-port dependency delta3')
+    contract=row['source_contract_PASS']
+    if (not isinstance(contract,dict) or set(contract)!={'schema','scope','passed','result_sha256','source_sha256'} or
+        contract['schema']!='note10-v130-host-power-admission-pass-v1' or contract['scope']!=HOST_POWER_SCOPE or contract['passed'] is not True or
+        contract['source_sha256']!={name:current[name] for name in HOST_POWER_FILES}):
+        raise ValueError('NEW host-port admission contract differs; native link is untested')
+    hexid(contract['result_sha256']);return row
+
+
 def pass_context(encoded):
     raw=base64.b64decode(encoded,validate=True)
-    if len(raw)>32768:raise ValueError('bounded public gadget-link continuation metadata required')
-    return gadget_link_context(json.loads(raw),source_pins())
+    if len(raw)>32768:raise ValueError('bounded public host-power continuation metadata required')
+    return host_power_context(json.loads(raw),source_pins())
 
 
 def main():
@@ -162,13 +187,15 @@ def main():
     archive=a.archive.absolute() if a.archive else out.with_name(out.name+'-kernel-input.tar.gz')
     if archive.is_symlink() or archive.is_relative_to(out) or archive.is_relative_to(work):p.error('external ordinary source archive required')
     out.mkdir(parents=True);commands=[]
+    gadget=retained['retained_gadget_link_continuation']
     result=dict(schema=BUILD_SCHEMA,version='v130',passed=False,ci_context=ci,source_sha256=pins,
         immutable128_source=INPUT128,immutable129_source=INPUT129,kernel_commit=COMMIT,kernel_archive_sha256=ARCHIVE_SHA,
-        build_evidence_id=identity,retained_NEW_PASS=retained['retained_compile_continuation']['retained_return_order_PASS']['retained_continuation_PASS']['retained_NEW_PASS'],
-        delta_NEW_PASS=retained['retained_compile_continuation']['retained_return_order_PASS']['retained_continuation_PASS']['delta_NEW_PASS'],return_order_delta_PASS=retained['retained_compile_continuation']['retained_return_order_PASS']['delta_NEW_PASS'],
-        retained_continuation_PASS=retained['retained_compile_continuation']['retained_return_order_PASS']['retained_continuation_PASS'],retained_return_order_PASS=retained['retained_compile_continuation']['retained_return_order_PASS'],
-        composite_source_contract_PASS=retained['retained_compile_continuation']['source_contract_PASS'],native_include_compile_status='pending',
-        retained_compile_continuation=retained['retained_compile_continuation'],gadget_link_source_contract_PASS=retained['source_contract_PASS'],native_link_validation_status='pending',
+        build_evidence_id=identity,retained_NEW_PASS=gadget['retained_compile_continuation']['retained_return_order_PASS']['retained_continuation_PASS']['retained_NEW_PASS'],
+        delta_NEW_PASS=gadget['retained_compile_continuation']['retained_return_order_PASS']['retained_continuation_PASS']['delta_NEW_PASS'],return_order_delta_PASS=gadget['retained_compile_continuation']['retained_return_order_PASS']['delta_NEW_PASS'],
+        retained_continuation_PASS=gadget['retained_compile_continuation']['retained_return_order_PASS']['retained_continuation_PASS'],retained_return_order_PASS=gadget['retained_compile_continuation']['retained_return_order_PASS'],
+        composite_source_contract_PASS=gadget['retained_compile_continuation']['source_contract_PASS'],native_include_compile_status='pending',
+        retained_compile_continuation=gadget['retained_compile_continuation'],gadget_link_source_contract_PASS=gadget['source_contract_PASS'],native_link_validation_status='pending',
+        retained_gadget_link_continuation=gadget,host_power_source_contract_PASS=retained['source_contract_PASS'],
         continuation_source_binding=dict(schema=retained['schema'],scope=retained['scope'],retained_source_commit=retained['retained_source_commit'],current_source_sha256=retained['source_sha256']),
         old_tests_replayed=0,execution_slot_enabled=False,
         private_payload_uploaded=False,hardware_package_emitted=False,physical_ready=False,device_operations=[])
