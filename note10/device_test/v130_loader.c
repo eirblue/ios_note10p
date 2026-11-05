@@ -26,7 +26,13 @@ static void event(const char *stage)
 {
     int fd=open("/dev/kmsg",O_WRONLY|O_CLOEXEC);char text[192];int n;
     n=snprintf(text,sizeof(text),"<6>N10XNU130 id=%s cycle=%.32s stage=%s\n",N130_BUILD_ID,(const char *)n130_cycle,stage);
-    if(fd>=0){if(n>0 && n<(int)sizeof(text))(void)write(fd,text,(size_t)n);close(fd);}
+    if(fd>=0){
+        if(n>0 && n<(int)sizeof(text)){
+            ssize_t written=write(fd,text,(size_t)n);
+            if(written!=n){close(fd);return;} /* Best-effort log; never retry. */
+        }
+        close(fd);
+    }
 }
 static int deadline(void)
 {
