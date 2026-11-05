@@ -17,7 +17,7 @@ from v130_slot import generic
 import v130_prepare as prepare
 HERE=Path(__file__).resolve().parent
 WORKFLOW='.github/workflows/note10-v130-actual-xnu.yml'
-SOURCES=('v130_archive.py', 'v130_build.py', 'v130_contract.py', 'v130_cycle.py', 'v130_dmaengine.inc', 'v130_fixture.c', 'v130_gate_core.h', 'v130_gic.inc', 'v130_handoff_core.c', 'v130_handoff_core.h', 'v130_iommu.inc', 'v130_kernel.c', 'v130_kernel_api.h', 'v130_loader.c', 'v130_package.py', 'v130_payload.py', 'v130_pl330.inc', 'v130_platform.py', 'v130_prepare.py', 'v130_slot.py', 'v130_sources.py', 'v130_timer.inc', 'v130_ufs.inc', 'v130_usb.inc', 'v130_usb_gadget.inc', 'test_v130_handoff.py', 'test_v130_pid1_write_return.py', 'test_v130_return_order_ufs.py')
+SOURCES=('v130_archive.py', 'v130_build.py', 'v130_contract.py', 'v130_cycle.py', 'v130_dmaengine.inc', 'v130_fixture.c', 'v130_gate_core.h', 'v130_gic.inc', 'v130_handoff_core.c', 'v130_handoff_core.h', 'v130_iommu.inc', 'v130_kernel.c', 'v130_kernel_api.h', 'v130_loader.c', 'v130_package.py', 'v130_payload.py', 'v130_pl330.inc', 'v130_platform.py', 'v130_prepare.py', 'v130_slot.py', 'v130_sources.py', 'v130_timer.inc', 'v130_ufs.inc', 'v130_usb.inc', 'v130_usb_gadget.inc', 'test_v130_handoff.py', 'test_v130_pid1_write_return.py', 'test_v130_return_order_ufs.py', 'test_v130_composite_include_contract.py')
 FILES=tuple('note10/device_test/'+name for name in SOURCES)+('note10/xnu26/boot_adt.py',WORKFLOW)
 SETTINGS=dict(KEXEC='y',KEXEC_JUMP='n',SMP='y',HOTPLUG_CPU='y',PM_SLEEP_SMP='y',ARM64_4K_PAGES='y',
     KVM='n',KVM_ARM_HOST='n',ARM64_VHE='n',SYSFS='y',OF='y',SEC_REBOOT='y',EXYNOS_PMU='y',
@@ -88,10 +88,36 @@ def return_order_context(row,current):
     hexid(delta['result_sha256']);return row
 
 
+RETURN_UFS_SOURCE_COMMIT = '580014f7e84c1db0858b24f2c6c7d57fe3b26122'
+RETURN_UFS_SOURCE_SHA256 = {'note10/device_test/v130_archive.py': 'bc49ffef72f73769de77a55432253f57f14d20433933ac56570f0ebfc3a1bce4', 'note10/device_test/v130_build.py': '7e8dd2c1222066c16c75f356d2e891a522973008efbf181a11f402fe52752d77', 'note10/device_test/v130_contract.py': 'd3336dccb8edf2366d4cc8233cd83d18b27f4d65c7dd3a3627807ddd0858c929', 'note10/device_test/v130_cycle.py': 'b1a5dd876b02c3680a1f789e19d21d6cf5cd4750a39241b20eb1a7adb5d6f360', 'note10/device_test/v130_dmaengine.inc': '4c1be828c50a1e42ad169afac07a32533680009caf1f2b6ad64f8517af9ba7c7', 'note10/device_test/v130_fixture.c': '1895ee818cf274e9e9d134f0c38658f83392f689004f0e3aa180e9396f6035c5', 'note10/device_test/v130_gate_core.h': '12b36033bda6976deba188099b5b6d1bd32748e84ea2edd796a4463faca7f543', 'note10/device_test/v130_gic.inc': 'ace8aed4e9f6880ef1744602b366c2dddbbd51a29d5b3414e13f7bd01d7276ee', 'note10/device_test/v130_handoff_core.c': '4cf36f2a3e95c537f95db521f0b1626f303bf85c2ee1071624182faa78c8793a', 'note10/device_test/v130_handoff_core.h': 'f424e9c6db1641d54e052ac14f2a0077016745d8aeb93c51d9941eaac53384de', 'note10/device_test/v130_iommu.inc': '25d3b471b5635af652993ae0601d5e42feb0da9fa4dafeb9dae7831433a61e81', 'note10/device_test/v130_kernel.c': 'e6a4747d461670a517059b75f211bd500bcbe2a69c26044c67178dd7c356e3f1', 'note10/device_test/v130_kernel_api.h': 'aa61dfffd257e94e2cb84a00085635a5133736512729c252cd680e73eefba77d', 'note10/device_test/v130_loader.c': '2663f22b3109b17f300fd80d2999b6aa18f052891b6157c63c5c020c69bc9b55', 'note10/device_test/v130_package.py': '7c12214b4a27c0ec8a5dd25c89adc74e39c135aa44816ea0a517a1ccc851e3df', 'note10/device_test/v130_payload.py': '45be7127de95f7a1ab60e3b0031d62bb8431b22906304da77af6e2e0c4fd1ac6', 'note10/device_test/v130_pl330.inc': '330583a2d4597c6f3d2d06ecca459c7379d898ab0f2fa3227824792d76940a21', 'note10/device_test/v130_platform.py': '62d727ab69abfa05e7427d5f332361ef52d25e537b26042b7d19465b5db2ec22', 'note10/device_test/v130_prepare.py': '090e353e00bb1fe56a9cdca0270991f7131a59aedb87866f95c0c778ed4afed3', 'note10/device_test/v130_slot.py': '07c05bc1507120ec8a184457a416e4b716283f54403967ff1c024e65a8563317', 'note10/device_test/v130_sources.py': 'ce40fcf158008ed9185ecba56ed902e4b57b70f80cdadaa377e6767f2969aae7', 'note10/device_test/v130_timer.inc': '8cb43fb5600759875a9c7a76610b69af2b13daea4823e5f09ad398de74892a31', 'note10/device_test/v130_ufs.inc': 'bfdf905f17ad2d35c966444f5d235a42ed5eb09ce0f6f52a7fea74fadc7551ac', 'note10/device_test/v130_usb.inc': '83ed2649607d4806bd77fce0f0a56e510ed5cdbd71079d458c5150a026ce1e02', 'note10/device_test/v130_usb_gadget.inc': 'f4ffc9f17d49d6b5a749ca4a39ff1aec2b2b959d6dae81d7e282ac014bd17b19', 'note10/device_test/test_v130_handoff.py': 'c878db51459f2461289f41064c5c51f27966d95c45fe0e29552bbb907228a1b5', 'note10/device_test/test_v130_pid1_write_return.py': 'b92c4658fc282d33364846b8983e4753e99a66a5b98133927ee4807244549b3d', 'note10/device_test/test_v130_return_order_ufs.py': '733fa71bd4bf8f2ad1f2e9598fd7fa0205aa09a3ba4f5fde98d140e89c2846c3', 'note10/xnu26/boot_adt.py': 'b64ceac3651957485e734ef9053f368f9238adb8d88b2adc5e5622c7ff974b33', '.github/workflows/note10-v130-actual-xnu.yml': 'fc78e86a052cd455a151a6b5148edf91d9d4a6376edc6c621cde558c9269be16'}
+RETURN_UFS_PASS_CANONICAL_SHA256 = '7a0a0a94ad392fee204093b359c6a6206cf231022aa448d2875d00e4a1eab556'
+COMPOSITE_SCOPE = 'v130-composite-include-contract-only'
+COMPOSITE_FILES = ('note10/device_test/v130_prepare.py','note10/device_test/v130_build.py','note10/device_test/test_v130_composite_include_contract.py')
+
+
+def composite_include_context(row,current):
+    keys={'schema','scope','source_contract_passed','native_compile_status','retained_source_commit','retained_return_order_PASS','source_contract_PASS','source_sha256'}
+    if (not isinstance(row,dict) or set(row)!=keys or row['schema']!='note10-v130-public-composite-compile-continuation-v1' or
+        row['scope']!=COMPOSITE_SCOPE or row['source_contract_passed'] is not True or row['native_compile_status']!='pending' or
+        row['retained_source_commit']!=RETURN_UFS_SOURCE_COMMIT or row['source_sha256']!=current):
+        raise ValueError('compile-only composite include admission must keep native validation pending')
+    prior=row['retained_return_order_PASS'];return_order_context(prior,RETURN_UFS_SOURCE_SHA256)
+    if digest(json.dumps(prior,separators=(',',':'),sort_keys=True).encode())!=RETURN_UFS_PASS_CANONICAL_SHA256:
+        raise ValueError('retained source30 PASS chain changed')
+    if set(current)!=set(RETURN_UFS_SOURCE_SHA256)|set(COMPOSITE_FILES) or any(current[k]!=pin for k,pin in RETURN_UFS_SOURCE_SHA256.items() if k not in COMPOSITE_FILES):
+        raise ValueError('unapproved source changed outside include/validator delta3')
+    contract=row['source_contract_PASS']
+    if (not isinstance(contract,dict) or set(contract)!={'schema','scope','passed','result_sha256','source_sha256'} or
+        contract['schema']!='note10-v130-composite-admission-contract-pass-v1' or contract['scope']!=COMPOSITE_SCOPE or contract['passed'] is not True or
+        contract['source_sha256']!={name:current[name] for name in COMPOSITE_FILES}):
+        raise ValueError('new admission-contract PASS differs; no native compile PASS is inferred')
+    hexid(contract['result_sha256']);return row
+
+
 def pass_context(encoded):
     raw=base64.b64decode(encoded,validate=True)
-    if len(raw)>32768:raise ValueError('bounded public return-order continuation PASS metadata required')
-    return return_order_context(json.loads(raw),source_pins())
+    if len(raw)>32768:raise ValueError('bounded public compile-only continuation metadata required')
+    return composite_include_context(json.loads(raw),source_pins())
 
 
 def main():
@@ -112,9 +138,10 @@ def main():
     out.mkdir(parents=True);commands=[]
     result=dict(schema=BUILD_SCHEMA,version='v130',passed=False,ci_context=ci,source_sha256=pins,
         immutable128_source=INPUT128,immutable129_source=INPUT129,kernel_commit=COMMIT,kernel_archive_sha256=ARCHIVE_SHA,
-        build_evidence_id=identity,retained_NEW_PASS=retained['retained_continuation_PASS']['retained_NEW_PASS'],
-        delta_NEW_PASS=retained['retained_continuation_PASS']['delta_NEW_PASS'],return_order_delta_PASS=retained['delta_NEW_PASS'],
-        retained_continuation_PASS=retained['retained_continuation_PASS'],
+        build_evidence_id=identity,retained_NEW_PASS=retained['retained_return_order_PASS']['retained_continuation_PASS']['retained_NEW_PASS'],
+        delta_NEW_PASS=retained['retained_return_order_PASS']['retained_continuation_PASS']['delta_NEW_PASS'],return_order_delta_PASS=retained['retained_return_order_PASS']['delta_NEW_PASS'],
+        retained_continuation_PASS=retained['retained_return_order_PASS']['retained_continuation_PASS'],retained_return_order_PASS=retained['retained_return_order_PASS'],
+        composite_source_contract_PASS=retained['source_contract_PASS'],native_include_compile_status='pending',
         continuation_source_binding=dict(schema=retained['schema'],scope=retained['scope'],retained_source_commit=retained['retained_source_commit'],current_source_sha256=retained['source_sha256']),
         old_tests_replayed=0,execution_slot_enabled=False,
         private_payload_uploaded=False,hardware_package_emitted=False,physical_ready=False,device_operations=[])
@@ -163,14 +190,16 @@ def main():
             wanted='# CONFIG_'+name+' is not set' if value=='n' else 'CONFIG_'+name+'='+value
             if wanted not in config.splitlines() and not(value=='n' and 'CONFIG_'+name+'=' not in config):raise ValueError('effective profile differs: '+name)
         run([*make,'-k','V=1','-j'+str(a.jobs),'Image'],'03-new-Image',5400)
-        image=(objects/'arch/arm64/boot/Image').read_bytes();symbols=(objects/'System.map').read_text()
+        result['native_include_compile_status']='compiled-by-this-CI'
+        image=(objects/'arch/arm64/boot/Image').read_bytes();(out/'Image').write_bytes(image)
+        symbols=(objects/'System.map').read_text()
         addresses={parts[2]:int(parts[0],16) for line in symbols.splitlines() if len(parts:=line.split())==3 and re.fullmatch('[0-9a-fA-F]+',parts[0])}
         if (image[56:60]!=b'ARM\x64' or len(image)>BOOT_LIMIT-32768 or image.count(archive_data)!=1 or image.count(DISABLED)!=1 or
             addresses.get('__initramfs_start',-1)-addresses.get('_text',-2)!=image.find(archive_data)):
             raise ValueError('actual source-built raw CPIO/symbol/disabled Image geometry differs')
         offset=image.find(archive_data);layout=dict(initramfs_offset=offset,initramfs_bytes=len(archive_data),prefix_bytes=prefix,
             slot_offset=offset+prefix,slot_bytes=len(archive_data)-prefix,cycle_offset=image.find(DISABLED))
-        shutil.copyfile(objects/'arch/arm64/boot/Image',out/'Image');shutil.copyfile(objects/'System.map',out/'System.map')
+        shutil.copyfile(objects/'System.map',out/'System.map')
         objects_pins={}
         for name in ('arch/arm64/mm/init.o','arch/arm64/kernel/machine_kexec.o','arch/arm64/kernel/relocate_kernel.o',
             'kernel/kexec_core.o','kernel/reboot.o','init/main.o','init/initramfs.o','drivers/samsung/sec_reboot.o',
