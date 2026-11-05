@@ -1,3 +1,12 @@
+## 2026-11-05: v129 bounded legacy-kexec recovery cycle completed
+
+- One NEW local parser, PID1 recovery and admission batch passed with two C fixture compilations and two processes. Prior passed entry and backend tests were not replayed.
+- [CI 41947196649](https://github.com/eirblue/ios_note10p/actions/runs/41947196649) built one fresh Linux Image and its selected kernel objects. The generic execution slot was disabled in the accepted build.
+- A package-only fix accepted the official recovery image's bounded appended DTBO while retaining a kernel-only diagnostic BOOT and the exact reference command line. Its focused new header/source-domain checks passed; the accepted Image was reused without another Image or CI build.
+- One reviewed physical cycle consumed one host BOOT write and one host reboot, then returned to TWRP with a changed boot ID. Same-cycle reservation readiness and the final kexec hook's checked recovery marker and watchdog qualification were observed.
+- No normal recovery fallback was observed. The final hook precedes native transfer: persistent park entry and the actual watchdog reset cause remain unproven. TWRP return alone does not establish those events.
+- This inert proof profile does not establish physical XNU entry, full kernel boot or iOS readiness. The physical cycle is consumed and will not be replayed.
+
 ## 2026-11-05: v128 opt-in legacy-kexec host CI passed
 
 - Reviewed source `182fc8c40160f3f19299cb72c2b41bbbd9a4d6e5` passed [CI 41936618151](https://github.com/eirblue/ios_note10p/actions/runs/41936618151). One fresh Linux Image was built; no historical tests were replayed.
