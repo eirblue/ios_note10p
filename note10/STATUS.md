@@ -1,3 +1,11 @@
+## 2026-11-05: v128 opt-in legacy-kexec host CI passed
+
+- Reviewed source `182fc8c40160f3f19299cb72c2b41bbbd9a4d6e5` passed [CI 41936618151](https://github.com/eirblue/ios_note10p/actions/runs/41936618151). One fresh Linux Image was built; no historical tests were replayed.
+- The preceding NEW hosted production-core fixture passed 137 checks in one compilation and one process. System calls and hardware services were intercepted; no actual kexec call occurred in that fixture.
+- The 46,415,884-byte Image binds the new PID1, park code, source/config and selected kernel objects. KEXEC, KEXEC_CORE and PM_SLEEP_SMP are enabled. The new 32 MiB destination reservation and 16 KiB alignment are compiled software contracts; runtime reservation and ownership were not observed on a phone.
+- Ciphertext was received, authenticated and extracted once. Metadata-only acceptance used the extraction hashes and intrinsic producer result without an additional Image reader.
+- The execution slot is disabled and no hardware package was emitted. No phone operation, BOOT write, reboot, MMU transfer or hardware XNU execution occurred. Watchdog-to-TWRP recovery and persistent park-entry evidence remain unproven.
+
 ## 2026-11-05: v127 PC-only current94 entry and leaf-mapper case passed
 
 - One new synthetic PC case followed the retained transfer branch, current startup path and actual 0012 leaf mapper, then stopped before the first MMU-enable instruction. The mapper returned to its link register; all 1,171 kernel and metadata pages checked, with no writes outside its ten-page table pool.
