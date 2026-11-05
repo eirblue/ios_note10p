@@ -7,6 +7,7 @@ HERE=Path(__file__).resolve().parent
 OPTION='NOTE10_XNU_KEXEC_HANDOFF'
 PINS={'arch/arm64/mm/init.c': 'cc990de7d8222f56fd71519c8b5dbf87a50abd4131e9eeb49ba78c04e3b6e3f3', 'init/main.c': '4493d28f7aacf7de510e7cdc1864fb359278f2f88233abcea6b77a39cb8e0b70', 'init/initramfs.c': '1a9af19668584dc664c28c640e02b6a03cc37a2fa5ecd1900d818bb67c775806', 'arch/arm64/Kconfig': '127273290ce9e8d337b0f186b576dac0ff3792bcbebffeea2ae49b9c5e99afc6', 'arch/arm64/kernel/machine_kexec.c': '341ab6c94215cb93c2e1a4ee39f9058bb9bd114de17c8a979ef77144cf67e5e6', 'arch/arm64/kernel/cpu-reset.h': '6f8873558cb62ac5403af15f25493ecab5b73bf803b835e449712e7dcbde0666', 'kernel/kexec_core.c': '537a3edd4e140117084aa641879965345ab1bdb9eaaad5396ed30aa831703d0b', 'kernel/reboot.c': 'ed27858a87e0b7fe098510f03054c034a333874017444de2052af3e691d5b3f8', 'drivers/samsung/sec_reboot.c': '9c598d65fac6c7be4ba9bcf1d3f6d7d5ec218844c28b97653deabc707190d594', 'drivers/watchdog/s3c2410_wdt.c': 'cea425d01ca901671ee67b644a15a0ee19271c970972894a2be52540f7186166', 'drivers/irqchip/irq-gic.c': 'b236ffb45d4269a0f1117bb5434ea2dc795ca9ec383ec164077cbf43096780eb', 'include/linux/irqchip/arm-gic.h': '191b5bd2eda66923b503f8c56186eb9001358941341207b5d5dceaf0fad4fbc6', 'drivers/clocksource/arm_arch_timer.c': '4b3d7bd50f48677962b650e7eef74320d3ae7e94df9806094723aa1eaf4039e4', 'drivers/usb/dwc3/core.c': '7d12e2d8303388da50de6c6631943921562423b4ae35b88d2a1431b668a3a4e1', 'drivers/usb/dwc3/core.h': '03de7b0605949ef9478dcba9593ff68329a13b26a88c0f997d581653e1b6b5f5', 'drivers/usb/dwc3/gadget.c': '89b6259ec31dd09add7497bd5f33a239a202742f461e0f716e6334daddf69bfc', 'drivers/scsi/ufs/ufshcd.c': '08e81a0bdabe781408ee2ffb17a3b5e89c5d4f24f7c9eecc04d3052603640b0b', 'drivers/scsi/ufs/ufshcd.h': 'd0a7a1e96aa5cc7dd22107cc2e6de52d6fd0987aab47f7d87d2dc7d680d8b190', 'drivers/scsi/ufs/ufs-exynos.c': 'ca61a2fad0b2dfee078cae1eb093297a5aca9b0e8d1227de22d1842ae854e188', 'drivers/iommu/exynos-iommu.c': '67d9bfb7597ec7434fc07a7101e69c385ac4cb9e61ebd727f0bcd40d01f1bb0b', 'drivers/iommu/exynos-iommu.h': 'f5f2be8937e8990672296e55d33bdbcd12244d0ab6aa8b8eef96de6717fadc11', 'include/linux/memblock.h': '04c5a23d41fa1adea1a955f832eca9412bd99cd43bbc84f2188559fb220f87fc', 'usr/initramfs_data.S': 'ec2e6e427c11bfe4544db421f1c889917c14510975bd568d472e0793a59111a2', 'usr/Makefile': 'fd61b618f993c54dc1e9e0f82f7f9798708683b601e2ab06c3c0d3c3dd84a1b5', 'lib/decompress.c': '784e0135483455f1bd30fc1d3359ca3d4705b07da2cfac0abc9eeeef5e3efd35', 'lib/decompress_inflate.c': 'a51bc095295c82b16e42504a664d61fdf7c68d0f1b65e8c288297a0ea826e8e3', 'scripts/gen_initramfs_list.sh': 'ea238afcbde1d54b8ca0a220adf3aed4e6078d85810ffa47ac04400d7cb3a271'}
 PINS.update({'drivers/dma/dmaengine.c': '6cfb91beb7420d1326d3047a527db818d9b139abe8816c28f16c7f9c73b45dbd', 'drivers/dma/pl330.c': '3ca7d5eaee1ee1c5432bf79349510f17d0a5b6885ad1997b9bb1780f2ce646de', 'include/linux/dmaengine.h': '0af046f49ce09565aa3d7ebf18e30a424ea09b9b24e4ac16d87e9d60dc48680e'})
+PINS.update({'drivers/scsi/ufs/ufs.h': '8856830dec209a98f0d945c6d154227199ae9391e1406c7cd6e14c46a6ea677f'})
 COMMON={
  'include/linux/legacy_kexec_core.h':'legacy_kexec_core.h',
  'include/linux/legacy_kexec_return.h':'legacy_kexec_return.h',
@@ -116,7 +117,7 @@ void __init arm64_memblock_init(void)''')
     machine=once(machine,b'\t/* Disable all DAIF exceptions. */',b'''#ifdef CONFIG_NOTE10_XNU_KEXEC_HANDOFF
     if (n10_kexec_final_return(kimage)) {
         pr_emerg("N10XNU130 final gate refused; recovery is not XNU proof\\n");
-        machine_restart("recovery");
+        n130_terminal_recovery();
         BUG();
     }
 #endif
@@ -140,7 +141,7 @@ void __init arm64_memblock_init(void)''')
         error = n130_after_shutdown();
         if (error) {
             /* Device shutdown is destructive: no return to PID1 or retry. */
-            machine_restart("recovery");
+            n130_terminal_recovery();
             BUG();
         }
 #endif''');output['kernel/kexec_core.c']=core
@@ -151,6 +152,18 @@ void __init arm64_memblock_init(void)''')
 #include <linux/v130_kernel_api.h>
 static int n130_kernel_restart(char *cmd);
 #endif''')
+    restart_start=reboot.index(b'void kernel_restart_prepare(char *cmd)\n{')
+    restart_end=reboot.index(b'\n}\n',restart_start)+3
+    restart_before=reboot[restart_start:restart_end]
+    restart_after=once(restart_before,b'\tignore_fs_panic = 1;\n\tdevice_shutdown();',b'''\tignore_fs_panic = 1;
+#ifdef CONFIG_NOTE10_XNU_KEXEC_HANDOFF
+    if (!cmd && n130_before_device_shutdown()) {
+        n130_terminal_recovery();
+        BUG();
+    }
+#endif
+\tdevice_shutdown();''')
+    reboot=once(reboot,restart_before,restart_after)
     reboot=once(reboot,b'void kernel_restart(char *cmd)\n{',b'''#ifdef CONFIG_NOTE10_XNU_KEXEC_HANDOFF
 static int n130_kernel_restart(char *cmd)
 #else
@@ -200,7 +213,7 @@ EXPORT_SYMBOL_GPL(kernel_restart);''')
     ufs=b'#ifdef CONFIG_NOTE10_XNU_KEXEC_HANDOFF\n#include <linux/v130_kernel_api.h>\n#endif\n'+ufs
     anchor=b'''\t/* allow force shutdown even in case of errors */'''
     ufs=once(ufs,anchor,b'''#ifdef CONFIG_NOTE10_XNU_KEXEC_HANDOFF
-    n130_dma_record(hba->dev, ret || !ufshcd_is_ufs_dev_poweroff(hba) || !ufshcd_is_link_off(hba) ? -EIO : 0);
+    n130_dma_record(hba->dev, ret || hba->curr_dev_pwr_mode!=UFS_POWERDOWN_PWR_MODE || !ufshcd_is_link_off(hba) ? -EIO : 0);
 #endif
 '''+anchor);output['drivers/scsi/ufs/ufshcd.c']=ufs
     engine=output['drivers/dma/dmaengine.c']

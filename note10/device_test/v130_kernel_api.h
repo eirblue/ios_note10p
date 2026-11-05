@@ -5,6 +5,8 @@
 struct kimage;struct device;struct dwc3;struct dma_device;
 int n130_before_shutdown(const struct kimage *);
 int n130_after_shutdown(void);
+int n130_before_device_shutdown(void);
+void n130_terminal_recovery(void);
 int n130_recovery_claim(void);
 int n130_dma_record(struct device *,int);
 int n130_dma_ready(struct device *);

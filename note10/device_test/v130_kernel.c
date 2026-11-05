@@ -21,10 +21,13 @@
 #include <asm/cputype.h>
 #include <asm/sysreg.h>
 #include <asm/smp_plat.h>
+#include <asm/system_misc.h>
 static struct n130_wire n130_destination,n130_armed;
 static struct n130_platform n130_platform;
 static int n130_reserved,n130_arm_state;
+enum n130_return_phase { N130_IDLE=0,N130_RECOVERY=1,N130_ARMING=2,N130_HARDWARE=3,N130_TIMEOUT_PENDING=4 };
 static int n130_return_owner;
+static const struct kimage *n130_pending_image;
 static struct {struct device *device;int result;} n130_dma[128];
 static unsigned int n130_dma_count;
 static void n130_deadline_fn(struct work_struct *work)
@@ -35,9 +38,17 @@ static void n130_deadline_fn(struct work_struct *work)
 static DECLARE_DELAYED_WORK(n130_deadline,n130_deadline_fn);
 int n130_recovery_claim(void)
 {
-    if(cmpxchg(&n130_return_owner,0,1)!=0)return -EBUSY;
-    cancel_delayed_work(&n130_deadline);
-    return 0;
+    int owner,target;
+    for(;;){
+        owner=READ_ONCE(n130_return_owner);
+        if(owner==N130_IDLE)target=N130_RECOVERY;
+        else if(owner==N130_ARMING)target=N130_TIMEOUT_PENDING;
+        else return -EBUSY;
+        if(cmpxchg(&n130_return_owner,owner,target)==owner)break;
+    }
+    /* A deadline during bounded HW arming is retained, never a competing restart. */
+    if(target==N130_TIMEOUT_PENDING)return -EBUSY;
+    cancel_delayed_work(&n130_deadline);return 0;
 }
 static int n130_el1(void){return read_sysreg(CurrentEL)==4;}
 static int n130_extent(void *unused,unsigned int index,n130_u64 *low,n130_u64 *high)
@@ -130,38 +141,54 @@ int n10_kexec_check_image(const struct kimage *image)
 }
 int n130_before_shutdown(const struct kimage *image)
 {
-    struct n10_wdt_witness witness={0};int result;
-    result=n10_kexec_check_image(image);
-    if(!result && cmpxchg(&n130_return_owner,0,2)!=0)result=-EBUSY;
+    int result=n10_kexec_check_image(image);
+    if(!result && READ_ONCE(n130_return_owner)!=N130_IDLE)result=-EBUSY;
     if(!result)result=n10_sec_stage_kexec_recovery();
+    if(result)return result;
+    /* Marker precedes blocking notifiers/freezer; Linux90s deadline still owns them. */
+    WRITE_ONCE(n130_pending_image,image);return 0;
+}
+int n130_before_device_shutdown(void)
+{
+    const struct kimage *image=READ_ONCE(n130_pending_image);
+    struct n10_wdt_witness witness={0};int result;
+    if(!image)return 0; /* Ordinary recovery/restart, not a pending XNU transfer. */
+    result=n10_kexec_check_image(image);if(result)return result;
+    if(cmpxchg(&n130_return_owner,N130_IDLE,N130_ARMING)!=N130_IDLE)return -EBUSY;
+    if(READ_ONCE(n130_return_owner)!=N130_ARMING)return -ETIMEDOUT;
+    result=n10_sec_stage_kexec_recovery();
+    if(!result && READ_ONCE(n130_return_owner)!=N130_ARMING)result=-ETIMEDOUT;
     if(!result)result=n10_wdt_stage_kexec_return(&witness);
+    if(!result && READ_ONCE(n130_return_owner)!=N130_ARMING)result=-ETIMEDOUT;
     if(!result)result=n10_watchdog_qualified(&witness);
-    if(!result && cmpxchg(&n130_arm_state,1,2)!=1)result=-EBUSY;
-    if(result){cmpxchg(&n130_return_owner,2,0);WRITE_ONCE(n130_arm_state,4);return result;}
-    /* Only after successful kexec_load: watchdog now owns the shutdown deadline. */
+    if(result)return result;
+    /* Same atomic word commits qualification or observes a racing pending timeout. */
+    if(cmpxchg(&n130_return_owner,N130_ARMING,N130_HARDWARE)!=N130_ARMING)return -ETIMEDOUT;
+    if(cmpxchg(&n130_arm_state,1,2)!=1)return -EBUSY;
     cancel_delayed_work_sync(&n130_deadline);
-    result=n130_dmaengine_prepare();
-    if(result){
-        WRITE_ONCE(n130_arm_state,4);cmpxchg(&n130_return_owner,2,0);
-        /* The permanent DMA freeze/PM/IRQ drain is not transactional. */
-        kernel_restart("recovery");
-        while(1)msleep(1000); /* Already-qualified WDT owns a failed restart. */
-    }
-    return 0;
+    /* No DMA/PM/IRQ mutation before qualified HW has taken the deadline. */
+    return n130_dmaengine_prepare();
+}
+void n130_terminal_recovery(void)
+{
+    WRITE_ONCE(n130_arm_state,4);WRITE_ONCE(n130_pending_image,NULL);
+    xchg(&n130_return_owner,N130_RECOVERY);
+    if(n10_sec_stage_kexec_recovery())pr_emerg("N10XNU130 recovery marker readback failed; no transfer\n");
+    machine_restart("recovery");
+    BUG();
 }
 int n130_after_shutdown(void)
 {
     int result=n130_usb_prepare();
     if(!result)result=n130_ufs_prepare();
     if(!result)result=n130_iommu_prepare();
-    if(result){WRITE_ONCE(n130_arm_state,4);cmpxchg(&n130_return_owner,2,0);}
     return result;
 }
 int n10_kexec_final_return(const struct kimage *image)
 {
     struct n10_wdt_witness witness={0};int result;
     result=n10_kexec_check_image(image);
-    if(!result && (READ_ONCE(n130_arm_state)!=2 || num_online_cpus()!=1 ||
+    if(!result && (READ_ONCE(n130_arm_state)!=2 || READ_ONCE(n130_return_owner)!=N130_HARDWARE || num_online_cpus()!=1 ||
        (read_sysreg(mpidr_el1)&MPIDR_HWID_BITMASK)!=n130_platform.mpidr))result=-EPERM;
     if(!result)result=n130_dmaengine_final();
     if(!result)result=n130_usb_final();

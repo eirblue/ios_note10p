@@ -8,7 +8,7 @@ static int n130_ufs_stop_device(struct device *device,void *unused)
     if(device->driver!=&exynos_ufs_driver.driver)return 0;
     hba=dev_get_drvdata(device);if(!hba)return -ENODEV;
     (void)ufshcd_shutdown(hba);
-    if(!n130_dma_ready(device) || !ufshcd_is_ufs_dev_poweroff(hba) || !ufshcd_is_link_off(hba))return -EIO;
+    if(!n130_dma_ready(device) || hba->curr_dev_pwr_mode!=UFS_POWERDOWN_PWR_MODE || !ufshcd_is_link_off(hba))return -EIO;
     n130_ufs_count++;return 0;
 }
 int n130_ufs_prepare(void)
