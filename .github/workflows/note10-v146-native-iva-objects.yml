@@ -1,0 +1,108 @@
+name: Note10 v146 native IVA four-object compile
+run-name: "v146 native objects | ${{ inputs.expected_source_head }}"
+on:
+  workflow_dispatch:
+    inputs:
+      expected_source_head:
+        description: Exact independently reviewed source commit
+        required: true
+        type: string
+      passed_new_test_context:
+        description: Reviewed synthetic actual142..146 host PASS and13 public-source context
+        required: true
+        type: string
+      recipient_public_key_b64:
+        description: Original approved RSA3072 PUBLIC recipient only
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  v146-native-iva-objects:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        id: python
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Bind source and original public recipient
+        shell: bash --noprofile --norc -euo pipefail {0}
+        env:
+          N10_EXPECTED_SOURCE: ${{ inputs.expected_source_head }}
+          N10_RECIPIENT_PUBLIC_KEY_B64: ${{ inputs.recipient_public_key_b64 }}
+        run: |
+          [[ "$N10_EXPECTED_SOURCE" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$GITHUB_SHA" == "$N10_EXPECTED_SOURCE" ]]
+          [[ "$GITHUB_RUN_ATTEMPT" == "1" ]]
+          "${{ steps.python.outputs.python-path }}" -B - <<'PY'
+          import base64,hashlib,os
+          from pathlib import Path
+          helper=(Path(os.environ['GITHUB_WORKSPACE'])/'note10/device_test/sealed_affinity_artifact.cjs').read_bytes()
+          assert hashlib.sha256(helper).hexdigest()=='08c17edb82357d5719fbccd2427fca1970c09f6b3ee7aef91d6034f7d12f70ec'
+          pem=base64.b64decode(os.environ['N10_RECIPIENT_PUBLIC_KEY_B64'],validate=True)
+          assert hashlib.sha256(pem).hexdigest()=='26aa34c6674e8bad6d5e3c1cf9967f33b8b24339fdd2cfd64a92a0ea344e7f51'
+          assert b'PRIVATE KEY' not in pem
+          PY
+          node "$GITHUB_WORKSPACE/note10/device_test/sealed_affinity_artifact.cjs" recipient
+      - name: Install native object build tools
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          packages=(clang-14 gcc gcc-aarch64-linux-gnu libc6-dev-arm64-cross gcc-arm-linux-gnueabi make bc bison flex libssl-dev libelf-dev)
+          missing=()
+          for package in "${packages[@]}"; do
+            if [ "$(dpkg-query -W -f='${Status}' "$package" 2>/dev/null || true)" != "install ok installed" ]; then
+              missing+=("$package")
+            fi
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            if [ -f /etc/apt/apt-mirrors.txt ]; then
+              printf 'https://archive.ubuntu.com/ubuntu/\tpriority:1\nhttps://security.ubuntu.com/ubuntu/\tpriority:2\n' | sudo -n tee /etc/apt/apt-mirrors.txt >/dev/null
+            fi
+            sudo -n env DEBIAN_FRONTEND=noninteractive timeout --kill-after=30s 180s apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=30 update
+            sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a timeout --kill-after=30s 480s apt-get -o Dpkg::Use-Pty=0 -o DPkg::Lock::Timeout=60 install --no-install-recommends -y "${missing[@]}"
+          fi
+      - name: One native four-object compile; carry host PASS without replay
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+          N10_EXPECTED_SOURCE: ${{ inputs.expected_source_head }}
+          N10_NEW_PASS: ${{ inputs.passed_new_test_context }}
+          N10_RECIPIENT_PUBLIC_KEY_B64: ${{ inputs.recipient_public_key_b64 }}
+        run: '"${{ steps.python.outputs.python-path }}" -B "$GITHUB_WORKSPACE/note10/device_test/v146_object_build.py" --output "$GITHUB_WORKSPACE/note10/private/v146-ci-native-iva-objects" --jobs 4 --expected-source-head "$N10_EXPECTED_SOURCE" --passed-new-test-context "$N10_NEW_PASS"'
+      - name: Seal private native object evidence including failures
+        if: always()
+        shell: bash --noprofile --norc -euo pipefail {0}
+        env:
+          N10_RECIPIENT_PUBLIC_KEY_B64: ${{ inputs.recipient_public_key_b64 }}
+        run: |
+          "${{ steps.python.outputs.python-path }}" -B - <<'PY'
+          from pathlib import Path
+          import os,zipfile
+          private=Path(os.environ['GITHUB_WORKSPACE'])/'note10/private';private.mkdir(parents=True,exist_ok=True)
+          build=private/'v146-ci-native-iva-objects'
+          if not (build/'result.json').is_file():
+              import json
+              build.mkdir(parents=True,exist_ok=True)
+              (build/'preflight-failure.json').write_bytes((json.dumps(dict(schema='note10-v146-native-object-preflight-failure-v1',passed=False,producer_result_available=False,source_head=os.environ.get('GITHUB_SHA',''),run_id=os.environ.get('GITHUB_RUN_ID',''),attempt=os.environ.get('GITHUB_RUN_ATTEMPT',''),physical_ready=False),indent=2)+'\n').encode())
+          helper=Path(os.environ['GITHUB_WORKSPACE'])/'note10/device_test/sealed_affinity_artifact.cjs'
+          import hashlib
+          if hashlib.sha256(helper.read_bytes()).hexdigest()!='08c17edb82357d5719fbccd2427fca1970c09f6b3ee7aef91d6034f7d12f70ec':raise ValueError('original Node helper differs')
+          with zipfile.ZipFile(private/'v146-native-iva-objects.zip','x',compression=zipfile.ZIP_DEFLATED) as bundle:
+              for path in sorted(build.rglob('*')) if build.exists() else []:
+                  if path.is_file() and not path.is_symlink():bundle.write(path,path.relative_to(build))
+          PY
+          node "$GITHUB_WORKSPACE/note10/device_test/sealed_affinity_artifact.cjs" seal "$GITHUB_WORKSPACE/note10/private/v146-native-iva-objects.zip" "$GITHUB_WORKSPACE/note10/private/v146-native-iva-objects.n10sealed" "$GITHUB_SHA"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: note10-v146-native-iva-objects-sealed-evidence
+          path: note10/private/v146-native-iva-objects.n10sealed
+          retention-days: 7
+          if-no-files-found: error
