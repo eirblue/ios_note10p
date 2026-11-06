@@ -1,0 +1,96 @@
+name: Note10 v141 bounded display admission drain handoff host
+run-name: "v141 kexec host | ${{ inputs.expected_source_head }}"
+on:
+  workflow_dispatch:
+    inputs:
+      expected_source_head:
+        description: Exact independently reviewed source commit
+        required: true
+        type: string
+      passed_new_test_context:
+        description: Bounded public JSON zlib envelope from reviewed local NEW PASS only
+        required: true
+        type: string
+      recipient_public_key_b64:
+        description: Approved RSA3072 PUBLIC recipient only
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  v141-display-admission:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 110
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Bind source and public recipient
+        shell: bash --noprofile --norc -euo pipefail {0}
+        env:
+          N10_EXPECTED_SOURCE: ${{ inputs.expected_source_head }}
+          N10_RECIPIENT_PUBLIC_KEY_B64: ${{ inputs.recipient_public_key_b64 }}
+        run: |
+          [[ "$N10_EXPECTED_SOURCE" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$GITHUB_SHA" == "$N10_EXPECTED_SOURCE" ]]
+          python -B - <<'PY'
+          import hashlib,sys
+          from pathlib import Path
+          sys.path.insert(0,'note10/device_test')
+          from v130_sources import INPUT128
+          p=Path('note10/device_test/sealed_affinity_artifact.cjs')
+          assert hashlib.sha256(p.read_bytes()).hexdigest()==INPUT128[p.as_posix()]
+          PY
+          node note10/device_test/sealed_affinity_artifact.cjs recipient
+      - name: Install fresh host build tools
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          packages=(clang-14 gcc gcc-aarch64-linux-gnu libc6-dev-arm64-cross gcc-arm-linux-gnueabi make bc bison flex libssl-dev libelf-dev)
+          missing=()
+          for package in "${packages[@]}"; do
+            if [ "$(dpkg-query -W -f='${Status}' "$package" 2>/dev/null || true)" != "install ok installed" ]; then
+              missing+=("$package")
+            fi
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            if [ -f /etc/apt/apt-mirrors.txt ]; then
+              printf 'https://archive.ubuntu.com/ubuntu/\tpriority:1\nhttps://security.ubuntu.com/ubuntu/\tpriority:2\n' | sudo -n tee /etc/apt/apt-mirrors.txt >/dev/null
+            fi
+            sudo -n env DEBIAN_FRONTEND=noninteractive timeout --kill-after=30s 180s apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=30 update
+            sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a timeout --kill-after=30s 480s apt-get -o Dpkg::Use-Pty=0 -o DPkg::Lock::Timeout=60 install --no-install-recommends -y "${missing[@]}"
+          fi
+      - name: One fresh host build; retain local NEW PASS without replay
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+          N10_EXPECTED_SOURCE: ${{ inputs.expected_source_head }}
+          N10_NEW_PASS: ${{ inputs.passed_new_test_context }}
+        run: python -B note10/device_test/v141_build.py --output note10/private/v141-ci-owned-xnu-host --jobs 4 --expected-source-head "$N10_EXPECTED_SOURCE" --passed-new-test-context "$N10_NEW_PASS"
+      - name: Seal private build evidence including failures
+        if: always()
+        env:
+          N10_RECIPIENT_PUBLIC_KEY_B64: ${{ inputs.recipient_public_key_b64 }}
+        run: |
+          python -B - <<'PY'
+          from pathlib import Path
+          import zipfile
+          root=Path('note10/private');root.mkdir(parents=True,exist_ok=True)
+          build=root/'v141-ci-owned-xnu-host'
+          with zipfile.ZipFile(root/'v141-owned-xnu-host.zip','x',compression=zipfile.ZIP_DEFLATED) as bundle:
+              for path in sorted(build.rglob('*')) if build.exists() else []:
+                  if path.is_file() and not path.is_symlink():bundle.write(path,path.relative_to(build))
+          PY
+          node note10/device_test/sealed_affinity_artifact.cjs seal note10/private/v141-owned-xnu-host.zip note10/private/v141-owned-xnu-host.n10sealed "$GITHUB_SHA"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: note10-v141-owned-xnu-host-sealed-evidence
+          path: note10/private/v141-owned-xnu-host.n10sealed
+          retention-days: 7
+          if-no-files-found: error
