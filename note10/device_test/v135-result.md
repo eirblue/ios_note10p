@@ -14,6 +14,6 @@ The package input path was corrected before generation, and the package was gene
 
 The cycle completed its one host BOOT write and one host reboot, then returned to fresh TWRP within the 240-second window. Integrity checks passed for all five tracked partitions.
 
-The native handoff recorded its load and reboot markers and an `ENOENT` (`-2`) refusal at the NPU IOMMU-owner gate. The final hook was not observed. The bounded native SCORE provider shutdown/reset proof passed before the later NPU IOMMU-owner refusal. Overall handoff completion, XNU entry, a full XNU boot, and a watchdog reset cause remain unproven.
+The native handoff recorded its load and reboot markers and an `ENOENT` (`-2`) refusal at the NPU IOMMU-owner gate. The final hook was not observed. The SCORE reset acknowledgement and all four DMA-idle checks passed, and the software-state recheck passed before the later NPU IOMMU-owner refusal. The platform clock callbacks do not provide an observable physical clock-off result, so SCORE/G2D clock-off remains unproven. Overall handoff completion, XNU entry, a full XNU boot, and a watchdog reset cause also remain unproven.
 
 The cycle is spent and must not be replayed. The observed TWRP return and partition checks are recorded separately from proof of XNU execution.
