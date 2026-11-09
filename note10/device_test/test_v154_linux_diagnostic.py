@@ -208,8 +208,9 @@ def elf():
 def context():
     return dict(schema=p.CONTEXT_SCHEMA, scope='stock-linux-iva-mmap-denial-no-XNU', source_sha256=p.source_pins(),
                 kernel=dict(commit=p.COMMIT, archive_sha256=p.ARCHIVE_SHA, defconfig_sha256=p.DEFCONFIG_SHA),
-                host_pass=dict(accepted=p.HOST_PASS, new=dict(schema='note10-v154-linux-host-once-v1', passed=True,
-                      result_sha256='1'*64, compiler_count=1, fixture_count=1, old_tests_count=0)))
+                host_pass=dict(accepted=p.HOST_PASS, retained_v154_host_result_sha256=build.V154_HOST_RESULT_SHA,
+                               new=dict(schema=build.V155_HOST_SCHEMA, passed=True, result_sha256='1'*64,
+                                        compiler_count=0, fixture_count=0, old_tests_count=0)))
 
 
 def config(settings):
@@ -259,7 +260,8 @@ def test_build(folder):
             raw = bytearray(4096)+cpio+p.CYCLE_MARKER+b'\0N154IVA N154ARM N10RET1 N10ROUTE2 N10BOOTLINK2 N10MININIT2 '+identity.encode()
             raw[56:60] = b'ARM\x64'; struct.pack_into('<Q', raw, 16, len(raw))
             image = objects/'arch/arm64/boot/Image'; image.parent.mkdir(parents=True); image.write_bytes(raw)
-            (objects/'System.map').write_bytes(b'0000000000000000 T _text\n0000000000001000 R __initramfs_start\n')
+            (objects/'System.map').write_bytes(b'0000000000000000 T _text\n0000000000000200 T dhd_smmu_fault_handler\n'
+                                             b'0000000000001000 R __initramfs_start\n')
         return SimpleNamespace(returncode=0)
     with ExitStack() as stack:
         for key, value in (('ARCHIVE_BYTES', 7), ('ARCHIVE_SHA', p.sha(b'archive')), ('DEFCONFIG_SHA', p.sha(b'defconfig'))):

@@ -1,5 +1,5 @@
-name: v154 bounded Linux IVA mmap denial Image
-run-name: "v154 Linux IVA diagnostic | ${{ inputs.expected_source_head }}"
+name: v155 bounded Linux IVA mmap denial Image
+run-name: "v155 Linux IVA diagnostic | ${{ inputs.expected_source_head }}"
 on:
   workflow_dispatch:
     inputs:
@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       passed_new_test_context:
-        description: Final exact source context and one new host PASS; accepted metadata only
+        description: Exact source context, carried v154 PASS and new v155 environment PASS
         required: true
         type: string
       recipient_public_key_b64:

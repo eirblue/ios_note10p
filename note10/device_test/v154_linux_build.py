@@ -41,6 +41,11 @@ SUCCESS_MEMBERS = tuple(sorted(('members.json', 'result.json', 'Image', 'minimal
                                *('commands/'+Path(name).with_name('.'+Path(name).name+'.cmd').as_posix() for name in PROOF_TARGETS))))
 
 
+MAKE_ENVIRONMENT = {'PLATFORM_VERSION': '11', 'ANDROID_MAJOR_VERSION': 'r'}
+DHD_SYMBOL = 'dhd_smmu_fault_handler'
+V154_HOST_RESULT_SHA = '28c7d96f68d1a49f6ccdd3dc0219747b46455ddf9b173992bc23cd77bf96a439'
+V155_HOST_SCHEMA = 'note10-v155-linux-make-environment-host-once-v1'
+
 def validate_context(context):
     if (type(context) is not dict or set(context) != {'schema', 'scope', 'source_sha256', 'host_pass', 'kernel'} or
         context['schema'] != p.CONTEXT_SCHEMA or context['scope'] != 'stock-linux-iva-mmap-denial-no-XNU' or
@@ -48,15 +53,17 @@ def validate_context(context):
         context['kernel'] != dict(commit=p.COMMIT, archive_sha256=p.ARCHIVE_SHA, defconfig_sha256=p.DEFCONFIG_SHA)):
         raise ValueError('exact final public context/source/kernel required')
     passes = context['host_pass']
-    if type(passes) is not dict or set(passes) != {'accepted', 'new'} or not p.same(passes['accepted'], p.HOST_PASS):
-        raise ValueError('accepted host metadata differs; no replay')
-    new = passes['new']
-    if (type(new) is not dict or set(new) != {'schema', 'passed', 'result_sha256', 'compiler_count', 'fixture_count', 'old_tests_count'} or
-        new['schema'] != 'note10-v154-linux-host-once-v1' or new['passed'] is not True or
-        any(type(new[k]) is not int or new[k] != n for k, n in
-            (('compiler_count', 1), ('fixture_count', 1), ('old_tests_count', 0)))):
-        raise ValueError('one new complete host batch PASS required')
-    p.hexid(new['result_sha256'])
+    if (type(passes) is not dict or set(passes) != {'accepted', 'new', 'retained_v154_host_result_sha256'} or
+        not p.same(passes['accepted'], p.HOST_PASS) or passes['retained_v154_host_result_sha256'] != V154_HOST_RESULT_SHA):
+        raise ValueError('exact accepted host and carried v154 PASS required')
+    environment = passes['new']
+    if (type(environment) is not dict or
+        set(environment) != {'schema', 'passed', 'result_sha256', 'compiler_count', 'fixture_count', 'old_tests_count'} or
+        environment['schema'] != V155_HOST_SCHEMA or environment['passed'] is not True or
+        any(type(environment[key]) is not int or environment[key] != 0
+            for key in ('compiler_count', 'fixture_count', 'old_tests_count'))):
+        raise ValueError('one new v155 environment host PASS required')
+    p.hexid(environment['result_sha256'])
     return context
 
 
@@ -144,6 +151,26 @@ def check_image(raw, archive, identity, symbols):
                 initramfs_bytes=len(archive), initramfs_sha256=p.sha(archive), linked_symbols=table)
 
 
+def check_dhd_symbol(symbols):
+    rows = []
+    for line in symbols.splitlines():
+        fields = line.split()
+        if fields and fields[-1] == DHD_SYMBOL:
+            rows.append(fields)
+    if len(rows) != 1 or len(rows[0]) != 3:
+        raise ValueError('exactly one defined DHD fault handler required')
+    address, kind, name = rows[0]
+    if kind not in ('T', 't') or not re.fullmatch(r'[0-9a-fA-F]{1,16}', address) or int(address, 16) == 0:
+        raise ValueError('DHD fault handler must be a defined text symbol')
+    return dict(name=name, address=int(address, 16), kind=kind)
+
+
+def run_command(argv, log, timeout):
+    env = dict(os.environ, **MAKE_ENVIRONMENT)
+    return subprocess.run(list(map(str, argv)), cwd=p.ROOT, stdout=log, stderr=subprocess.STDOUT,
+                          timeout=timeout, env=env)
+
+
 def run_build(output, context, head, jobs=4):
     validate_context(context)
     if sys.platform != 'linux' or type(jobs) is not int or jobs != 4:
@@ -155,7 +182,8 @@ def run_build(output, context, head, jobs=4):
         raise ValueError('fresh output/work/archive required; never retry')
     buffers = p.load_sources(context['source_sha256'])
     out.mkdir(parents=True)
-    result = dict(schema=p.BUILD_SCHEMA, version='v154', passed=False, source_head=head,
+    result = dict(schema=p.BUILD_SCHEMA, version='v154', build_revision='v155', passed=False, source_head=head,
+                  make_environment=dict(MAKE_ENVIRONMENT),
                   source_sha256=context['source_sha256'], public_input=context,
                   build_evidence_id=uuid.uuid4().hex, stages={}, XNU_execution_allowed=False,
                   physical_ready=False, internal_kexec_limit=0, full_Image_build_attempts=0,
@@ -169,7 +197,7 @@ def run_build(output, context, head, jobs=4):
         result['stages'][label] = dict(argv=list(map(str, argv)), status='started')
         persist()
         with (out/(label+'.log')).open('xb') as log:
-            call = subprocess.run(list(map(str, argv)), cwd=p.ROOT, stdout=log, stderr=subprocess.STDOUT, timeout=timeout)
+            call = run_command(argv, log, timeout)
         result['stages'][label].update(returncode=call.returncode, status='completed')
         persist()
         if (out/(label+'.log')).stat().st_size == 0:
@@ -249,7 +277,9 @@ def run_build(output, context, head, jobs=4):
         result['IMA_evidence'] = dict(generated_macros_undefined=True, production_fence_compiled=True,
                                       all_native_units_from_same_Image=True, autoconf_sha256=p.sha(autoconf))
         raw = p.ordinary(objects/'arch/arm64/boot/Image', p.IMAGE_LIMIT)
-        result.update(check_image(raw, cpio, identity, p.ordinary(objects/'System.map', 16*1024*1024).decode()))
+        symbols = p.ordinary(objects/'System.map', 16*1024*1024).decode()
+        result.update(check_image(raw, cpio, identity, symbols))
+        result['dhd_link_evidence'] = check_dhd_symbol(symbols)
         (out/'Image').write_bytes(raw)
         if p.source_pins() != context['source_sha256']:
             raise ValueError('source changed during producer execution')
