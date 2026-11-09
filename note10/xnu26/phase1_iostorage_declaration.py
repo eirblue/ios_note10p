@@ -1,4 +1,4 @@
-"""Check one public IOStorage C++ source against the actual macOS SDK."""
+"""Check public IOStorage sources against the actual macOS SDK."""
 import argparse
 import hashlib
 import io
@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
+import struct
 import subprocess
 import sys
 import tarfile
@@ -20,6 +21,10 @@ PIO_INPUTS = (
     'note10/xnu26/note10_iostorage_pio_bridge.h',
     'note10/xnu26/note10_iostorage_read_request.h',
     'note10/xnu26/note10_iostorage_read_range.h',
+)
+PIO_LINK_C_SOURCES = (
+    'note10/xnu26/note10_iostorage_read_range.c',
+    'note10/xnu26/note10_iostorage_read_request.c',
 )
 PIO_SDK_PINS = {
     'IOKit/IOMemoryDescriptor.h': '69b98b0114396328b5c931794f071fc1c115aac798a1734c03562a1846825afd',
@@ -48,6 +53,10 @@ COMPILE_FLAGS = (
     '--target=' + TARGET, '-std=gnu++2b', '-mkernel', '-fapple-kext', '-fsized-deallocation',
     '-ffreestanding', '-fno-builtin', '-fno-common', '-fblocks', '-nostdlibinc', '-nostdinc++',
     '-DKERNEL=1', '-ferror-limit=8', '-fsyntax-only',
+)
+C_OBJECT_FLAGS = (
+    '--target=' + TARGET, '-std=c11', '-mkernel', '-ffreestanding', '-fno-builtin',
+    '-fno-common', '-nostdlibinc', '-DKERNEL=1', '-ferror-limit=8',
 )
 
 
@@ -94,6 +103,57 @@ def stage_headers(include):
             (storage / name).write_bytes(data)
 
 
+def require_arm64_object(path):
+    with path.open('rb') as stream:
+        magic, cpu, subtype, kind = struct.unpack('<4I', stream.read(16))
+    require(magic == 0xfeedfacf and cpu == 0x0100000c and (subtype & 0xffffff) == 0 and kind == 1,
+            'expected plain ARM64 Mach-O relocatable object')
+
+
+def link_pio(result, work, compiler, includes):
+    result['stage'] = 'pio-object-compile'
+    objects = []
+    returncodes = []
+    result['object_compiler_returncodes'] = returncodes
+    units = ((PIO_SOURCE, COMPILE_FLAGS[:-1]), *((source, C_OBJECT_FLAGS) for source in PIO_LINK_C_SOURCES))
+    for source, flags in units:
+        obj = work / (Path(source).stem + '.o')
+        result['compile_attempts'] += 1
+        call = subprocess.run([*compiler, *flags, *includes, '-O2', '-c', source, '-o', str(obj)],
+                              cwd=ROOT, capture_output=True, timeout=60)
+        returncodes.append(call.returncode)
+        if call.returncode:
+            return
+        require_arm64_object(obj)
+        objects.append(str(obj))
+    result['compiled_arm64_objects'] = len(objects)
+
+    result['stage'] = 'pio-relocatable-link'
+    result['partial_link_attempts'] = 1
+    merged = work / 'note10_iostorage_pio_link.o'
+    call = subprocess.run(['xcrun', '--sdk', 'macosx', 'ld', '-r', '-arch', 'arm64',
+                           '-o', str(merged), *objects], cwd=ROOT, capture_output=True, timeout=60)
+    result['partial_link_returncode'] = call.returncode
+    if call.returncode:
+        return
+    require_arm64_object(merged)
+    result['stage'] = 'pio-symbol-audit'
+    nm = ['xcrun', '--sdk', 'macosx', 'nm']
+    defined = set(read_command([*nm, '-g', '-U', '-j', str(merged)]).splitlines())
+    undefined = sorted(set(read_command([*nm, '-u', '-j', str(merged)]).splitlines()))
+    require(len(undefined) <= 32 and all(re.fullmatch(r'[A-Za-z_.$][A-Za-z0-9_.$]{0,199}', n)
+                                         for n in undefined), 'unexpected undefined symbol output')
+    bridge_name = 'note10_iostorage_pio_read'
+    bridge_prefix = f'__Z{len(bridge_name)}{bridge_name}'
+    bridge = [name for name in defined if name.startswith(bridge_prefix)]
+    helpers = {'_note10_iostorage_read_range', '_note10_iostorage_read_request'}
+    require(len(bridge) == 1 and helpers <= defined, 'expected bridge and both C helpers')
+    require(not any('note10_iostorage_' in name for name in undefined), 'unresolved internal PIO symbol')
+    result.update(stage='complete', passed=True, pio_relocatable_link_verified=True,
+                  defined_pio_symbols=sorted(helpers | set(bridge)),
+                  undefined_external_symbols=undefined, undefined_external_count=len(undefined))
+
+
 def compile_probe(result, mode, source):
     result['stage'] = 'sdk-preflight'
     sdk_path = Path(read_command(['xcrun', '--sdk', 'macosx', '--show-sdk-path']))
@@ -115,18 +175,24 @@ def compile_probe(result, mode, source):
         result['public_kernel_headers_available'] = kernel.is_dir()
         return
     result['sdk_header_sha256'] = {name: sha(path.read_bytes()) for name, path in found.items()}
-    if mode == 'pio_bridge':
+    if mode in ('pio_bridge', 'pio_link'):
         require(all(result['sdk_header_sha256'][name] == digest for name, digest in PIO_SDK_PINS.items()),
                 'reviewed SDK descriptor/type header pin differs')
 
-    with tempfile.TemporaryDirectory(prefix='note10-iostorage-') as work:
-        include = Path(work) / 'include'
+    with tempfile.TemporaryDirectory(prefix='note10-iostorage-') as work_dir:
+        work = Path(work_dir)
+        include = work / 'include'
         result['stage'] = 'pinned-header-staging'
         result['archive_fetch_attempts'] = 1
         stage_headers(include)
         result['archive_verified'] = True
-        command = ['xcrun', '--sdk', 'macosx', 'clang', *COMPILE_FLAGS, '-isysroot', str(sdk), '-I', str(include),
-                   '-isystem', str(kernel), '-isystem', str(sdk / 'usr/include'), source]
+        compiler = ['xcrun', '--sdk', 'macosx', 'clang']
+        includes = ['-isysroot', str(sdk), '-I', str(include),
+                    '-isystem', str(kernel), '-isystem', str(sdk / 'usr/include')]
+        if mode == 'pio_link':
+            link_pio(result, work, compiler, includes)
+            return
+        command = [*compiler, *COMPILE_FLAGS, *includes, source]
         result['stage'] = 'pio-bridge-compile' if mode == 'pio_bridge' else 'declaration-compile'
         result['compile_attempts'] = 1
         call = subprocess.run(command, cwd=ROOT, capture_output=True, timeout=60)
@@ -145,7 +211,7 @@ def compile_probe(result, mode, source):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--mode', choices=('declaration', 'pio_bridge'), default='declaration')
+    parser.add_argument('--mode', choices=('declaration', 'pio_bridge', 'pio_link'), default='declaration')
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     head, run_id = reviewed_identity()
@@ -153,18 +219,22 @@ def main():
     private = ROOT / 'note10/private'
     require(out != private and out.is_relative_to(private), 'fresh private result directory required')
     out.mkdir(parents=True)
-    pio = args.mode == 'pio_bridge'
+    pio = args.mode != 'declaration'
     source = PIO_SOURCE if pio else SOURCE
     paths = (source, WORKFLOW, Path(__file__).resolve().relative_to(ROOT).as_posix())
     if pio:
         paths += PIO_INPUTS
-    schema = 'note10-phase1-iostorage-pio-bridge-result-v1' if pio else 'note10-phase1-iostorage-declaration-result-v1'
+    if args.mode == 'pio_link':
+        paths += PIO_LINK_C_SOURCES
+    schema = f'note10-phase1-iostorage-{args.mode.replace("_", "-")}-result-v1'
     result = dict(schema=schema, passed=False,
                   source_head=head, run_id=run_id, run_attempt=1, target=TARGET,
                   source_sha256={name: sha((ROOT / name).read_bytes()) for name in paths},
                   iostorage_commit=COMMIT, archive_sha256=ARCHIVE_SHA, archive_header_sha256=HEADERS,
                   archive_fetch_attempts=0, compile_attempts=0, kernel_builds=0, old_tests_count=0,
                   device_operations=0, deployment_ready=False)
+    if args.mode == 'pio_link':
+        result.update(compiled_arm64_objects=0, partial_link_attempts=0, pio_relocatable_link_verified=False)
     try:
         compile_probe(result, args.mode, source)
     except Exception as error:

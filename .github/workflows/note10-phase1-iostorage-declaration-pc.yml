@@ -15,6 +15,7 @@ on:
         options:
           - declaration
           - pio_bridge
+          - pio_link
 permissions:
   contents: read
 jobs:
@@ -28,7 +29,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Check one public IOStorage source
+      - name: Check selected public IOStorage inputs
         env:
           N10_EXPECTED_SOURCE_HEAD: ${{ inputs.expected_source_head }}
           N10_PROBE_MODE: ${{ inputs.mode }}
@@ -36,7 +37,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: ${{ inputs.mode == 'pio_bridge' && 'note10-phase1-iostorage-pio-bridge-result' || 'note10-phase1-iostorage-declaration-result' }}
+          name: ${{ inputs.mode == 'pio_link' && 'note10-phase1-iostorage-pio-link-result' || inputs.mode == 'pio_bridge' && 'note10-phase1-iostorage-pio-bridge-result' || 'note10-phase1-iostorage-declaration-result' }}
           path: note10/private/phase1-iostorage-declaration-once/result.json
           retention-days: 7
           if-no-files-found: error
