@@ -45,15 +45,77 @@ MAKE_ENVIRONMENT = {'PLATFORM_VERSION': '11', 'ANDROID_MAJOR_VERSION': 'r'}
 DHD_SYMBOL = 'dhd_smmu_fault_handler'
 V154_HOST_RESULT_SHA = '28c7d96f68d1a49f6ccdd3dc0219747b46455ddf9b173992bc23cd77bf96a439'
 V155_HOST_SCHEMA = 'note10-v155-linux-make-environment-host-once-v1'
+V157_CONTEXT_SCHEMA = 'note10-v157-linux-builtin-preexec-public-input-v1'
+V157_BUILD_SCHEMA = 'note10-v157-linux-builtin-preexec-build-v1'
+V157_OUTPUT = 'note10/private/v157-ci-linux-builtin-preexec'
+V157_OBSERVER = 'v157_builtin_init_observation.inc'
+V157_NATIVE = ('init/main.c', 'drivers/misc/v154_linux_return.c', 'drivers/misc/'+V157_OBSERVER)
+V157_SOURCE = {
+    'note10/device_test/v157_splice_observation.py': '212d3bb320767b54d686948c6d0974ffb1d389ed4a3a9f212ce12d7280bd3f34',
+    'note10/device_test/'+V157_OBSERVER: 'f9b97fa886ff303657b73b68276af4e31ee770fc0a6c8f1ff4392cbf4d675498',
+}
+V157_STOCK = {
+    'include/linux/cred.h': '3892bf98b97ae4a937b13859cca740fbdd8fef86febeaf603e1265ad0f7993ad',
+    'include/linux/dcache.h': '4074fdbd7713fe68b8f68e61150019f3adb5542552c29cc48a741ba3a2d55e06',
+    'include/linux/err.h': 'eaea697160bdfe002ba6b7b7b46a20a44a7afd6b2dd6faf587fa1122848d5eb6',
+    'include/linux/fcntl.h': 'c683f32678ab06ad389c2a6c48307eb9d7dfbd3b3b04ec79721e2984cde0d461',
+    'include/linux/fs.h': '28f33eb4c958db5d8983458c2ed76a78383a51f8fc6a023f66f68d062f6ea34f',
+    'include/linux/namei.h': '12d3d48d427bdcd07d484231a19bf78b3060bb120ebac507fc4e44e6b11c84bf',
+    'include/linux/path.h': '478f1703984df9260834133726d1cbe32adf17faf776b202c990d9eb94cd1ca8',
+    'include/linux/stat.h': '959af62ca017e2d65c3d7e606beeaef5f14b7432207e2f8f34e3687770fef1dc',
+    'include/uapi/asm-generic/fcntl.h': 'fc4998b97bb644acb07c55a4dade3bdcb89f6f82d6c24c305d68858b3dce88e1',
+    'include/uapi/linux/stat.h': '2e5c5b2179e313d91995c3c5e8bd1303dc2cec3915424cd0ce2b8b1f31bec819',
+    'fs/namei.c': 'ab04c33e3e6af5e235151e41600cb04885072f638d1781d9925cb714a89804e4',
+    'fs/open.c': '49845ac0e8c34fe9d34441081484a10ad1f8f85595023cc7cfb770bd6d5baff7',
+    'init/do_mounts.c': '61282d08f8d6f10915230371712d9b32b27345550b6028da28ceb6f18f8ddb84',
+}
+V157_SPLICE_PASS = dict(schema='note10-v157-splice-host-once-v1', passed=True, fixture_count=1, old_tests_count=0,
+                        result_sha256='8ca879bb56e4eb0c1b757fbd02809d36d1eb7f174b951a9f19bc5562128f24d6',
+                        review_sha256='b0ab83fa16c1bca03b15881ad99b8cf09590af38b300fe297b7995beed143522')
+V157_RETAINED_ENV_SHA = '476648d2692da950a0ea6afce3cb216a67b6a386a96baddf95e82e1092401439'
 
-def validate_context(context):
-    if (type(context) is not dict or set(context) != {'schema', 'scope', 'source_sha256', 'host_pass', 'kernel'} or
-        context['schema'] != p.CONTEXT_SCHEMA or context['scope'] != 'stock-linux-iva-mmap-denial-no-XNU' or
-        context['source_sha256'] != p.source_pins() or
+
+def v157_sources():
+    buffers = {name: p.ordinary(p.ROOT/name) for name in V157_SOURCE}
+    if {name: p.sha(raw) for name, raw in buffers.items()} != V157_SOURCE:
+        raise ValueError('v157 reviewed observation source bytes differ')
+    return buffers
+
+
+def source_pins(revision):
+    pins = p.source_pins()
+    if revision == 'v157':
+        v157_sources()
+        pins.update(V157_SOURCE)
+    return pins
+
+
+def load_sources(pins, revision):
+    if revision == 'v155':
+        return p.load_sources(pins)
+    buffers = v157_sources()
+    if any(pins.get(name) != V157_SOURCE[name] for name in buffers):
+        raise ValueError('v157 context source pins differ')
+    return dict(p.load_sources({name: pin for name, pin in pins.items() if name not in buffers}), **buffers)
+
+def validate_context(context, revision='v155'):
+    if revision not in ('v155', 'v157'):
+        raise ValueError('unsupported Linux diagnostic build revision')
+    is_v157 = revision == 'v157'
+    fields = {'schema', 'scope', 'source_sha256', 'host_pass', 'kernel'}
+    if is_v157:
+        fields.add('build_revision')
+    if (type(context) is not dict or set(context) != fields or
+        context['schema'] != (V157_CONTEXT_SCHEMA if is_v157 else p.CONTEXT_SCHEMA) or
+        context['scope'] != ('stock-linux-builtin-preexec-observation-no-XNU' if is_v157 else 'stock-linux-iva-mmap-denial-no-XNU') or
+        (is_v157 and context['build_revision'] != revision) or context['source_sha256'] != source_pins(revision) or
         context['kernel'] != dict(commit=p.COMMIT, archive_sha256=p.ARCHIVE_SHA, defconfig_sha256=p.DEFCONFIG_SHA)):
         raise ValueError('exact final public context/source/kernel required')
     passes = context['host_pass']
-    if (type(passes) is not dict or set(passes) != {'accepted', 'new', 'retained_v154_host_result_sha256'} or
+    pass_fields = {'accepted', 'new', 'retained_v154_host_result_sha256'}
+    if is_v157:
+        pass_fields.add('v157_splice')
+    if (type(passes) is not dict or set(passes) != pass_fields or
         not p.same(passes['accepted'], p.HOST_PASS) or passes['retained_v154_host_result_sha256'] != V154_HOST_RESULT_SHA):
         raise ValueError('exact accepted host and carried v154 PASS required')
     environment = passes['new']
@@ -64,6 +126,9 @@ def validate_context(context):
             for key in ('compiler_count', 'fixture_count', 'old_tests_count'))):
         raise ValueError('one new v155 environment host PASS required')
     p.hexid(environment['result_sha256'])
+    if is_v157 and (environment['result_sha256'] != V157_RETAINED_ENV_SHA or
+                    not p.same(passes['v157_splice'], V157_SPLICE_PASS)):
+        raise ValueError('exact retained v155 environment and v157 splice PASS required')
     return context
 
 
@@ -78,9 +143,9 @@ def ci_guard(head, env):
         raise ValueError('actual CI run required')
 
 
-def public_context(encoded):
+def public_context(encoded, revision='v155'):
     codec = p.module('v135_metadata', {'note10/device_test/v135_metadata.py': p.ordinary(p.ROOT/'note10/device_test/v135_metadata.py')})
-    return validate_context(codec.decode_public(encoded))
+    return validate_context(codec.decode_public(encoded), revision)
 
 
 def recipient(encoded):
@@ -171,18 +236,60 @@ def run_command(argv, log, timeout):
                           timeout=timeout, env=env)
 
 
-def run_build(output, context, head, jobs=4):
-    validate_context(context)
+def install_v157(source, buffers, preparation):
+    for name, pin in V157_STOCK.items():
+        if p.sha(p.ordinary(source/name)) != pin:
+            raise ValueError('v157 pinned stock observation API differs: '+name)
+    main, return_tu, observer = (source/name for name in V157_NATIVE)
+    if observer.exists() or observer.is_symlink():
+        raise ValueError('fresh v157 observer include required')
+    splice = p.module('v157_splice_observation', buffers)
+    main_bytes, return_bytes = splice.prepare(p.ordinary(main), p.ordinary(return_tu))
+    observer_bytes = buffers['note10/device_test/'+V157_OBSERVER]
+    for path, raw in zip((main, return_tu, observer), (main_bytes, return_bytes, observer_bytes)):
+        path.write_bytes(raw)
+        preparation['installed_sha256'][path.relative_to(source).as_posix()] = p.sha(raw)
+
+
+def v157_link_proof(raw, symbols):
+    name = 'n157_builtin_init_observe'
+    rows = [line.split() for line in symbols.splitlines() if line.split()[-1:] == [name]]
+    if (len(rows) != 1 or len(rows[0]) != 3 or rows[0][1] not in ('T', 't') or
+        not re.fullmatch('[0-9a-fA-F]{1,16}', rows[0][0]) or int(rows[0][0], 16) == 0 or
+        raw.count(b'N157PRE1 id=') != 1):
+        raise ValueError('one same-Image v157 observer and marker required')
+    return dict(marker='N157PRE1', symbol=name, linked_address=int(rows[0][0], 16),
+                original_exec_retained=True, device_ready=False)
+
+
+def producer_output(output, revision):
+    out = p.private(output)
+    if (out == p.ROOT/V157_OUTPUT) != (revision == 'v157'):
+        raise ValueError('exact revision-specific producer output required')
+    return out
+
+
+def spent_output(out, revision):
+    paths = (out, out.with_name(out.name+'-work'), out.with_name(out.name+'-source.tar.gz'))
+    if revision == 'v157':
+        paths += (out.with_suffix('.zip'), out.with_suffix('.n10sealed'))
+    return any(path.exists() or path.is_symlink() for path in paths)
+
+
+def run_build(output, context, head, jobs=4, revision='v155'):
+    validate_context(context, revision)
     if sys.platform != 'linux' or type(jobs) is not int or jobs != 4:
         raise ValueError('Linux jobs4 only')
-    out = p.private(output)
+    out = producer_output(output, revision)
+    is_v157 = revision == 'v157'
     work = out.with_name(out.name+'-work')
     archive = out.with_name(out.name+'-source.tar.gz')
-    if any(path.exists() for path in (out, work, archive)):
+    if spent_output(out, revision):
         raise ValueError('fresh output/work/archive required; never retry')
-    buffers = p.load_sources(context['source_sha256'])
+    buffers = load_sources(context['source_sha256'], revision)
     out.mkdir(parents=True)
-    result = dict(schema=p.BUILD_SCHEMA, version='v154', build_revision='v155', passed=False, source_head=head,
+    result = dict(schema=V157_BUILD_SCHEMA if is_v157 else p.BUILD_SCHEMA,
+                  version=revision if is_v157 else 'v154', build_revision=revision, passed=False, source_head=head,
                   make_environment=dict(MAKE_ENVIRONMENT),
                   source_sha256=context['source_sha256'], public_input=context,
                   build_evidence_id=uuid.uuid4().hex, stages={}, XNU_execution_allowed=False,
@@ -225,7 +332,9 @@ def run_build(output, context, head, jobs=4):
             raise ValueError('stock defconfig differs')
         result['stages']['source-acquire']['status'] = 'completed'
         result['preparation'] = p.install(source, result['build_evidence_id'], buffers); persist()
-        for name in p.FINAL_NATIVE:
+        if is_v157:
+            install_v157(source, buffers, result['preparation']); persist()
+        for name in (*p.FINAL_NATIVE, *(V157_NATIVE if is_v157 else ())):
             dest = out/'native-source'/name; dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(p.ordinary(source/name))
         identity = result['build_evidence_id']
@@ -243,6 +352,8 @@ def run_build(output, context, head, jobs=4):
         run([*make, p.DEFCONFIG], '02-stock-defconfig')
         check_config(p.ordinary(objects/'.config'), {})
         settings = dict(SETTINGS, INITRAMFS_SOURCE='"'+str(out/'initramfs.cpio')+'"')
+        if is_v157:
+            settings['LOCALVERSION'] = '"-v157-linux-builtin-preexec"'
         edits = []
         for key, value in settings.items():
             edits.extend(['--enable' if value == 'y' else '--disable', key] if value in ('y', 'n') else
@@ -264,14 +375,20 @@ def run_build(output, context, head, jobs=4):
             obj = p.ordinary(objects/target, MAX_MEMBER)
             cmdname = str(Path(target).with_name('.'+Path(target).name+'.cmd'))
             cmd = p.ordinary(objects/cmdname)
+            dependencies = DEPENDENCIES.get(target, ())
+            if is_v157 and target == 'drivers/misc/v154_linux_return.o':
+                dependencies += (V157_OBSERVER,)
             if (obj[:6] != b'\x7fELF\x02\x01' or int.from_bytes(obj[16:18], 'little') != 1 or
                 int.from_bytes(obj[18:20], 'little') != 183 or b'clang-14' not in cmd or
-                target[:-2].encode()+b'.c' not in cmd or any(name.encode() not in cmd for name in DEPENDENCIES.get(target, ())) or re.search(rb'(?:^|\s)-DMODULE(?:\s|=|$)', cmd)):
+                target[:-2].encode()+b'.c' not in cmd or any(name.encode() not in cmd for name in dependencies) or re.search(rb'(?:^|\s)-DMODULE(?:\s|=|$)', cmd)):
                 raise ValueError('actual same-Image builtin ARM64 source/.cmd proof failed: '+target)
+            if (is_v157 and target in ('init/main.o', 'drivers/misc/v154_linux_return.o') and
+                b'n157_builtin_init_observe\0' not in obj):
+                raise ValueError('v157 observer symbol absent from same-Image native object: '+target)
             saved = out/'commands'/cmdname; saved.parent.mkdir(parents=True, exist_ok=True); saved.write_bytes(cmd)
             evidence[target] = dict(object_sha256=p.sha(obj), object_bytes=len(obj), command_sha256=p.sha(cmd),
                                     command_path=saved.relative_to(out).as_posix(), builtin_ARM64=True,
-                                    helper_dependencies={name: True for name in DEPENDENCIES.get(target, ())},
+                                    helper_dependencies={name: True for name in dependencies},
                                     source_dependency={target[:-2]+'.c': True})
         result['object_evidence'] = evidence
         result['IMA_evidence'] = dict(generated_macros_undefined=True, production_fence_compiled=True,
@@ -280,10 +397,15 @@ def run_build(output, context, head, jobs=4):
         symbols = p.ordinary(objects/'System.map', 16*1024*1024).decode()
         result.update(check_image(raw, cpio, identity, symbols))
         result['dhd_link_evidence'] = check_dhd_symbol(symbols)
+        native_output = p.FINAL_NATIVE
+        if is_v157:
+            result['preexec_observation'] = v157_link_proof(raw, symbols)
+            native_output = dict(native_output, **{name: result['preparation']['installed_sha256'][name]
+                                                   for name in V157_NATIVE})
         (out/'Image').write_bytes(raw)
-        if p.source_pins() != context['source_sha256']:
+        if source_pins(revision) != context['source_sha256']:
             raise ValueError('source changed during producer execution')
-        result.update(passed=True, native_output_sha256=p.FINAL_NATIVE,
+        result.update(passed=True, native_output_sha256=native_output,
                       native_make_target='Image', native_link_validation_status='linked-in-this-Image')
         persist()
     except BaseException as error:
@@ -291,26 +413,30 @@ def run_build(output, context, head, jobs=4):
     return result
 
 
-def seal(output, head):
-    out = p.private(output)
+def seal(output, head, revision='v155'):
+    out = producer_output(output, revision)
     result = p.read(out/'result.json')
     if result['source_head'] != head:
         raise ValueError('sealing source association differs')
+    is_v157 = revision == 'v157'
+    if is_v157 != (result.get('build_revision') == 'v157') or (is_v157 and result.get('schema') != V157_BUILD_SCHEMA):
+        raise ValueError('sealing build revision association differs')
     if (out/'members.json').exists() or (out/'members.json').is_symlink():
         raise ValueError('preexisting manifest; never seal twice')
     files = sorted(path for path in out.rglob('*') if path.is_file())
     if any(path.is_symlink() or not path.resolve().is_relative_to(out) for path in files):
         raise ValueError('unsafe evidence member')
     sizes = {path.relative_to(out).as_posix(): path.stat().st_size for path in files}
-    before_manifest = set(SUCCESS_MEMBERS)-{'members.json'}
+    success_members = tuple(sorted((*SUCCESS_MEMBERS, *('native-source/'+name for name in V157_NATIVE)))) if is_v157 else SUCCESS_MEMBERS
+    before_manifest = set(success_members)-{'members.json'}
     if not set(sizes) <= before_manifest or (result['passed'] is True and set(sizes) != before_manifest):
         raise ValueError('exact producer member allowlist differs')
     if any(not 0 < size <= MAX_MEMBER for size in sizes.values()) or sum(sizes.values()) > MAX_TOTAL or len(files) > 64:
         raise ValueError('bounded exact Image evidence archive required')
-    manifest = dict(schema='note10-v154-sealed-members-v1', source_head=head,
+    manifest = dict(schema='note10-v157-sealed-members-v1' if is_v157 else 'note10-v154-sealed-members-v1', source_head=head,
                     member_sha256={path.relative_to(out).as_posix(): (result['Image_sha256'] if path.name == 'Image' else p.sha(p.ordinary(path, MAX_MEMBER))) for path in files},
                     member_bytes=sizes, max_member=MAX_MEMBER, max_total=MAX_TOTAL,
-                    success_member_allowlist=list(SUCCESS_MEMBERS), manifest_self_excluded=True)
+                    success_member_allowlist=list(success_members), manifest_self_excluded=True)
     manifest_raw = (json.dumps(manifest, indent=2, sort_keys=True)+'\n').encode()
     if len(files)+1 > 64 or len(manifest_raw) > MAX_MEMBER or sum(sizes.values())+len(manifest_raw) > MAX_TOTAL:
         raise ValueError('manifest-inclusive evidence budget exceeded')
@@ -328,6 +454,7 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--expected-source-head', required=True)
     parser.add_argument('--passed-new-test-context', required=True)
+    parser.add_argument('--build-revision', choices=('v155', 'v157'), default='v155')
     parser.add_argument('--jobs', type=int, default=4)
     args = parser.parse_args()
     ci_guard(args.expected_source_head, os.environ)
@@ -335,18 +462,18 @@ def main():
     for name, pin in p.TRUSTED.items():
         if p.sha(p.ordinary(p.ROOT/name)) != pin:
             raise ValueError('original trusted source changed')
-    context = public_context(args.passed_new_test_context)
+    context = public_context(args.passed_new_test_context, args.build_revision)
     recipient(os.environ.get('N10_RECIPIENT_PUBLIC_KEY_B64', ''))
-    p.load_sources(context['source_sha256'])
+    load_sources(context['source_sha256'], args.build_revision)
     subprocess.run(['node', str(p.ROOT/'note10/device_test/sealed_affinity_artifact.cjs'), 'recipient'], check=True, timeout=30)
-    output = p.private(args.output)
-    if any(path.exists() for path in (output, output.with_name(output.name+'-work'), output.with_name(output.name+'-source.tar.gz'))):
+    output = producer_output(args.output, args.build_revision)
+    if spent_output(output, args.build_revision):
         raise ValueError('spent producer invocation; no sealing/replay')
     try:
-        run_build(output, context, args.expected_source_head, args.jobs)
+        run_build(output, context, args.expected_source_head, args.jobs, args.build_revision)
     finally:
         if (output/'result.json').is_file():
-            seal(output, args.expected_source_head)
+            seal(output, args.expected_source_head, args.build_revision)
 
 
 if __name__ == '__main__':
