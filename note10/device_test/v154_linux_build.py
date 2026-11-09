@@ -73,48 +73,69 @@ V157_SPLICE_PASS = dict(schema='note10-v157-splice-host-once-v1', passed=True, f
                         result_sha256='8ca879bb56e4eb0c1b757fbd02809d36d1eb7f174b951a9f19bc5562128f24d6',
                         review_sha256='b0ab83fa16c1bca03b15881ad99b8cf09590af38b300fe297b7995beed143522')
 V157_RETAINED_ENV_SHA = '476648d2692da950a0ea6afce3cb216a67b6a386a96baddf95e82e1092401439'
+V158_CONTEXT_SCHEMA = 'note10-v158-linux-builtin-entry-public-input-v1'
+V158_BUILD_SCHEMA = 'note10-v158-linux-builtin-entry-build-v1'
+V158_OUTPUT = 'note10/private/v158-ci-linux-builtin-entry'
+V158_PID1 = 'note10/device_test/v158_builtin_init.c'
+V158_PID1_SHA = 'd231c5fdf2d99b07054f3613f0376236bb99864afa8a6b64e5ea6f71122d7ebe'
+V158_PID1_ID = b'N10MININIT2:N158PID1'
+V158_ENTRY_PASS = dict(schema='note10-v158-entry-only-pid1-host-once-v1', passed=True, compiler_count=1, fixture_count=1,
+                       old_tests_count=0, result_sha256='96022f17fa5e32b237107f131690d800bac811b00acb9ab0b3765c53a5e0e98d',
+                       review_sha256='6f507f686f966cf5a8d63ebb19b52a81a4cba05ad10aa21159e7d60399550a1a')
+V158_STOCK = {
+    'arch/arm64/include/uapi/asm/fcntl.h': '6d43602d5db08d4f4acda256ba09009c43b9d93b9283ad9dd75ce7c9dd2b6864',
+    'arch/arm64/include/uapi/asm/unistd.h': '252cf55cbdece5ef96f6e834bc9f48d043008038971b9ae4bd9d6bfd4dfb9fc1',
+    'include/uapi/linux/fcntl.h': '23dec401241e680af2106be32573aa568aaf6dd76dee2a4593705d9319648355',
+    'fs/select.c': '546b19b69238e5336403f253190a609b65922f98d99a341066352373ff5d4e74',
+}
 
 
-def v157_sources():
-    buffers = {name: p.ordinary(p.ROOT/name) for name in V157_SOURCE}
-    if {name: p.sha(raw) for name, raw in buffers.items()} != V157_SOURCE:
-        raise ValueError('v157 reviewed observation source bytes differ')
+def observer_sources(revision):
+    expected = dict(V157_SOURCE)
+    if revision == 'v158':
+        expected[V158_PID1] = V158_PID1_SHA
+    buffers = {name: p.ordinary(p.ROOT/name) for name in expected}
+    if {name: p.sha(raw) for name, raw in buffers.items()} != expected:
+        raise ValueError('reviewed observer/PID1 source bytes differ')
     return buffers
 
 
 def source_pins(revision):
     pins = p.source_pins()
-    if revision == 'v157':
-        v157_sources()
-        pins.update(V157_SOURCE)
+    if revision != 'v155':
+        pins.update({name: p.sha(raw) for name, raw in observer_sources(revision).items()})
     return pins
 
 
 def load_sources(pins, revision):
     if revision == 'v155':
         return p.load_sources(pins)
-    buffers = v157_sources()
-    if any(pins.get(name) != V157_SOURCE[name] for name in buffers):
-        raise ValueError('v157 context source pins differ')
+    buffers = observer_sources(revision)
+    if any(pins.get(name) != p.sha(raw) for name, raw in buffers.items()):
+        raise ValueError('observer/PID1 context source pins differ')
     return dict(p.load_sources({name: pin for name, pin in pins.items() if name not in buffers}), **buffers)
 
 def validate_context(context, revision='v155'):
-    if revision not in ('v155', 'v157'):
+    if revision not in ('v155', 'v157', 'v158'):
         raise ValueError('unsupported Linux diagnostic build revision')
-    is_v157 = revision == 'v157'
+    observer = revision != 'v155'
+    schemas = {'v155': p.CONTEXT_SCHEMA, 'v157': V157_CONTEXT_SCHEMA, 'v158': V158_CONTEXT_SCHEMA}
+    scopes = {'v155': 'stock-linux-iva-mmap-denial-no-XNU', 'v157': 'stock-linux-builtin-preexec-observation-no-XNU',
+              'v158': 'stock-linux-builtin-entry-only-no-userspace-IVA-probe-or-XNU'}
     fields = {'schema', 'scope', 'source_sha256', 'host_pass', 'kernel'}
-    if is_v157:
+    if observer:
         fields.add('build_revision')
     if (type(context) is not dict or set(context) != fields or
-        context['schema'] != (V157_CONTEXT_SCHEMA if is_v157 else p.CONTEXT_SCHEMA) or
-        context['scope'] != ('stock-linux-builtin-preexec-observation-no-XNU' if is_v157 else 'stock-linux-iva-mmap-denial-no-XNU') or
-        (is_v157 and context['build_revision'] != revision) or context['source_sha256'] != source_pins(revision) or
+        context['schema'] != schemas[revision] or context['scope'] != scopes[revision] or
+        (observer and context['build_revision'] != revision) or context['source_sha256'] != source_pins(revision) or
         context['kernel'] != dict(commit=p.COMMIT, archive_sha256=p.ARCHIVE_SHA, defconfig_sha256=p.DEFCONFIG_SHA)):
         raise ValueError('exact final public context/source/kernel required')
     passes = context['host_pass']
     pass_fields = {'accepted', 'new', 'retained_v154_host_result_sha256'}
-    if is_v157:
+    if observer:
         pass_fields.add('v157_splice')
+    if revision == 'v158':
+        pass_fields.add('v158_entry')
     if (type(passes) is not dict or set(passes) != pass_fields or
         not p.same(passes['accepted'], p.HOST_PASS) or passes['retained_v154_host_result_sha256'] != V154_HOST_RESULT_SHA):
         raise ValueError('exact accepted host and carried v154 PASS required')
@@ -126,9 +147,11 @@ def validate_context(context, revision='v155'):
             for key in ('compiler_count', 'fixture_count', 'old_tests_count'))):
         raise ValueError('one new v155 environment host PASS required')
     p.hexid(environment['result_sha256'])
-    if is_v157 and (environment['result_sha256'] != V157_RETAINED_ENV_SHA or
+    if observer and (environment['result_sha256'] != V157_RETAINED_ENV_SHA or
                     not p.same(passes['v157_splice'], V157_SPLICE_PASS)):
         raise ValueError('exact retained v155 environment and v157 splice PASS required')
+    if revision == 'v158' and not p.same(passes['v158_entry'], V158_ENTRY_PASS):
+        raise ValueError('exact reviewed v158 entry-only PID1 host PASS required')
     return context
 
 
@@ -184,14 +207,14 @@ def check_config(raw, settings):
     return values
 
 
-def check_image(raw, archive, identity, symbols):
+def check_image(raw, archive, identity, symbols, pid1_marker=b'N154IVA'):
     if not 64 <= len(raw) <= p.IMAGE_LIMIT or raw[56:60] != b'ARM\x64':
         raise ValueError('bounded ARM64 Image header required')
     linked_extent = struct.unpack_from('<Q', raw, 16)[0]
     if (not 0 < linked_extent <= p.IMAGE_LIMIT or
         raw.count(p.CYCLE_MARKER+b'\0') != 1 or raw.count(archive) != 1):
         raise ValueError('bounded ARM64 Image/cycle/CPIO proof differs')
-    if any(marker not in raw for marker in (b'N154IVA', b'N154ARM', b'N10RET1', b'N10ROUTE2', b'N10BOOTLINK2', b'N10MININIT2', identity.encode())):
+    if any(marker not in raw for marker in (pid1_marker, b'N154ARM', b'N10RET1', b'N10ROUTE2', b'N10BOOTLINK2', b'N10MININIT2', identity.encode())):
         raise ValueError('builtin diagnostic/return markers missing')
     if any(marker in raw for marker in (b'N10XNU141', b'N10OWNED', b'N10PAYLOAD', b'N10SHASTREAM1', b'N10SHACTL1')):
         raise ValueError('legacy transfer/diagnostic payload found')
@@ -262,16 +285,48 @@ def v157_link_proof(raw, symbols):
                 original_exec_retained=True, device_ready=False)
 
 
+def v158_pid1_proof(elf, archive, init):
+    if V158_PID1_ID not in elf or any(marker in elf for marker in (b'N154IVA', b'/dev/iva_ctl')):
+        raise ValueError('entry-only v158 ELF identity required')
+    phoff, = struct.unpack_from('<Q', elf, 32)
+    phsize, count = struct.unpack_from('<HH', elf, 54)
+    entry = init['entry']
+    offsets = []
+    for i in range(count):
+        kind, flags, pos, va, _, file_size, _, _ = struct.unpack_from('<IIQQQQQQ', elf, phoff+i*phsize)
+        if kind == 1 and flags & 1 and va <= entry < va+file_size:
+            offsets.append(pos+entry-va)
+    if entry % 4 or len(offsets) != 1:
+        raise ValueError('unique file-backed v158 AArch64 entry required')
+    pos = 0
+    for name in (b'dev', b'dev/console', b'dev/kmsg'):
+        raw = archive[pos:pos+110]
+        if re.fullmatch(rb'070701[0-9a-fA-F]{104}', raw) is None:
+            raise ValueError('v158 packaged kmsg newc header required')
+        fields = [int(raw[i:i+8], 16) for i in range(6, 110, 8)]
+        name_end = pos+110+fields[11]
+        if fields[6] or archive[pos+110:name_end] != name+b'\0':
+            raise ValueError('v158 packaged kmsg path differs')
+        pos = (name_end+3)&~3
+    if (fields[1], fields[2], fields[3], fields[9], fields[10]) != (0o020600, 0, 0, 1, 11):
+        raise ValueError('v158 packaged kmsg must be root-owned character device 1:11')
+    return dict(schema='note10-v158-entry-only-pid1-evidence-v1', source_sha256=V158_PID1_SHA,
+                elf_sha256=init['sha256'], file_backed_entry_offset=offsets[0],
+                packaged_kmsg=dict(major=1, minor=11, mode='020600'), marker='N158PID1',
+                source_declared_syscalls=[56, 57, 64, 73], device_ready=False)
+
+
 def producer_output(output, revision):
     out = p.private(output)
-    if (out == p.ROOT/V157_OUTPUT) != (revision == 'v157'):
+    fixed = {'v157': p.ROOT/V157_OUTPUT, 'v158': p.ROOT/V158_OUTPUT}
+    if (revision in fixed and out != fixed[revision]) or (revision == 'v155' and out in fixed.values()):
         raise ValueError('exact revision-specific producer output required')
     return out
 
 
 def spent_output(out, revision):
     paths = (out, out.with_name(out.name+'-work'), out.with_name(out.name+'-source.tar.gz'))
-    if revision == 'v157':
+    if revision != 'v155':
         paths += (out.with_suffix('.zip'), out.with_suffix('.n10sealed'))
     return any(path.exists() or path.is_symlink() for path in paths)
 
@@ -281,15 +336,16 @@ def run_build(output, context, head, jobs=4, revision='v155'):
     if sys.platform != 'linux' or type(jobs) is not int or jobs != 4:
         raise ValueError('Linux jobs4 only')
     out = producer_output(output, revision)
-    is_v157 = revision == 'v157'
+    observer = revision != 'v155'
+    entry_only = revision == 'v158'
     work = out.with_name(out.name+'-work')
     archive = out.with_name(out.name+'-source.tar.gz')
     if spent_output(out, revision):
         raise ValueError('fresh output/work/archive required; never retry')
     buffers = load_sources(context['source_sha256'], revision)
     out.mkdir(parents=True)
-    result = dict(schema=V157_BUILD_SCHEMA if is_v157 else p.BUILD_SCHEMA,
-                  version=revision if is_v157 else 'v154', build_revision=revision, passed=False, source_head=head,
+    schema = {'v155': p.BUILD_SCHEMA, 'v157': V157_BUILD_SCHEMA, 'v158': V158_BUILD_SCHEMA}[revision]
+    result = dict(schema=schema, version=revision if observer else 'v154', build_revision=revision, passed=False, source_head=head,
                   make_environment=dict(MAKE_ENVIRONMENT),
                   source_sha256=context['source_sha256'], public_input=context,
                   build_evidence_id=uuid.uuid4().hex, stages={}, XNU_execution_allowed=False,
@@ -332,19 +388,31 @@ def run_build(output, context, head, jobs=4, revision='v155'):
             raise ValueError('stock defconfig differs')
         result['stages']['source-acquire']['status'] = 'completed'
         result['preparation'] = p.install(source, result['build_evidence_id'], buffers); persist()
-        if is_v157:
+        if observer:
             install_v157(source, buffers, result['preparation']); persist()
-        for name in (*p.FINAL_NATIVE, *(V157_NATIVE if is_v157 else ())):
+        for name in (*p.FINAL_NATIVE, *(V157_NATIVE if observer else ())):
             dest = out/'native-source'/name; dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(p.ordinary(source/name))
         identity = result['build_evidence_id']
-        run(['aarch64-linux-gnu-gcc', '-std=c11', '-O2', '-static', '-fno-stack-protector',
-             '-Wall', '-Wextra', '-Werror', '-DN154_BUILD_ID="'+identity+'"',
-             p.ROOT/'note10/device_test/v154_linux_probe.c', '-o', out/'minimal-init.elf'], '01-probe-compile')
+        if entry_only:
+            for name, pin in V158_STOCK.items():
+                if p.sha(p.ordinary(source/name)) != pin:
+                    raise ValueError('v158 pinned stock PID1 ABI differs: '+name)
+            pid1 = work/Path(V158_PID1).name
+            pid1.write_bytes(buffers[V158_PID1])
+            run(['aarch64-linux-gnu-gcc', '-std=c11', '-Os', '-ffreestanding', '-fno-stack-protector',
+                 '-fno-pie', '-no-pie', '-nostdlib', '-static', '-Wl,-e,_start', '-Wall', '-Wextra', '-Werror',
+                 '-DN158_BUILD_ID="'+identity+'"', pid1, '-o', out/'minimal-init.elf'], '01-pid1-compile')
+        else:
+            run(['aarch64-linux-gnu-gcc', '-std=c11', '-O2', '-static', '-fno-stack-protector',
+                 '-Wall', '-Wextra', '-Werror', '-DN154_BUILD_ID="'+identity+'"',
+                 p.ROOT/'note10/device_test/v154_linux_probe.c', '-o', out/'minimal-init.elf'], '01-probe-compile')
         route = p.module('builtin_init_route', buffers)
         init = p.ordinary(out/'minimal-init.elf', 1024*1024)
         result['minimal_init'] = route.elf_manifest(init)
         cpio = route.cpio(init); (out/'initramfs.cpio').write_bytes(cpio)
+        if entry_only:
+            result['entry_only_pid1'] = v158_pid1_proof(init, cpio, result['minimal_init'])
         make = ['make', '-C', str(source), 'O='+str(objects), 'ARCH=arm64', 'CC=clang-14',
                 'CROSS_COMPILE=aarch64-linux-gnu-', 'CLANG_TRIPLE=aarch64-linux-gnu-',
                 'CROSS_COMPILE_ARM32=arm-linux-gnueabi-', 'GCC_TOOLCHAIN_DIR=/usr/aarch64-linux-gnu/bin/',
@@ -352,7 +420,9 @@ def run_build(output, context, head, jobs=4, revision='v155'):
         run([*make, p.DEFCONFIG], '02-stock-defconfig')
         check_config(p.ordinary(objects/'.config'), {})
         settings = dict(SETTINGS, INITRAMFS_SOURCE='"'+str(out/'initramfs.cpio')+'"')
-        if is_v157:
+        if entry_only:
+            settings['LOCALVERSION'] = '"-v158-linux-builtin-entry"'
+        elif observer:
             settings['LOCALVERSION'] = '"-v157-linux-builtin-preexec"'
         edits = []
         for key, value in settings.items():
@@ -376,13 +446,13 @@ def run_build(output, context, head, jobs=4, revision='v155'):
             cmdname = str(Path(target).with_name('.'+Path(target).name+'.cmd'))
             cmd = p.ordinary(objects/cmdname)
             dependencies = DEPENDENCIES.get(target, ())
-            if is_v157 and target == 'drivers/misc/v154_linux_return.o':
+            if observer and target == 'drivers/misc/v154_linux_return.o':
                 dependencies += (V157_OBSERVER,)
             if (obj[:6] != b'\x7fELF\x02\x01' or int.from_bytes(obj[16:18], 'little') != 1 or
                 int.from_bytes(obj[18:20], 'little') != 183 or b'clang-14' not in cmd or
                 target[:-2].encode()+b'.c' not in cmd or any(name.encode() not in cmd for name in dependencies) or re.search(rb'(?:^|\s)-DMODULE(?:\s|=|$)', cmd)):
                 raise ValueError('actual same-Image builtin ARM64 source/.cmd proof failed: '+target)
-            if (is_v157 and target in ('init/main.o', 'drivers/misc/v154_linux_return.o') and
+            if (observer and target in ('init/main.o', 'drivers/misc/v154_linux_return.o') and
                 b'n157_builtin_init_observe\0' not in obj):
                 raise ValueError('v157 observer symbol absent from same-Image native object: '+target)
             saved = out/'commands'/cmdname; saved.parent.mkdir(parents=True, exist_ok=True); saved.write_bytes(cmd)
@@ -395,10 +465,12 @@ def run_build(output, context, head, jobs=4, revision='v155'):
                                       all_native_units_from_same_Image=True, autoconf_sha256=p.sha(autoconf))
         raw = p.ordinary(objects/'arch/arm64/boot/Image', p.IMAGE_LIMIT)
         symbols = p.ordinary(objects/'System.map', 16*1024*1024).decode()
-        result.update(check_image(raw, cpio, identity, symbols))
+        result.update(check_image(raw, cpio, identity, symbols, V158_PID1_ID if entry_only else b'N154IVA'))
+        if entry_only and b'N154IVA' in raw:
+            raise ValueError('legacy IVA probe marker in v158 Image')
         result['dhd_link_evidence'] = check_dhd_symbol(symbols)
         native_output = p.FINAL_NATIVE
-        if is_v157:
+        if observer:
             result['preexec_observation'] = v157_link_proof(raw, symbols)
             native_output = dict(native_output, **{name: result['preparation']['installed_sha256'][name]
                                                    for name in V157_NATIVE})
@@ -418,8 +490,10 @@ def seal(output, head, revision='v155'):
     result = p.read(out/'result.json')
     if result['source_head'] != head:
         raise ValueError('sealing source association differs')
-    is_v157 = revision == 'v157'
-    if is_v157 != (result.get('build_revision') == 'v157') or (is_v157 and result.get('schema') != V157_BUILD_SCHEMA):
+    observer = revision != 'v155'
+    schemas = {'v157': V157_BUILD_SCHEMA, 'v158': V158_BUILD_SCHEMA}
+    if ((observer and (result.get('build_revision') != revision or result.get('schema') != schemas[revision])) or
+        (not observer and result.get('build_revision') in schemas)):
         raise ValueError('sealing build revision association differs')
     if (out/'members.json').exists() or (out/'members.json').is_symlink():
         raise ValueError('preexisting manifest; never seal twice')
@@ -427,13 +501,19 @@ def seal(output, head, revision='v155'):
     if any(path.is_symlink() or not path.resolve().is_relative_to(out) for path in files):
         raise ValueError('unsafe evidence member')
     sizes = {path.relative_to(out).as_posix(): path.stat().st_size for path in files}
-    success_members = tuple(sorted((*SUCCESS_MEMBERS, *('native-source/'+name for name in V157_NATIVE)))) if is_v157 else SUCCESS_MEMBERS
+    members = set(SUCCESS_MEMBERS)
+    if observer:
+        members.update('native-source/'+name for name in V157_NATIVE)
+    if revision == 'v158':
+        members.remove('01-probe-compile.log')
+        members.add('01-pid1-compile.log')
+    success_members = sorted(members)
     before_manifest = set(success_members)-{'members.json'}
     if not set(sizes) <= before_manifest or (result['passed'] is True and set(sizes) != before_manifest):
         raise ValueError('exact producer member allowlist differs')
     if any(not 0 < size <= MAX_MEMBER for size in sizes.values()) or sum(sizes.values()) > MAX_TOTAL or len(files) > 64:
         raise ValueError('bounded exact Image evidence archive required')
-    manifest = dict(schema='note10-v157-sealed-members-v1' if is_v157 else 'note10-v154-sealed-members-v1', source_head=head,
+    manifest = dict(schema=f'note10-{revision if observer else "v154"}-sealed-members-v1', source_head=head,
                     member_sha256={path.relative_to(out).as_posix(): (result['Image_sha256'] if path.name == 'Image' else p.sha(p.ordinary(path, MAX_MEMBER))) for path in files},
                     member_bytes=sizes, max_member=MAX_MEMBER, max_total=MAX_TOTAL,
                     success_member_allowlist=list(success_members), manifest_self_excluded=True)
@@ -454,7 +534,7 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--expected-source-head', required=True)
     parser.add_argument('--passed-new-test-context', required=True)
-    parser.add_argument('--build-revision', choices=('v155', 'v157'), default='v155')
+    parser.add_argument('--build-revision', choices=('v155', 'v157', 'v158'), default='v155')
     parser.add_argument('--jobs', type=int, default=4)
     args = parser.parse_args()
     ci_guard(args.expected_source_head, os.environ)

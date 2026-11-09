@@ -11,6 +11,7 @@ on:
         options:
           - v155
           - v157
+          - v158
       expected_source_head:
         description: Exact reviewed source HEAD
         required: true
@@ -47,7 +48,7 @@ jobs:
           N10_EXPECTED_SOURCE: ${{ inputs.expected_source_head }}
           N10_BUILD_REVISION: ${{ inputs.build_revision }}
         run: |
-          [[ "$N10_BUILD_REVISION" == v155 || "$N10_BUILD_REVISION" == v157 ]]
+          [[ "$N10_BUILD_REVISION" == v155 || "$N10_BUILD_REVISION" == v157 || "$N10_BUILD_REVISION" == v158 ]]
           [[ "$N10_EXPECTED_SOURCE" =~ ^[0-9a-f]{40}$ ]]
           [[ "$GITHUB_SHA" == "$N10_EXPECTED_SOURCE" ]]
           [[ "$GITHUB_WORKFLOW_SHA" == "$N10_EXPECTED_SOURCE" ]]
@@ -74,14 +75,14 @@ jobs:
           PYTHONDONTWRITEBYTECODE: '1'
           N10_EXPECTED_SOURCE: ${{ inputs.expected_source_head }}
           N10_BUILD_REVISION: ${{ inputs.build_revision }}
-          N10_OUTPUT: ${{ inputs.build_revision == 'v157' && 'note10/private/v157-ci-linux-builtin-preexec' || 'note10/private/v154-ci-linux-iva-diagnostic' }}
+          N10_OUTPUT: ${{ inputs.build_revision == 'v158' && 'note10/private/v158-ci-linux-builtin-entry' || (inputs.build_revision == 'v157' && 'note10/private/v157-ci-linux-builtin-preexec' || 'note10/private/v154-ci-linux-iva-diagnostic') }}
           N10_NEW_PASS: ${{ inputs.passed_new_test_context }}
           N10_RECIPIENT_PUBLIC_KEY_B64: ${{ inputs.recipient_public_key_b64 }}
         run: '"${{ steps.python.outputs.python-path }}" -B "$GITHUB_WORKSPACE/note10/device_test/v154_linux_build.py" --output "$GITHUB_WORKSPACE/$N10_OUTPUT" --jobs 4 --build-revision "$N10_BUILD_REVISION" --expected-source-head "$N10_EXPECTED_SOURCE" --passed-new-test-context "$N10_NEW_PASS"'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: ${{ inputs.build_revision == 'v157' && 'note10-v157-linux-builtin-preexec-sealed-evidence' || 'note10-v154-linux-iva-diagnostic-sealed-evidence' }}
-          path: ${{ inputs.build_revision == 'v157' && 'note10/private/v157-ci-linux-builtin-preexec.n10sealed' || 'note10/private/v154-ci-linux-iva-diagnostic.n10sealed' }}
+          name: ${{ inputs.build_revision == 'v158' && 'note10-v158-linux-builtin-entry-sealed-evidence' || (inputs.build_revision == 'v157' && 'note10-v157-linux-builtin-preexec-sealed-evidence' || 'note10-v154-linux-iva-diagnostic-sealed-evidence') }}
+          path: ${{ inputs.build_revision == 'v158' && 'note10/private/v158-ci-linux-builtin-entry.n10sealed' || (inputs.build_revision == 'v157' && 'note10/private/v157-ci-linux-builtin-preexec.n10sealed' || 'note10/private/v154-ci-linux-iva-diagnostic.n10sealed') }}
           retention-days: 7
           if-no-files-found: error
