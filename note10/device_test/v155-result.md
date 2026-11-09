@@ -4,4 +4,6 @@ The previous Linux diagnostic Image failed at the kernel link: its PCIe IOMMU ca
 
 The focused host batch passed 14 checks covering the child environment, symbol proof, and separation of the new test from the carried v154 host evidence. No old tests, C compiler, or C fixture were replayed.
 
-Full Linux Image CI: pending. The device diagnostic is limited to IVA mmap denial and automatic TWRP return. No device action, DMA terminal, or XNU/iOS execution is claimed.
+Full Linux Image CI: **PASS**. The actual linked Image contains the DHD fault handler. One encrypted artifact was authenticated and safely extracted, with 36 members bound to the same build. The Image file is about 44.8 MiB and its linked extent about 53.1 MiB, within the reviewed limits. The Linux diagnostic package and paired restore ZIP were generated.
+
+Device preflight stopped at the 10% battery requirement before any BOOT write or reboot. The mmap denial and automatic TWRP return were therefore not exercised. The physical cycle remains unconsumed. No DMA terminal, hardware ownership transfer, or XNU/iOS execution is claimed.
