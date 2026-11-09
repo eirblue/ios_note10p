@@ -7,3 +7,5 @@ The check establishes the public C++ declaration boundary. The Exynos block prov
 The subsequent [PIO bridge SDK run](https://github.com/eirblue/ios_note10p/actions/runs/42581228925) compiled the bridge once with macOS SDK 26.5. The checked code connects the read request core to IOMemoryDescriptor preparation, copy and cleanup, followed by IOStorage completion. The separate PC request fixture passed 10 cases, including rejection before admission, short reads and backing failures.
 
 The PIO result covers source compatibility with the SDK. Linking, service registration, inline completion safety at the final caller, and APFS mounting still require verification.
+
+The [ARM64 link run](https://github.com/eirblue/ios_note10p/actions/runs/42585127349) compiled the C++ bridge and both C helpers into three objects with macOS SDK 26.5. Apple's relocatable linker resolved the internal PIO references. The merged object still refers to the external `IOStorage::complete` implementation. The run did not link or execute a kernel.
