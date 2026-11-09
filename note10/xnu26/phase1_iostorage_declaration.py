@@ -41,6 +41,25 @@ COMMIT = '7edb88fbae296fb7c8ce2f64e115e116e566d51c'
 ARCHIVE_URL = 'https://codeload.github.com/apple-oss-distributions/IOStorageFamily/tar.gz/' + COMMIT
 ARCHIVE_BYTES = 1361346
 ARCHIVE_SHA = '2a2b85c3350157e5e93f945c8729b8b8915ff5dc26a284bedc892af43519f413'
+BASE_MEMBER = 'IOBlockStorageDevice.cpp'
+BASE_MEMBER_BYTES = 7912
+BASE_MEMBER_SHA = '91391448f3abced8238f71cce6b9f1062bd22e43994243e25c86df3e73ffd848'
+BASE_REQUIRED_SYMBOLS = (
+    '__ZN20IOBlockStorageDevice10gMetaClassE',
+    '__ZN20IOBlockStorageDevice11requestIdleEv',
+    '__ZN20IOBlockStorageDevice13doSetPriorityEP26IOBlockStorageDeviceExtentjh',
+    '__ZN20IOBlockStorageDevice13doSynchronizeEyyj',
+    '__ZN20IOBlockStorageDevice13setPropertiesEP8OSObject',
+    '__ZN20IOBlockStorageDevice18doSynchronizeCacheEv',
+    '__ZN20IOBlockStorageDevice18getWriteCacheStateEPb',
+    '__ZN20IOBlockStorageDevice18setWriteCacheStateEb',
+    '__ZN20IOBlockStorageDevice20doGetProvisionStatusEyyPjP35IOBlockStorageProvisionDeviceExtenty',
+    '__ZN20IOBlockStorageDevice4initEP12OSDictionary',
+    '__ZN20IOBlockStorageDevice7doUnmapEP26IOBlockStorageDeviceExtentjj',
+    '__ZN20IOBlockStorageDeviceC2EPK11OSMetaClass',
+    '__ZN20IOBlockStorageDeviceD2Ev',
+    '__ZNK20IOBlockStorageDevice11getPropertyEPK8OSSymbol',
+)
 HEADERS = {
     'IOBlockStorageDevice.h': 'afe6609327355c84a70f764c55291d41931e47dedbfb49dc9a2b3601902cdd9c',
     'IOMedia.h': 'f8d96b002ec37bdc32e8b715394b8324e399f73ede88ac5d2d9770780e7a3bab',
@@ -52,6 +71,7 @@ SDK_HEADERS = (
     'TargetConditionals.h', 'IOKit/IOTypes.h', 'IOKit/IOMemoryDescriptor.h', 'IOKit/IOMessage.h',
     'IOKit/IOService.h', 'IOKit/assert.h', 'libkern/c++/OSMetaClass.h', 'sys/kernel_types.h',
 )
+BASE_SDK_HEADERS = ('IOKit/IOLib.h', 'IOKit/IOUserClient.h', 'IOKit/system.h', 'kern/task.h')
 TARGET = 'arm64-apple-ios26.5.2'
 COMPILE_FLAGS = (
     '--target=' + TARGET, '-std=gnu++2b', '-mkernel', '-fapple-kext', '-fsized-deallocation',
@@ -91,7 +111,7 @@ def reviewed_identity():
     return head, int(run_id)
 
 
-def stage_headers(include):
+def stage_headers(include, base_source=None):
     with urllib.request.urlopen(ARCHIVE_URL, timeout=30) as response:
         raw = response.read(ARCHIVE_BYTES + 1)
     require(len(raw) == ARCHIVE_BYTES and sha(raw) == ARCHIVE_SHA, 'public IOStorageFamily archive pin differs')
@@ -105,6 +125,13 @@ def stage_headers(include):
                 data = stream.read()
             require(sha(data) == digest, 'public IOStorageFamily header pin differs')
             (storage / name).write_bytes(data)
+        if base_source is not None:
+            member = archive.getmember('IOStorageFamily-' + COMMIT + '/' + BASE_MEMBER)
+            require(member.isfile() and member.size == BASE_MEMBER_BYTES, 'public base implementation size differs')
+            with archive.extractfile(member) as stream:
+                data = stream.read()
+            require(sha(data) == BASE_MEMBER_SHA, 'public base implementation pin differs')
+            base_source.write_bytes(data)
 
 
 def require_arm64_object(path):
@@ -185,6 +212,28 @@ def compile_provider_object(result, work, compiler, includes):
                   undefined_external_count=len(undefined))
 
 
+def compile_base_object(result, source, compiler, includes):
+    result['stage'] = 'base-object-compile'
+    obj = source.with_suffix('.o')
+    command = [*compiler, *COMPILE_FLAGS[:-1], *includes, '-O2', '-c', str(source), '-o', str(obj)]
+    result['compile_attempts'] = 1
+    call = subprocess.run(command, cwd=ROOT, capture_output=True, timeout=60)
+    result['compiler_returncode'] = call.returncode
+    if call.returncode:
+        match = re.search(rb"fatal error: '([A-Za-z0-9_][A-Za-z0-9_./+\-]{0,127})' file not found", call.stderr)
+        if match and b'..' not in match.group(1):
+            result['missing_include'] = match.group(1).decode('ascii')
+        return
+    require_arm64_object(obj)
+    result['compiled_arm64_objects'] = 1
+    result['stage'] = 'base-object-symbol-audit'
+    defined = set(read_command(['xcrun', '--sdk', 'macosx', 'nm', '-g', '-U', '-j', str(obj)]).splitlines())
+    result['matched_required_symbols'] = [name for name in BASE_REQUIRED_SYMBOLS if name in defined]
+    result['missing_required_symbols'] = [name for name in BASE_REQUIRED_SYMBOLS if name not in defined]
+    if not result['missing_required_symbols']:
+        result.update(stage='complete', passed=True, base_required_symbols_verified=True)
+
+
 def compile_probe(result, mode, source):
     result['stage'] = 'sdk-preflight'
     sdk_path = Path(read_command(['xcrun', '--sdk', 'macosx', '--show-sdk-path']))
@@ -197,8 +246,9 @@ def compile_probe(result, mode, source):
     if not kernel.is_dir():
         kernel = framework / 'Versions/A/Headers'
     includes = (kernel, sdk / 'usr/include')
+    headers = SDK_HEADERS + BASE_SDK_HEADERS if mode == 'base_object' else SDK_HEADERS
     found = {name: next((directory / name for directory in includes if (directory / name).is_file()), None)
-             for name in SDK_HEADERS}
+             for name in headers}
     result['sdk_version'] = version
     missing = [name for name, path in found.items() if path is None]
     if not kernel.is_dir() or missing:
@@ -209,16 +259,17 @@ def compile_probe(result, mode, source):
     if mode != 'declaration':
         require(all(result['sdk_header_sha256'][name] == digest for name, digest in PIO_SDK_PINS.items()),
                 'reviewed SDK descriptor/type header pin differs')
-    if mode == 'provider_object':
+    if mode in ('provider_object', 'base_object'):
         require(result['sdk_header_sha256']['libkern/c++/OSMetaClass.h'] == PROVIDER_METACLASS_SHA,
                 'reviewed SDK metaclass header pin differs')
 
     with tempfile.TemporaryDirectory(prefix='note10-iostorage-') as work_dir:
         work = Path(work_dir)
         include = work / 'include'
+        base_source = work / BASE_MEMBER if mode == 'base_object' else None
         result['stage'] = 'pinned-header-staging'
         result['archive_fetch_attempts'] = 1
-        stage_headers(include)
+        stage_headers(include, base_source)
         result['archive_verified'] = True
         compiler = ['xcrun', '--sdk', 'macosx', 'clang']
         includes = ['-isysroot', str(sdk), '-I', str(include),
@@ -228,6 +279,10 @@ def compile_probe(result, mode, source):
             return
         if mode == 'provider_object':
             compile_provider_object(result, work, compiler, includes)
+            return
+        if base_source is not None:
+            result['archive_source_verified'] = True
+            compile_base_object(result, base_source, compiler, includes)
             return
         command = [*compiler, *COMPILE_FLAGS, *includes, source]
         result['stage'] = 'pio-bridge-compile' if mode == 'pio_bridge' else 'declaration-compile'
@@ -248,7 +303,7 @@ def compile_probe(result, mode, source):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--mode', choices=('declaration', 'pio_bridge', 'pio_link', 'provider_object'),
+    parser.add_argument('--mode', choices=('declaration', 'pio_bridge', 'pio_link', 'provider_object', 'base_object'),
                         default='declaration')
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
@@ -259,8 +314,11 @@ def main():
     out.mkdir(parents=True)
     pio = args.mode in ('pio_bridge', 'pio_link')
     provider = args.mode == 'provider_object'
-    source = PROVIDER_SOURCE if provider else PIO_SOURCE if pio else SOURCE
-    paths = (source, WORKFLOW, Path(__file__).resolve().relative_to(ROOT).as_posix())
+    base = args.mode == 'base_object'
+    source = None if base else PROVIDER_SOURCE if provider else PIO_SOURCE if pio else SOURCE
+    paths = (WORKFLOW, Path(__file__).resolve().relative_to(ROOT).as_posix())
+    if source is not None:
+        paths += (source,)
     if pio:
         paths += PIO_INPUTS
     if args.mode == 'pio_link':
@@ -278,6 +336,11 @@ def main():
         result.update(compiled_arm64_objects=0, partial_link_attempts=0, pio_relocatable_link_verified=False)
     if provider:
         result.update(compiled_arm64_objects=0, partial_link_attempts=0, provider_object_verified=False)
+    if base:
+        result.update(compiled_arm64_objects=0, partial_link_attempts=0, base_required_symbols_verified=False,
+                      archive_source_member='IOStorageFamily-' + COMMIT + '/' + BASE_MEMBER,
+                      archive_source_sha256=BASE_MEMBER_SHA, archive_source_bytes=BASE_MEMBER_BYTES,
+                      archive_source_verified=False, required_symbol_count=len(BASE_REQUIRED_SYMBOLS))
     try:
         compile_probe(result, args.mode, source)
     except Exception as error:
