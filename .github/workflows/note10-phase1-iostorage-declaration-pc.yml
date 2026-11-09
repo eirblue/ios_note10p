@@ -16,6 +16,7 @@ on:
           - declaration
           - pio_bridge
           - pio_link
+          - provider_object
 permissions:
   contents: read
 jobs:
@@ -37,7 +38,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: ${{ inputs.mode == 'pio_link' && 'note10-phase1-iostorage-pio-link-result' || inputs.mode == 'pio_bridge' && 'note10-phase1-iostorage-pio-bridge-result' || 'note10-phase1-iostorage-declaration-result' }}
+          name: ${{ format('note10-phase1-iostorage-{0}-result', inputs.mode == 'provider_object' && 'provider-object' || inputs.mode == 'pio_link' && 'pio-link' || inputs.mode == 'pio_bridge' && 'pio-bridge' || 'declaration') }}
           path: note10/private/phase1-iostorage-declaration-once/result.json
           retention-days: 7
           if-no-files-found: error

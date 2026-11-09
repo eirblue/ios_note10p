@@ -17,6 +17,10 @@ import urllib.request
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = 'note10/xnu26/phase1_iostorage_declaration.cpp'
 PIO_SOURCE = 'note10/xnu26/note10_iostorage_pio_bridge.cpp'
+PROVIDER_SOURCE = 'note10/xnu26/phase1_iostorage_provider_object.cpp'
+PROVIDER_CLASS = 'Note10RAMBlockProviderProbe'
+PROVIDER_BRIDGE_IMPORT = '__Z25note10_iostorage_pio_readPKvyyP18IOMemoryDescriptoryyPK19IOStorageCompletion'
+PROVIDER_METACLASS_SHA = '030784b3b7962124b69d855d5ac20323b78522a3be5f9806908baa0ef9126494'
 PIO_INPUTS = (
     'note10/xnu26/note10_iostorage_pio_bridge.h',
     'note10/xnu26/note10_iostorage_read_request.h',
@@ -154,6 +158,33 @@ def link_pio(result, work, compiler, includes):
                   undefined_external_symbols=undefined, undefined_external_count=len(undefined))
 
 
+def compile_provider_object(result, work, compiler, includes):
+    result['stage'] = 'provider-object-compile'
+    obj = work / 'note10_iostorage_provider_probe.o'
+    command = [*compiler, *COMPILE_FLAGS[:-1], *includes, '-DN10_RAM_PROVIDER_OBJECT_PROBE=1',
+               '-O2', '-c', PROVIDER_SOURCE, '-o', str(obj)]
+    result['compile_attempts'] = 1
+    call = subprocess.run(command, cwd=ROOT, capture_output=True, timeout=60)
+    result['compiler_returncode'] = call.returncode
+    if call.returncode:
+        return
+    require_arm64_object(obj)
+    result['compiled_arm64_objects'] = 1
+    result['stage'] = 'provider-object-symbol-audit'
+    nm = ['xcrun', '--sdk', 'macosx', 'nm']
+    defined = set(read_command([*nm, '-g', '-U', '-j', str(obj)]).splitlines())
+    undefined = sorted(set(read_command([*nm, '-u', '-j', str(obj)]).splitlines()))
+    require(len(undefined) <= 512 and all(re.fullmatch(r'[A-Za-z_.$][A-Za-z0-9_.$]{0,383}', n)
+                                          for n in undefined), 'unexpected provider symbol output')
+    vtable = f'__ZTV{len(PROVIDER_CLASS)}{PROVIDER_CLASS}'
+    require(vtable in defined, 'concrete provider vtable missing')
+    require(PROVIDER_BRIDGE_IMPORT in undefined and any('IOBlockStorageDevice' in n for n in undefined)
+            and any('OSMetaClass' in n for n in undefined), 'expected provider imports missing')
+    result.update(stage='complete', passed=True, provider_object_verified=True,
+                  defined_provider_vtable=vtable, undefined_external_symbols=undefined,
+                  undefined_external_count=len(undefined))
+
+
 def compile_probe(result, mode, source):
     result['stage'] = 'sdk-preflight'
     sdk_path = Path(read_command(['xcrun', '--sdk', 'macosx', '--show-sdk-path']))
@@ -175,9 +206,12 @@ def compile_probe(result, mode, source):
         result['public_kernel_headers_available'] = kernel.is_dir()
         return
     result['sdk_header_sha256'] = {name: sha(path.read_bytes()) for name, path in found.items()}
-    if mode in ('pio_bridge', 'pio_link'):
+    if mode != 'declaration':
         require(all(result['sdk_header_sha256'][name] == digest for name, digest in PIO_SDK_PINS.items()),
                 'reviewed SDK descriptor/type header pin differs')
+    if mode == 'provider_object':
+        require(result['sdk_header_sha256']['libkern/c++/OSMetaClass.h'] == PROVIDER_METACLASS_SHA,
+                'reviewed SDK metaclass header pin differs')
 
     with tempfile.TemporaryDirectory(prefix='note10-iostorage-') as work_dir:
         work = Path(work_dir)
@@ -191,6 +225,9 @@ def compile_probe(result, mode, source):
                     '-isystem', str(kernel), '-isystem', str(sdk / 'usr/include')]
         if mode == 'pio_link':
             link_pio(result, work, compiler, includes)
+            return
+        if mode == 'provider_object':
+            compile_provider_object(result, work, compiler, includes)
             return
         command = [*compiler, *COMPILE_FLAGS, *includes, source]
         result['stage'] = 'pio-bridge-compile' if mode == 'pio_bridge' else 'declaration-compile'
@@ -211,7 +248,8 @@ def compile_probe(result, mode, source):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--mode', choices=('declaration', 'pio_bridge', 'pio_link'), default='declaration')
+    parser.add_argument('--mode', choices=('declaration', 'pio_bridge', 'pio_link', 'provider_object'),
+                        default='declaration')
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     head, run_id = reviewed_identity()
@@ -219,13 +257,16 @@ def main():
     private = ROOT / 'note10/private'
     require(out != private and out.is_relative_to(private), 'fresh private result directory required')
     out.mkdir(parents=True)
-    pio = args.mode != 'declaration'
-    source = PIO_SOURCE if pio else SOURCE
+    pio = args.mode in ('pio_bridge', 'pio_link')
+    provider = args.mode == 'provider_object'
+    source = PROVIDER_SOURCE if provider else PIO_SOURCE if pio else SOURCE
     paths = (source, WORKFLOW, Path(__file__).resolve().relative_to(ROOT).as_posix())
     if pio:
         paths += PIO_INPUTS
     if args.mode == 'pio_link':
         paths += PIO_LINK_C_SOURCES
+    if provider:
+        paths += (PIO_INPUTS[0],)
     schema = f'note10-phase1-iostorage-{args.mode.replace("_", "-")}-result-v1'
     result = dict(schema=schema, passed=False,
                   source_head=head, run_id=run_id, run_attempt=1, target=TARGET,
@@ -235,6 +276,8 @@ def main():
                   device_operations=0, deployment_ready=False)
     if args.mode == 'pio_link':
         result.update(compiled_arm64_objects=0, partial_link_attempts=0, pio_relocatable_link_verified=False)
+    if provider:
+        result.update(compiled_arm64_objects=0, partial_link_attempts=0, provider_object_verified=False)
     try:
         compile_probe(result, args.mode, source)
     except Exception as error:
