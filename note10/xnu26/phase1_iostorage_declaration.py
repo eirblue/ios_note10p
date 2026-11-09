@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SOURCE = 'note10/xnu26/phase1_iostorage_declaration.cpp'
 PIO_SOURCE = 'note10/xnu26/note10_iostorage_pio_bridge.cpp'
 PROVIDER_SOURCE = 'note10/xnu26/phase1_iostorage_provider_object.cpp'
+NATIVE_INPUTS_SOURCE = 'note10/xnu26/phase1_iostorage_native_inputs.py'
 PROVIDER_CLASS = 'Note10RAMBlockProviderProbe'
 PROVIDER_BRIDGE_IMPORT = '__Z25note10_iostorage_pio_readPKvyyP18IOMemoryDescriptoryyPK19IOStorageCompletion'
 PROVIDER_METACLASS_SHA = '030784b3b7962124b69d855d5ac20323b78522a3be5f9806908baa0ef9126494'
@@ -303,7 +304,8 @@ def compile_probe(result, mode, source):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--mode', choices=('declaration', 'pio_bridge', 'pio_link', 'provider_object', 'base_object'),
+    parser.add_argument('--mode', choices=('declaration', 'pio_bridge', 'pio_link', 'provider_object', 'base_object',
+                                          'native_inputs'),
                         default='declaration')
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
@@ -315,7 +317,9 @@ def main():
     pio = args.mode in ('pio_bridge', 'pio_link')
     provider = args.mode == 'provider_object'
     base = args.mode == 'base_object'
-    source = None if base else PROVIDER_SOURCE if provider else PIO_SOURCE if pio else SOURCE
+    native_inputs = args.mode == 'native_inputs'
+    source = (NATIVE_INPUTS_SOURCE if native_inputs else None if base else
+              PROVIDER_SOURCE if provider else PIO_SOURCE if pio else SOURCE)
     paths = (WORKFLOW, Path(__file__).resolve().relative_to(ROOT).as_posix())
     if source is not None:
         paths += (source,)
@@ -342,7 +346,13 @@ def main():
                       archive_source_sha256=BASE_MEMBER_SHA, archive_source_bytes=BASE_MEMBER_BYTES,
                       archive_source_verified=False, required_symbol_count=len(BASE_REQUIRED_SYMBOLS))
     try:
-        compile_probe(result, args.mode, source)
+        if native_inputs:
+            from phase1_iostorage_native_inputs import generate
+            result.update(native_inputs_generated=False, host_config_tool_built=False,
+                          target_object_compile_attempts=0)
+            generate(result, out)
+        else:
+            compile_probe(result, args.mode, source)
     except Exception as error:
         result.update(passed=False, failure_type=type(error).__name__)
     raw = json.dumps(result, indent=2, sort_keys=True) + '\n'

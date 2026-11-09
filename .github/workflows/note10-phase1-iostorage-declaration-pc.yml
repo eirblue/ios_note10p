@@ -18,12 +18,13 @@ on:
           - pio_link
           - provider_object
           - base_object
+          - native_inputs
 permissions:
   contents: read
 jobs:
   iostorage-public-declaration:
     runs-on: macos-26
-    timeout-minutes: 10
+    timeout-minutes: ${{ inputs.mode == 'native_inputs' && 30 || 10 }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -35,11 +36,17 @@ jobs:
         env:
           N10_EXPECTED_SOURCE_HEAD: ${{ inputs.expected_source_head }}
           N10_PROBE_MODE: ${{ inputs.mode }}
-        run: python -B note10/xnu26/phase1_iostorage_declaration.py --mode "${N10_PROBE_MODE:-declaration}" --output note10/private/phase1-iostorage-declaration-once
+        run: |
+          if [ "$N10_PROBE_MODE" = native_inputs ]; then
+            mkdir -p note10/private
+            python -B note10/xnu26/phase1_iostorage_declaration.py --mode native_inputs --output note10/private/phase1-iostorage-declaration-once > note10/private/phase1-iostorage-native-inputs.internal.log 2>&1
+          else
+            python -B note10/xnu26/phase1_iostorage_declaration.py --mode "${N10_PROBE_MODE:-declaration}" --output note10/private/phase1-iostorage-declaration-once
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: ${{ format('note10-phase1-iostorage-{0}-result', inputs.mode == 'base_object' && 'base-object' || inputs.mode == 'provider_object' && 'provider-object' || inputs.mode == 'pio_link' && 'pio-link' || inputs.mode == 'pio_bridge' && 'pio-bridge' || 'declaration') }}
+          name: ${{ format('note10-phase1-iostorage-{0}-result', inputs.mode == 'native_inputs' && 'native-inputs' || inputs.mode == 'base_object' && 'base-object' || inputs.mode == 'provider_object' && 'provider-object' || inputs.mode == 'pio_link' && 'pio-link' || inputs.mode == 'pio_bridge' && 'pio-bridge' || 'declaration') }}
           path: note10/private/phase1-iostorage-declaration-once/result.json
           retention-days: 7
           if-no-files-found: error
