@@ -1,5 +1,6 @@
 """Check public IOStorage sources against the actual macOS SDK."""
 import argparse
+from contextlib import contextmanager
 import hashlib
 import io
 import json
@@ -21,6 +22,17 @@ PROVIDER_SOURCE = 'note10/xnu26/phase1_iostorage_provider_object.cpp'
 NATIVE_INPUTS_SOURCE = 'note10/xnu26/phase1_iostorage_native_inputs.py'
 NATIVE_COMPLETE_SOURCE = 'note10/xnu26/phase1_iostorage_native_complete.py'
 NATIVE_INPUTS_SHA256 = 'bf34f56e47bf5a05119ad45d6e00fdd7d6972076aad02f4788459b0c112fa126'
+CLOSURE_INPUT_SHA256 = {
+    NATIVE_COMPLETE_SOURCE: '4755da14c888b886715cfc0c414cfed000e44f0ad209e30866ab6f536f84760a',
+    PROVIDER_SOURCE: 'ac252306b4dd3faea053f9b171663d3f17794b9fa8790aa4c88b21c10dda87b7',
+    PIO_SOURCE: '56bbcdb885b04650d4216cc37c06e148fd626fcfc919a7bfe62da8ab2bb52ec0',
+    'note10/xnu26/note10_iostorage_pio_bridge.h': 'f57c49f687c80a672b980fe3d74a03968311724f8871a65c53fd67b124c869d1',
+    'note10/xnu26/note10_iostorage_read_range.c': '12b9de8c5e7c59b0e2df4deec0e109043d53ee5f7dd45653ce899d0f17ae38a2',
+    'note10/xnu26/note10_iostorage_read_range.h': '61bd6d3741137139cbb00280334c763dbe85431483cbee8e31270c61361df2a3',
+    'note10/xnu26/note10_iostorage_read_request.c': '7b5fd68db13eb27ff35cf3f3f70fd9cda4cf76bc414867e8b802189efb6a6815',
+    'note10/xnu26/note10_iostorage_read_request.h': 'bedab328a94426f0409b3617d80746d3bf5ee76a03e2bcc2537808092f8d2f15',
+}
+CLOSURE_PUBLIC_SDK_SHA256 = 'd86ae8d761c1b5788400912f5007504d3a7d32b3c70647a23e61fe48f7bd2007'
 PROVIDER_CLASS = 'Note10RAMBlockProviderProbe'
 PROVIDER_BRIDGE_IMPORT = '__Z25note10_iostorage_pio_readPKvyyP18IOMemoryDescriptoryyPK19IOStorageCompletion'
 PROVIDER_METACLASS_SHA = '030784b3b7962124b69d855d5ac20323b78522a3be5f9806908baa0ef9126494'
@@ -121,24 +133,28 @@ def open_verified_archive():
     return tarfile.open(fileobj=io.BytesIO(raw), mode='r:gz')
 
 
-def stage_headers(include, base_source=None):
+def stage_storage_members(archive, include, base_source):
     storage = include / 'IOKit/storage'
     storage.mkdir(parents=True)
+    for name, digest in HEADERS.items():
+        member = archive.getmember('IOStorageFamily-' + COMMIT + '/' + name)
+        require(member.isfile() and 0 < member.size <= 1024 * 1024, 'expected ordinary bounded archive header')
+        with archive.extractfile(member) as stream:
+            data = stream.read()
+        require(sha(data) == digest, 'public IOStorageFamily header pin differs')
+        (storage / name).write_bytes(data)
+    if base_source is not None:
+        member = archive.getmember('IOStorageFamily-' + COMMIT + '/' + BASE_MEMBER)
+        require(member.isfile() and member.size == BASE_MEMBER_BYTES, 'public base implementation size differs')
+        with archive.extractfile(member) as stream:
+            data = stream.read()
+        require(sha(data) == BASE_MEMBER_SHA, 'public base implementation pin differs')
+        base_source.write_bytes(data)
+
+
+def stage_headers(include, base_source=None):
     with open_verified_archive() as archive:
-        for name, digest in HEADERS.items():
-            member = archive.getmember('IOStorageFamily-' + COMMIT + '/' + name)
-            require(member.isfile() and 0 < member.size <= 1024 * 1024, 'expected ordinary bounded archive header')
-            with archive.extractfile(member) as stream:
-                data = stream.read()
-            require(sha(data) == digest, 'public IOStorageFamily header pin differs')
-            (storage / name).write_bytes(data)
-        if base_source is not None:
-            member = archive.getmember('IOStorageFamily-' + COMMIT + '/' + BASE_MEMBER)
-            require(member.isfile() and member.size == BASE_MEMBER_BYTES, 'public base implementation size differs')
-            with archive.extractfile(member) as stream:
-                data = stream.read()
-            require(sha(data) == BASE_MEMBER_SHA, 'public base implementation pin differs')
-            base_source.write_bytes(data)
+        stage_storage_members(archive, include, base_source)
 
 
 def require_arm64_object(path):
@@ -241,7 +257,7 @@ def compile_base_object(result, source, compiler, includes):
         result.update(stage='complete', passed=True, base_required_symbols_verified=True)
 
 
-def compile_probe(result, mode, source):
+def public_sdk_context(result, mode):
     result['stage'] = 'sdk-preflight'
     sdk_path = Path(read_command(['xcrun', '--sdk', 'macosx', '--show-sdk-path']))
     require(sdk_path.is_absolute(), 'absolute SDK path required')
@@ -269,6 +285,14 @@ def compile_probe(result, mode, source):
     if mode in ('provider_object', 'base_object'):
         require(result['sdk_header_sha256']['libkern/c++/OSMetaClass.h'] == PROVIDER_METACLASS_SHA,
                 'reviewed SDK metaclass header pin differs')
+    return sdk, kernel
+
+
+def compile_probe(result, mode, source):
+    sdk_context = public_sdk_context(result, mode)
+    if sdk_context is None:
+        return
+    sdk, kernel = sdk_context
 
     with tempfile.TemporaryDirectory(prefix='note10-iostorage-') as work_dir:
         work = Path(work_dir)
@@ -308,10 +332,88 @@ def compile_probe(result, mode, source):
             result['declaration_overrides_verified'] = 14
 
 
+def compile_relocatable_closure(result, output):
+    sdk_context = public_sdk_context(result, 'base_object')
+    if sdk_context is None:
+        return
+    sdk, kernel = sdk_context
+    sdk_json = json.dumps(result['sdk_header_sha256'], sort_keys=True, separators=(',', ':')).encode()
+    require(sha(sdk_json) == CLOSURE_PUBLIC_SDK_SHA256, 'accepted public SDK header set differs')
+
+    from phase1_iostorage_native_complete import compile_complete, COMPLETE_SYMBOL
+    public = output / 'public-sdk-objects'
+    include = public / 'include'
+    base = public / BASE_MEMBER
+
+    @contextmanager
+    def stage_shared_archive():
+        with open_verified_archive() as archive:
+            stage_storage_members(archive, include, base)
+            yield archive
+
+    compile_complete(result, output, stage_shared_archive, COMMIT, HEADERS['IOStorage.h'], require_arm64_object)
+    result['unit_compiler_returncodes'] = {}
+    if 'compiler_returncode' in result:
+        result['unit_compiler_returncodes']['IOStorage.cpp'] = result['compiler_returncode']
+    if not result['native_complete_verified']:
+        return
+    result.update(passed=False, stage='closure-public-object-compile')
+    objects = [str(output / 'apple-implementation/IOStorage.o')]
+    compiler = ['xcrun', '--sdk', 'macosx', 'clang']
+    includes = ['-isysroot', str(sdk), '-I', str(include),
+                '-isystem', str(kernel), '-isystem', str(sdk / 'usr/include')]
+    units = (
+        (str(base), COMPILE_FLAGS[:-1], ()),
+        (PROVIDER_SOURCE, COMPILE_FLAGS[:-1], ('-DN10_RAM_PROVIDER_OBJECT_PROBE=1',)),
+        (PIO_SOURCE, COMPILE_FLAGS[:-1], ()),
+        *((source, C_OBJECT_FLAGS, ()) for source in PIO_LINK_C_SOURCES),
+    )
+    for source, flags, extra in units:
+        obj = public / (Path(source).stem + '.o')
+        result['compile_attempts'] += 1
+        result['target_object_compile_attempts'] += 1
+        call = subprocess.run([*compiler, *flags, *includes, *extra, '-O2', '-c', source, '-o', str(obj)],
+                              cwd=ROOT, capture_output=True, timeout=60)
+        result['unit_compiler_returncodes'][Path(source).name] = call.returncode
+        if call.returncode:
+            return
+        require_arm64_object(obj)
+        objects.append(str(obj))
+        result['compiled_arm64_objects'] = len(objects)
+
+    result.update(stage='closure-relocatable-link', partial_link_attempts=1)
+    merged = output / 'note10_iostorage_closure.o'
+    call = subprocess.run(['xcrun', '--sdk', 'macosx', 'ld', '-r', '-arch', 'arm64',
+                           '-o', str(merged), *objects], cwd=ROOT, capture_output=True, timeout=60)
+    result['partial_link_returncode'] = call.returncode
+    if call.returncode:
+        return
+    require_arm64_object(merged)
+
+    result['stage'] = 'closure-symbol-audit'
+    nm = ['xcrun', '--sdk', 'macosx', 'nm']
+    defined = read_command([*nm, '-g', '-U', '-j', str(merged)]).splitlines()
+    undefined = sorted(set(read_command([*nm, '-u', '-j', str(merged)]).splitlines()))
+    for names in (defined, undefined):
+        require(len(names) <= 512 and all(re.fullmatch(r'[A-Za-z_.$][A-Za-z0-9_.$]{0,383}', n)
+                                         for n in names), 'unexpected relocatable symbol output')
+    required = (*BASE_REQUIRED_SYMBOLS, PROVIDER_BRIDGE_IMPORT, COMPLETE_SYMBOL,
+                '_note10_iostorage_read_range', '_note10_iostorage_read_request')
+    provider_vtable = f'__ZTV{len(PROVIDER_CLASS)}{PROVIDER_CLASS}'
+    require(all(defined.count(name) == 1 for name in (*required, provider_vtable)),
+            'missing or duplicate closure definition')
+    require(not any(name in required or 'note10_iostorage_' in name or PROVIDER_CLASS in name or
+                    'IOBlockStorageDevice' in name for name in undefined), 'unresolved internal storage symbol')
+    result.update(stage='complete', passed=True, relocatable_closure_verified=True,
+                  resolved_by_composition=sorted(required), defined_provider_vtable=provider_vtable,
+                  defined_external_symbols=sorted(defined), defined_external_count=len(defined),
+                  undefined_external_symbols=undefined, undefined_external_count=len(undefined))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--mode', choices=('declaration', 'pio_bridge', 'pio_link', 'provider_object', 'base_object',
-                                          'native_inputs', 'native_complete'),
+                                          'native_inputs', 'native_complete', 'relocatable_closure'),
                         default='declaration')
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
@@ -325,6 +427,7 @@ def main():
     base = args.mode == 'base_object'
     native_inputs = args.mode == 'native_inputs'
     native_complete = args.mode == 'native_complete'
+    closure = args.mode == 'relocatable_closure'
     source = {
         'declaration': SOURCE, 'pio_bridge': PIO_SOURCE, 'pio_link': PIO_SOURCE,
         'provider_object': PROVIDER_SOURCE, 'native_inputs': NATIVE_INPUTS_SOURCE,
@@ -341,6 +444,8 @@ def main():
         paths += (PIO_INPUTS[0],)
     if native_complete:
         paths += (NATIVE_INPUTS_SOURCE,)
+    if closure:
+        paths += (NATIVE_INPUTS_SOURCE, *CLOSURE_INPUT_SHA256)
     schema = f'note10-phase1-iostorage-{args.mode.replace("_", "-")}-result-v1'
     result = dict(schema=schema, passed=False,
                   source_head=head, run_id=run_id, run_attempt=1, target=TARGET,
@@ -358,17 +463,26 @@ def main():
                       archive_source_sha256=BASE_MEMBER_SHA, archive_source_bytes=BASE_MEMBER_BYTES,
                       archive_source_verified=False, required_symbol_count=len(BASE_REQUIRED_SYMBOLS))
     try:
-        if native_inputs or native_complete:
+        if native_inputs or native_complete or closure:
             result.update(native_inputs_generated=False, host_config_tool_built=False,
                           target_object_compile_attempts=0)
-            if native_complete:
+            if native_complete or closure:
                 require(result['source_sha256'][NATIVE_INPUTS_SOURCE] == NATIVE_INPUTS_SHA256,
                         'accepted native generation source differs')
                 from phase1_iostorage_native_complete import compile_complete, MEMBER, MEMBER_BYTES, MEMBER_SHA256
                 result.update(native_complete_verified=False, compiled_arm64_objects=0, partial_link_attempts=0,
                               archive_source_verified=False, archive_source_member='IOStorageFamily-' + COMMIT + '/' + MEMBER,
                               archive_source_bytes=MEMBER_BYTES, archive_source_sha256=MEMBER_SHA256)
-                compile_complete(result, out, open_verified_archive, COMMIT, HEADERS['IOStorage.h'], require_arm64_object)
+                if closure:
+                    require(all(result['source_sha256'][name] == digest for name, digest in
+                                CLOSURE_INPUT_SHA256.items()), 'accepted composition input source differs')
+                    result.update(relocatable_closure_verified=False,
+                                  archive_base_source_member='IOStorageFamily-' + COMMIT + '/' + BASE_MEMBER,
+                                  archive_base_source_bytes=BASE_MEMBER_BYTES, archive_base_source_sha256=BASE_MEMBER_SHA)
+                    compile_relocatable_closure(result, out)
+                else:
+                    compile_complete(result, out, open_verified_archive, COMMIT, HEADERS['IOStorage.h'],
+                                     require_arm64_object)
             else:
                 from phase1_iostorage_native_inputs import generate
                 generate(result, out)
