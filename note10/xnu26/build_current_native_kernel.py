@@ -24,21 +24,28 @@ JOB = 'current-native-selected-link'
 WORKFLOW = '.github/workflows/note10-current-native-selected-link.yml'
 LEAF_WORKFLOW = '.github/workflows/note10-exynos-leaf-bootstrap-pc.yml'
 CHECKED_WORKFLOW = '.github/workflows/note10-exynos-checked-ptpage-pc.yml'
+STORAGE_WORKFLOW = '.github/workflows/note10-iostorage-final-link-pc.yml'
 LIBDISPATCH = '2361ffb78a76f7ee488cd052eb0bc5c767118bf9'
 CASE_IDS = ('test_current_inventory_resolves_owner_and_generated_identity',
             'test_current_context_rejects_stale_candidate_and_partial_objects',
             'test_direct_native_link_uses_current_filelist_and_reports_failure')
 
 
-def ci_context(leaf=False, checked=False):
+def ci_context(leaf=False, checked=False, storage=False):
     result = {k: os.environ.get(k, '') for k in ('GITHUB_SHA', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT',
         'GITHUB_JOB', 'GITHUB_WORKFLOW_REF', 'GITHUB_WORKFLOW_SHA', 'GITHUB_REPOSITORY')}
+    workflow = STORAGE_WORKFLOW if storage else (CHECKED_WORKFLOW if checked else (LEAF_WORKFLOW if leaf else WORKFLOW))
     if (not re.fullmatch('[0-9a-f]{40}', result['GITHUB_SHA']) or
         result['GITHUB_WORKFLOW_SHA'] != result['GITHUB_SHA'] or result['GITHUB_JOB'] != JOB or
         result['GITHUB_REPOSITORY'] != 'eirblue/ios_note10p' or
-        not result['GITHUB_WORKFLOW_REF'].startswith('eirblue/ios_note10p/' + (CHECKED_WORKFLOW if checked else (LEAF_WORKFLOW if leaf else WORKFLOW)) + '@') or
+        not result['GITHUB_WORKFLOW_REF'].startswith('eirblue/ios_note10p/' + workflow + '@') or
         any(not re.fullmatch('[1-9][0-9]*', result[k]) for k in ('GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT'))):
         raise ValueError('exact current source/workflow/run/attempt/job required')
+    if storage and (sys.platform != 'darwin' or os.environ.get('GITHUB_ACTIONS') != 'true' or
+                    os.environ.get('GITHUB_EVENT_NAME') != 'workflow_dispatch' or result['GITHUB_RUN_ATTEMPT'] != '1' or
+                    result['GITHUB_WORKFLOW_REF'] != 'eirblue/ios_note10p/' + workflow + '@refs/heads/main' or
+                    os.environ.get('N10_EXPECTED_SOURCE_HEAD') != result['GITHUB_SHA']):
+        raise ValueError('exact reviewed storage workflow first attempt required')
     return result
 
 
@@ -199,10 +206,15 @@ def intrinsic_kernel_result(path, symbols_text, undefined, *, leaf=False):
     return result
 
 
-def build(work, output, *, leaf=False, checked=False):
+def build(work, output, *, leaf=False, checked=False, storage=False):
     # Reuse only provisioning/configuration primitives; never the v83 tests/build.
+    if storage:
+        checked = True
     if checked:leaf=True
-    ci = ci_context(leaf,checked)
+    ci = ci_context(leaf, checked, storage=True) if storage else ci_context(leaf, checked)
+    if storage:
+        import phase1_iostorage_kernel_link as storage_link
+        storage_link.verify_sources()
     if leaf and os.environ.get('N10_BUILD_ONLY','false')!='false':
         raise ValueError('new leaf scope has no retained-PASS skip gate')
     prior_pass = None if leaf else prior_pass_authorization(ci)
@@ -219,6 +231,8 @@ def build(work, output, *, leaf=False, checked=False):
                  deployment_ready=False, hardware_verified=False, device_operations=[])
     if leaf:state.update(kind='v93-exynos-leaf-bootstrap-pc',PC_only=True,physical_ready=False,whole_XNU_kernel_entry_executed=False,hardware_XNU_executed=False)
     if checked:state.update(kind='v94-exynos-checked-ptpage-pc')
+    if storage:
+        state.update(kind='phase1-iostorage-final-link-pc', storage={'stage': 'pending'})
     state['build_only_prior_pass'] = prior_pass
     bootstrap.write_json(output / 'result.json', state)
     original_env = dict(os.environ)
@@ -270,6 +284,8 @@ def build(work, output, *, leaf=False, checked=False):
             generate_native_extra.main()
         generated = generated_inputs(private)
         rows = native.inventory(makefiles, source, generated, private)
+        if storage and len(rows) != 1067:
+            raise ValueError('accepted checked native inventory count required')
         bootstrap.selected_sources(makefiles)
         resource = Path(subprocess.check_output([provisioned['compiler'], '-print-resource-dir']).decode().strip())
         runtime = resource / 'lib/darwin/libclang_rt.cc_kext_ios.a'
@@ -325,9 +341,16 @@ def build(work, output, *, leaf=False, checked=False):
         bootstrap.write_json(output / 'producer-context.json', current)
         objects = [r for report in (c, cxx, assembly, firehose, metadata) for r in report['units']]
         bootstrap.write_json(output / 'current-object-receipts.json', objects)
-        aliases, alias_evidence = aliases_for_current(source, objects, output)
-        linked = native.direct_link(current, objects, output, provisioned['compiler'], provisioned['sdk'],
-                                    flags, aliases, toolchain['runtime'])
+        if storage:
+            storage_rows = storage_link.compile_storage(current, work, output, state['storage'])
+            aliases, alias_evidence = aliases_for_current(source, objects + storage_rows, output)
+            state['storage']['stage'] = 'storage-final-link'
+            linked = native.direct_link(current, objects, output, provisioned['compiler'], provisioned['sdk'],
+                                        flags, aliases, toolchain['runtime'], storage_rows=storage_rows)
+        else:
+            aliases, alias_evidence = aliases_for_current(source, objects, output)
+            linked = native.direct_link(current, objects, output, provisioned['compiler'], provisioned['sdk'],
+                                        flags, aliases, toolchain['runtime'])
         state.update(link=linked, alias_evidence=alias_evidence, layout_variables=layout,
                      producer_id=current['producer_id'], input_binding=current['input_binding'])
         if not linked['link_succeeded']:
@@ -336,6 +359,8 @@ def build(work, output, *, leaf=False, checked=False):
         undefined = bootstrap.run(['xcrun', 'nm', '-u', kernel], ROOT, output / 'kernel-undefined.log').decode()
         symbols = bootstrap.run(['xcrun', 'nm', kernel], ROOT, output / 'kernel-symbols.log').decode()
         state.update(intrinsic_kernel_result(kernel, symbols, undefined,leaf=leaf))
+        if storage:
+            storage_link.verify_final_symbols(symbols, linked, state['storage'])
         state.update(phase='complete', passed=True, native_objects=len(rows), dependency_objects=4,
                      candidate_archive_used=False, old_suites_executed=0)
     except BaseException as error:
@@ -343,7 +368,8 @@ def build(work, output, *, leaf=False, checked=False):
         raise
     finally:
         bootstrap.write_json(output / 'result.json', state)
-        collect_evidence(private, output)
+        if not storage:
+            collect_evidence(private, output)
         os.environ.clear()
         os.environ.update(original_env)
 

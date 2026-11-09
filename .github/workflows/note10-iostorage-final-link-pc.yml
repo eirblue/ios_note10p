@@ -1,0 +1,35 @@
+name: Note10 Phase 1 IOStorage final link PC
+run-name: "Phase 1 IOStorage final link | ${{ inputs.expected_source_head }}"
+on:
+  workflow_dispatch:
+    inputs:
+      expected_source_head:
+        description: Exact independently reviewed source HEAD
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  current-native-selected-link:
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Build and audit one private PC link
+        env:
+          N10_EXPECTED_SOURCE_HEAD: ${{ inputs.expected_source_head }}
+        run: |
+          mkdir -p note10/private
+          python -B note10/xnu26/phase1_iostorage_kernel_link.py > note10/private/phase1-iostorage-final-link.internal.log 2>&1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: note10-phase1-iostorage-final-link-result
+          path: note10/private/phase1-iostorage-final-link-result/result.json
+          retention-days: 7
+          if-no-files-found: error

@@ -23,7 +23,7 @@ NATIVE_INPUTS_SOURCE = 'note10/xnu26/phase1_iostorage_native_inputs.py'
 NATIVE_COMPLETE_SOURCE = 'note10/xnu26/phase1_iostorage_native_complete.py'
 NATIVE_INPUTS_SHA256 = 'bf34f56e47bf5a05119ad45d6e00fdd7d6972076aad02f4788459b0c112fa126'
 CLOSURE_INPUT_SHA256 = {
-    NATIVE_COMPLETE_SOURCE: '4755da14c888b886715cfc0c414cfed000e44f0ad209e30866ab6f536f84760a',
+    NATIVE_COMPLETE_SOURCE: 'd383b7192f040ac860bb36032ab94828c48354ea2dda444d1357fd96cb5cc994',
     PROVIDER_SOURCE: 'ac252306b4dd3faea053f9b171663d3f17794b9fa8790aa4c88b21c10dda87b7',
     PIO_SOURCE: '56bbcdb885b04650d4216cc37c06e148fd626fcfc919a7bfe62da8ab2bb52ec0',
     'note10/xnu26/note10_iostorage_pio_bridge.h': 'f57c49f687c80a672b980fe3d74a03968311724f8871a65c53fd67b124c869d1',
@@ -332,7 +332,7 @@ def compile_probe(result, mode, source):
             result['declaration_overrides_verified'] = 14
 
 
-def compile_relocatable_closure(result, output):
+def compile_closure_objects(result, output, *, native_work=None):
     sdk_context = public_sdk_context(result, 'base_object')
     if sdk_context is None:
         return
@@ -340,7 +340,7 @@ def compile_relocatable_closure(result, output):
     sdk_json = json.dumps(result['sdk_header_sha256'], sort_keys=True, separators=(',', ':')).encode()
     require(sha(sdk_json) == CLOSURE_PUBLIC_SDK_SHA256, 'accepted public SDK header set differs')
 
-    from phase1_iostorage_native_complete import compile_complete, COMPLETE_SYMBOL
+    from phase1_iostorage_native_complete import compile_complete, compile_generated_complete
     public = output / 'public-sdk-objects'
     include = public / 'include'
     base = public / BASE_MEMBER
@@ -351,7 +351,11 @@ def compile_relocatable_closure(result, output):
             stage_storage_members(archive, include, base)
             yield archive
 
-    compile_complete(result, output, stage_shared_archive, COMMIT, HEADERS['IOStorage.h'], require_arm64_object)
+    if native_work is None:
+        compile_complete(result, output, stage_shared_archive, COMMIT, HEADERS['IOStorage.h'], require_arm64_object)
+    else:
+        compile_generated_complete(result, output, native_work, stage_shared_archive, COMMIT, HEADERS['IOStorage.h'],
+                                   require_arm64_object, existing_exports=True)
     result['unit_compiler_returncodes'] = {}
     if 'compiler_returncode' in result:
         result['unit_compiler_returncodes']['IOStorage.cpp'] = result['compiler_returncode']
@@ -380,7 +384,20 @@ def compile_relocatable_closure(result, output):
         require_arm64_object(obj)
         objects.append(str(obj))
         result['compiled_arm64_objects'] = len(objects)
+    return objects
 
+
+def closure_symbols():
+    from phase1_iostorage_native_complete import COMPLETE_SYMBOL
+    required = (*BASE_REQUIRED_SYMBOLS, PROVIDER_BRIDGE_IMPORT, COMPLETE_SYMBOL,
+                '_note10_iostorage_read_range', '_note10_iostorage_read_request')
+    return required, f'__ZTV{len(PROVIDER_CLASS)}{PROVIDER_CLASS}'
+
+
+def compile_relocatable_closure(result, output):
+    objects = compile_closure_objects(result, output)
+    if objects is None:
+        return
     result.update(stage='closure-relocatable-link', partial_link_attempts=1)
     merged = output / 'note10_iostorage_closure.o'
     call = subprocess.run(['xcrun', '--sdk', 'macosx', 'ld', '-r', '-arch', 'arm64',
@@ -397,9 +414,7 @@ def compile_relocatable_closure(result, output):
     for names in (defined, undefined):
         require(len(names) <= 512 and all(re.fullmatch(r'[A-Za-z_.$][A-Za-z0-9_.$]{0,383}', n)
                                          for n in names), 'unexpected relocatable symbol output')
-    required = (*BASE_REQUIRED_SYMBOLS, PROVIDER_BRIDGE_IMPORT, COMPLETE_SYMBOL,
-                '_note10_iostorage_read_range', '_note10_iostorage_read_request')
-    provider_vtable = f'__ZTV{len(PROVIDER_CLASS)}{PROVIDER_CLASS}'
+    required, provider_vtable = closure_symbols()
     require(all(defined.count(name) == 1 for name in (*required, provider_vtable)),
             'missing or duplicate closure definition')
     require(not any(name in required or 'note10_iostorage_' in name or PROVIDER_CLASS in name or

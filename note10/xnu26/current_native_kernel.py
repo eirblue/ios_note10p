@@ -130,10 +130,14 @@ def admit_objects(current, rows):
     return [Path(row['object_path']) for row in rows]
 
 
-def direct_link(current, rows, directory, compiler, sdk, flags, aliases, runtime, *, runner=subprocess.run):
+def direct_link(current, rows, directory, compiler, sdk, flags, aliases, runtime, *,
+                runner=subprocess.run, storage_rows=None):
     """Exactly one final link. No partial merge, archive discovery or fallback."""
     paths = admit_objects(current, rows)
     directory = Path(directory)
+    if storage_rows is not None:
+        from phase1_iostorage_kernel_link import admit_storage
+        paths += admit_storage(current, storage_rows, directory, paths)
     output = directory / 'current-native.macho'
     if output.exists() or (directory / 'native-objects.filelist').exists():
         raise ValueError('fresh direct link outputs required')

@@ -71,15 +71,21 @@ def write_pinned(data, destination, digest):
         stream.write(data)
 
 
-def stage_exports(source, native):
+def stage_exports(source, native, *, existing=False):
+    def bind(original, destination, digest):
+        if existing:
+            require(not destination.is_symlink() and sha(destination) == digest,
+                    'current native declaration export differs')
+        else:
+            write_pinned(original.read_bytes(), destination, digest)
+
     for relative, digest in EXPORTS_SHA256.items():
         path = Path(relative)
         exported = Path('san') / path.name if relative.startswith('san/') else Path(path.name)
-        write_pinned((source / path).read_bytes(), native / 'exports' / exported, digest)
+        bind(source / path, native / 'exports' / exported, digest)
     entitlement = Path('CoreEntitlements/V2/Kernel.h')
     support = ROOT / 'host-tools/kdk/headers/KDK.pkg/System/Library/KernelSupport'
-    write_pinned((support / entitlement).read_bytes(), native / 'kernel-support-declarations' / entitlement,
-                 CORE_ENTITLEMENTS_SHA256)
+    bind(support / entitlement, native / 'kernel-support-declarations' / entitlement, CORE_ENTITLEMENTS_SHA256)
 
 
 def stage_apple(archive, stage, commit, header_sha):
@@ -115,12 +121,17 @@ def include_paths(apple, native, source, sdk):
 
 def compile_complete(result, output, open_archive, commit, header_sha, require_arm64_object):
     generate(result, output)
+    compile_generated_complete(result, output, output / 'native-work', open_archive, commit, header_sha,
+                               require_arm64_object)
+
+
+def compile_generated_complete(result, output, work, open_archive, commit, header_sha, require_arm64_object,
+                               *, existing_exports=False):
     result.update(passed=False, stage='native-complete-input-binding')
     require(result['fresh_tool_sha256'] == GENERATION_TOOL_SHA256 and
             {name: item['sha256'] for name, item in result['fresh_generated_headers'].items()} ==
             GENERATION_HEADER_SHA256, 'fresh native inputs differ from accepted generation')
     native = ROOT / 'note10/private/windows-xnu'
-    work = output / 'native-work'
     context = json.loads((work / 'context.json').read_bytes())
     source = work / 'source'
     compiler = command('xcrun', '-f', 'clang')
@@ -135,7 +146,7 @@ def compile_complete(result, output, open_archive, commit, header_sha, require_a
     flags = definitions((config / 'Makefile').read_text())
     require(hashlib.sha256(json.dumps(flags, separators=(',', ':')).encode()).hexdigest() ==
             CONFIG_DEFINES_SHA256, 'native IOKit config defines differ')
-    stage_exports(source, native)
+    stage_exports(source, native, existing=existing_exports)
     apple = output / 'apple-implementation'
     result['archive_fetch_attempts'] = 1
     with open_archive() as archive:
