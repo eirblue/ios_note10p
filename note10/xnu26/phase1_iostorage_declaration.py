@@ -19,6 +19,8 @@ SOURCE = 'note10/xnu26/phase1_iostorage_declaration.cpp'
 PIO_SOURCE = 'note10/xnu26/note10_iostorage_pio_bridge.cpp'
 PROVIDER_SOURCE = 'note10/xnu26/phase1_iostorage_provider_object.cpp'
 NATIVE_INPUTS_SOURCE = 'note10/xnu26/phase1_iostorage_native_inputs.py'
+NATIVE_COMPLETE_SOURCE = 'note10/xnu26/phase1_iostorage_native_complete.py'
+NATIVE_INPUTS_SHA256 = 'bf34f56e47bf5a05119ad45d6e00fdd7d6972076aad02f4788459b0c112fa126'
 PROVIDER_CLASS = 'Note10RAMBlockProviderProbe'
 PROVIDER_BRIDGE_IMPORT = '__Z25note10_iostorage_pio_readPKvyyP18IOMemoryDescriptoryyPK19IOStorageCompletion'
 PROVIDER_METACLASS_SHA = '030784b3b7962124b69d855d5ac20323b78522a3be5f9806908baa0ef9126494'
@@ -112,13 +114,17 @@ def reviewed_identity():
     return head, int(run_id)
 
 
-def stage_headers(include, base_source=None):
+def open_verified_archive():
     with urllib.request.urlopen(ARCHIVE_URL, timeout=30) as response:
         raw = response.read(ARCHIVE_BYTES + 1)
     require(len(raw) == ARCHIVE_BYTES and sha(raw) == ARCHIVE_SHA, 'public IOStorageFamily archive pin differs')
+    return tarfile.open(fileobj=io.BytesIO(raw), mode='r:gz')
+
+
+def stage_headers(include, base_source=None):
     storage = include / 'IOKit/storage'
     storage.mkdir(parents=True)
-    with tarfile.open(fileobj=io.BytesIO(raw), mode='r:gz') as archive:
+    with open_verified_archive() as archive:
         for name, digest in HEADERS.items():
             member = archive.getmember('IOStorageFamily-' + COMMIT + '/' + name)
             require(member.isfile() and 0 < member.size <= 1024 * 1024, 'expected ordinary bounded archive header')
@@ -305,7 +311,7 @@ def compile_probe(result, mode, source):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--mode', choices=('declaration', 'pio_bridge', 'pio_link', 'provider_object', 'base_object',
-                                          'native_inputs'),
+                                          'native_inputs', 'native_complete'),
                         default='declaration')
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
@@ -318,8 +324,12 @@ def main():
     provider = args.mode == 'provider_object'
     base = args.mode == 'base_object'
     native_inputs = args.mode == 'native_inputs'
-    source = (NATIVE_INPUTS_SOURCE if native_inputs else None if base else
-              PROVIDER_SOURCE if provider else PIO_SOURCE if pio else SOURCE)
+    native_complete = args.mode == 'native_complete'
+    source = {
+        'declaration': SOURCE, 'pio_bridge': PIO_SOURCE, 'pio_link': PIO_SOURCE,
+        'provider_object': PROVIDER_SOURCE, 'native_inputs': NATIVE_INPUTS_SOURCE,
+        'native_complete': NATIVE_COMPLETE_SOURCE,
+    }.get(args.mode)
     paths = (WORKFLOW, Path(__file__).resolve().relative_to(ROOT).as_posix())
     if source is not None:
         paths += (source,)
@@ -329,6 +339,8 @@ def main():
         paths += PIO_LINK_C_SOURCES
     if provider:
         paths += (PIO_INPUTS[0],)
+    if native_complete:
+        paths += (NATIVE_INPUTS_SOURCE,)
     schema = f'note10-phase1-iostorage-{args.mode.replace("_", "-")}-result-v1'
     result = dict(schema=schema, passed=False,
                   source_head=head, run_id=run_id, run_attempt=1, target=TARGET,
@@ -346,11 +358,20 @@ def main():
                       archive_source_sha256=BASE_MEMBER_SHA, archive_source_bytes=BASE_MEMBER_BYTES,
                       archive_source_verified=False, required_symbol_count=len(BASE_REQUIRED_SYMBOLS))
     try:
-        if native_inputs:
-            from phase1_iostorage_native_inputs import generate
+        if native_inputs or native_complete:
             result.update(native_inputs_generated=False, host_config_tool_built=False,
                           target_object_compile_attempts=0)
-            generate(result, out)
+            if native_complete:
+                require(result['source_sha256'][NATIVE_INPUTS_SOURCE] == NATIVE_INPUTS_SHA256,
+                        'accepted native generation source differs')
+                from phase1_iostorage_native_complete import compile_complete, MEMBER, MEMBER_BYTES, MEMBER_SHA256
+                result.update(native_complete_verified=False, compiled_arm64_objects=0, partial_link_attempts=0,
+                              archive_source_verified=False, archive_source_member='IOStorageFamily-' + COMMIT + '/' + MEMBER,
+                              archive_source_bytes=MEMBER_BYTES, archive_source_sha256=MEMBER_SHA256)
+                compile_complete(result, out, open_verified_archive, COMMIT, HEADERS['IOStorage.h'], require_arm64_object)
+            else:
+                from phase1_iostorage_native_inputs import generate
+                generate(result, out)
         else:
             compile_probe(result, args.mode, source)
     except Exception as error:
