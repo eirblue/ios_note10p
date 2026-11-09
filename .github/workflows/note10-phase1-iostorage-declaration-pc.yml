@@ -1,0 +1,33 @@
+name: Note10 Phase 1 public IOStorage declaration
+run-name: "Phase 1 IOStorage declaration | ${{ inputs.expected_source_head }}"
+on:
+  workflow_dispatch:
+    inputs:
+      expected_source_head:
+        description: Exact independently reviewed source HEAD
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  iostorage-public-declaration:
+    runs-on: macos-26
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Compile one public IOStorage declaration
+        env:
+          N10_EXPECTED_SOURCE_HEAD: ${{ inputs.expected_source_head }}
+        run: python -B note10/xnu26/phase1_iostorage_declaration.py --output note10/private/phase1-iostorage-declaration-once
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: note10-phase1-iostorage-declaration-result
+          path: note10/private/phase1-iostorage-declaration-once/result.json
+          retention-days: 7
+          if-no-files-found: error
