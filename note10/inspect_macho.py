@@ -10,10 +10,34 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'host-tools/python-packages'))
-import capstone
+
+
+def header_commands(raw):
+    """Frame a completed header/command prefix without accessing file bodies."""
+    def check(ok, reason):
+        if not ok:
+            raise ValueError(reason)
+
+    check(len(raw) >= 32 and raw[:4] == b'\xcf\xfa\xed\xfe', 'Expected thin little-endian Mach-O 64')
+    header = struct.unpack_from('<8I', raw)
+    _, cpu, _, _, ncmds, sizeofcmds, _, _ = header
+    check(cpu == 0x0100000c, 'Expected ARM64')
+    end = 32 + sizeofcmds
+    check(end <= len(raw) and ncmds <= sizeofcmds // 8, 'Load command bounds')
+    off, commands = 32, []
+    for _ in range(ncmds):
+        check(off + 8 <= end, 'Command header bounds')
+        cmd, size = struct.unpack_from('<II', raw, off)
+        check(size >= 8 and size % 8 == 0 and off + size <= end, 'Command bounds')
+        commands.append((off, cmd, size))
+        off += size
+    check(off == end, 'Load command size mismatch')
+    return header, commands
 
 
 def inspect(path):
+    import capstone
+
     raw = path.read_bytes()
 
     def check(ok, reason):
@@ -23,10 +47,11 @@ def inspect(path):
     def text(b):
         return b.split(b'\0', 1)[0].decode('utf-8', errors='replace')
 
-    check(len(raw) >= 32 and raw[:4] == b'\xcf\xfa\xed\xfe', 'Expected thin little-endian Mach-O 64')
-    _, cpu, subtype, kind, ncmds, sizeofcmds, flags, _ = struct.unpack_from('<8I', raw)
-    check(cpu == 0x0100000c, 'Expected ARM64')
-    check(32 + sizeofcmds <= len(raw) and ncmds <= sizeofcmds // 8, 'Load command bounds')
+    try:
+        header, commands = header_commands(raw)
+    except ValueError as error:
+        raise ValueError(f'{path}: {error}') from None
+    _, cpu, subtype, kind, _, _, flags, _ = header
     report = {'file': str(path.relative_to(ROOT)), 'size': len(raw), 'sha256': hashlib.sha256(raw).hexdigest(),
               'cpu_type': hex(cpu), 'cpu_subtype': hex(subtype), 'filetype': kind, 'flags': hex(flags),
               'capstone_version': capstone.__version__, 'libraries': [], 'code_sections': [],
@@ -34,14 +59,10 @@ def inspect(path):
               'limits': ['Static scan only; no execution or control-flow reachability proof.',
                          'Decoder may not recognize newer instructions; unknown words are reported.',
                          'Counts cover instruction-marked sections, not all libraries or dyld caches.']}
-    off = 32
     decoder = capstone.Cs(capstone.CS_ARCH_ARM64, capstone.CS_MODE_LITTLE_ENDIAN)
     decoder.skipdata = True
     counts, examples, unknown = Counter(), {}, 0
-    for _ in range(ncmds):
-        check(off + 8 <= 32 + sizeofcmds, 'Command header bounds')
-        cmd, size = struct.unpack_from('<II', raw, off)
-        check(size >= 8 and off + size <= 32 + sizeofcmds, 'Command bounds')
+    for off, cmd, size in commands:
         if cmd == 0x19:
             check(size >= 72, 'Segment header bounds')
             seg = text(raw[off + 8:off + 24])
@@ -89,8 +110,6 @@ def inspect(path):
                     check(pos + 8 <= len(fix), 'Fixup segment header bounds')
                     fmt = struct.unpack_from('<H', fix, pos + 6)[0]
                     report['chained_fixup_pointer_formats'].append(fmt)
-        off += size
-    check(off == 32 + sizeofcmds, 'Load command size mismatch')
     report['authentication_instruction_counts'] = dict(sorted(counts.items()))
     report['examples'] = examples
     report['undecoded_bytes'] = unknown
