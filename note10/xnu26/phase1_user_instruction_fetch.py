@@ -39,15 +39,36 @@ CONTEXT_REFERENCE_PINS = {
     'bsd/sys/_types/_dev_t.h': '4ba3d19759544b9f7bf424d2a16a518ff586e31ed968d525440e678cfbb07a5d',
     'osfmk/libsa/string.h': '630b7c4668cd1ed1995fd6b3fc4a1e1f33d592f1bb100f4c6a00e58a819fb514',
 }
+AUTH_BRANCH_SOURCE = 'note10/xnu26/note10_user_auth_branch.c'
+AUTH_BRANCH_PINS = {
+    AUTH_BRANCH_SOURCE: '034e365acb4dd91271527c58d7f991fa4427829a713f8f810b479b417c739ce7',
+    'note10/xnu26/note10_user_auth_branch.h': '9e23e1a37c8d7d874a1d271c06a3129d661f9c8a0fbf43002d3f2f0307e5762f',
+    'note10/xnu26/test_user_auth_branch.c': 'a8b152f09118fd605dddafffbc6fe3ab3b0cc39c37e62bb4330fb573b56c6e59',
+    'note10/compat/auth_branch.c': '1f22a5c683d0dcbd8b1ca15a87eba13f9456d6b831f5573ebba5698160371a92',
+    'note10/compat/auth_branch.h': '25758d997877ac33e4b9f43b4757bdf6f833432978143dcc9a964cd2e40f101b',
+}
+COMPOSITION_HOST_PASS = {
+    'passed': True, 'compiler_attempts': 1, 'fixture_attempts': 1, 'cases': 4, 'old_tests': 0,
+    'result_sha256': '41ef842d814efa3cf2847c00f067b0857cb5ca53d6dfdfd82eed988c7b2437de',
+    'stdout_sha256': 'b6cd9fae5a33a10af0360d4492778c50c93741c8b041ba427ac83d91e6eeb085',
+    'coding_receipt_sha256': '1c74aace9b0adaf608dacbcafd63dc9ef509bccaecf233ba0752c5cbac100dca',
+    'review_sha256': '93a7aafaaffb252fc4aed87b611d65f6cc3985422ed420ad8b22cd80d751cf4f',
+}
+FETCH_NATIVE_RESULT_SHA256 = '92b62b546b0f4c9efde26ee3090e89c50b40b7344828ae2f19c2b33b58f6d492'
 
 
-def compile_object(result, output, require_arm64_object, *, diagnostics=False, header_context=False):
+def compile_object(result, output, require_arm64_object, *, diagnostics=False, header_context=False,
+                   auth_branch=False):
     result.update(passed=False, stage='user-fetch-source-binding', host_pass=HOST_PASS,
                   scope='public-reference-native-user-fetch-one-object-no-link-or-runtime',
                   user_instruction_object_verified=False, compiled_arm64_objects=0,
                   partial_link_attempts=0, target_object_compile_attempts=0,
                   kernel_links=0, production_hook=False, firmware_abi_verified=False,
                   synthetic_board_inputs=True, exact_target_source=False)
+    if auth_branch:
+        require(diagnostics and header_context, 'composition requires accepted diagnostic/BSD context')
+        del result['user_instruction_object_verified']
+        result['user_auth_branch_object_verified'] = False
     require(all(sha(ROOT / name) == digest for name, digest in INPUT_PINS.items()),
             'reviewed user-fetch source or retained native recipe differs')
     result['source_sha256'].update(INPUT_PINS)
@@ -61,6 +82,13 @@ def compile_object(result, output, require_arm64_object, *, diagnostics=False, h
                 'reviewed BSD header-context regression required')
         result['source_sha256'][CONTEXT_HEADER] = CONTEXT_HEADER_SHA256
         result['scope'] = 'public-reference-user-fetch-bsd-header-context-no-link-or-runtime'
+    if auth_branch:
+        require(all(sha(ROOT / name) == digest for name, digest in AUTH_BRANCH_PINS.items()),
+                'accepted composition source/dependency pins differ')
+        result['source_sha256'].update(AUTH_BRANCH_PINS)
+        result.update(scope='public-reference-user-fetch-auth-branch-object-no-link-or-runtime',
+                      composition_host_pass=COMPOSITION_HOST_PASS,
+                      carried_fetch_native_result_sha256=FETCH_NATIVE_RESULT_SHA256)
     from test_user_instruction_fetch import REFERENCE_PINS
     from build_native_bootstrap_selection import common_flags, definitions
     from phase1_iostorage_native_complete import (GENERATION_TOOL_SHA256, GENERATION_HEADER_SHA256,
@@ -110,6 +138,8 @@ def compile_object(result, output, require_arm64_object, *, diagnostics=False, h
             mach_kernel_private=False, compiled_regression=False,
             regression_header_sha256=CONTEXT_HEADER_SHA256, public_header_sha256=CONTEXT_REFERENCE_PINS)
     obj = output / 'note10_user_instruction_fetch.o'
+    if auth_branch:
+        obj = output / 'note10_user_auth_branch.o'
     # common_flags supplies the accepted generated configuration/SDK include recipe;
     # these C code-generation flags are the retained compile_native_components recipe.
     argv = [compiler, *common_flags(source, config, sdk), '-std=gnu11',
@@ -123,11 +153,14 @@ def compile_object(result, output, require_arm64_object, *, diagnostics=False, h
         require(argv.count('-DMACH_KERNEL_PRIVATE') == 1, 'one inherited Mach-private flag required')
         argv.remove('-DMACH_KERNEL_PRIVATE')
         argv[argv.index('-c'):argv.index('-c')] = ['-include', str(ROOT / CONTEXT_HEADER)]
+    if auth_branch:
+        argv[argv.index('-c') + 1] = str(ROOT / AUTH_BRANCH_SOURCE)
     (output / 'compiler-argv.internal.json').write_text(json.dumps(argv) + '\n', encoding='utf-8')
     path_options = {'-I', '-include', '-isysroot', '-c', '-o'}
     flags = [arg for index, arg in enumerate(argv[1:], 1)
              if arg not in path_options and argv[index - 1] not in path_options]
-    result.update(stage='user-fetch-one-object-compile', compiler_flags=flags,
+    result.update(stage='user-auth-branch-one-object-compile' if auth_branch else 'user-fetch-one-object-compile',
+                  compiler_flags=flags,
                   compiler_argv_count=len(argv),
                   compiler_argv_sha256=hashlib.sha256(json.dumps(argv, separators=(',', ':')).encode()).hexdigest(),
                   compile_attempts=1, target_object_compile_attempts=1)
@@ -148,7 +181,8 @@ def compile_object(result, output, require_arm64_object, *, diagnostics=False, h
             result['missing_include_sha256'] = hashlib.sha256(match.group(1)).hexdigest()
         return
     require_arm64_object(obj)
-    result.update(stage='user-fetch-symbol-audit', compiled_arm64_objects=1, object_sha256=sha(obj),
+    result.update(stage='user-auth-branch-symbol-audit' if auth_branch else 'user-fetch-symbol-audit',
+                  compiled_arm64_objects=1, object_sha256=sha(obj),
                   object_bytes=obj.stat().st_size)
     nm = ('xcrun', '--sdk', 'macosx', 'nm')
     defined = command(*nm, '-g', '-U', '-j', str(obj)).splitlines()
@@ -157,6 +191,12 @@ def compile_object(result, output, require_arm64_object, *, diagnostics=False, h
             all(re.fullmatch(r'[A-Za-z_.$][A-Za-z0-9_.$]{0,383}', name) for name in defined + undefined),
             'bounded object symbol names required')
     result.update(defined_external_symbols=defined, undefined_external_symbols=undefined)
-    require(defined == ['_n10_fetch_user_instruction'] and undefined == ['_copyin'],
-            'unexpected user-fetch definitions or imports')
-    result.update(stage='complete', passed=True, user_instruction_object_verified=True)
+    if auth_branch:
+        require(defined == ['_n10_decode_user_auth_branch'] and
+                sorted(undefined) == ['_n10_decode_auth_branch', '_n10_fetch_user_instruction'],
+                'unexpected user-auth-branch definitions or imports')
+        result.update(stage='complete', passed=True, user_auth_branch_object_verified=True)
+    else:
+        require(defined == ['_n10_fetch_user_instruction'] and undefined == ['_copyin'],
+                'unexpected user-fetch definitions or imports')
+        result.update(stage='complete', passed=True, user_instruction_object_verified=True)
