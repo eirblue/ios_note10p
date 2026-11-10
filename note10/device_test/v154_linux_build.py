@@ -100,14 +100,33 @@ V159_ROOTFS_PASS = dict(schema='note10-v159-rootfs-materialization-host-once-v1'
                         fixture_count=1, old_tests_count=0,
                         result_sha256='69469db57e58b082ce092d4195fb9ed44c8c0370aa1b8a934c78c3e35321387f',
                         review_sha256='28f64654d500eca1b1aecfdeb3022fded74bb2200505d1faf1ffeda8d3241fba')
+V160_CONTEXT_SCHEMA = 'note10-v160-linux-rootfs-relocation-public-input-v1'
+V160_BUILD_SCHEMA = 'note10-v160-linux-rootfs-relocation-build-v1'
+V160_OUTPUT = 'note10/private/v160-ci-linux-rootfs-relocation'
+V160_SCOPE = 'stock-linux-rootfs-relocation-proof-and-materialization-observation-no-XNU'
+V160_SOURCE = {'note10/device_test/v160_rootfs_relocation.py':
+               'dcd37fdf338eeb904aac1576b52ad381c97fbec7d6ab8eb683f35818826c24fe'}
+V160_STOCK = {
+    'arch/arm64/Makefile': '621178b0a638d591aeec814215dcd7c8ab1bf69137d7255beb6ffb05ce315d5d',
+    'arch/arm64/kernel/head.S': '015d1af89b5821df0b0c8abef91209fca6178b123cac6d5d89ff5accff605908',
+    'arch/arm64/kernel/vmlinux.lds.S': '7d1e35dbdd36858f29794c16efcc197ba7950e8cf265277288c66d155062baec',
+    'arch/arm64/kernel/image.h': 'f09a9bc7abd5c49191567c05c281ec5637d67af627ed9e217bb8cb25dff80054',
+    'arch/arm64/include/asm/elf.h': '0c1e6515d233640afe9c86782c41cb40ddae83f7e7b411f5e98505ad3c6b2e4e',
+    'arch/arm64/boot/Makefile': '5393fe51861fb4cb12e56049cec668246218e5351c4af205a16bdaccf8f8e9a5',
+}
+V160_RELOCATION_PASS = dict(schema='note10-v160-rootfs-relocation-host-once-v1', passed=True, compiler_count=0,
+                            fixture_count=1, old_tests_count=0,
+                            result_sha256='22b52b376c89ae7605ab9296d44bace6b2f4a4c397e15b846fa338074504b89e', review_sha256='5b7f9aac2bd9252a08dc896bd81a565c00490fd829a83677e4c76c87da922272')
 
 
 def observer_sources(revision):
     expected = dict(V157_SOURCE)
-    if revision in ('v158', 'v159'):
+    if revision in ('v158', 'v159', 'v160'):
         expected[V158_PID1] = V158_PID1_SHA
-    if revision == 'v159':
+    if revision in ('v159', 'v160'):
         expected.update(V159_SOURCE)
+    if revision == 'v160':
+        expected.update(V160_SOURCE)
     buffers = {name: p.ordinary(p.ROOT/name) for name in expected}
     if {name: p.sha(raw) for name, raw in buffers.items()} != expected:
         raise ValueError('reviewed observer/PID1 source bytes differ')
@@ -130,13 +149,14 @@ def load_sources(pins, revision):
     return dict(p.load_sources({name: pin for name, pin in pins.items() if name not in buffers}), **buffers)
 
 def validate_context(context, revision='v155'):
-    if revision not in ('v155', 'v157', 'v158', 'v159'):
+    if revision not in ('v155', 'v157', 'v158', 'v159', 'v160'):
         raise ValueError('unsupported Linux diagnostic build revision')
     observer = revision != 'v155'
-    schemas = {'v155': p.CONTEXT_SCHEMA, 'v157': V157_CONTEXT_SCHEMA, 'v158': V158_CONTEXT_SCHEMA, 'v159': V159_CONTEXT_SCHEMA}
+    schemas = {'v155': p.CONTEXT_SCHEMA, 'v157': V157_CONTEXT_SCHEMA, 'v158': V158_CONTEXT_SCHEMA,
+               'v159': V159_CONTEXT_SCHEMA, 'v160': V160_CONTEXT_SCHEMA}
     scopes = {'v155': 'stock-linux-iva-mmap-denial-no-XNU', 'v157': 'stock-linux-builtin-preexec-observation-no-XNU',
               'v158': 'stock-linux-builtin-entry-only-no-userspace-IVA-probe-or-XNU',
-              'v159': 'stock-linux-rootfs-materialization-observation-no-XNU'}
+              'v159': 'stock-linux-rootfs-materialization-observation-no-XNU', 'v160': V160_SCOPE}
     fields = {'schema', 'scope', 'source_sha256', 'host_pass', 'kernel'}
     if observer:
         fields.add('build_revision')
@@ -149,10 +169,12 @@ def validate_context(context, revision='v155'):
     pass_fields = {'accepted', 'new', 'retained_v154_host_result_sha256'}
     if observer:
         pass_fields.add('v157_splice')
-    if revision in ('v158', 'v159'):
+    if revision in ('v158', 'v159', 'v160'):
         pass_fields.add('v158_entry')
-    if revision == 'v159':
+    if revision in ('v159', 'v160'):
         pass_fields.add('v159_rootfs')
+    if revision == 'v160':
+        pass_fields.add('v160_relocation')
     if (type(passes) is not dict or set(passes) != pass_fields or
         not p.same(passes['accepted'], p.HOST_PASS) or passes['retained_v154_host_result_sha256'] != V154_HOST_RESULT_SHA):
         raise ValueError('exact accepted host and carried v154 PASS required')
@@ -167,10 +189,12 @@ def validate_context(context, revision='v155'):
     if observer and (environment['result_sha256'] != V157_RETAINED_ENV_SHA or
                     not p.same(passes['v157_splice'], V157_SPLICE_PASS)):
         raise ValueError('exact retained v155 environment and v157 splice PASS required')
-    if revision in ('v158', 'v159') and not p.same(passes['v158_entry'], V158_ENTRY_PASS):
+    if revision in ('v158', 'v159', 'v160') and not p.same(passes['v158_entry'], V158_ENTRY_PASS):
         raise ValueError('exact reviewed v158 entry-only PID1 host PASS required')
-    if revision == 'v159' and not p.same(passes['v159_rootfs'], V159_ROOTFS_PASS):
+    if revision in ('v159', 'v160') and not p.same(passes['v159_rootfs'], V159_ROOTFS_PASS):
         raise ValueError('exact reviewed v159 rootfs metadata host PASS required')
+    if revision == 'v160' and not p.same(passes['v160_relocation'], V160_RELOCATION_PASS):
+        raise ValueError('exact reviewed v160 relocation host PASS required')
     return context
 
 
@@ -355,7 +379,8 @@ def v158_pid1_proof(elf, archive, init):
 
 def producer_output(output, revision):
     out = p.private(output)
-    fixed = {'v157': p.ROOT/V157_OUTPUT, 'v158': p.ROOT/V158_OUTPUT, 'v159': p.ROOT/V159_OUTPUT}
+    fixed = {'v157': p.ROOT/V157_OUTPUT, 'v158': p.ROOT/V158_OUTPUT,
+             'v159': p.ROOT/V159_OUTPUT, 'v160': p.ROOT/V160_OUTPUT}
     if (revision in fixed and out != fixed[revision]) or (revision == 'v155' and out in fixed.values()):
         raise ValueError('exact revision-specific producer output required')
     return out
@@ -374,15 +399,16 @@ def run_build(output, context, head, jobs=4, revision='v155'):
         raise ValueError('Linux jobs4 only')
     out = producer_output(output, revision)
     observer = revision != 'v155'
-    entry_only = revision in ('v158', 'v159')
-    rootfs_observation = revision == 'v159'
+    entry_only = revision in ('v158', 'v159', 'v160')
+    rootfs_observation = revision in ('v159', 'v160')
     work = out.with_name(out.name+'-work')
     archive = out.with_name(out.name+'-source.tar.gz')
     if spent_output(out, revision):
         raise ValueError('fresh output/work/archive required; never retry')
     buffers = load_sources(context['source_sha256'], revision)
     out.mkdir(parents=True)
-    schema = {'v155': p.BUILD_SCHEMA, 'v157': V157_BUILD_SCHEMA, 'v158': V158_BUILD_SCHEMA, 'v159': V159_BUILD_SCHEMA}[revision]
+    schema = {'v155': p.BUILD_SCHEMA, 'v157': V157_BUILD_SCHEMA, 'v158': V158_BUILD_SCHEMA,
+              'v159': V159_BUILD_SCHEMA, 'v160': V160_BUILD_SCHEMA}[revision]
     result = dict(schema=schema, version=revision if observer else 'v154', build_revision=revision, passed=False, source_head=head,
                   make_environment=dict(MAKE_ENVIRONMENT),
                   source_sha256=context['source_sha256'], public_input=context,
@@ -430,6 +456,11 @@ def run_build(output, context, head, jobs=4, revision='v155'):
             install_v157(source, buffers, result['preparation']); persist()
         if rootfs_observation:
             rootfs_helper = install_v159(source, buffers, result['preparation']); persist()
+        if revision == 'v160':
+            for name, pin in V160_STOCK.items():
+                if p.sha(p.ordinary(source/name)) != pin:
+                    raise ValueError('v160 pinned stock relocation semantics differ: '+name)
+            relocation_helper = p.module('v160_rootfs_relocation', buffers)
         for name in (*p.FINAL_NATIVE, *(V157_NATIVE if observer else ()), *(V159_NATIVE if rootfs_observation else ())):
             dest = out/'native-source'/name; dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(p.ordinary(source/name))
@@ -460,7 +491,9 @@ def run_build(output, context, head, jobs=4, revision='v155'):
         run([*make, p.DEFCONFIG], '02-stock-defconfig')
         check_config(p.ordinary(objects/'.config'), {})
         settings = dict(SETTINGS, INITRAMFS_SOURCE='"'+str(out/'initramfs.cpio')+'"')
-        if rootfs_observation:
+        if revision == 'v160':
+            settings['LOCALVERSION'] = '"-v160-linux-rootfs-relocation"'
+        elif rootfs_observation:
             settings['LOCALVERSION'] = '"-v159-linux-rootfs-materialization"'
         elif entry_only:
             settings['LOCALVERSION'] = '"-v158-linux-builtin-entry"'
@@ -474,6 +507,8 @@ def run_build(output, context, head, jobs=4, revision='v155'):
         run([*make, 'olddefconfig'], '04-effective-defconfig')
         config = p.ordinary(objects/'.config'); (out/'actual-effective.config').write_bytes(config)
         result['effective_profile'] = check_config(config, settings)
+        if revision == 'v160' and result['effective_profile'].get('RELOCATABLE') != 'y':
+            raise ValueError('v160 boot RELATIVE relocation handling must be enabled')
         result['cmdline_policy'] = route.builtin_cmdline_policy(config.decode())
         result['effective_config_sha256'] = p.sha(config)
         result['full_Image_build_attempts'] = 1; persist()
@@ -515,7 +550,10 @@ def run_build(output, context, head, jobs=4, revision='v155'):
         symbols = p.ordinary(objects/'System.map', 16*1024*1024).decode()
         result.update(check_image(raw, cpio, identity, symbols, V158_PID1_ID if entry_only else b'N154IVA'))
         if rootfs_observation:
-            result['rootfs_materialization'] = rootfs_helper.linked_rootfs_proof(raw, symbols, len(cpio), result['linked_extent'])
+            if revision == 'v160':
+                relocation_helper.producer_rootfs_proof(result, raw, symbols, persist)
+            else:
+                result['rootfs_materialization'] = rootfs_helper.linked_rootfs_proof(raw, symbols, len(cpio), result['linked_extent'])
             if raw.count(b'N159ROOT1 id=') != 1:
                 raise ValueError('one same-Image rootfs snapshot frame required')
         if entry_only and b'N154IVA' in raw:
@@ -545,7 +583,8 @@ def seal(output, head, revision='v155'):
     if result['source_head'] != head:
         raise ValueError('sealing source association differs')
     observer = revision != 'v155'
-    schemas = {'v157': V157_BUILD_SCHEMA, 'v158': V158_BUILD_SCHEMA, 'v159': V159_BUILD_SCHEMA}
+    schemas = {'v157': V157_BUILD_SCHEMA, 'v158': V158_BUILD_SCHEMA,
+               'v159': V159_BUILD_SCHEMA, 'v160': V160_BUILD_SCHEMA}
     if ((observer and (result.get('build_revision') != revision or result.get('schema') != schemas[revision])) or
         (not observer and result.get('build_revision') in schemas)):
         raise ValueError('sealing build revision association differs')
@@ -558,10 +597,10 @@ def seal(output, head, revision='v155'):
     members = set(SUCCESS_MEMBERS)
     if observer:
         members.update('native-source/'+name for name in V157_NATIVE)
-    if revision in ('v158', 'v159'):
+    if revision in ('v158', 'v159', 'v160'):
         members.remove('01-probe-compile.log')
         members.add('01-pid1-compile.log')
-    if revision == 'v159':
+    if revision in ('v159', 'v160'):
         members.update('native-source/'+name for name in V159_NATIVE)
         members.add('commands/init/.initramfs.o.cmd')
     success_members = sorted(members)
@@ -591,7 +630,7 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--expected-source-head', required=True)
     parser.add_argument('--passed-new-test-context', required=True)
-    parser.add_argument('--build-revision', choices=('v155', 'v157', 'v158', 'v159'), default='v155')
+    parser.add_argument('--build-revision', choices=('v155', 'v157', 'v158', 'v159', 'v160'), default='v155')
     parser.add_argument('--jobs', type=int, default=4)
     args = parser.parse_args()
     ci_guard(args.expected_source_head, os.environ)
