@@ -23,6 +23,7 @@ NATIVE_INPUTS_SOURCE = 'note10/xnu26/phase1_iostorage_native_inputs.py'
 NATIVE_COMPLETE_SOURCE = 'note10/xnu26/phase1_iostorage_native_complete.py'
 USER_FETCH_SOURCE = 'note10/xnu26/phase1_user_instruction_fetch.py'
 USER_BRANCH_CLOSURE_SOURCE = 'note10/xnu26/phase1_user_auth_branch_closure.py'
+MEMDEV_WIDE_SOURCE = 'note10/xnu26/phase1_memdev_wide_extent.py'
 NATIVE_INPUTS_SHA256 = 'bf34f56e47bf5a05119ad45d6e00fdd7d6972076aad02f4788459b0c112fa126'
 CLOSURE_INPUT_SHA256 = {
     NATIVE_COMPLETE_SOURCE: 'd383b7192f040ac860bb36032ab94828c48354ea2dda444d1357fd96cb5cc994',
@@ -433,7 +434,7 @@ def main():
                                           'native_inputs', 'native_complete', 'relocatable_closure',
                                           'user_instruction_object', 'user_instruction_diagnostics',
                                           'user_instruction_header_context', 'user_auth_branch_object',
-                                          'user_auth_branch_closure'),
+                                          'user_auth_branch_closure', 'memdev_wide_extent'),
                         default='declaration')
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
@@ -450,6 +451,7 @@ def main():
     closure = args.mode == 'relocatable_closure'
     auth_branch = args.mode == 'user_auth_branch_object'
     user_branch_closure = args.mode == 'user_auth_branch_closure'
+    memdev_wide = args.mode == 'memdev_wide_extent'
     header_context = args.mode in ('user_instruction_header_context', 'user_auth_branch_object')
     diagnostics = args.mode in ('user_instruction_diagnostics', 'user_instruction_header_context', 'user_auth_branch_object')
     user_fetch = args.mode in ('user_instruction_object', 'user_instruction_diagnostics',
@@ -463,6 +465,7 @@ def main():
         'user_instruction_header_context': USER_FETCH_SOURCE,
         'user_auth_branch_object': USER_FETCH_SOURCE,
         'user_auth_branch_closure': USER_BRANCH_CLOSURE_SOURCE,
+        'memdev_wide_extent': MEMDEV_WIDE_SOURCE,
     }.get(args.mode)
     paths = (WORKFLOW, Path(__file__).resolve().relative_to(ROOT).as_posix())
     if source is not None:
@@ -495,6 +498,10 @@ def main():
         result['schema'] = 'note10-v166-user-auth-branch-closure-result-v1'
         for name in ('iostorage_commit', 'archive_sha256', 'archive_header_sha256'):
             del result[name]
+    if memdev_wide:
+        result['schema'] = 'note10-v168-memdev-wide-extent-result-v1'
+        for name in ('iostorage_commit', 'archive_sha256', 'archive_header_sha256'):
+            del result[name]
     if args.mode == 'pio_link':
         result.update(compiled_arm64_objects=0, partial_link_attempts=0, pio_relocatable_link_verified=False)
     if provider:
@@ -505,7 +512,10 @@ def main():
                       archive_source_sha256=BASE_MEMBER_SHA, archive_source_bytes=BASE_MEMBER_BYTES,
                       archive_source_verified=False, required_symbol_count=len(BASE_REQUIRED_SYMBOLS))
     try:
-        if user_branch_closure:
+        if memdev_wide:
+            from phase1_memdev_wide_extent import compile_memdev
+            compile_memdev(result, out, require_arm64_object)
+        elif user_branch_closure:
             from phase1_user_auth_branch_closure import compile_auth_branch_closure
             compile_auth_branch_closure(result, out, require_arm64_object)
         elif user_fetch:
@@ -577,6 +587,18 @@ def main():
             generated_header_sha256 public_reference_sha256 native_reference_sha256 public_xnu_commit
             osfmk_config_defines_sha256 osfmk_config_header_sha256 osfmk_generated_headers_sha256 osfmk_makefile_sha256
             header_context decoder_source units link carried_evidence'''.split()
+        result = {name: result[name] for name in public_fields if name in result}
+    elif memdev_wide:
+        public_fields = '''schema passed source_head run_id run_attempt target source_sha256 scope stage failure_type
+            host_pass compile_attempts target_object_compile_attempts compiled_arm64_objects partial_link_attempts
+            kernel_builds kernel_links old_tests_count device_operations deployment_ready production_hook
+            firmware_abi_verified synthetic_board_inputs exact_target_source compiler_version sdk_version
+            fresh_tool_sha256 generated_header_sha256 native_inputs_generated host_config_tool_built
+            public_xnu_commit public_reference_sha256 bsd_makefile_sha256 bsd_generated_headers_sha256
+            bsd_config_header_sha256 bsd_config_defines_sha256 kernel_support_header_sha256 memdev_source
+            compiler_flags compiler_argv_count compiler_argv_sha256 compiler_returncode compiler_timed_out
+            compiler_diagnostics object_sha256 object_bytes defined_external_symbols undefined_external_symbols
+            memdev_object_verified'''.split()
         result = {name: result[name] for name in public_fields if name in result}
     raw = json.dumps(result, indent=2, sort_keys=True) + '\n'
     (out / 'result.json').write_text(raw, encoding='utf-8', newline='\n')
