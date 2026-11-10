@@ -179,16 +179,33 @@ V188_SOURCE = {
     V188_CORE[3]: 'bedab328a94426f0409b3617d80746d3bf5ee76a03e2bcc2537808092f8d2f15',
 }
 
+V189_CONTEXT_SCHEMA = 'note10-v189-linux-complete-block-read-public-input-v1'
+V189_BUILD_SCHEMA = 'note10-v189-linux-complete-block-read-build-v1'
+V189_OUTPUT = 'note10/private/v189-ci-linux-complete-block-read'
+V189_SCOPE = 'stock-linux-PID1-RAM-rootfs-complete-block-read-no-XNU'
+V189_PID1 = 'note10/device_test/v189_builtin_read.c'
+V189_ID = b'N10MININIT2:N189READ1'
+V189_CORE = ('note10/xnu26/note10_iostorage_read_range.c', 'note10/xnu26/note10_iostorage_read_range.h',
+             'note10/xnu26/note10_iostorage_read_request.c', 'note10/xnu26/note10_iostorage_read_request.h')
+V189_SOURCE = {
+    V189_PID1: '202b171f1c1d9aced2b5ae9d80e66e2367d1a9290bfdf158bddffb933081527f',
+    'note10/device_test/test_v189_complete_block_read.py': '44ec160400869ca5a35927dbbd0db2243c11e9f783e594388d929ec16e0a4b38',
+    V189_CORE[0]: '12b9de8c5e7c59b0e2df4deec0e109043d53ee5f7dd45653ce899d0f17ae38a2',
+    V189_CORE[1]: '61bd6d3741137139cbb00280334c763dbe85431483cbee8e31270c61361df2a3',
+    V189_CORE[2]: '7b5fd68db13eb27ff35cf3f3f70fd9cda4cf76bc414867e8b802189efb6a6815',
+    V189_CORE[3]: 'bedab328a94426f0409b3617d80746d3bf5ee76a03e2bcc2537808092f8d2f15',
+}
+
 
 def observer_sources(revision):
     expected = dict(V157_SOURCE)
-    if revision in ('v158', 'v159', 'v160', 'v161', 'v186', 'v187', 'v188'):
+    if revision in ('v158', 'v159', 'v160', 'v161', 'v186', 'v187', 'v188', 'v189'):
         expected[V158_PID1] = V158_PID1_SHA
-    if revision in ('v159', 'v160', 'v161', 'v186', 'v187', 'v188'):
+    if revision in ('v159', 'v160', 'v161', 'v186', 'v187', 'v188', 'v189'):
         expected.update(V159_SOURCE)
-    if revision in ('v160', 'v161', 'v186', 'v187', 'v188'):
+    if revision in ('v160', 'v161', 'v186', 'v187', 'v188', 'v189'):
         expected.update(V160_SOURCE)
-    if revision in ('v161', 'v186', 'v187', 'v188'):
+    if revision in ('v161', 'v186', 'v187', 'v188', 'v189'):
         expected.update(V161_SOURCE)
     if revision == 'v186':
         del expected[V158_PID1]
@@ -199,6 +216,9 @@ def observer_sources(revision):
     if revision == 'v188':
         del expected[V158_PID1]
         expected.update(V188_SOURCE)
+    if revision == 'v189':
+        del expected[V158_PID1]
+        expected.update(V189_SOURCE)
     buffers = {name: p.ordinary(p.ROOT/name) for name in expected}
     if {name: p.sha(raw) for name, raw in buffers.items()} != expected:
         raise ValueError('reviewed observer/PID1 source bytes differ')
@@ -221,15 +241,15 @@ def load_sources(pins, revision):
     return dict(p.load_sources({name: pin for name, pin in pins.items() if name not in buffers}), **buffers)
 
 def validate_context(context, revision='v155'):
-    if revision not in ('v155', 'v157', 'v158', 'v159', 'v160', 'v161', 'v186', 'v187', 'v188'):
+    if revision not in ('v155', 'v157', 'v158', 'v159', 'v160', 'v161', 'v186', 'v187', 'v188', 'v189'):
         raise ValueError('unsupported Linux diagnostic build revision')
     observer = revision != 'v155'
     schemas = {'v155': p.CONTEXT_SCHEMA, 'v157': V157_CONTEXT_SCHEMA, 'v158': V158_CONTEXT_SCHEMA,
-               'v159': V159_CONTEXT_SCHEMA, 'v160': V160_CONTEXT_SCHEMA, 'v161': V161_CONTEXT_SCHEMA, 'v186': V186_CONTEXT_SCHEMA, 'v187': V187_CONTEXT_SCHEMA, 'v188': V188_CONTEXT_SCHEMA}
+               'v159': V159_CONTEXT_SCHEMA, 'v160': V160_CONTEXT_SCHEMA, 'v161': V161_CONTEXT_SCHEMA, 'v186': V186_CONTEXT_SCHEMA, 'v187': V187_CONTEXT_SCHEMA, 'v188': V188_CONTEXT_SCHEMA, 'v189': V189_CONTEXT_SCHEMA}
     scopes = {'v155': 'stock-linux-iva-mmap-denial-no-XNU', 'v157': 'stock-linux-builtin-preexec-observation-no-XNU',
               'v158': 'stock-linux-builtin-entry-only-no-userspace-IVA-probe-or-XNU',
               'v159': 'stock-linux-rootfs-materialization-observation-no-XNU', 'v160': V160_SCOPE,
-              'v161': V161_SCOPE, 'v186': V186_SCOPE, 'v187': V187_SCOPE, 'v188': V188_SCOPE}
+              'v161': V161_SCOPE, 'v186': V186_SCOPE, 'v187': V187_SCOPE, 'v188': V188_SCOPE, 'v189': V189_SCOPE}
     fields = {'schema', 'scope', 'source_sha256', 'host_pass', 'kernel'}
     if observer:
         fields.add('build_revision')
@@ -242,13 +262,13 @@ def validate_context(context, revision='v155'):
     pass_fields = {'accepted', 'new', 'retained_v154_host_result_sha256'}
     if observer:
         pass_fields.add('v157_splice')
-    if revision in ('v158', 'v159', 'v160', 'v161', 'v186', 'v187', 'v188'):
+    if revision in ('v158', 'v159', 'v160', 'v161', 'v186', 'v187', 'v188', 'v189'):
         pass_fields.add('v158_entry')
-    if revision in ('v159', 'v160', 'v161', 'v186', 'v187', 'v188'):
+    if revision in ('v159', 'v160', 'v161', 'v186', 'v187', 'v188', 'v189'):
         pass_fields.add('v159_rootfs')
-    if revision in ('v160', 'v161', 'v186', 'v187', 'v188'):
+    if revision in ('v160', 'v161', 'v186', 'v187', 'v188', 'v189'):
         pass_fields.add('v160_relocation')
-    if revision in ('v161', 'v186', 'v187', 'v188'):
+    if revision in ('v161', 'v186', 'v187', 'v188', 'v189'):
         pass_fields.add('v161_parser')
     if revision == 'v186':
         pass_fields.add('v186_read')
@@ -256,6 +276,8 @@ def validate_context(context, revision='v155'):
         pass_fields.add('v187_read')
     if revision == 'v188':
         pass_fields.add('v188_read')
+    if revision == 'v189':
+        pass_fields.add('v189_read')
     if (type(passes) is not dict or set(passes) != pass_fields or
         not p.same(passes['accepted'], p.HOST_PASS) or passes['retained_v154_host_result_sha256'] != V154_HOST_RESULT_SHA):
         raise ValueError('exact accepted host and carried v154 PASS required')
@@ -270,13 +292,13 @@ def validate_context(context, revision='v155'):
     if observer and (environment['result_sha256'] != V157_RETAINED_ENV_SHA or
                     not p.same(passes['v157_splice'], V157_SPLICE_PASS)):
         raise ValueError('exact retained v155 environment and v157 splice PASS required')
-    if revision in ('v158', 'v159', 'v160', 'v161', 'v186', 'v187', 'v188') and not p.same(passes['v158_entry'], V158_ENTRY_PASS):
+    if revision in ('v158', 'v159', 'v160', 'v161', 'v186', 'v187', 'v188', 'v189') and not p.same(passes['v158_entry'], V158_ENTRY_PASS):
         raise ValueError('exact reviewed v158 entry-only PID1 host PASS required')
-    if revision in ('v159', 'v160', 'v161', 'v186', 'v187', 'v188') and not p.same(passes['v159_rootfs'], V159_ROOTFS_PASS):
+    if revision in ('v159', 'v160', 'v161', 'v186', 'v187', 'v188', 'v189') and not p.same(passes['v159_rootfs'], V159_ROOTFS_PASS):
         raise ValueError('exact reviewed v159 rootfs metadata host PASS required')
-    if revision in ('v160', 'v161', 'v186', 'v187', 'v188') and not p.same(passes['v160_relocation'], V160_RELOCATION_PASS):
+    if revision in ('v160', 'v161', 'v186', 'v187', 'v188', 'v189') and not p.same(passes['v160_relocation'], V160_RELOCATION_PASS):
         raise ValueError('exact reviewed v160 relocation host PASS required')
-    if revision in ('v161', 'v186', 'v187', 'v188') and not p.same(passes['v161_parser'], V161_PARSER_PASS):
+    if revision in ('v161', 'v186', 'v187', 'v188', 'v189') and not p.same(passes['v161_parser'], V161_PARSER_PASS):
         raise ValueError('exact reviewed v161 diagnostic parser host PASS required')
     if revision == 'v186':
         new = passes['v186_read']
@@ -304,6 +326,15 @@ def validate_context(context, revision='v155'):
         if (type(new) is not dict or set(new) != {*expected, 'result_sha256', 'review_sha256'} or
                 any(type(new.get(key)) is not type(value) or not p.same(new[key], value) for key, value in expected.items())):
             raise ValueError('reviewed new v188 adapter/core fixture PASS required')
+        p.hexid(new['result_sha256']); p.hexid(new['review_sha256'])
+    if revision == 'v189':
+        new = passes['v189_read']
+        expected = dict(schema='note10-v189-builtin-read-host-once-v1', passed=True, compiler_count=1,
+                        fixture_count=1, groups=3, old_tests_count=0,
+                        source_sha256={name: V189_SOURCE[name] for name in (V189_PID1, *V189_CORE)})
+        if (type(new) is not dict or set(new) != {*expected, 'result_sha256', 'review_sha256'} or
+                any(type(new.get(key)) is not type(value) or not p.same(new[key], value) for key, value in expected.items())):
+            raise ValueError('reviewed new v189 adapter/core fixture PASS required')
         p.hexid(new['result_sha256']); p.hexid(new['review_sha256'])
     return context
 
@@ -636,10 +667,68 @@ def v188_pid1_proof(elf, archive, init, symbols, copied):
                 kmsg_write_limit=1, retry_limit=0, XNU_execution_allowed=False, device_ready=False)
 
 
+def v189_window(elf):
+    if not 80 <= len(elf) <= 1048576:
+        raise ValueError('actual boundary ELF extent80..1MiB required')
+    phoff, = struct.unpack_from('<Q', elf, 32)
+    ehsize, phentsize, phnum = struct.unpack_from('<HHH', elf, 52)
+    if phoff != 64 or ehsize != 64 or phentsize != 56 or not 1 <= phnum <= 16 or phoff+phentsize*phnum > len(elf):
+        raise ValueError('actual fresh ELF header/program-header boundary differs')
+    p_type, p_flags = struct.unpack_from('<II', elf, 64)
+    checksum = 2166136261
+    for byte in elf[48:80]:
+        checksum = ((checksum ^ byte)*16777619)&0xffffffff
+    return dict(offset=48, length=32, phoff=phoff, ehsize=ehsize, phentsize=phentsize,
+                phnum=phnum, p_type=p_type, p_flags=p_flags, fnv1a32=checksum)
+
+
+def v189_pid1_proof(elf, archive, init, symbols, copied):
+    if (elf.count(V189_ID) != 1 or any(marker in elf for marker in (b'N158PID1', b'N154IVA', b'/dev/iva_ctl')) or
+            copied != {name: V189_SOURCE[name] for name in (V189_PID1, *V189_CORE)}):
+        raise ValueError('exact new PID1 and copied production core sources required')
+    window = v189_window(elf)
+    rows = [line.split() for line in symbols.splitlines() if line.strip()]
+    required = ('_start', 'note10_iostorage_read_range', 'note10_iostorage_read_request', 'n189_backing_read', 'n189_complete', 'n189_deny_read', 'n189_deny_complete')
+    if any(len(row) < 3 or row[1] in ('U', 'u', 'w', 'v') for row in rows) or any(
+            len([row for row in rows if row[0] == name and row[1] in ('t', 'T')]) != 1 for name in required):
+        raise ValueError('linked PID1/core/callback symbols without undefined runtime imports required')
+    phoff, = struct.unpack_from('<Q', elf, 32)
+    phsize, count = struct.unpack_from('<HH', elf, 54)
+    offsets = []
+    for i in range(count):
+        kind, flags, pos, va, _, file_size, _, _ = struct.unpack_from('<IIQQQQQQ', elf, phoff+i*phsize)
+        if kind == 1 and flags & 1 and va <= init['entry'] < va+file_size:
+            offsets.append(pos+init['entry']-va)
+    if init['entry'] % 4 or len(offsets) != 1:
+        raise ValueError('unique file-backed AArch64 PID1 entry required')
+    pos = 0
+    for name in (b'dev', b'dev/console', b'dev/kmsg'):
+        raw = archive[pos:pos+110]
+        if re.fullmatch(rb'070701[0-9a-fA-F]{104}', raw) is None:
+            raise ValueError('new PID1 packaged device header required')
+        fields = [int(raw[i:i+8], 16) for i in range(6, 110, 8)]
+        name_end = pos+110+fields[11]
+        if fields[6] or archive[pos+110:name_end] != name+b'\0':
+            raise ValueError('new PID1 packaged device path differs')
+        pos = (name_end+3)&~3
+    if (fields[1], fields[2], fields[3], fields[9], fields[10]) != (0o020600, 0, 0, 1, 11):
+        raise ValueError('root-owned kmsg 1:11 required')
+    return dict(schema='note10-v189-read-only-pid1-evidence-v1', source_sha256=V189_SOURCE[V189_PID1],
+                core_source_sha256={name: V189_SOURCE[name] for name in V189_CORE},
+                copied_source_sha256=copied, elf_sha256=init['sha256'], elf_bytes=init['bytes'],
+                file_backed_entry_offset=offsets[0], marker='N189READ1', packaged_kmsg=dict(major=1, minor=11, mode='020600'),
+                linked_symbols=list(required), undefined_symbols=[], source_declared_syscalls=[56, 57, 62, 64, 67, 73],
+                fixed_path='/init', request=dict(block_bytes=16, lba=3, count=2, descriptor_length=32, direction=1),
+                byte_window=window, provider_geometry=dict(block_bytes=16,
+                extent_bytes=init['bytes']-init['bytes']%16, tail_bytes=init['bytes']%16),
+                denial=dict(lba=3, count=2, descriptor_length=31, admitted=False, read_callbacks=0, completion_callbacks=0),
+                kmsg_write_limit=1, retry_limit=0, XNU_execution_allowed=False, device_ready=False)
+
+
 def producer_output(output, revision):
     out = p.private(output)
     fixed = {'v157': p.ROOT/V157_OUTPUT, 'v158': p.ROOT/V158_OUTPUT,
-             'v159': p.ROOT/V159_OUTPUT, 'v160': p.ROOT/V160_OUTPUT, 'v161': p.ROOT/V161_OUTPUT, 'v186': p.ROOT/V186_OUTPUT, 'v187': p.ROOT/V187_OUTPUT, 'v188': p.ROOT/V188_OUTPUT}
+             'v159': p.ROOT/V159_OUTPUT, 'v160': p.ROOT/V160_OUTPUT, 'v161': p.ROOT/V161_OUTPUT, 'v186': p.ROOT/V186_OUTPUT, 'v187': p.ROOT/V187_OUTPUT, 'v188': p.ROOT/V188_OUTPUT, 'v189': p.ROOT/V189_OUTPUT}
     if (revision in fixed and out != fixed[revision]) or (revision == 'v155' and out in fixed.values()):
         raise ValueError('exact revision-specific producer output required')
     return out
@@ -658,8 +747,8 @@ def run_build(output, context, head, jobs=4, revision='v155'):
         raise ValueError('Linux jobs4 only')
     out = producer_output(output, revision)
     observer = revision != 'v155'
-    entry_only = revision in ('v158', 'v159', 'v160', 'v161', 'v186', 'v187', 'v188')
-    rootfs_observation = revision in ('v159', 'v160', 'v161', 'v186', 'v187', 'v188')
+    entry_only = revision in ('v158', 'v159', 'v160', 'v161', 'v186', 'v187', 'v188', 'v189')
+    rootfs_observation = revision in ('v159', 'v160', 'v161', 'v186', 'v187', 'v188', 'v189')
     work = out.with_name(out.name+'-work')
     archive = out.with_name(out.name+'-source.tar.gz')
     if spent_output(out, revision):
@@ -667,7 +756,7 @@ def run_build(output, context, head, jobs=4, revision='v155'):
     buffers = load_sources(context['source_sha256'], revision)
     out.mkdir(parents=True)
     schema = {'v155': p.BUILD_SCHEMA, 'v157': V157_BUILD_SCHEMA, 'v158': V158_BUILD_SCHEMA,
-              'v159': V159_BUILD_SCHEMA, 'v160': V160_BUILD_SCHEMA, 'v161': V161_BUILD_SCHEMA, 'v186': V186_BUILD_SCHEMA, 'v187': V187_BUILD_SCHEMA, 'v188': V188_BUILD_SCHEMA}[revision]
+              'v159': V159_BUILD_SCHEMA, 'v160': V160_BUILD_SCHEMA, 'v161': V161_BUILD_SCHEMA, 'v186': V186_BUILD_SCHEMA, 'v187': V187_BUILD_SCHEMA, 'v188': V188_BUILD_SCHEMA, 'v189': V189_BUILD_SCHEMA}[revision]
     result = dict(schema=schema, version=revision if observer else 'v154', build_revision=revision, passed=False, source_head=head,
                   make_environment=dict(MAKE_ENVIRONMENT),
                   source_sha256=context['source_sha256'], public_input=context,
@@ -694,7 +783,7 @@ def run_build(output, context, head, jobs=4, revision='v155'):
     persist()
     try:
         for tool in ('clang-14', 'gcc', 'make', 'aarch64-linux-gnu-gcc', 'arm-linux-gnueabi-gcc',
-                     *(('aarch64-linux-gnu-nm',) if revision in ('v186', 'v187', 'v188') else ())):
+                     *(('aarch64-linux-gnu-nm',) if revision in ('v186', 'v187', 'v188', 'v189') else ())):
             if shutil.which(tool) is None:
                 raise ValueError('required tool unavailable: '+tool)
         run(['clang-14', '--version'], '00-clang-version')
@@ -716,9 +805,9 @@ def run_build(output, context, head, jobs=4, revision='v155'):
             install_v157(source, buffers, result['preparation']); persist()
         if rootfs_observation:
             rootfs_helper = install_v159(source, buffers, result['preparation']); persist()
-        if revision in ('v161', 'v186', 'v187', 'v188'):
+        if revision in ('v161', 'v186', 'v187', 'v188', 'v189'):
             install_v161(source, buffers, result['preparation']); persist()
-        if revision in ('v160', 'v161', 'v186', 'v187', 'v188'):
+        if revision in ('v160', 'v161', 'v186', 'v187', 'v188', 'v189'):
             for name, pin in V160_STOCK.items():
                 if p.sha(p.ordinary(source/name)) != pin:
                     raise ValueError('v160 pinned stock relocation semantics differ: '+name)
@@ -731,9 +820,9 @@ def run_build(output, context, head, jobs=4, revision='v155'):
             for name, pin in V158_STOCK.items():
                 if p.sha(p.ordinary(source/name)) != pin:
                     raise ValueError('v158 pinned stock PID1 ABI differs: '+name)
-            if revision in ('v186', 'v187', 'v188'):
-                read_pid1 = V188_PID1 if revision == 'v188' else V187_PID1 if revision == 'v187' else V186_PID1
-                read_core = V188_CORE if revision == 'v188' else V187_CORE if revision == 'v187' else V186_CORE
+            if revision in ('v186', 'v187', 'v188', 'v189'):
+                read_pid1 = V189_PID1 if revision == 'v189' else V188_PID1 if revision == 'v188' else V187_PID1 if revision == 'v187' else V186_PID1
+                read_core = V189_CORE if revision == 'v189' else V188_CORE if revision == 'v188' else V187_CORE if revision == 'v187' else V186_CORE
                 if p.sha(p.ordinary(source/'include/uapi/asm-generic/fcntl.h')) != 'fc4998b97bb644acb07c55a4dade3bdcb89f6f82d6c24c305d68858b3dce88e1':
                     raise ValueError('v186 pinned native open flags differ')
                 pid1_dir = work/'pid1-source'; pid1_dir.mkdir()
@@ -750,7 +839,7 @@ def run_build(output, context, head, jobs=4, revision='v155'):
             run(['aarch64-linux-gnu-gcc', '-std=c11', '-Os', '-ffreestanding', '-fno-stack-protector',
                  '-fno-pie', '-no-pie', '-nostdlib', '-static', '-Wl,-e,_start', '-Wall', '-Wextra', '-Werror',
                  *options, *compile_sources, '-o', out/'minimal-init.elf'], '01-pid1-compile')
-            if revision in ('v186', 'v187', 'v188'):
+            if revision in ('v186', 'v187', 'v188', 'v189'):
                 run(['aarch64-linux-gnu-nm', '--format=posix', out/'minimal-init.elf'], '01-pid1-core-symbols')
         else:
             run(['aarch64-linux-gnu-gcc', '-std=c11', '-O2', '-static', '-fno-stack-protector',
@@ -760,9 +849,9 @@ def run_build(output, context, head, jobs=4, revision='v155'):
         init = p.ordinary(out/'minimal-init.elf', 1024*1024)
         result['minimal_init'] = route.elf_manifest(init)
         cpio = route.cpio(init); (out/'initramfs.cpio').write_bytes(cpio)
-        if revision in ('v186', 'v187', 'v188'):
+        if revision in ('v186', 'v187', 'v188', 'v189'):
             copied = {name: p.sha(p.ordinary(pid1_dir/Path(name).name)) for name in (read_pid1, *read_core)}
-            proof = v188_pid1_proof if revision == 'v188' else v187_pid1_proof if revision == 'v187' else v186_pid1_proof
+            proof = v189_pid1_proof if revision == 'v189' else v188_pid1_proof if revision == 'v188' else v187_pid1_proof if revision == 'v187' else v186_pid1_proof
             result['read_only_pid1'] = proof(init, cpio, result['minimal_init'],
                 p.ordinary(out/'01-pid1-core-symbols.log').decode(), copied)
         elif entry_only:
@@ -774,7 +863,9 @@ def run_build(output, context, head, jobs=4, revision='v155'):
         run([*make, p.DEFCONFIG], '02-stock-defconfig')
         check_config(p.ordinary(objects/'.config'), {})
         settings = dict(SETTINGS, INITRAMFS_SOURCE='"'+str(out/'initramfs.cpio')+'"')
-        if revision == 'v188':
+        if revision == 'v189':
+            settings['LOCALVERSION'] = '"-v189-linux-complete-block-read"'
+        elif revision == 'v188':
             settings['LOCALVERSION'] = '"-v188-linux-boundary-read"'
         elif revision == 'v187':
             settings['LOCALVERSION'] = '"-v187-linux-nonzero-read"'
@@ -798,9 +889,9 @@ def run_build(output, context, head, jobs=4, revision='v155'):
         run([*make, 'olddefconfig'], '04-effective-defconfig')
         config = p.ordinary(objects/'.config'); (out/'actual-effective.config').write_bytes(config)
         result['effective_profile'] = check_config(config, settings)
-        if revision in ('v160', 'v161', 'v186', 'v187', 'v188') and result['effective_profile'].get('RELOCATABLE') != 'y':
+        if revision in ('v160', 'v161', 'v186', 'v187', 'v188', 'v189') and result['effective_profile'].get('RELOCATABLE') != 'y':
             raise ValueError('v160 boot RELATIVE relocation handling must be enabled')
-        if revision in ('v161', 'v186', 'v187', 'v188') and any(result['effective_profile'].get(name) != 'y' for name in V161_CONFIG):
+        if revision in ('v161', 'v186', 'v187', 'v188', 'v189') and any(result['effective_profile'].get(name) != 'y' for name in V161_CONFIG):
             raise ValueError('v161 diagnostic parser configuration must be enabled')
         result['cmdline_policy'] = route.builtin_cmdline_policy(config.decode())
         result['effective_config_sha256'] = p.sha(config)
@@ -809,7 +900,7 @@ def run_build(output, context, head, jobs=4, revision='v155'):
         autoconf = p.ordinary(objects/'include/generated/autoconf.h')
         if re.search(rb'^\s*#\s*define\s+CONFIG_EXYNOS_IMA(?:_MODULE)?\b', autoconf, re.M):
             raise ValueError('IMA stock/generated undefined proof failed')
-        if revision in ('v161', 'v186', 'v187', 'v188') and any(len(re.findall(rb'^#define CONFIG_'+name.encode()+rb' 1$', autoconf, re.M)) != 1
+        if revision in ('v161', 'v186', 'v187', 'v188', 'v189') and any(len(re.findall(rb'^#define CONFIG_'+name.encode()+rb' 1$', autoconf, re.M)) != 1
                                        for name in V161_CONFIG):
             raise ValueError('v161 actual generated diagnostic configuration differs')
         (out/'generated-autoconf.h').write_bytes(autoconf)
@@ -824,7 +915,7 @@ def run_build(output, context, head, jobs=4, revision='v155'):
                 dependencies += (V157_OBSERVER,)
             if rootfs_observation and target in ('init/initramfs.o', 'drivers/misc/v154_linux_return.o'):
                 dependencies += ('linux/note10_rootfs_snapshot.h',)
-            if revision in ('v161', 'v186', 'v187', 'v188') and target == 'init/initramfs.o':
+            if revision in ('v161', 'v186', 'v187', 'v188', 'v189') and target == 'init/initramfs.o':
                 dependencies += ('linux/kconfig.h',)
             if (obj[:6] != b'\x7fELF\x02\x01' or int.from_bytes(obj[16:18], 'little') != 1 or
                 int.from_bytes(obj[18:20], 'little') != 183 or b'clang-14' not in cmd or
@@ -842,7 +933,7 @@ def run_build(output, context, head, jobs=4, revision='v155'):
                                     helper_dependencies={name: True for name in dependencies},
                                     source_dependency={target[:-2]+'.c': True})
         result['object_evidence'] = evidence
-        if revision in ('v161', 'v186', 'v187', 'v188'):
+        if revision in ('v161', 'v186', 'v187', 'v188', 'v189'):
             row = evidence['init/initramfs.o']
             result['initramfs_skip_policy'] = dict(schema='note10-v161-diagnostic-initramfs-policy-evidence-v1',
                 source_sha256=result['preparation']['installed_sha256']['init/initramfs.c'],
@@ -857,10 +948,10 @@ def run_build(output, context, head, jobs=4, revision='v155'):
                                       all_native_units_from_same_Image=True, autoconf_sha256=p.sha(autoconf))
         raw = p.ordinary(objects/'arch/arm64/boot/Image', p.IMAGE_LIMIT)
         symbols = p.ordinary(objects/'System.map', 16*1024*1024).decode()
-        marker = V188_ID if revision == 'v188' else V187_ID if revision == 'v187' else V186_ID if revision == 'v186' else V158_PID1_ID if entry_only else b'N154IVA'
+        marker = V189_ID if revision == 'v189' else V188_ID if revision == 'v188' else V187_ID if revision == 'v187' else V186_ID if revision == 'v186' else V158_PID1_ID if entry_only else b'N154IVA'
         result.update(check_image(raw, cpio, identity, symbols, marker))
         if rootfs_observation:
-            if revision in ('v160', 'v161', 'v186', 'v187', 'v188'):
+            if revision in ('v160', 'v161', 'v186', 'v187', 'v188', 'v189'):
                 relocation_helper.producer_rootfs_proof(result, raw, symbols, persist)
             else:
                 result['rootfs_materialization'] = rootfs_helper.linked_rootfs_proof(raw, symbols, len(cpio), result['linked_extent'])
@@ -894,7 +985,7 @@ def seal(output, head, revision='v155'):
         raise ValueError('sealing source association differs')
     observer = revision != 'v155'
     schemas = {'v157': V157_BUILD_SCHEMA, 'v158': V158_BUILD_SCHEMA,
-               'v159': V159_BUILD_SCHEMA, 'v160': V160_BUILD_SCHEMA, 'v161': V161_BUILD_SCHEMA, 'v186': V186_BUILD_SCHEMA, 'v187': V187_BUILD_SCHEMA, 'v188': V188_BUILD_SCHEMA}
+               'v159': V159_BUILD_SCHEMA, 'v160': V160_BUILD_SCHEMA, 'v161': V161_BUILD_SCHEMA, 'v186': V186_BUILD_SCHEMA, 'v187': V187_BUILD_SCHEMA, 'v188': V188_BUILD_SCHEMA, 'v189': V189_BUILD_SCHEMA}
     if ((observer and (result.get('build_revision') != revision or result.get('schema') != schemas[revision])) or
         (not observer and result.get('build_revision') in schemas)):
         raise ValueError('sealing build revision association differs')
@@ -907,12 +998,12 @@ def seal(output, head, revision='v155'):
     members = set(SUCCESS_MEMBERS)
     if observer:
         members.update('native-source/'+name for name in V157_NATIVE)
-    if revision in ('v158', 'v159', 'v160', 'v161', 'v186', 'v187', 'v188'):
+    if revision in ('v158', 'v159', 'v160', 'v161', 'v186', 'v187', 'v188', 'v189'):
         members.remove('01-probe-compile.log')
         members.add('01-pid1-compile.log')
-    if revision in ('v186', 'v187', 'v188'):
+    if revision in ('v186', 'v187', 'v188', 'v189'):
         members.add('01-pid1-core-symbols.log')
-    if revision in ('v159', 'v160', 'v161', 'v186', 'v187', 'v188'):
+    if revision in ('v159', 'v160', 'v161', 'v186', 'v187', 'v188', 'v189'):
         members.update('native-source/'+name for name in V159_NATIVE)
         members.add('commands/init/.initramfs.o.cmd')
     success_members = sorted(members)
@@ -942,7 +1033,7 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--expected-source-head', required=True)
     parser.add_argument('--passed-new-test-context', required=True)
-    parser.add_argument('--build-revision', choices=('v155', 'v157', 'v158', 'v159', 'v160', 'v161', 'v186', 'v187', 'v188'), default='v155')
+    parser.add_argument('--build-revision', choices=('v155', 'v157', 'v158', 'v159', 'v160', 'v161', 'v186', 'v187', 'v188', 'v189'), default='v155')
     parser.add_argument('--jobs', type=int, default=4)
     args = parser.parse_args()
     ci_guard(args.expected_source_head, os.environ)
