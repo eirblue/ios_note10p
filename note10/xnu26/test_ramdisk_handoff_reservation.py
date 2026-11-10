@@ -21,7 +21,7 @@ def inputs(size=DISK[1]):
     raw, checked, adapter, adt, plan = fixture()
     adt = encode_ramdisk_adt(decode(adt), mapped_ram=Region(0x86000000, 0x2000000),
                              backing=Region(**BACKING), physical_base=DISK[0], size=size)
-    plan.update(command_line='rd=md0', reserved=[dict(BACKING)])
+    plan.update(command_line='rd=md0', reserved=[dict(BACKING)], top_of_kernel=BACKING['start'] + BACKING['size'])
     return raw, checked, adapter, adt, plan
 
 

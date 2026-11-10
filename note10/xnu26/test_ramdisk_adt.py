@@ -99,7 +99,8 @@ class RamdiskAdtTests(unittest.TestCase):
         disk_base, disk_size = backing.start + 0x1000, 0x3000
         adt = encode_ramdisk_adt(decode(raw), mapped_ram=mapped, backing=backing,
                                 physical_base=disk_base, size=disk_size)
-        plan = dict(plan, command_line='rd=md0', reserved=[dict(start=backing.start, size=backing.size)])
+        plan = dict(plan, command_line='rd=md0', reserved=[dict(start=backing.start, size=backing.size)],
+                    top_of_kernel=backing.end)
         manifest, files = construct(kernel, checked, adapter, adt, plan)
         args = files['boot-args.mem']
         length, = struct.unpack_from('<I', args, OFFSETS['deviceTreeLength'])

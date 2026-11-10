@@ -17,7 +17,7 @@ MAX_IMAGE=256*1024*1024
 TRUST_CACHE_FILE = 'trust-cache.mem'
 
 
-def _validate_ramdisk(tree, ram, reserved, occupied):
+def _validate_ramdisk(tree, ram, reserved, occupied, kernel, top):
     chosen = next((node for node in tree.children if node.name == 'chosen'), None)
     memory_map = next((node for node in chosen.children if node.name == 'memory-map'), None) if chosen else None
     if memory_map is None or 'RAMDisk' not in memory_map.properties:
@@ -31,6 +31,7 @@ def _validate_ramdisk(tree, ram, reserved, occupied):
     if not ram.contains(disk) or any(disk.overlaps(region) for region in occupied):
         raise ValueError('RAMDisk must lie in modeled RAM outside occupied memory')
     if not any(ram.contains(region) and region.contains(disk) and not region.start % PAGE and not region.size % PAGE
+               and kernel.end <= region.start and region.end <= top
                for region in reserved):
         raise ValueError('RAMDisk requires a containing page-aligned reserved backing')
 
@@ -170,12 +171,12 @@ def construct(raw,checked,adapter_raw,adt,plan,*,trust_cache=None):
         raise ValueError('XNU entry outside materialized kernel')
     adt_root=decode_adt(adt)
     if not adt or len(adt)>PAGE:raise ValueError('Initial ADT exceeds metadata page')
-    _validate_ramdisk(adt_root,ram,reserved,occupied)
+    top=uint(plan['top_of_kernel'])
+    _validate_ramdisk(adt_root,ram,reserved,occupied,kernel_region,top)
     adapter,relative_entry,record=materialize_adapter(adapter_raw)
     arguments=Region(plan['arguments_address'],PAGE)
     tree=Region(plan['device_tree_address'],PAGE)
     transfer=Region(plan['adapter_address'],PAGE)
-    top=uint(plan['top_of_kernel'])
     validate_placement(ram=ram,reserved=reserved,occupied=occupied,kernel=kernel_region,
                        arguments=arguments,device_tree=tree,adapter=transfer,top_of_kernel=top)
     blocked=(*reserved,*occupied,kernel_region,arguments,tree,transfer)
@@ -253,9 +254,10 @@ def load(directory,*,kernel_sha256,allow_trust_cache=False):
     for name,field in (('boot-args.mem','arguments_address'),('device-tree.mem','device_tree_address'),('adapter.mem','adapter_address')):
         if by_name[name]!=Region(plan[field],PAGE):raise ValueError('Metadata buffer differs from plan')
     reserved=[Region(**r) for r in plan['reserved']];occupied=[Region(**r) for r in plan['occupied']]
+    top=uint(plan['top_of_kernel'])
     validate_placement(ram=ram,reserved=reserved,occupied=occupied,kernel=by_name['kernel.mem'],
                        arguments=by_name['boot-args.mem'],device_tree=by_name['device-tree.mem'],
-                       adapter=by_name['adapter.mem'],top_of_kernel=plan['top_of_kernel'])
+                       adapter=by_name['adapter.mem'],top_of_kernel=top)
     trust_region=by_name.pop(TRUST_CACHE_FILE,None)
     blocked=(*reserved,*occupied,*by_name.values())
     trust_backing=_trust_cache_backing(plan,ram,blocked)
@@ -267,7 +269,7 @@ def load(directory,*,kernel_sha256,allow_trust_cache=False):
     length=uint(manifest['device_tree_length'],32)
     if not 0<length<=PAGE or any(files['device-tree.mem'][length:]):raise ValueError('Invalid padded ADT')
     adt_root=decode_adt(files['device-tree.mem'][:length])
-    _validate_ramdisk(adt_root,ram,reserved,occupied)
+    _validate_ramdisk(adt_root,ram,reserved,occupied,by_name['kernel.mem'],top)
     _validate_trust_cache(adt_root,trust_backing,files.get(TRUST_CACHE_FILE))
     virtual=uint(plan['virtual_base'])
     args=encode_boot_args(virtual_base=virtual,physical_base=ram.start,memory_size=ram.size,
