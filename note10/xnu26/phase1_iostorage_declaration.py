@@ -22,6 +22,7 @@ PROVIDER_SOURCE = 'note10/xnu26/phase1_iostorage_provider_object.cpp'
 NATIVE_INPUTS_SOURCE = 'note10/xnu26/phase1_iostorage_native_inputs.py'
 NATIVE_COMPLETE_SOURCE = 'note10/xnu26/phase1_iostorage_native_complete.py'
 USER_FETCH_SOURCE = 'note10/xnu26/phase1_user_instruction_fetch.py'
+USER_BRANCH_CLOSURE_SOURCE = 'note10/xnu26/phase1_user_auth_branch_closure.py'
 NATIVE_INPUTS_SHA256 = 'bf34f56e47bf5a05119ad45d6e00fdd7d6972076aad02f4788459b0c112fa126'
 CLOSURE_INPUT_SHA256 = {
     NATIVE_COMPLETE_SOURCE: 'd383b7192f040ac860bb36032ab94828c48354ea2dda444d1357fd96cb5cc994',
@@ -431,7 +432,8 @@ def main():
     parser.add_argument('--mode', choices=('declaration', 'pio_bridge', 'pio_link', 'provider_object', 'base_object',
                                           'native_inputs', 'native_complete', 'relocatable_closure',
                                           'user_instruction_object', 'user_instruction_diagnostics',
-                                          'user_instruction_header_context', 'user_auth_branch_object'),
+                                          'user_instruction_header_context', 'user_auth_branch_object',
+                                          'user_auth_branch_closure'),
                         default='declaration')
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
@@ -447,6 +449,7 @@ def main():
     native_complete = args.mode == 'native_complete'
     closure = args.mode == 'relocatable_closure'
     auth_branch = args.mode == 'user_auth_branch_object'
+    user_branch_closure = args.mode == 'user_auth_branch_closure'
     header_context = args.mode in ('user_instruction_header_context', 'user_auth_branch_object')
     diagnostics = args.mode in ('user_instruction_diagnostics', 'user_instruction_header_context', 'user_auth_branch_object')
     user_fetch = args.mode in ('user_instruction_object', 'user_instruction_diagnostics',
@@ -459,6 +462,7 @@ def main():
         'user_instruction_diagnostics': USER_FETCH_SOURCE,
         'user_instruction_header_context': USER_FETCH_SOURCE,
         'user_auth_branch_object': USER_FETCH_SOURCE,
+        'user_auth_branch_closure': USER_BRANCH_CLOSURE_SOURCE,
     }.get(args.mode)
     paths = (WORKFLOW, Path(__file__).resolve().relative_to(ROOT).as_posix())
     if source is not None:
@@ -487,6 +491,10 @@ def main():
                             'note10-v162-user-instruction-object-result-v1')
         for name in ('iostorage_commit', 'archive_sha256', 'archive_header_sha256'):
             del result[name]
+    if user_branch_closure:
+        result['schema'] = 'note10-v166-user-auth-branch-closure-result-v1'
+        for name in ('iostorage_commit', 'archive_sha256', 'archive_header_sha256'):
+            del result[name]
     if args.mode == 'pio_link':
         result.update(compiled_arm64_objects=0, partial_link_attempts=0, pio_relocatable_link_verified=False)
     if provider:
@@ -497,7 +505,10 @@ def main():
                       archive_source_sha256=BASE_MEMBER_SHA, archive_source_bytes=BASE_MEMBER_BYTES,
                       archive_source_verified=False, required_symbol_count=len(BASE_REQUIRED_SYMBOLS))
     try:
-        if user_fetch:
+        if user_branch_closure:
+            from phase1_user_auth_branch_closure import compile_auth_branch_closure
+            compile_auth_branch_closure(result, out, require_arm64_object)
+        elif user_fetch:
             from phase1_user_instruction_fetch import compile_object
             if auth_branch:
                 compile_object(result, out, require_arm64_object, diagnostics=True, header_context=True,
@@ -555,6 +566,17 @@ def main():
             public_fields.remove('user_instruction_object_verified')
             public_fields.extend(('user_auth_branch_object_verified', 'composition_host_pass',
                                   'carried_fetch_native_result_sha256'))
+        result = {name: result[name] for name in public_fields if name in result}
+    elif user_branch_closure:
+        public_fields = '''schema passed source_head run_id run_attempt target source_sha256 scope stage failure_type
+            compile_attempts target_object_compile_attempts compiled_arm64_objects partial_link_attempts
+            partial_link_returncode closure_verified defined_external_symbols undefined_external_symbols
+            merged_object_sha256 merged_object_bytes old_tests_count kernel_builds kernel_links device_operations
+            deployment_ready production_hook firmware_abi_verified synthetic_board_inputs exact_target_source
+            fresh_tool_sha256 compiler_version sdk_version native_inputs_generated host_config_tool_built
+            generated_header_sha256 public_reference_sha256 native_reference_sha256 public_xnu_commit
+            osfmk_config_defines_sha256 osfmk_config_header_sha256 osfmk_generated_headers_sha256 osfmk_makefile_sha256
+            header_context decoder_source units link carried_evidence'''.split()
         result = {name: result[name] for name in public_fields if name in result}
     raw = json.dumps(result, indent=2, sort_keys=True) + '\n'
     (out / 'result.json').write_text(raw, encoding='utf-8', newline='\n')
