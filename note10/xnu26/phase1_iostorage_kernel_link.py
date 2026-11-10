@@ -123,12 +123,19 @@ def verify_final_symbols(symbols, linked, result):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--memdev-wide-extent', action='store_true')
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument('--memdev-wide-extent', action='store_true')
+    modes.add_argument('--memdev-handoff-artifact', action='store_true')
     args = parser.parse_args()
-    memdev = args.memdev_wide_extent
+    artifact = args.memdev_handoff_artifact
+    memdev = args.memdev_wide_extent or artifact
     work = PRIVATE / 'v170-memdev-kernel-link-work' if memdev else WORK
     output = PRIVATE / 'v170-memdev-kernel-link-once' if memdev else OUTPUT
     summary = PRIVATE / 'v170-memdev-kernel-link-result/result.json' if memdev else SUMMARY
+    if artifact:
+        work = PRIVATE / 'v173-native-kernel-artifact-work'
+        output = PRIVATE / 'v173-native-kernel-artifact-build'
+        summary = PRIVATE / 'v173-native-kernel-artifact-result/result.json'
     ci = builder.ci_context(checked=True, storage=True)
     summary.parent.mkdir(parents=True)
     result = dict(schema='note10-phase1-iostorage-final-link-result-v1', passed=False,
@@ -147,6 +154,12 @@ def main():
         result['source_sha256'].update({name: sha(ROOT / name) for name in (
             'note10/xnu26/phase1_memdev_kernel_integration.py', 'note10/xnu26/prepare_memdev_wide_extent.py',
             'note10/xnu26/patches/0014-memdev-wide-byte-extent.patch', 'note10/xnu26/user_instruction_diagnostics.py')})
+    if artifact:
+        result.update(schema='note10-v173-native-kernel-artifact-result-v1',
+                      scope='public-reference-patched-kernel-retention-PC-handoff-no-runtime')
+        result['source_sha256'].update({name: sha(ROOT / name) for name in (
+            'note10/xnu26/native_handoff_artifact.py', 'note10/device_test/bundle_affinity_evidence.py',
+            'note10/device_test/sealed_affinity_artifact.cjs')})
     try:
         builder.build(builder.bootstrap.private(work), builder.bootstrap.private(output), storage=True, memdev=memdev)
     except BaseException as error:

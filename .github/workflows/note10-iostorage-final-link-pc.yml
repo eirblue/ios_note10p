@@ -15,6 +15,12 @@ on:
         options:
           - baseline
           - memdev_wide_extent
+          - memdev_handoff_artifact
+      recipient_public_key_b64:
+        description: RSA3072 public recipient only, used by memdev_handoff_artifact
+        required: false
+        default: ''
+        type: string
 permissions:
   contents: read
 jobs:
@@ -28,6 +34,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
+      - uses: actions/setup-node@v4
+        if: ${{ inputs.mode == 'memdev_handoff_artifact' }}
+        with:
+          node-version: '24'
+      - name: Validate artifact public recipient
+        if: ${{ inputs.mode == 'memdev_handoff_artifact' }}
+        env:
+          N10_RECIPIENT_PUBLIC_KEY_B64: ${{ inputs.recipient_public_key_b64 }}
+        run: node note10/device_test/sealed_affinity_artifact.cjs recipient
       - name: Build and audit one private PC link
         env:
           N10_EXPECTED_SOURCE_HEAD: ${{ inputs.expected_source_head }}
@@ -41,12 +56,34 @@ jobs:
             memdev_wide_extent)
               python -B note10/xnu26/phase1_iostorage_kernel_link.py --memdev-wide-extent > note10/private/v170-memdev-kernel-link.internal.log 2>&1
               ;;
+            memdev_handoff_artifact)
+              python -B note10/xnu26/phase1_iostorage_kernel_link.py --memdev-handoff-artifact > note10/private/v173-native-kernel-artifact.internal.log 2>&1
+              ;;
             *) exit 2 ;;
           esac
+      - name: Stage native handoff evidence including failures
+        if: ${{ always() && inputs.mode == 'memdev_handoff_artifact' }}
+        env:
+          N10_EXPECTED_SOURCE_HEAD: ${{ inputs.expected_source_head }}
+        run: |
+          mkdir -p note10/private
+          python -B note10/xnu26/native_handoff_artifact.py > note10/private/v173-native-kernel-artifact-pack.internal.log 2>&1
+      - name: Seal native handoff evidence including failures
+        if: ${{ always() && inputs.mode == 'memdev_handoff_artifact' }}
+        env:
+          N10_RECIPIENT_PUBLIC_KEY_B64: ${{ inputs.recipient_public_key_b64 }}
+        run: node note10/device_test/sealed_affinity_artifact.cjs seal note10/private/v173-native-kernel-artifact.zip note10/private/v173-native-kernel-artifact.n10sealed "$GITHUB_SHA"
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: ${{ always() && inputs.mode != 'memdev_handoff_artifact' }}
         with:
           name: ${{ inputs.mode == 'memdev_wide_extent' && 'note10-v170-memdev-kernel-link-result' || 'note10-phase1-iostorage-final-link-result' }}
           path: ${{ inputs.mode == 'memdev_wide_extent' && 'note10/private/v170-memdev-kernel-link-result/result.json' || 'note10/private/phase1-iostorage-final-link-result/result.json' }}
+          retention-days: 7
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() && inputs.mode == 'memdev_handoff_artifact' }}
+        with:
+          name: note10-v173-native-kernel-handoff-sealed-evidence
+          path: note10/private/v173-native-kernel-artifact.n10sealed
           retention-days: 7
           if-no-files-found: error
