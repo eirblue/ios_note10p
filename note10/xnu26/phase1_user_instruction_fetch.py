@@ -27,9 +27,13 @@ HOST_PASS = {
 }
 # The retained board patch adds cache-line definitions, not a saved-state ABI.
 NATIVE_PROC_REG_SHA256 = 'a50f2a60a6a96c536cf2ee91a1b55e50cd70063280abc828c5900e9eba989fef'
+DIAGNOSTIC_PINS = {
+    'note10/xnu26/user_instruction_diagnostics.py': 'c703fb7bd72191286dd6e8e4b20176bfe36a0af260e99f2d05c308688e230607',
+    'note10/xnu26/test_user_instruction_diagnostics.py': '9ced29a56abea6a2c0a0d25e60af77e129eb2b82d602bc3f89b1d4adea86dfb5',
+}
 
 
-def compile_object(result, output, require_arm64_object):
+def compile_object(result, output, require_arm64_object, *, diagnostics=False):
     result.update(passed=False, stage='user-fetch-source-binding', host_pass=HOST_PASS,
                   scope='public-reference-native-user-fetch-one-object-no-link-or-runtime',
                   user_instruction_object_verified=False, compiled_arm64_objects=0,
@@ -39,6 +43,11 @@ def compile_object(result, output, require_arm64_object):
     require(all(sha(ROOT / name) == digest for name, digest in INPUT_PINS.items()),
             'reviewed user-fetch source or retained native recipe differs')
     result['source_sha256'].update(INPUT_PINS)
+    if diagnostics:
+        require(all(sha(ROOT / name) == digest for name, digest in DIAGNOSTIC_PINS.items()),
+                'reviewed compiler diagnostic source differs')
+        result['source_sha256'].update(DIAGNOSTIC_PINS)
+        result['scope'] = 'public-reference-user-fetch-compiler-diagnostics-no-link-or-runtime'
     from test_user_instruction_fetch import REFERENCE_PINS
     from build_native_bootstrap_selection import common_flags, definitions
     from phase1_iostorage_native_complete import (GENERATION_TOOL_SHA256, GENERATION_HEADER_SHA256,
@@ -98,6 +107,12 @@ def compile_object(result, output, require_arm64_object):
                   compile_attempts=1, target_object_compile_attempts=1)
     call = subprocess.run(argv, cwd=ROOT, capture_output=True, timeout=60)
     result['compiler_returncode'] = call.returncode
+    if diagnostics:
+        from user_instruction_diagnostics import summarize
+        result['compiler_diagnostics'] = summarize(call.stderr, {
+            str(ROOT / 'note10/xnu26'): 'port', str(source): 'XNU', str(native): 'generated',
+            sdk: 'SDK', str(output): 'output', compiler: 'compiler',
+        })
     (output / 'compiler.internal.log').write_bytes(call.stdout + call.stderr)
     if call.returncode:
         match = re.search(rb"fatal error: '([A-Za-z0-9_][A-Za-z0-9_./+\-]{0,127})' file not found", call.stderr)

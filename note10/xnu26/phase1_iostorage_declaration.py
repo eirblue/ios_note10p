@@ -430,7 +430,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--mode', choices=('declaration', 'pio_bridge', 'pio_link', 'provider_object', 'base_object',
                                           'native_inputs', 'native_complete', 'relocatable_closure',
-                                          'user_instruction_object'),
+                                          'user_instruction_object', 'user_instruction_diagnostics'),
                         default='declaration')
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
@@ -445,12 +445,14 @@ def main():
     native_inputs = args.mode == 'native_inputs'
     native_complete = args.mode == 'native_complete'
     closure = args.mode == 'relocatable_closure'
-    user_fetch = args.mode == 'user_instruction_object'
+    diagnostics = args.mode == 'user_instruction_diagnostics'
+    user_fetch = args.mode in ('user_instruction_object', 'user_instruction_diagnostics')
     source = {
         'declaration': SOURCE, 'pio_bridge': PIO_SOURCE, 'pio_link': PIO_SOURCE,
         'provider_object': PROVIDER_SOURCE, 'native_inputs': NATIVE_INPUTS_SOURCE,
         'native_complete': NATIVE_COMPLETE_SOURCE,
         'user_instruction_object': USER_FETCH_SOURCE,
+        'user_instruction_diagnostics': USER_FETCH_SOURCE,
     }.get(args.mode)
     paths = (WORKFLOW, Path(__file__).resolve().relative_to(ROOT).as_posix())
     if source is not None:
@@ -473,7 +475,8 @@ def main():
                   archive_fetch_attempts=0, compile_attempts=0, kernel_builds=0, old_tests_count=0,
                   device_operations=0, deployment_ready=False)
     if user_fetch:
-        result['schema'] = 'note10-v162-user-instruction-object-result-v1'
+        result['schema'] = ('note10-v163-user-instruction-diagnostics-result-v1' if diagnostics else
+                            'note10-v162-user-instruction-object-result-v1')
         for name in ('iostorage_commit', 'archive_sha256', 'archive_header_sha256'):
             del result[name]
     if args.mode == 'pio_link':
@@ -488,7 +491,10 @@ def main():
     try:
         if user_fetch:
             from phase1_user_instruction_fetch import compile_object
-            compile_object(result, out, require_arm64_object)
+            if diagnostics:
+                compile_object(result, out, require_arm64_object, diagnostics=True)
+            else:
+                compile_object(result, out, require_arm64_object)
         elif native_inputs or native_complete or closure:
             result.update(native_inputs_generated=False, host_config_tool_built=False,
                           target_object_compile_attempts=0)
@@ -530,6 +536,8 @@ def main():
             undefined_external_symbols user_instruction_object_verified partial_link_attempts kernel_builds
             kernel_links old_tests_count device_operations deployment_ready production_hook
             firmware_abi_verified synthetic_board_inputs exact_target_source'''.split()
+        if diagnostics:
+            public_fields.append('compiler_diagnostics')
         result = {name: result[name] for name in public_fields if name in result}
     raw = json.dumps(result, indent=2, sort_keys=True) + '\n'
     (out / 'result.json').write_text(raw, encoding='utf-8', newline='\n')
