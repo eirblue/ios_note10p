@@ -31,9 +31,17 @@ DIAGNOSTIC_PINS = {
     'note10/xnu26/user_instruction_diagnostics.py': 'c703fb7bd72191286dd6e8e4b20176bfe36a0af260e99f2d05c308688e230607',
     'note10/xnu26/test_user_instruction_diagnostics.py': '9ced29a56abea6a2c0a0d25e60af77e129eb2b82d602bc3f89b1d4adea86dfb5',
 }
+CONTEXT_HEADER = 'note10/xnu26/user_instruction_header_context.h'
+CONTEXT_HEADER_SHA256 = 'a2fa27027f150b5b76168f3c025287697e383225063d80b951973e0cc41ef069'
+CONTEXT_REFERENCE_PINS = {
+    'bsd/sys/types.h': 'f8b136bb10d56bb604e7b253f1ec23858d0b4ae21fe85eaede0ccc66afdb554a',
+    'bsd/sys/_types.h': '508393c2752392fb306f3f9540f848e766f9bb4b52a5f616739a9cc63006f9ec',
+    'bsd/sys/_types/_dev_t.h': '4ba3d19759544b9f7bf424d2a16a518ff586e31ed968d525440e678cfbb07a5d',
+    'osfmk/libsa/string.h': '630b7c4668cd1ed1995fd6b3fc4a1e1f33d592f1bb100f4c6a00e58a819fb514',
+}
 
 
-def compile_object(result, output, require_arm64_object, *, diagnostics=False):
+def compile_object(result, output, require_arm64_object, *, diagnostics=False, header_context=False):
     result.update(passed=False, stage='user-fetch-source-binding', host_pass=HOST_PASS,
                   scope='public-reference-native-user-fetch-one-object-no-link-or-runtime',
                   user_instruction_object_verified=False, compiled_arm64_objects=0,
@@ -48,6 +56,11 @@ def compile_object(result, output, require_arm64_object, *, diagnostics=False):
                 'reviewed compiler diagnostic source differs')
         result['source_sha256'].update(DIAGNOSTIC_PINS)
         result['scope'] = 'public-reference-user-fetch-compiler-diagnostics-no-link-or-runtime'
+    if header_context:
+        require(diagnostics and sha(ROOT / CONTEXT_HEADER) == CONTEXT_HEADER_SHA256,
+                'reviewed BSD header-context regression required')
+        result['source_sha256'][CONTEXT_HEADER] = CONTEXT_HEADER_SHA256
+        result['scope'] = 'public-reference-user-fetch-bsd-header-context-no-link-or-runtime'
     from test_user_instruction_fetch import REFERENCE_PINS
     from build_native_bootstrap_selection import common_flags, definitions
     from phase1_iostorage_native_complete import (GENERATION_TOOL_SHA256, GENERATION_HEADER_SHA256,
@@ -88,6 +101,14 @@ def compile_object(result, output, require_arm64_object, *, diagnostics=False):
                   osfmk_generated_headers_sha256=rows[0]['headers'],
                   osfmk_makefile_sha256=sha(config / 'Makefile'))
     stage_exports(source, native)
+    if header_context:
+        require(all(sha(source / name) == digest for name, digest in CONTEXT_REFERENCE_PINS.items()) and
+                all(sha(native / 'source-exports' / name) == CONTEXT_REFERENCE_PINS[name]
+                    for name in ('bsd/sys/types.h', 'bsd/sys/_types/_dev_t.h')),
+                'actual public BSD type/string source and exported type headers required')
+        result['header_context'] = dict(schema='note10-v164-user-fetch-header-context-v1',
+            mach_kernel_private=False, compiled_regression=False,
+            regression_header_sha256=CONTEXT_HEADER_SHA256, public_header_sha256=CONTEXT_REFERENCE_PINS)
     obj = output / 'note10_user_instruction_fetch.o'
     # common_flags supplies the accepted generated configuration/SDK include recipe;
     # these C code-generation flags are the retained compile_native_components recipe.
@@ -97,6 +118,11 @@ def compile_object(result, output, require_arm64_object, *, diagnostics=False):
             '-momit-leaf-frame-pointer', '-fno-branch-target-identification', '-mno-implicit-sme',
             '-DMACH_KERNEL_PRIVATE', '-DMACH_KERNEL', '-I', str(native / 'exports'),
             '-c', str(ROOT / SOURCE), '-o', str(obj)]
+    if header_context:
+        # libsa/string.h selects conflicting standalone types only for MACH_KERNEL_PRIVATE.
+        require(argv.count('-DMACH_KERNEL_PRIVATE') == 1, 'one inherited Mach-private flag required')
+        argv.remove('-DMACH_KERNEL_PRIVATE')
+        argv[argv.index('-c'):argv.index('-c')] = ['-include', str(ROOT / CONTEXT_HEADER)]
     (output / 'compiler-argv.internal.json').write_text(json.dumps(argv) + '\n', encoding='utf-8')
     path_options = {'-I', '-include', '-isysroot', '-c', '-o'}
     flags = [arg for index, arg in enumerate(argv[1:], 1)
@@ -107,6 +133,8 @@ def compile_object(result, output, require_arm64_object, *, diagnostics=False):
                   compile_attempts=1, target_object_compile_attempts=1)
     call = subprocess.run(argv, cwd=ROOT, capture_output=True, timeout=60)
     result['compiler_returncode'] = call.returncode
+    if header_context and call.returncode == 0:
+        result['header_context']['compiled_regression'] = True
     if diagnostics:
         from user_instruction_diagnostics import summarize
         result['compiler_diagnostics'] = summarize(call.stderr, {
