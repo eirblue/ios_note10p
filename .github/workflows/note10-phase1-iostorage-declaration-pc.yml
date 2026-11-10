@@ -21,12 +21,13 @@ on:
           - native_inputs
           - native_complete
           - relocatable_closure
+          - user_instruction_object
 permissions:
   contents: read
 jobs:
   iostorage-public-declaration:
     runs-on: macos-26
-    timeout-minutes: ${{ (inputs.mode == 'native_inputs' || inputs.mode == 'native_complete' || inputs.mode == 'relocatable_closure') && 30 || 10 }}
+    timeout-minutes: ${{ (inputs.mode == 'native_inputs' || inputs.mode == 'native_complete' || inputs.mode == 'relocatable_closure' || inputs.mode == 'user_instruction_object') && 30 || 10 }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -40,6 +41,10 @@ jobs:
           N10_PROBE_MODE: ${{ inputs.mode }}
         run: |
           case "$N10_PROBE_MODE" in
+            user_instruction_object)
+              mkdir -p note10/private
+              python -B note10/xnu26/phase1_iostorage_declaration.py --mode "$N10_PROBE_MODE" --output note10/private/v162-user-instruction-object-once > note10/private/v162-user-instruction-object.internal.log 2>&1
+              ;;
             native_inputs|native_complete|relocatable_closure)
               mkdir -p note10/private
               python -B note10/xnu26/phase1_iostorage_declaration.py --mode "$N10_PROBE_MODE" --output note10/private/phase1-iostorage-declaration-once > note10/private/phase1-iostorage-native.internal.log 2>&1
@@ -51,7 +56,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: ${{ format('note10-phase1-iostorage-{0}-result', inputs.mode == 'relocatable_closure' && 'relocatable-closure' || inputs.mode == 'native_complete' && 'native-complete' || inputs.mode == 'native_inputs' && 'native-inputs' || inputs.mode == 'base_object' && 'base-object' || inputs.mode == 'provider_object' && 'provider-object' || inputs.mode == 'pio_link' && 'pio-link' || inputs.mode == 'pio_bridge' && 'pio-bridge' || 'declaration') }}
-          path: note10/private/phase1-iostorage-declaration-once/result.json
+          name: ${{ inputs.mode == 'user_instruction_object' && 'note10-v162-user-instruction-object-result' || format('note10-phase1-iostorage-{0}-result', inputs.mode == 'relocatable_closure' && 'relocatable-closure' || inputs.mode == 'native_complete' && 'native-complete' || inputs.mode == 'native_inputs' && 'native-inputs' || inputs.mode == 'base_object' && 'base-object' || inputs.mode == 'provider_object' && 'provider-object' || inputs.mode == 'pio_link' && 'pio-link' || inputs.mode == 'pio_bridge' && 'pio-bridge' || 'declaration') }}
+          path: ${{ inputs.mode == 'user_instruction_object' && 'note10/private/v162-user-instruction-object-once/result.json' || 'note10/private/phase1-iostorage-declaration-once/result.json' }}
           retention-days: 7
           if-no-files-found: error

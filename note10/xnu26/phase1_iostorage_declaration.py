@@ -21,6 +21,7 @@ PIO_SOURCE = 'note10/xnu26/note10_iostorage_pio_bridge.cpp'
 PROVIDER_SOURCE = 'note10/xnu26/phase1_iostorage_provider_object.cpp'
 NATIVE_INPUTS_SOURCE = 'note10/xnu26/phase1_iostorage_native_inputs.py'
 NATIVE_COMPLETE_SOURCE = 'note10/xnu26/phase1_iostorage_native_complete.py'
+USER_FETCH_SOURCE = 'note10/xnu26/phase1_user_instruction_fetch.py'
 NATIVE_INPUTS_SHA256 = 'bf34f56e47bf5a05119ad45d6e00fdd7d6972076aad02f4788459b0c112fa126'
 CLOSURE_INPUT_SHA256 = {
     NATIVE_COMPLETE_SOURCE: 'd383b7192f040ac860bb36032ab94828c48354ea2dda444d1357fd96cb5cc994',
@@ -428,7 +429,8 @@ def compile_relocatable_closure(result, output):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--mode', choices=('declaration', 'pio_bridge', 'pio_link', 'provider_object', 'base_object',
-                                          'native_inputs', 'native_complete', 'relocatable_closure'),
+                                          'native_inputs', 'native_complete', 'relocatable_closure',
+                                          'user_instruction_object'),
                         default='declaration')
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
@@ -443,10 +445,12 @@ def main():
     native_inputs = args.mode == 'native_inputs'
     native_complete = args.mode == 'native_complete'
     closure = args.mode == 'relocatable_closure'
+    user_fetch = args.mode == 'user_instruction_object'
     source = {
         'declaration': SOURCE, 'pio_bridge': PIO_SOURCE, 'pio_link': PIO_SOURCE,
         'provider_object': PROVIDER_SOURCE, 'native_inputs': NATIVE_INPUTS_SOURCE,
         'native_complete': NATIVE_COMPLETE_SOURCE,
+        'user_instruction_object': USER_FETCH_SOURCE,
     }.get(args.mode)
     paths = (WORKFLOW, Path(__file__).resolve().relative_to(ROOT).as_posix())
     if source is not None:
@@ -468,6 +472,10 @@ def main():
                   iostorage_commit=COMMIT, archive_sha256=ARCHIVE_SHA, archive_header_sha256=HEADERS,
                   archive_fetch_attempts=0, compile_attempts=0, kernel_builds=0, old_tests_count=0,
                   device_operations=0, deployment_ready=False)
+    if user_fetch:
+        result['schema'] = 'note10-v162-user-instruction-object-result-v1'
+        for name in ('iostorage_commit', 'archive_sha256', 'archive_header_sha256'):
+            del result[name]
     if args.mode == 'pio_link':
         result.update(compiled_arm64_objects=0, partial_link_attempts=0, pio_relocatable_link_verified=False)
     if provider:
@@ -478,7 +486,10 @@ def main():
                       archive_source_sha256=BASE_MEMBER_SHA, archive_source_bytes=BASE_MEMBER_BYTES,
                       archive_source_verified=False, required_symbol_count=len(BASE_REQUIRED_SYMBOLS))
     try:
-        if native_inputs or native_complete or closure:
+        if user_fetch:
+            from phase1_user_instruction_fetch import compile_object
+            compile_object(result, out, require_arm64_object)
+        elif native_inputs or native_complete or closure:
             result.update(native_inputs_generated=False, host_config_tool_built=False,
                           target_object_compile_attempts=0)
             if native_complete or closure:
@@ -505,6 +516,21 @@ def main():
             compile_probe(result, args.mode, source)
     except Exception as error:
         result.update(passed=False, failure_type=type(error).__name__)
+    if user_fetch:
+        if 'fresh_generated_headers' in result:
+            result['generated_header_sha256'] = sorted(
+                item['sha256'] for item in result['fresh_generated_headers'].values())
+        public_fields = '''schema passed source_head run_id run_attempt target scope stage failure_type
+            source_sha256 host_pass compiler_version sdk_version fresh_tool_sha256 generated_header_sha256
+            native_inputs_generated host_config_tool_built public_reference_sha256 native_reference_sha256
+            public_xnu_commit osfmk_config_defines_sha256 osfmk_config_header_sha256
+            osfmk_generated_headers_sha256 osfmk_makefile_sha256 compiler_flags compiler_argv_count
+            compiler_argv_sha256 compile_attempts target_object_compile_attempts compiled_arm64_objects
+            compiler_returncode missing_include_sha256 object_sha256 object_bytes defined_external_symbols
+            undefined_external_symbols user_instruction_object_verified partial_link_attempts kernel_builds
+            kernel_links old_tests_count device_operations deployment_ready production_hook
+            firmware_abi_verified synthetic_board_inputs exact_target_source'''.split()
+        result = {name: result[name] for name in public_fields if name in result}
     raw = json.dumps(result, indent=2, sort_keys=True) + '\n'
     (out / 'result.json').write_text(raw, encoding='utf-8', newline='\n')
     print(raw, end='')
