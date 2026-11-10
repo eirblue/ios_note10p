@@ -88,12 +88,26 @@ V158_STOCK = {
     'include/uapi/linux/fcntl.h': '23dec401241e680af2106be32573aa568aaf6dd76dee2a4593705d9319648355',
     'fs/select.c': '546b19b69238e5336403f253190a609b65922f98d99a341066352373ff5d4e74',
 }
+V159_CONTEXT_SCHEMA = 'note10-v159-linux-rootfs-materialization-public-input-v1'
+V159_BUILD_SCHEMA = 'note10-v159-linux-rootfs-materialization-build-v1'
+V159_OUTPUT = 'note10/private/v159-ci-linux-rootfs-materialization'
+V159_SOURCE = {
+    'note10/device_test/v159_rootfs_materialization.py': '2495fbdbf799b5686a603e1ae33116433f7ae6c885f41d250a14963d71173644',
+    'note10/device_test/note10_rootfs_snapshot.h': '9844788efebdcc5793bc0f50d9abc34ec0f396ac0e9431fb8f875aca604bfaf1',
+}
+V159_NATIVE = ('init/initramfs.c', 'include/linux/note10_rootfs_snapshot.h')
+V159_ROOTFS_PASS = dict(schema='note10-v159-rootfs-materialization-host-once-v1', passed=True, compiler_count=0,
+                        fixture_count=1, old_tests_count=0,
+                        result_sha256='69469db57e58b082ce092d4195fb9ed44c8c0370aa1b8a934c78c3e35321387f',
+                        review_sha256='28f64654d500eca1b1aecfdeb3022fded74bb2200505d1faf1ffeda8d3241fba')
 
 
 def observer_sources(revision):
     expected = dict(V157_SOURCE)
-    if revision == 'v158':
+    if revision in ('v158', 'v159'):
         expected[V158_PID1] = V158_PID1_SHA
+    if revision == 'v159':
+        expected.update(V159_SOURCE)
     buffers = {name: p.ordinary(p.ROOT/name) for name in expected}
     if {name: p.sha(raw) for name, raw in buffers.items()} != expected:
         raise ValueError('reviewed observer/PID1 source bytes differ')
@@ -116,12 +130,13 @@ def load_sources(pins, revision):
     return dict(p.load_sources({name: pin for name, pin in pins.items() if name not in buffers}), **buffers)
 
 def validate_context(context, revision='v155'):
-    if revision not in ('v155', 'v157', 'v158'):
+    if revision not in ('v155', 'v157', 'v158', 'v159'):
         raise ValueError('unsupported Linux diagnostic build revision')
     observer = revision != 'v155'
-    schemas = {'v155': p.CONTEXT_SCHEMA, 'v157': V157_CONTEXT_SCHEMA, 'v158': V158_CONTEXT_SCHEMA}
+    schemas = {'v155': p.CONTEXT_SCHEMA, 'v157': V157_CONTEXT_SCHEMA, 'v158': V158_CONTEXT_SCHEMA, 'v159': V159_CONTEXT_SCHEMA}
     scopes = {'v155': 'stock-linux-iva-mmap-denial-no-XNU', 'v157': 'stock-linux-builtin-preexec-observation-no-XNU',
-              'v158': 'stock-linux-builtin-entry-only-no-userspace-IVA-probe-or-XNU'}
+              'v158': 'stock-linux-builtin-entry-only-no-userspace-IVA-probe-or-XNU',
+              'v159': 'stock-linux-rootfs-materialization-observation-no-XNU'}
     fields = {'schema', 'scope', 'source_sha256', 'host_pass', 'kernel'}
     if observer:
         fields.add('build_revision')
@@ -134,8 +149,10 @@ def validate_context(context, revision='v155'):
     pass_fields = {'accepted', 'new', 'retained_v154_host_result_sha256'}
     if observer:
         pass_fields.add('v157_splice')
-    if revision == 'v158':
+    if revision in ('v158', 'v159'):
         pass_fields.add('v158_entry')
+    if revision == 'v159':
+        pass_fields.add('v159_rootfs')
     if (type(passes) is not dict or set(passes) != pass_fields or
         not p.same(passes['accepted'], p.HOST_PASS) or passes['retained_v154_host_result_sha256'] != V154_HOST_RESULT_SHA):
         raise ValueError('exact accepted host and carried v154 PASS required')
@@ -150,8 +167,10 @@ def validate_context(context, revision='v155'):
     if observer and (environment['result_sha256'] != V157_RETAINED_ENV_SHA or
                     not p.same(passes['v157_splice'], V157_SPLICE_PASS)):
         raise ValueError('exact retained v155 environment and v157 splice PASS required')
-    if revision == 'v158' and not p.same(passes['v158_entry'], V158_ENTRY_PASS):
+    if revision in ('v158', 'v159') and not p.same(passes['v158_entry'], V158_ENTRY_PASS):
         raise ValueError('exact reviewed v158 entry-only PID1 host PASS required')
+    if revision == 'v159' and not p.same(passes['v159_rootfs'], V159_ROOTFS_PASS):
+        raise ValueError('exact reviewed v159 rootfs metadata host PASS required')
     return context
 
 
@@ -274,6 +293,24 @@ def install_v157(source, buffers, preparation):
         preparation['installed_sha256'][path.relative_to(source).as_posix()] = p.sha(raw)
 
 
+def install_v159(source, buffers, preparation):
+    helper = p.module('v159_rootfs_materialization', buffers)
+    if (source/V159_NATIVE[1]).exists() or (source/V159_NATIVE[1]).is_symlink():
+        raise ValueError('fresh v159 rootfs snapshot header required')
+    outputs = helper.prepare(p.ordinary(source/'init/initramfs.c'),
+                             p.ordinary(source/'drivers/misc'/V157_OBSERVER),
+                             buffers['note10/device_test/note10_rootfs_snapshot.h'])
+    if set(outputs) != {*V159_NATIVE, 'drivers/misc/'+V157_OBSERVER}:
+        raise ValueError('exact v159 rootfs transformation outputs required')
+    for name, raw in outputs.items():
+        target = source/name
+        if target.resolve() != target or not target.is_relative_to(source):
+            raise ValueError('unsafe rootfs transformation output')
+        target.write_bytes(raw)
+        preparation['installed_sha256'][name] = p.sha(raw)
+    return helper
+
+
 def v157_link_proof(raw, symbols):
     name = 'n157_builtin_init_observe'
     rows = [line.split() for line in symbols.splitlines() if line.split()[-1:] == [name]]
@@ -318,7 +355,7 @@ def v158_pid1_proof(elf, archive, init):
 
 def producer_output(output, revision):
     out = p.private(output)
-    fixed = {'v157': p.ROOT/V157_OUTPUT, 'v158': p.ROOT/V158_OUTPUT}
+    fixed = {'v157': p.ROOT/V157_OUTPUT, 'v158': p.ROOT/V158_OUTPUT, 'v159': p.ROOT/V159_OUTPUT}
     if (revision in fixed and out != fixed[revision]) or (revision == 'v155' and out in fixed.values()):
         raise ValueError('exact revision-specific producer output required')
     return out
@@ -337,14 +374,15 @@ def run_build(output, context, head, jobs=4, revision='v155'):
         raise ValueError('Linux jobs4 only')
     out = producer_output(output, revision)
     observer = revision != 'v155'
-    entry_only = revision == 'v158'
+    entry_only = revision in ('v158', 'v159')
+    rootfs_observation = revision == 'v159'
     work = out.with_name(out.name+'-work')
     archive = out.with_name(out.name+'-source.tar.gz')
     if spent_output(out, revision):
         raise ValueError('fresh output/work/archive required; never retry')
     buffers = load_sources(context['source_sha256'], revision)
     out.mkdir(parents=True)
-    schema = {'v155': p.BUILD_SCHEMA, 'v157': V157_BUILD_SCHEMA, 'v158': V158_BUILD_SCHEMA}[revision]
+    schema = {'v155': p.BUILD_SCHEMA, 'v157': V157_BUILD_SCHEMA, 'v158': V158_BUILD_SCHEMA, 'v159': V159_BUILD_SCHEMA}[revision]
     result = dict(schema=schema, version=revision if observer else 'v154', build_revision=revision, passed=False, source_head=head,
                   make_environment=dict(MAKE_ENVIRONMENT),
                   source_sha256=context['source_sha256'], public_input=context,
@@ -390,7 +428,9 @@ def run_build(output, context, head, jobs=4, revision='v155'):
         result['preparation'] = p.install(source, result['build_evidence_id'], buffers); persist()
         if observer:
             install_v157(source, buffers, result['preparation']); persist()
-        for name in (*p.FINAL_NATIVE, *(V157_NATIVE if observer else ())):
+        if rootfs_observation:
+            rootfs_helper = install_v159(source, buffers, result['preparation']); persist()
+        for name in (*p.FINAL_NATIVE, *(V157_NATIVE if observer else ()), *(V159_NATIVE if rootfs_observation else ())):
             dest = out/'native-source'/name; dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(p.ordinary(source/name))
         identity = result['build_evidence_id']
@@ -420,7 +460,9 @@ def run_build(output, context, head, jobs=4, revision='v155'):
         run([*make, p.DEFCONFIG], '02-stock-defconfig')
         check_config(p.ordinary(objects/'.config'), {})
         settings = dict(SETTINGS, INITRAMFS_SOURCE='"'+str(out/'initramfs.cpio')+'"')
-        if entry_only:
+        if rootfs_observation:
+            settings['LOCALVERSION'] = '"-v159-linux-rootfs-materialization"'
+        elif entry_only:
             settings['LOCALVERSION'] = '"-v158-linux-builtin-entry"'
         elif observer:
             settings['LOCALVERSION'] = '"-v157-linux-builtin-preexec"'
@@ -441,13 +483,16 @@ def run_build(output, context, head, jobs=4, revision='v155'):
             raise ValueError('IMA stock/generated undefined proof failed')
         (out/'generated-autoconf.h').write_bytes(autoconf)
         evidence = {}
-        for target in PROOF_TARGETS:
+        proof_targets = (*PROOF_TARGETS, *(('init/initramfs.o',) if rootfs_observation else ()))
+        for target in proof_targets:
             obj = p.ordinary(objects/target, MAX_MEMBER)
             cmdname = str(Path(target).with_name('.'+Path(target).name+'.cmd'))
             cmd = p.ordinary(objects/cmdname)
             dependencies = DEPENDENCIES.get(target, ())
             if observer and target == 'drivers/misc/v154_linux_return.o':
                 dependencies += (V157_OBSERVER,)
+            if rootfs_observation and target in ('init/initramfs.o', 'drivers/misc/v154_linux_return.o'):
+                dependencies += ('linux/note10_rootfs_snapshot.h',)
             if (obj[:6] != b'\x7fELF\x02\x01' or int.from_bytes(obj[16:18], 'little') != 1 or
                 int.from_bytes(obj[18:20], 'little') != 183 or b'clang-14' not in cmd or
                 target[:-2].encode()+b'.c' not in cmd or any(name.encode() not in cmd for name in dependencies) or re.search(rb'(?:^|\s)-DMODULE(?:\s|=|$)', cmd)):
@@ -455,6 +500,9 @@ def run_build(output, context, head, jobs=4, revision='v155'):
             if (observer and target in ('init/main.o', 'drivers/misc/v154_linux_return.o') and
                 b'n157_builtin_init_observe\0' not in obj):
                 raise ValueError('v157 observer symbol absent from same-Image native object: '+target)
+            if (rootfs_observation and target in ('init/initramfs.o', 'drivers/misc/v154_linux_return.o') and
+                b'n159_rootfs_get_snapshot\0' not in obj):
+                raise ValueError('v159 snapshot symbol absent from same-Image native object: '+target)
             saved = out/'commands'/cmdname; saved.parent.mkdir(parents=True, exist_ok=True); saved.write_bytes(cmd)
             evidence[target] = dict(object_sha256=p.sha(obj), object_bytes=len(obj), command_sha256=p.sha(cmd),
                                     command_path=saved.relative_to(out).as_posix(), builtin_ARM64=True,
@@ -466,6 +514,10 @@ def run_build(output, context, head, jobs=4, revision='v155'):
         raw = p.ordinary(objects/'arch/arm64/boot/Image', p.IMAGE_LIMIT)
         symbols = p.ordinary(objects/'System.map', 16*1024*1024).decode()
         result.update(check_image(raw, cpio, identity, symbols, V158_PID1_ID if entry_only else b'N154IVA'))
+        if rootfs_observation:
+            result['rootfs_materialization'] = rootfs_helper.linked_rootfs_proof(raw, symbols, len(cpio), result['linked_extent'])
+            if raw.count(b'N159ROOT1 id=') != 1:
+                raise ValueError('one same-Image rootfs snapshot frame required')
         if entry_only and b'N154IVA' in raw:
             raise ValueError('legacy IVA probe marker in v158 Image')
         result['dhd_link_evidence'] = check_dhd_symbol(symbols)
@@ -474,6 +526,8 @@ def run_build(output, context, head, jobs=4, revision='v155'):
             result['preexec_observation'] = v157_link_proof(raw, symbols)
             native_output = dict(native_output, **{name: result['preparation']['installed_sha256'][name]
                                                    for name in V157_NATIVE})
+        if rootfs_observation:
+            native_output.update({name: result['preparation']['installed_sha256'][name] for name in V159_NATIVE})
         (out/'Image').write_bytes(raw)
         if source_pins(revision) != context['source_sha256']:
             raise ValueError('source changed during producer execution')
@@ -491,7 +545,7 @@ def seal(output, head, revision='v155'):
     if result['source_head'] != head:
         raise ValueError('sealing source association differs')
     observer = revision != 'v155'
-    schemas = {'v157': V157_BUILD_SCHEMA, 'v158': V158_BUILD_SCHEMA}
+    schemas = {'v157': V157_BUILD_SCHEMA, 'v158': V158_BUILD_SCHEMA, 'v159': V159_BUILD_SCHEMA}
     if ((observer and (result.get('build_revision') != revision or result.get('schema') != schemas[revision])) or
         (not observer and result.get('build_revision') in schemas)):
         raise ValueError('sealing build revision association differs')
@@ -504,9 +558,12 @@ def seal(output, head, revision='v155'):
     members = set(SUCCESS_MEMBERS)
     if observer:
         members.update('native-source/'+name for name in V157_NATIVE)
-    if revision == 'v158':
+    if revision in ('v158', 'v159'):
         members.remove('01-probe-compile.log')
         members.add('01-pid1-compile.log')
+    if revision == 'v159':
+        members.update('native-source/'+name for name in V159_NATIVE)
+        members.add('commands/init/.initramfs.o.cmd')
     success_members = sorted(members)
     before_manifest = set(success_members)-{'members.json'}
     if not set(sizes) <= before_manifest or (result['passed'] is True and set(sizes) != before_manifest):
@@ -534,7 +591,7 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--expected-source-head', required=True)
     parser.add_argument('--passed-new-test-context', required=True)
-    parser.add_argument('--build-revision', choices=('v155', 'v157', 'v158'), default='v155')
+    parser.add_argument('--build-revision', choices=('v155', 'v157', 'v158', 'v159'), default='v155')
     parser.add_argument('--jobs', type=int, default=4)
     args = parser.parse_args()
     ci_guard(args.expected_source_head, os.environ)
