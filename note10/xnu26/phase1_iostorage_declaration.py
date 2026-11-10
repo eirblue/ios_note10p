@@ -26,7 +26,7 @@ USER_BRANCH_CLOSURE_SOURCE = 'note10/xnu26/phase1_user_auth_branch_closure.py'
 MEMDEV_WIDE_SOURCE = 'note10/xnu26/phase1_memdev_wide_extent.py'
 NATIVE_INPUTS_SHA256 = 'bf34f56e47bf5a05119ad45d6e00fdd7d6972076aad02f4788459b0c112fa126'
 CLOSURE_INPUT_SHA256 = {
-    NATIVE_COMPLETE_SOURCE: 'd383b7192f040ac860bb36032ab94828c48354ea2dda444d1357fd96cb5cc994',
+    NATIVE_COMPLETE_SOURCE: 'c6ac1a8685972aabd5eabdf6aa8d66d41e100e895a5212330c77f507f67f3d3c',
     PROVIDER_SOURCE: 'ac252306b4dd3faea053f9b171663d3f17794b9fa8790aa4c88b21c10dda87b7',
     PIO_SOURCE: '56bbcdb885b04650d4216cc37c06e148fd626fcfc919a7bfe62da8ab2bb52ec0',
     'note10/xnu26/note10_iostorage_pio_bridge.h': 'f57c49f687c80a672b980fe3d74a03968311724f8871a65c53fd67b124c869d1',
@@ -335,7 +335,7 @@ def compile_probe(result, mode, source):
             result['declaration_overrides_verified'] = 14
 
 
-def compile_closure_objects(result, output, *, native_work=None):
+def compile_closure_objects(result, output, *, native_work=None, diagnostic_sink=None):
     sdk_context = public_sdk_context(result, 'base_object')
     if sdk_context is None:
         return
@@ -358,7 +358,7 @@ def compile_closure_objects(result, output, *, native_work=None):
         compile_complete(result, output, stage_shared_archive, COMMIT, HEADERS['IOStorage.h'], require_arm64_object)
     else:
         compile_generated_complete(result, output, native_work, stage_shared_archive, COMMIT, HEADERS['IOStorage.h'],
-                                   require_arm64_object, existing_exports=True)
+                                   require_arm64_object, existing_exports=True, diagnostic_sink=diagnostic_sink)
     result['unit_compiler_returncodes'] = {}
     if 'compiler_returncode' in result:
         result['unit_compiler_returncodes']['IOStorage.cpp'] = result['compiler_returncode']
@@ -379,8 +379,15 @@ def compile_closure_objects(result, output, *, native_work=None):
         obj = public / (Path(source).stem + '.o')
         result['compile_attempts'] += 1
         result['target_object_compile_attempts'] += 1
-        call = subprocess.run([*compiler, *flags, *includes, *extra, '-O2', '-c', source, '-o', str(obj)],
-                              cwd=ROOT, capture_output=True, timeout=60)
+        try:
+            call = subprocess.run([*compiler, *flags, *includes, *extra, '-O2', '-c', source, '-o', str(obj)],
+                                  cwd=ROOT, capture_output=True, timeout=60)
+        except subprocess.TimeoutExpired as error:
+            if diagnostic_sink is not None:
+                diagnostic_sink(Path(source).name, None, error.stderr or b'', True)
+            raise
+        if diagnostic_sink is not None:
+            diagnostic_sink(Path(source).name, call.returncode, call.stderr, False)
         result['unit_compiler_returncodes'][Path(source).name] = call.returncode
         if call.returncode:
             return

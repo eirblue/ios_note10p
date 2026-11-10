@@ -1,4 +1,5 @@
 """One reviewed PC-only final link with six fresh storage objects."""
+import argparse
 import json
 from pathlib import Path
 import re
@@ -36,7 +37,7 @@ def storage_units(directory):
     return [(source, owner / (source.stem + '.o'), digest) for source, owner, digest in units]
 
 
-def compile_storage(current, work, output, result):
+def compile_storage(current, work, output, result, *, diagnostic_sink=None):
     directory = output / 'storage'
     directory.mkdir()
     ci = current['producer']['ci_context']
@@ -54,7 +55,7 @@ def compile_storage(current, work, output, result):
                   fresh_generated_headers=fresh_headers(PRIVATE / 'windows-xnu'),
                   fresh_tool_sha256={name: sha(Path(command('xcrun', '-f', name)))
                                      for name in complete.GENERATION_TOOL_SHA256})
-    objects = sdk.compile_closure_objects(result, directory, native_work=work)
+    objects = sdk.compile_closure_objects(result, directory, native_work=work, diagnostic_sink=diagnostic_sink)
     units = storage_units(directory)
     require(objects == [str(obj) for _, obj, _ in units] and result['compile_attempts'] == 6 and
             result['archive_fetch_attempts'] == 1 and result['fresh_inputs_reverified'],
@@ -121,8 +122,15 @@ def verify_final_symbols(symbols, linked, result):
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--memdev-wide-extent', action='store_true')
+    args = parser.parse_args()
+    memdev = args.memdev_wide_extent
+    work = PRIVATE / 'v170-memdev-kernel-link-work' if memdev else WORK
+    output = PRIVATE / 'v170-memdev-kernel-link-once' if memdev else OUTPUT
+    summary = PRIVATE / 'v170-memdev-kernel-link-result/result.json' if memdev else SUMMARY
     ci = builder.ci_context(checked=True, storage=True)
-    SUMMARY.parent.mkdir(parents=True)
+    summary.parent.mkdir(parents=True)
     result = dict(schema='note10-phase1-iostorage-final-link-result-v1', passed=False,
                   source_head=ci['GITHUB_SHA'], run_id=int(ci['GITHUB_RUN_ID']), run_attempt=1,
                   old_suites_executed=0, device_operations=0, deployment_ready=False,
@@ -132,11 +140,20 @@ def main():
                       'note10/xnu26/phase1_iostorage_declaration.py', sdk.NATIVE_COMPLETE_SOURCE,
                       sdk.NATIVE_INPUTS_SOURCE, *[name for name in sdk.CLOSURE_INPUT_SHA256
                                                   if name != sdk.NATIVE_COMPLETE_SOURCE])})
+    if memdev:
+        result.update(schema='note10-v170-memdev-kernel-link-result-v1',
+            scope='public-reference-patched-memdev1077-kernel-link-no-runtime',
+            physical_ready=False, runtime_executed=False, firmware_abi_verified=False)
+        result['source_sha256'].update({name: sha(ROOT / name) for name in (
+            'note10/xnu26/phase1_memdev_kernel_integration.py', 'note10/xnu26/prepare_memdev_wide_extent.py',
+            'note10/xnu26/patches/0014-memdev-wide-byte-extent.patch', 'note10/xnu26/user_instruction_diagnostics.py')})
     try:
-        builder.build(builder.bootstrap.private(WORK), builder.bootstrap.private(OUTPUT), storage=True)
-    except Exception as error:
+        builder.build(builder.bootstrap.private(work), builder.bootstrap.private(output), storage=True, memdev=memdev)
+    except BaseException as error:
+        if not memdev and not isinstance(error, Exception):
+            raise
         result['failure_type'] = type(error).__name__
-    path = OUTPUT / 'result.json'
+    path = output / 'result.json'
     state = json.loads(path.read_bytes()) if path.is_file() else {}
     link = state.get('link', {})
     storage = state.get('storage', {})
@@ -157,7 +174,12 @@ def main():
     if result['passed']:
         result.update(kernel_sha256=state['output_sha256'], kernel_bytes=state['output_bytes'],
                       undefined_external_count=0)
-    SUMMARY.write_bytes((json.dumps(result, sort_keys=True, indent=2) + '\n').encode())
+    if memdev:
+        result['memdev_integration'] = state.get('memdev', dict(stage='provisioning',
+            failure_code='provisioning_failed', patch_apply_attempts=0, final_link_attempts=0,
+            total_target_compile_attempts=0, kernel_link_verified=False))
+        result['passed'] = result['passed'] and result['memdev_integration']['kernel_link_verified'] is True
+    summary.write_bytes((json.dumps(result, sort_keys=True, indent=2) + '\n').encode())
     return 0 if result['passed'] else 1
 
 

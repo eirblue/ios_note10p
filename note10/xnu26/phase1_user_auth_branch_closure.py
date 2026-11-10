@@ -7,7 +7,7 @@ import subprocess
 from phase1_iostorage_native_inputs import ROOT, command, generate, require, sha
 
 RETAINED_BUILDER = 'note10/xnu26/phase1_user_instruction_fetch.py'
-RETAINED_BUILDER_SHA256 = '74aec7aedd981d4831d14da28a1b26d80f5eb8505c54cd9f9cbc89a66f0bfcb7'
+RETAINED_BUILDER_SHA256 = '340c0336965e5632937c7c9ac2762e0dddd89a87b115a7226f33bd588a5e8773'
 DECODER_MARKER = b'\nenum n10_step_result n10_step_auth_branch('
 DECODER_BYTES = 1523
 DECODER_SHA256 = '17b34248d595c4a9ea4542feb1f28f8633cd708571d03a7ee67b9ed6a4611133'

@@ -98,11 +98,14 @@ def collect_evidence(private, output):
             shutil.copyfile(path, dest)
 
 
-def aliases_for_current(source, rows, output):
+def aliases_for_current(source, rows, output, *, memdev_current=None, memdev_observation=None):
     from audit_link_inputs import symbols
     paths = [row['object_path'] for row in rows]
     raw = bootstrap.run(['xcrun', 'nm', '-g', *paths], ROOT, output / 'current-object-symbols.log')
     defined, references = symbols(raw.decode())
+    if memdev_current is not None:
+        import phase1_memdev_kernel_integration as memdev_scope
+        memdev_scope.bind_providers(memdev_current, rows, defined, references, memdev_observation)
     unresolved = set(references) - set(defined)
     aliases, pins = {}, {}
     for path in sorted((source / 'config').glob('*.exports')):
@@ -206,8 +209,12 @@ def intrinsic_kernel_result(path, symbols_text, undefined, *, leaf=False):
     return result
 
 
-def build(work, output, *, leaf=False, checked=False, storage=False):
+def build(work, output, *, leaf=False, checked=False, storage=False, memdev=False):
     # Reuse only provisioning/configuration primitives; never the v83 tests/build.
+    if memdev and not storage:
+        raise ValueError('memdev integration requires the storage final-link lane')
+    if memdev:
+        import phase1_memdev_kernel_integration as memdev_scope
     if storage:
         checked = True
     if checked:leaf=True
@@ -233,10 +240,15 @@ def build(work, output, *, leaf=False, checked=False, storage=False):
     if checked:state.update(kind='v94-exynos-checked-ptpage-pc')
     if storage:
         state.update(kind='phase1-iostorage-final-link-pc', storage={'stage': 'pending'})
+    if memdev:
+        state.update(kind='v170-memdev-kernel-link-pc', memdev=memdev_scope.begin())
     state['build_only_prior_pass'] = prior_pass
     bootstrap.write_json(output / 'result.json', state)
     original_env = dict(os.environ)
     try:
+        if memdev:
+            extra_patch = memdev_scope.apply_patch(source, output, provisioned['sdk'], state['memdev'])
+            state['memdev'].update(stage='configuration', failure_code='configuration_failed')
         os.environ.update(N10_CC=provisioned['compiler'], N10_SDKROOT=provisioned['sdk'],
                           N10_MAKE=shutil.which('make') or 'make')
         makefiles, configured = {}, []
@@ -252,8 +264,13 @@ def build(work, output, *, leaf=False, checked=False, storage=False):
                 if line.startswith('+++ b/'):
                     name = line[6:]
                     patched[name] = native.file_sha(source / name)
-        bootstrap.write_json(private / 'configure-result.json', dict(source_directory=source.relative_to(ROOT).as_posix(),
-            source_commit=COMMIT, configured=configured, patched_source_sha256=patched))
+        if memdev:
+            patched[extra_patch['source']] = extra_patch['postimage_sha256']
+        configuration = dict(source_directory=source.relative_to(ROOT).as_posix(),
+            source_commit=COMMIT, configured=configured, patched_source_sha256=patched)
+        if memdev:
+            configuration['extra_memdev_patch'] = extra_patch
+        bootstrap.write_json(private / 'configure-result.json', configuration)
         target = json.loads((ROOT / 'note10/target.json').read_text())
         library = ROOT / target['research_directory'] / ('libdispatch-' + LIBDISPATCH)
         library.mkdir(parents=True, exist_ok=False)
@@ -276,6 +293,8 @@ def build(work, output, *, leaf=False, checked=False, storage=False):
         import compile_public_dependencies
         import compile_link_metadata
         from link_experimental_kernel import layout_flags
+        if memdev:
+            state['memdev'].update(stage='header-generation', failure_code='header_generation_failed')
         with (output / 'current-generation.log').open('w') as log, contextlib.redirect_stdout(log):
             cloud_compile.sdk_declarations()
             export_source_headers.main()
@@ -313,6 +332,11 @@ def build(work, output, *, leaf=False, checked=False, storage=False):
             producer['candidate_kind']='v94-exynos-checked-ptpage-pc'
             producer['recipe_sha256'].update({n:native.file_sha(ROOT/'note10/xnu26'/n) for n in
                 ('prepare_exynos_checked_ptpage.py','exynos_checked_ptpage.c')})
+        if memdev:
+            producer['extra_memdev_patch'] = extra_patch
+            producer['recipe_sha256'].update({n: native.file_sha(ROOT / 'note10/xnu26' / n) for n in
+                ('phase1_memdev_kernel_integration.py', 'prepare_memdev_wide_extent.py',
+                 'phase1_iostorage_declaration.py', 'phase1_iostorage_native_complete.py', 'user_instruction_diagnostics.py')})
         binding_files = ('configure-result.json', 'exports-result.json', 'native-mig-result.json',
                          'native-extra-result.json', 'native-link/generate-result.json')
         bindings = {n: native.file_sha(private / n) for n in binding_files}
@@ -320,6 +344,8 @@ def build(work, output, *, leaf=False, checked=False, storage=False):
         bindings.update(KDK_public_input_sha256=cloud_compile.KDK_SHA,
                         public_firehose_header_sha256=native.file_sha(header),
                         link_flags_sha256=native.digest(flags))
+        if memdev:
+            bindings['extra_memdev_patch_binding'] = native.digest(extra_patch)
         dep_paths = {'@public/libdispatch/firehose_buffer.c': library / 'src/firehose/firehose_buffer.c',
             '@metadata/version.c': private / 'native-link/version.c',
             '@metadata/lastkerneldataconst.c': source / 'libsa/lastkerneldataconst.c',
@@ -327,26 +353,52 @@ def build(work, output, *, leaf=False, checked=False, storage=False):
         current = dict(kind='v84-current-native', producer=producer, producer_id=native.digest(producer),
             bindings=bindings, input_binding=native.digest(bindings), inventory=rows,
             dependencies={n: dict(path=str(p), source_sha256=native.file_sha(p)) for n, p in dep_paths.items()})
+        if memdev:
+            state['memdev'].update(stage='inventory-binding', failure_code='inventory_binding_failed')
+            memdev_scope.bind_inventory(current, state['memdev'])
+            diagnostic_roots = memdev_scope.roots(source, output, provisioned['sdk'])
         bootstrap.write_json(output / 'producer-context.json', current)
         with (output / 'current-compilation.log').open('w') as log, contextlib.redirect_stdout(log):
+            if memdev:
+                state['memdev'].update(stage='native-c', failure_code='native_c_compile_failed')
             c = compile_native_components.main(current, 'C')
             base = next(r['command'] for r in c['units'] if r['source'] == 'osfmk/arm64/machine_routines.c')
             assym = generate_assym.main(current, base)
             current['assembly_input'] = native.digest(assym)
+            if memdev:
+                state['memdev'].update(stage='native-cxx', failure_code='native_cxx_compile_failed')
             cxx = compile_native_components.main(current, 'C++')
+            if memdev:
+                state['memdev'].update(stage='native-asm', failure_code='native_asm_compile_failed')
             assembly = compile_native_components.main(current, 'assembly')
+            if memdev:
+                state['memdev'].update(stage='firehose', failure_code='firehose_compile_failed')
             firehose = compile_public_dependencies.main(current,
                 next(r['command'] for r in c['units'] if r['source'] == 'libkern/os/log.c'))
+            if memdev:
+                state['memdev'].update(stage='metadata', failure_code='metadata_compile_failed')
             metadata = compile_link_metadata.main(current, base)
+        if memdev:
+            state['memdev']['failure_code'] = 'compile_metadata_failed'
+            memdev_scope.collect_compile_reports(private, state['memdev'], diagnostic_roots)
         bootstrap.write_json(output / 'producer-context.json', current)
         objects = [r for report in (c, cxx, assembly, firehose, metadata) for r in report['units']]
         bootstrap.write_json(output / 'current-object-receipts.json', objects)
         if storage:
-            storage_rows = storage_link.compile_storage(current, work, output, state['storage'])
-            aliases, alias_evidence = aliases_for_current(source, objects + storage_rows, output)
+            storage_options = {}
+            if memdev:
+                state['memdev'].update(stage='storage-compile', failure_code='storage_compile_failed')
+                storage_options['diagnostic_sink'] = memdev_scope.storage_sink(state['memdev'], diagnostic_roots)
+            storage_rows = storage_link.compile_storage(current, work, output, state['storage'], **storage_options)
+            alias_options = dict(memdev_current=current, memdev_observation=state['memdev']) if memdev else {}
+            aliases, alias_evidence = aliases_for_current(source, objects + storage_rows, output, **alias_options)
             state['storage']['stage'] = 'storage-final-link'
+            link_options = dict(storage_rows=storage_rows)
+            if memdev:
+                state['memdev'].update(stage='final-link', failure_code='final_link_admission_failed')
+                link_options['runner'] = memdev_scope.link_runner(state['memdev'], diagnostic_roots)
             linked = native.direct_link(current, objects, output, provisioned['compiler'], provisioned['sdk'],
-                                        flags, aliases, toolchain['runtime'], storage_rows=storage_rows)
+                                        flags, aliases, toolchain['runtime'], **link_options)
         else:
             aliases, alias_evidence = aliases_for_current(source, objects, output)
             linked = native.direct_link(current, objects, output, provisioned['compiler'], provisioned['sdk'],
@@ -355,18 +407,56 @@ def build(work, output, *, leaf=False, checked=False, storage=False):
                      producer_id=current['producer_id'], input_binding=current['input_binding'])
         if not linked['link_succeeded']:
             raise RuntimeError('current direct kernel link failed')
+        if memdev:
+            state['memdev'].update(stage='kernel-intrinsics', failure_code='kernel_intrinsic_failed')
         kernel = output / 'current-native.macho'
         undefined = bootstrap.run(['xcrun', 'nm', '-u', kernel], ROOT, output / 'kernel-undefined.log').decode()
         symbols = bootstrap.run(['xcrun', 'nm', kernel], ROOT, output / 'kernel-symbols.log').decode()
         state.update(intrinsic_kernel_result(kernel, symbols, undefined,leaf=leaf))
         if storage:
+            if memdev:
+                state['memdev'].update(stage='storage-final-symbols', failure_code='storage_final_symbols_failed')
             storage_link.verify_final_symbols(symbols, linked, state['storage'])
+        if memdev:
+            memdev_scope.final_symbols(symbols, linked, state['memdev'])
         state.update(phase='complete', passed=True, native_objects=len(rows), dependency_objects=4,
                      candidate_archive_used=False, old_suites_executed=0)
     except BaseException as error:
+        if memdev:
+            try:
+                diagnostic_roots = memdev_scope.roots(source, output, provisioned['sdk'])
+                memdev_scope.collect_compile_reports(private, state['memdev'], diagnostic_roots)
+                reports = state['memdev']['completed_compile_reports']
+                expected = {'native-c': 'current-c-result.json', 'native-cxx': 'current-cxx-result.json',
+                    'native-asm': 'current-asm-result.json', 'firehose': 'current-public-result.json',
+                    'metadata': 'current-link-metadata-result.json'}.get(state['memdev']['stage'])
+                if expected is not None and expected not in reports:
+                    observation = state['memdev']
+                    observation.update(compile_counts_complete=False,
+                        recorded_native_compile_attempts=observation['native_compile_attempts'],
+                        recorded_dependency_compile_attempts=observation['dependency_compile_attempts'])
+                    if state['memdev']['stage'].startswith('native-'):
+                        observation.update(native_compile_attempts=None, native_compiler_successes=None)
+                    else:
+                        observation.update(dependency_compile_attempts=None, dependency_compiler_successes=None)
+                if isinstance(error, subprocess.TimeoutExpired) and state['memdev']['stage'] != 'final-link':
+                    raw = error.stderr or b''
+                    state['memdev']['timeout_diagnostics'] = memdev_scope.summarize(
+                        raw.encode() if isinstance(raw, str) else raw, diagnostic_roots)
+            except Exception as observation_error:
+                state['memdev']['observation_error_type'] = type(observation_error).__name__
         state.update(phase='failed', passed=False, error=type(error).__name__ + ': ' + str(error))
         raise
     finally:
+        if memdev:
+            observation = state['memdev']
+            observation['storage_compile_attempts'] = state['storage'].get('target_object_compile_attempts', 0)
+            observation['storage_compiler_successes'] = sum(
+                row.get('returncode') == 0 for row in observation.get('storage_diagnostics', []))
+            observation['storage_objects'] = state['storage'].get('compiled_arm64_objects', 0)
+            counts = [observation[k] for k in
+                ('native_compile_attempts', 'dependency_compile_attempts', 'storage_compile_attempts')]
+            observation['total_target_compile_attempts'] = sum(counts) if all(type(n) is int for n in counts) else None
         bootstrap.write_json(output / 'result.json', state)
         if not storage:
             collect_evidence(private, output)

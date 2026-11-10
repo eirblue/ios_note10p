@@ -126,7 +126,7 @@ def compile_complete(result, output, open_archive, commit, header_sha, require_a
 
 
 def compile_generated_complete(result, output, work, open_archive, commit, header_sha, require_arm64_object,
-                               *, existing_exports=False):
+                               *, existing_exports=False, diagnostic_sink=None):
     result.update(passed=False, stage='native-complete-input-binding')
     require(result['fresh_tool_sha256'] == GENERATION_TOOL_SHA256 and
             {name: item['sha256'] for name, item in result['fresh_generated_headers'].items()} ==
@@ -164,7 +164,14 @@ def compile_generated_complete(result, output, work, open_archive, commit, heade
         argv.extend(('-I', str(path)))
     argv.extend(('-c', str(apple / MEMBER), '-o', str(obj)))
     result.update(stage='native-complete-compile', compile_attempts=1, target_object_compile_attempts=1)
-    call = subprocess.run(argv, cwd=ROOT, capture_output=True, timeout=60)
+    try:
+        call = subprocess.run(argv, cwd=ROOT, capture_output=True, timeout=60)
+    except subprocess.TimeoutExpired as error:
+        if diagnostic_sink is not None:
+            diagnostic_sink(MEMBER, None, error.stderr or b'', True)
+        raise
+    if diagnostic_sink is not None:
+        diagnostic_sink(MEMBER, call.returncode, call.stderr, False)
     result['compiler_returncode'] = call.returncode
     if call.returncode:
         match = re.search(rb"fatal error: '([A-Za-z0-9_][A-Za-z0-9_./+\-]{0,127})' file not found", call.stderr)

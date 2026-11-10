@@ -7,6 +7,14 @@ on:
         description: Exact independently reviewed source HEAD
         required: true
         type: string
+      mode:
+        description: Reviewed final-link source scope
+        required: true
+        default: baseline
+        type: choice
+        options:
+          - baseline
+          - memdev_wide_extent
 permissions:
   contents: read
 jobs:
@@ -23,13 +31,22 @@ jobs:
       - name: Build and audit one private PC link
         env:
           N10_EXPECTED_SOURCE_HEAD: ${{ inputs.expected_source_head }}
+          N10_LINK_MODE: ${{ inputs.mode }}
         run: |
           mkdir -p note10/private
-          python -B note10/xnu26/phase1_iostorage_kernel_link.py > note10/private/phase1-iostorage-final-link.internal.log 2>&1
+          case "$N10_LINK_MODE" in
+            baseline)
+              python -B note10/xnu26/phase1_iostorage_kernel_link.py > note10/private/phase1-iostorage-final-link.internal.log 2>&1
+              ;;
+            memdev_wide_extent)
+              python -B note10/xnu26/phase1_iostorage_kernel_link.py --memdev-wide-extent > note10/private/v170-memdev-kernel-link.internal.log 2>&1
+              ;;
+            *) exit 2 ;;
+          esac
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: note10-phase1-iostorage-final-link-result
-          path: note10/private/phase1-iostorage-final-link-result/result.json
+          name: ${{ inputs.mode == 'memdev_wide_extent' && 'note10-v170-memdev-kernel-link-result' || 'note10-phase1-iostorage-final-link-result' }}
+          path: ${{ inputs.mode == 'memdev_wide_extent' && 'note10/private/v170-memdev-kernel-link-result/result.json' || 'note10/private/phase1-iostorage-final-link-result/result.json' }}
           retention-days: 7
           if-no-files-found: error

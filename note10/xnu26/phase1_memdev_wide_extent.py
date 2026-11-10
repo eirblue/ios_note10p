@@ -14,7 +14,7 @@ INPUT_PINS = {
     'note10/xnu26/test_memdev_wide_extent.py': 'd82f592347cab7466110c45be57c9cceef949ee63432c91fc1023188c8e22c45',
     'note10/xnu26/test_memdev_wide_extent.c': 'a0e3c8df788810fc89d131c7080bdd14e5303ec2d96d59925d40fc533cd8704b',
     'note10/xnu26/phase1_iostorage_native_inputs.py': 'bf34f56e47bf5a05119ad45d6e00fdd7d6972076aad02f4788459b0c112fa126',
-    'note10/xnu26/phase1_iostorage_native_complete.py': 'd383b7192f040ac860bb36032ab94828c48354ea2dda444d1357fd96cb5cc994',
+    'note10/xnu26/phase1_iostorage_native_complete.py': 'c6ac1a8685972aabd5eabdf6aa8d66d41e100e895a5212330c77f507f67f3d3c',
     'note10/xnu26/build_native_bootstrap_selection.py': '3cb6f5e2a6d88887597e44a24a5b60e1beeef494cf3b6010b3dea6912d9f5513',
     'note10/xnu26/compile_native_components.py': '0c180519af6099157d5c61a6dda788f23c6ee30dad0c12b5e700336a39a7845c',
     'note10/xnu26/user_instruction_diagnostics.py': 'c703fb7bd72191286dd6e8e4b20176bfe36a0af260e99f2d05c308688e230607',

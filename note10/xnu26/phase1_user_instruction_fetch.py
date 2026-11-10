@@ -15,7 +15,7 @@ INPUT_PINS = {
     HEADER: '6a9817830b75296d59f087b2cf96e872c8f9d4018b51e5b16d6e3b3cfdc96238',
     HOST_RECIPE: '23d32905dc66fb23a9ee34cfeba0689165302114bf8552b1bda0381005975f25',
     'note10/xnu26/phase1_iostorage_native_inputs.py': 'bf34f56e47bf5a05119ad45d6e00fdd7d6972076aad02f4788459b0c112fa126',
-    'note10/xnu26/phase1_iostorage_native_complete.py': 'd383b7192f040ac860bb36032ab94828c48354ea2dda444d1357fd96cb5cc994',
+    'note10/xnu26/phase1_iostorage_native_complete.py': 'c6ac1a8685972aabd5eabdf6aa8d66d41e100e895a5212330c77f507f67f3d3c',
     'note10/xnu26/compile_native_components.py': '0c180519af6099157d5c61a6dda788f23c6ee30dad0c12b5e700336a39a7845c',
 }
 HOST_PASS = {
