@@ -11,6 +11,7 @@ MAX_BYTES = 16 * 1024 * 1024
 MAX_NODES = 4096
 MAX_DEPTH = 32
 MAX_PROPS = 1024
+RAMDISK_MAX_BYTES = 0xfffff000
 
 
 @dataclass
@@ -104,7 +105,7 @@ def encode_ramdisk_adt(root, *, mapped_ram, backing, physical_base, size):
     disk = Region(physical_base, size)
     unit = 1 << 12
     # memdev reconstructs bytes with the unwidened uint32_t mdSize << 12.
-    if not disk.start or disk.start % unit or disk.size % unit or disk.size > 0xfffff000:
+    if not disk.start or disk.start % unit or disk.size % unit or disk.size > RAMDISK_MAX_BYTES:
         raise ValueError('RAMDisk must fit the aligned 32-bit consumer byte extent')
     if backing.start % PAGE or backing.size % PAGE:
         raise ValueError('RAMDisk backing must meet the selected 16 KiB alignment')
