@@ -28,17 +28,24 @@ HOST_PASS = {
 }
 DEFINITIONS = ['_mdevBMajor', '_mdevCMajor', '_mdevadd', '_mdevgetrange',
                '_mdevinit', '_mdevlookup', '_mdevremoveall']
+PROJECTION_PINS = {
+    'note10/xnu26/memdev_config_projection.py': '72fd77f590d47d1612491da9b3f39ccbcca1dca9ac405da27cdd3c855abce563',
+    'note10/xnu26/test_memdev_config_projection.py': '72971be9a5560e6aa3088edcabcee33425e895fda477871782e3d66da08499aa',
+}
 
 
-def compile_memdev(result, output, require_arm64_object):
+def compile_memdev(result, output, require_arm64_object, *, context_observation=False):
     result.update(passed=False, scope='public-reference-memdev-wide-extent-one-object-no-link-or-runtime',
         stage='memdev-source-binding', host_pass=HOST_PASS, memdev_object_verified=False,
         compiled_arm64_objects=0, target_object_compile_attempts=0, partial_link_attempts=0,
         kernel_links=0, production_hook=False, firmware_abi_verified=False,
         synthetic_board_inputs=True, exact_target_source=False)
-    require(all(sha(ROOT / name) == digest for name, digest in INPUT_PINS.items()),
+    if context_observation:
+        result['scope'] = 'public-reference-memdev-context-observation-one-object-no-link-or-runtime'
+    pins = dict(INPUT_PINS, **PROJECTION_PINS) if context_observation else INPUT_PINS
+    require(all(sha(ROOT / name) == digest for name, digest in pins.items()),
             'reviewed memdev patch or native recipe differs')
-    result['source_sha256'].update(INPUT_PINS)
+    result['source_sha256'].update(pins)
     from prepare_memdev_wide_extent import REL, REFERENCE_PINS, POSTIMAGE_SHA256, PATCH_NAME, PATCH_SHA256, patch_bytes
     from build_native_bootstrap_selection import definitions
     from phase1_iostorage_native_complete import (GENERATION_TOOL_SHA256, GENERATION_HEADER_SHA256,
@@ -66,20 +73,59 @@ def compile_memdev(result, output, require_arm64_object):
                   public_reference_sha256={name: digest for name, (_, digest) in REFERENCE_PINS.items()})
     native = ROOT / 'note10/private/windows-xnu'
     config = native / 'configured/DEVELOPMENT/bsd'
+    if context_observation:
+        observation = dict(schema='note10-v169-memdev-context-observation-v1',
+                           failure_code='bsd_configuration_record_failed', checks={})
+        result['context_observation'] = observation
+
+        def observe(code, checks):
+            observation['checks'].update(checks)
+            observation['failure_code'] = 'none' if all(checks.values()) else code
+            require(all(checks.values()), 'BSD context predicates differ')
+
     configured = json.loads((native / 'configure-result.json').read_bytes())
     rows = [row for row in configured['configured'] if row['variant'] == 'DEVELOPMENT' and row['component'] == 'bsd']
-    require(configured['source_directory'] == source.relative_to(ROOT).as_posix() and
-            configured['source_commit'] == context['public_source_commit'] and len(rows) == 1 and
-            sha(config / 'Makefile') == rows[0]['makefile_sha256'], 'fresh BSD configuration required')
+    if context_observation:
+        observe('bsd_configuration_binding_failed', dict(
+            bsd_source_directory=configured['source_directory'] == source.relative_to(ROOT).as_posix(),
+            bsd_source_commit=configured['source_commit'] == context['public_source_commit'],
+            bsd_row_unique=len(rows) == 1,
+            bsd_makefile=len(rows) == 1 and (config / 'Makefile').is_file() and
+                sha(config / 'Makefile') == rows[0]['makefile_sha256']))
+    else:
+        require(configured['source_directory'] == source.relative_to(ROOT).as_posix() and
+                configured['source_commit'] == context['public_source_commit'] and len(rows) == 1 and
+                sha(config / 'Makefile') == rows[0]['makefile_sha256'], 'fresh BSD configuration required')
+    if context_observation:
+        observation['failure_code'] = 'bsd_headers_read_failed'
     headers = rows[0]['headers']
-    require(type(headers) is dict and 0 < len(headers) <= 512 and 'meta_features.h' in headers and
-            all(re.fullmatch(r'[A-Za-z0-9_.+-]{1,96}\.h', name) and
-                (config / name).is_file() and 0 < (config / name).stat().st_size <= 1048576 and
-                sha(config / name) == digest for name, digest in headers.items()),
-            'all fresh BSD generated headers required')
+    if context_observation:
+        inventory = type(headers) is dict and 0 < len(headers) <= 512 and 'meta_features.h' in headers
+        names = inventory and all(type(name) is str and re.fullmatch(r'[A-Za-z0-9_.+-]{1,96}\.h', name)
+                                  for name in headers)
+        files = bool(names) and all((config / name).is_file() and
+                                   0 < (config / name).stat().st_size <= 1048576 for name in headers)
+        hashes = files and all(sha(config / name) == digest for name, digest in headers.items())
+        observe('bsd_header_binding_failed', dict(bsd_header_inventory=inventory,
+            bsd_header_names=bool(names), bsd_header_files=files, bsd_header_hashes=hashes))
+        observation['failure_code'] = 'bsd_defines_parse_failed'
+    else:
+        require(type(headers) is dict and 0 < len(headers) <= 512 and 'meta_features.h' in headers and
+                all(re.fullmatch(r'[A-Za-z0-9_.+-]{1,96}\.h', name) and
+                    (config / name).is_file() and 0 < (config / name).stat().st_size <= 1048576 and
+                    sha(config / name) == digest for name, digest in headers.items()),
+                'all fresh BSD generated headers required')
     defines = definitions((config / 'Makefile').read_text())
-    require(all(re.fullmatch(r'-D[A-Za-z0-9_]+(?:=[A-Za-z0-9_+.-]+)?', flag) for flag in defines),
-            'path-free actual BSD config defines required')
+    if context_observation:
+        observation['checks']['bsd_defines_parsed'] = True
+        observation['failure_code'] = 'bsd_defines_projection_failed'
+        from memdev_config_projection import project_defines
+        public_defines, result['config_projection'] = project_defines(defines)
+        observation['checks']['bsd_defines_projected'] = True
+        observation['failure_code'] = 'none'
+    else:
+        require(all(re.fullmatch(r'-D[A-Za-z0-9_]+(?:=[A-Za-z0-9_+.-]+)?', flag) for flag in defines),
+                'path-free actual BSD config defines required')
     result.update(bsd_makefile_sha256=rows[0]['makefile_sha256'], bsd_generated_headers_sha256=headers,
         bsd_config_header_sha256=headers['meta_features.h'],
         bsd_config_defines_sha256=hashlib.sha256(json.dumps(defines, separators=(',', ':')).encode()).hexdigest())
@@ -151,6 +197,9 @@ def compile_memdev(result, output, require_arm64_object):
         stream.write(json.dumps(argv) + '\n')
     path_options = {'-I', '-include', '-isysroot', '-c', '-o'}
     safe_flags = [arg for i, arg in enumerate(argv[1:], 1) if arg not in path_options and argv[i-1] not in path_options]
+    if context_observation:
+        safe_flags = [*safe_flags[:len(PRE_CONFIG_FLAGS)], *public_defines,
+                      *safe_flags[len(PRE_CONFIG_FLAGS) + len(defines):]]
     result.update(stage='memdev-one-object-compile', compiler_flags=safe_flags, compiler_argv_count=len(argv),
         compiler_argv_sha256=hashlib.sha256(json.dumps(argv, separators=(',', ':')).encode()).hexdigest(),
         compile_attempts=1, target_object_compile_attempts=1)

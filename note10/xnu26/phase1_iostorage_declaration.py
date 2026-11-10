@@ -434,7 +434,8 @@ def main():
                                           'native_inputs', 'native_complete', 'relocatable_closure',
                                           'user_instruction_object', 'user_instruction_diagnostics',
                                           'user_instruction_header_context', 'user_auth_branch_object',
-                                          'user_auth_branch_closure', 'memdev_wide_extent'),
+                                          'user_auth_branch_closure', 'memdev_wide_extent',
+                                          'memdev_context_observation'),
                         default='declaration')
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
@@ -451,7 +452,8 @@ def main():
     closure = args.mode == 'relocatable_closure'
     auth_branch = args.mode == 'user_auth_branch_object'
     user_branch_closure = args.mode == 'user_auth_branch_closure'
-    memdev_wide = args.mode == 'memdev_wide_extent'
+    memdev_context = args.mode == 'memdev_context_observation'
+    memdev_wide = args.mode in ('memdev_wide_extent', 'memdev_context_observation')
     header_context = args.mode in ('user_instruction_header_context', 'user_auth_branch_object')
     diagnostics = args.mode in ('user_instruction_diagnostics', 'user_instruction_header_context', 'user_auth_branch_object')
     user_fetch = args.mode in ('user_instruction_object', 'user_instruction_diagnostics',
@@ -466,6 +468,7 @@ def main():
         'user_auth_branch_object': USER_FETCH_SOURCE,
         'user_auth_branch_closure': USER_BRANCH_CLOSURE_SOURCE,
         'memdev_wide_extent': MEMDEV_WIDE_SOURCE,
+        'memdev_context_observation': MEMDEV_WIDE_SOURCE,
     }.get(args.mode)
     paths = (WORKFLOW, Path(__file__).resolve().relative_to(ROOT).as_posix())
     if source is not None:
@@ -499,7 +502,8 @@ def main():
         for name in ('iostorage_commit', 'archive_sha256', 'archive_header_sha256'):
             del result[name]
     if memdev_wide:
-        result['schema'] = 'note10-v168-memdev-wide-extent-result-v1'
+        result['schema'] = ('note10-v169-memdev-context-observation-result-v1' if memdev_context else
+                            'note10-v168-memdev-wide-extent-result-v1')
         for name in ('iostorage_commit', 'archive_sha256', 'archive_header_sha256'):
             del result[name]
     if args.mode == 'pio_link':
@@ -514,7 +518,7 @@ def main():
     try:
         if memdev_wide:
             from phase1_memdev_wide_extent import compile_memdev
-            compile_memdev(result, out, require_arm64_object)
+            compile_memdev(result, out, require_arm64_object, context_observation=memdev_context)
         elif user_branch_closure:
             from phase1_user_auth_branch_closure import compile_auth_branch_closure
             compile_auth_branch_closure(result, out, require_arm64_object)
@@ -599,6 +603,8 @@ def main():
             compiler_flags compiler_argv_count compiler_argv_sha256 compiler_returncode compiler_timed_out
             compiler_diagnostics object_sha256 object_bytes defined_external_symbols undefined_external_symbols
             memdev_object_verified'''.split()
+        if memdev_context:
+            public_fields.extend(('context_observation', 'config_projection'))
         result = {name: result[name] for name in public_fields if name in result}
     raw = json.dumps(result, indent=2, sort_keys=True) + '\n'
     (out / 'result.json').write_text(raw, encoding='utf-8', newline='\n')
