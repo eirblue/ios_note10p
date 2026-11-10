@@ -4,7 +4,7 @@ No firmware identities, MMIO values, CPU topology or GIC ownership are inferred.
 This is not a Linux FDT-to-platform conversion or an IM4P encoder.
 Placeholder properties are deliberately unsupported by this producer.
 """
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import struct
 
 MAX_BYTES = 16 * 1024 * 1024
@@ -89,3 +89,42 @@ def decode(raw):
     result = visit(0)
     if cursor != len(raw): raise ValueError('Trailing ADT bytes')
     return result
+
+
+def encode_ramdisk_adt(root, *, mapped_ram, backing, physical_base, size):
+    """Encode a synthetic RAMDisk declaration using caller-supplied ranges.
+
+    The backing region follows the selected 16 KiB placement contract. The
+    property stores byte values aligned to the consumer's 4 KiB units.
+    """
+    from boot_contract import PAGE, Region
+
+    if not isinstance(root, Node) or not all(isinstance(r, Region) for r in (mapped_ram, backing)):
+        raise ValueError('ADT root and explicit mapped RAM/backing regions required')
+    disk = Region(physical_base, size)
+    unit = 1 << 12
+    # memdev reconstructs bytes with the unwidened uint32_t mdSize << 12.
+    if not disk.start or disk.start % unit or disk.size % unit or disk.size > 0xfffff000:
+        raise ValueError('RAMDisk must fit the aligned 32-bit consumer byte extent')
+    if backing.start % PAGE or backing.size % PAGE:
+        raise ValueError('RAMDisk backing must meet the selected 16 KiB alignment')
+    if not mapped_ram.contains(backing) or not backing.contains(disk):
+        raise ValueError('RAMDisk must fit its backing inside mapped RAM')
+
+    chosen_nodes = [child for child in root.children if child.name == 'chosen']
+    if len(chosen_nodes) != 1:
+        raise ValueError('Expected one existing /chosen node')
+    chosen = chosen_nodes[0]
+    maps = [child for child in chosen.children if child.name == 'memory-map']
+    if len(maps) > 1 or (maps and 'RAMDisk' in maps[0].properties):
+        raise ValueError('Duplicate memory-map or RAMDisk declaration')
+
+    value = struct.pack('<QQ', disk.start, disk.size)
+    if maps:
+        current = maps[0]
+        memory_map = replace(current, properties=dict(current.properties, RAMDisk=value))
+        children = [memory_map if child is current else child for child in chosen.children]
+    else:
+        children = [*chosen.children, Node('memory-map', {'RAMDisk': value})]
+    updated = replace(chosen, children=children)
+    return encode(replace(root, children=[updated if child is chosen else child for child in root.children]))
