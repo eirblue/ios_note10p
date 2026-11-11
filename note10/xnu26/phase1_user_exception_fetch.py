@@ -23,6 +23,32 @@ SOURCE_FILES = (
     'note10/inspect_macho.py',
     *overlay.PINS,
 )
+BOUNDARY_IMPORTS = {'section$start$__DATA_CONST$__kern_brk_desc',
+                    'section$end$__DATA_CONST$__kern_brk_desc'}
+SYMBOL_FAILURE_CODES = {'symbol_process_or_output_bounds', 'symbol_utf8',
+                        'symbol_name_admission', 'symbol_set_or_fetch_edge', 'symbol_view_unclassified'}
+
+
+def external_symbols(raw, returncode):
+    require(returncode == 0 and len(raw) <= 131072, 'symbol_process_or_output_bounds')
+    try:
+        text = raw.decode('utf-8')
+    except UnicodeError:
+        raise ValueError('symbol_utf8') from None
+    defined, undefined = [], []
+    for line in text.splitlines():
+        if 'non-external' in line or not re.search(r'\bexternal\b', line):
+            continue
+        name = line.split()[-1]
+        imported = '(undefined)' in line
+        require(re.fullmatch(r'_[A-Za-z0-9_.$]{1,383}', name) is not None or
+                (imported and name in BOUNDARY_IMPORTS), 'symbol_name_admission')
+        (undefined if imported else defined).append(name)
+    require(len(defined) <= 256 and len(undefined) <= 256 and
+            len(set(defined)) == len(defined) and len(set(undefined)) == len(undefined) and
+            undefined.count('_n10_fetch_user_instruction') == 1 and '_n10_fetch_user_instruction' not in defined,
+            'symbol_set_or_fetch_edge')
+    return sorted(defined), sorted(undefined)
 
 
 def caller_argv(compiler, source, native, sdk, output):
@@ -85,20 +111,9 @@ def compile_caller(result, output):
     view = subprocess.run(['xcrun', '--sdk', 'macosx', 'nm', '-m', str(obj)], cwd=ROOT,
                           capture_output=True, timeout=30)
     (output / 'nm.internal.log').write_bytes(view.stdout + view.stderr)
-    require(view.returncode == 0 and len(view.stdout) <= 131072, 'bounded new caller symbol view required')
-    defined, undefined = [], []
-    for line in view.stdout.decode('utf-8').splitlines():
-        if 'non-external' in line or not re.search(r'\bexternal\b', line):
-            continue
-        name = line.split()[-1]
-        require(re.fullmatch(r'_[A-Za-z0-9_.$]{1,383}', name), 'bounded external symbol name required')
-        (undefined if '(undefined)' in line else defined).append(name)
-    require(len(defined) <= 256 and len(undefined) <= 256 and
-            len(set(defined)) == len(defined) and len(set(undefined)) == len(undefined) and
-            undefined.count('_n10_fetch_user_instruction') == 1 and '_n10_fetch_user_instruction' not in defined,
-            'new actual caller must import the genuine fetch')
-    result.update(stage='complete', passed=True, caller_compile_verified=True,
-                  defined_external_symbols=sorted(defined), undefined_external_symbols=sorted(undefined))
+    defined, undefined = external_symbols(view.stdout, view.returncode)
+    result.update(stage='complete', passed=True, caller_compile_verified=True, symbol_validation_verified=True,
+                  defined_external_symbols=defined, undefined_external_symbols=undefined)
 
 
 def main():
@@ -121,9 +136,12 @@ def main():
         compile_caller(result, OUTPUT)
     except Exception as error:
         result.update(passed=False, failure_type=type(error).__name__)
+        if result['stage'] == 'new-caller-symbol-view':
+            reason = str(error)
+            result['symbol_failure_code'] = reason if reason in SYMBOL_FAILURE_CODES else 'symbol_view_unclassified'
     # Native generation exposes private paths in intermediate metadata; publish only these fields.
     fields = '''schema source_head run_id run_attempt target scope stage passed failure_type source_sha256
-        caller_compile_verified target_object_compile_attempts compiler_returncode compiler_argv_sha256
+        caller_compile_verified symbol_validation_verified symbol_failure_code target_object_compile_attempts compiler_returncode compiler_argv_sha256
         compiler_diagnostics native_context overlay fresh_tool_sha256 compiler_version sdk_version
         native_inputs_generated host_config_tool_built new_object_raw_reads new_object_nm_views object_sha256
         object_bytes defined_external_symbols undefined_external_symbols unchanged_fetch_compiles kernel_builds
