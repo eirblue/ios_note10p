@@ -3,6 +3,7 @@ import difflib
 import hashlib
 import json
 from pathlib import Path
+import re
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -19,6 +20,9 @@ PINS = {SOURCE: '20becc0643449b8116a22efb377e9486c18830569e5294c87931930d004eb1b
         HEADER: '6a9817830b75296d59f087b2cf96e872c8f9d4018b51e5b16d6e3b3cfdc96238',
         'note10/xnu26/user_instruction_header_context.h': 'a2fa27027f150b5b76168f3c025287697e383225063d80b951973e0cc41ef069'}
 CAP = 1048576
+COPYIN_REL = 'osfmk/arm64/copyio.c'
+COPYIN_SHA = '3be70427aebd03f130de44ca06db5adcbf16a9576fa43b9ccc47a50f29930456'
+LINK_SYMBOLS = ('_sleh_synchronous', '_n10_fetch_user_instruction', '_copyin')
 READ_BEFORE = '\tCOPYIN(get_saved_state_pc(state), (char *)&instr, sizeof(instr));'
 READ_AFTER = '''#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
 \tif (PSR64_IS_USER64(get_saved_state_cpsr(state))) {
@@ -42,12 +46,12 @@ def sha(raw):
     return hashlib.sha256(raw).hexdigest()
 
 
-def read(path):
+def read(path, cap=CAP):
     require(path.resolve() == path and not path.is_symlink() and path.is_file() and
-            0 < path.stat().st_size <= CAP, 'ordinary bounded source required')
+            0 < path.stat().st_size <= cap, 'ordinary bounded source required')
     with path.open('rb') as stream:
-        raw = stream.read(CAP + 1)
-    require(len(raw) == path.stat().st_size <= CAP, 'source extent differs')
+        raw = stream.read(cap + 1)
+    require(len(raw) == path.stat().st_size <= cap, 'source extent differs')
     return raw
 
 
@@ -92,7 +96,7 @@ def apply(source, output):
     return observation
 
 
-def admit_binding(current):
+def admit_provenance(current):
     observation = current['producer'].get('user_exception_fetch')
     require(observation == proof() and current['bindings'].get('user_exception_fetch') ==
             hashlib.sha256(json.dumps(observation, sort_keys=True, separators=(',', ':')).encode()).hexdigest(),
@@ -101,7 +105,86 @@ def admit_binding(current):
     require(len(rows) == 1 and rows[0]['source_sha256'] == POSTIMAGE and rows[0]['component'] == 'osfmk' and
             rows[0]['kind'] == 'C', 'one new caller inventory owner required')
     provider = current['dependencies'].get(UNIT)
+    require(type(provider) is dict and set(provider) == {'path', 'source_sha256'} and
+            type(provider['path']) is str and 0 < len(provider['path']) <= 4096 and
+            provider['source_sha256'] == PINS[SOURCE], 'genuine provider source provenance required')
+
+
+def admit_binding(current):
+    admit_provenance(current)
+    provider = current['dependencies'][UNIT]
     require(provider == dict(path=str(ROOT / SOURCE), source_sha256=PINS[SOURCE]), 'genuine current provider identity required')
+
+
+def link_begin():
+    return dict(schema='note10-v200-user-exception-symbol-provenance-v1', stage='pending', passed=False,
+                object_provenance_verified=False, final_symbols_verified=False,
+                runtime_copyin_verified=False, runtime_task_map_observed=False, native_activation=False,
+                firmware_abi_verified=False, physical_ready=False)
+
+
+def bind_symbol_origins(current, rows, defined, references, aliases, observation):
+    from current_native_kernel import digest
+    admit_provenance(current)
+    require(current['producer_id'] == digest(current['producer']) and current['input_binding'] == digest(current['bindings']),
+            'current symbol provenance context required')
+    by_path = {r['object_path']: r for r in rows}
+    require(len(by_path) == len(rows), 'unique current object paths required')
+    expected = ((REL, POSTIMAGE, 'native'), (UNIT, PINS[SOURCE], 'port'), (COPYIN_REL, COPYIN_SHA, 'native'))
+    members = {}
+    for symbol, (name, source_sha, category) in zip(LINK_SYMBOLS, expected):
+        paths = defined.get(symbol, [])
+        require(len(paths) == 1 and paths[0] in by_path and symbol not in aliases,
+                'unique genuine symbol provider without alias required')
+        row = by_path[paths[0]]
+        require(row['source'] == name and row['source_sha256'] == source_sha and row['category'] == category and
+                row['passed'] is True and row['producer_id'] == current['producer_id'] and
+                row['input_binding'] == current['input_binding'], 'exact caller/fetch/native copyin origin required')
+        members[symbol] = {k: row[k] for k in ('source', 'source_sha256', 'object_path', 'object_sha256', 'category')}
+    require(members[LINK_SYMBOLS[0]]['object_path'] in references.get(LINK_SYMBOLS[1], []) and
+            members[LINK_SYMBOLS[1]]['object_path'] in references.get(LINK_SYMBOLS[2], []),
+            'actual caller to fetch to native copyin references required')
+    observation.update(stage='object-symbols', producer_id=current['producer_id'], input_binding=current['input_binding'],
+                       members=members, caller_references_fetch=True, fetch_references_native_copyin=True,
+                       aliases_substituted=False, object_provenance_verified=True)
+
+
+def final_symbols(symbols, linked, current, observation):
+    from current_native_kernel import expected_objects
+    names = [parts[-1] for line in symbols.splitlines() if len(parts := line.split()) >= 3 and
+             re.fullmatch('[0-9a-fA-F]+', parts[0]) and parts[-2].isupper()]
+    count = expected_objects(current, storage='storage' in current)
+    require(observation['object_provenance_verified'] is True and
+            linked['object_count'] == count and
+            linked['link_succeeded'] is True and type(linked['returncode']) is int and linked['returncode'] == 0 and
+            all(names.count(name) == 1 for name in LINK_SYMBOLS), 'exact final three source symbols required')
+    observation.update(stage='complete', passed=True, final_symbols_verified=True,
+                       final_symbol_counts={name: names.count(name) for name in LINK_SYMBOLS}, linked_objects=count)
+
+
+def tool_counts(native, observation, complete):
+    """Report completed recorded work; unobservable partial generator counts stay null."""
+    counts = dict(counts_complete=False, linked_unit_compile_attempts=observation.get('total_target_compile_attempts'),
+                  auxiliary_genassym_target_compiles=None, total_target_driver_compile_jobs=None,
+                  host_config_compiler_drivers=None, host_config_C_units=None, host_config_links=None,
+                  bison=None, flex=None, IIG_attempts=None, IIG_successes=None, MIG_attempts=None,
+                  MIG_successes=None, alias_map_generations=None, alias_assembler_invocations=0, nm_invocations=None)
+    if not complete:
+        return counts
+    extra = json.loads(read(native / 'native-extra-result.json', 8388608))
+    mig = json.loads(read(native / 'native-mig-result.json', 8388608))
+    assym = json.loads(read(native / 'current-genassym-result.json', 8388608))
+    commands = [r for r in extra['commands'] if '--def' in r['command']]
+    migrations = mig['interfaces'] + mig['generated_sources']
+    require(assym['passed'] is True and observation['total_target_compile_attempts'] == 1078 and
+            all(r['exit_code'] == 0 for r in commands) and all(r['passed'] is True for r in migrations),
+            'complete actual generator/target reports required')
+    counts.update(counts_complete=True, linked_unit_compile_attempts=1078, auxiliary_genassym_target_compiles=1,
+                  total_target_driver_compile_jobs=1079, host_config_compiler_drivers=1, host_config_C_units=9,
+                  host_config_links=1, bison=1, flex=1, IIG_attempts=len(commands),
+                  IIG_successes=sum(r['exit_code'] == 0 for r in commands), MIG_attempts=len(migrations),
+                  MIG_successes=sum(r['passed'] is True for r in migrations), alias_map_generations=1, nm_invocations=4)
+    return counts
 
 
 def fetch_argv(compiler, source, native, sdk, output):

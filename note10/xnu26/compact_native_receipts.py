@@ -7,12 +7,14 @@ import re
 from current_native_kernel import digest, EXTRAS
 
 RAW_MAX = 32 * 1024 * 1024
+FETCH_RAW_MAX = 64 * 1024 * 1024
 COMPACT_MAX = 8 * 1024 * 1024
 CORE = ('source', 'category', 'passed', 'source_sha256', 'object_path', 'object_sha256',
         'producer_id', 'input_binding')
 CODES = {'compact_input_shape', 'compact_context_binding', 'compact_inventory_binding',
          'compact_duplicate_receipt', 'compact_source_binding', 'compact_object_owner',
-         'compact_assembly_binding', 'compact_storage_binding', 'compact_filelist_binding', 'compact_output_limit'}
+         'compact_assembly_binding', 'compact_storage_binding', 'compact_filelist_binding', 'compact_output_limit',
+         'compact_fetch_binding'}
 STORAGE = ('IOStorage.cpp', 'IOBlockStorageDevice.cpp', 'phase1_iostorage_provider_object.cpp',
            'note10_iostorage_pio_bridge.cpp', 'note10_iostorage_read_range.c', 'note10_iostorage_read_request.c')
 
@@ -34,10 +36,25 @@ def hex64(value):
     return type(value) is str and re.fullmatch('[0-9a-f]{64}', value) is not None
 
 
-def project(raw, current, storage, link, filelist, producer):
-    require(type(raw) is bytes and 0 < len(raw) <= RAW_MAX, 'compact_input_shape')
-    rows = json.loads(raw, object_pairs_hook=unique)
-    require(type(rows) is list and len(rows) == 1071 and all(type(row) is dict for row in rows), 'compact_input_shape')
+def validate_rows(rows, current, storage, link, filelist, producer, *, user_exception_fetch=False):
+    require(type(user_exception_fetch) is bool, 'compact_input_shape')
+    extras = dict(EXTRAS)
+    if user_exception_fetch:
+        from prepare_user_exception_fetch import UNIT, admit_provenance
+        try:
+            admit_provenance(current)
+        except ValueError:
+            raise ValueError('compact_fetch_binding') from None
+        provider_path = PurePosixPath(current['dependencies'][UNIT]['path'])
+        require(provider_path.is_absolute() and '..' not in provider_path.parts and
+                provider_path.as_posix() == current['dependencies'][UNIT]['path'] and
+                provider_path.parts[-3:] == ('note10', 'xnu26', 'note10_user_instruction_fetch.c'),
+                'compact_source_binding')
+        extras[UNIT] = 'port'
+    else:
+        require('user_exception_fetch' not in current['producer'], 'compact_context_binding')
+    row_count, linked_count = (1072, 1078) if user_exception_fetch else (1071, 1077)
+    require(type(rows) is list and len(rows) == row_count and all(type(row) is dict for row in rows), 'compact_input_shape')
     require(current['kind'] == 'v84-current-native' and current['producer_id'] == digest(current['producer']) and
             current['input_binding'] == digest(current['bindings']) and
             current['producer']['source_commit'] == producer['source_head'], 'compact_context_binding')
@@ -46,9 +63,9 @@ def project(raw, current, storage, link, filelist, producer):
             digest([{k: row[k] for k in ('source','component','kind','source_sha256')} for row in inventory]) ==
             producer['memdev_integration']['native_manifest_sha256'], 'compact_inventory_binding')
     expected = {row['source']: row for row in inventory}
-    require(len(expected) == 1067 and not set(expected) & set(EXTRAS) and
-            set(current['dependencies']) == set(EXTRAS), 'compact_inventory_binding')
-    categories = {name: 'native' for name in expected} | EXTRAS
+    require(len(expected) == 1067 and not set(expected) & set(extras) and
+            set(current['dependencies']) == set(extras), 'compact_inventory_binding')
+    categories = {name: 'native' for name in expected} | extras
     sources = {name: row['source_sha256'] for name, row in expected.items()}
     sources.update({name: row['source_sha256'] for name, row in current['dependencies'].items()})
     seen, paths = set(), set()
@@ -101,11 +118,19 @@ def project(raw, current, storage, link, filelist, producer):
         paths.add(row['object_path'])
     require(link['producer_id'] == current['producer_id'] and link['input_binding'] == current['input_binding'] and
             link['link_succeeded'] is True and type(link['returncode']) is int and link['returncode'] == 0 and
-            type(link['object_count']) is int and link['object_count'] == 1077 and len(paths) == 1077 and
+            type(link['object_count']) is int and link['object_count'] == linked_count and len(paths) == linked_count and
             filelist.decode('utf-8').splitlines() == [row['object_path'] for row in rows + units] and
             hashlib.sha256(filelist).hexdigest() == link['filelist_sha256'], 'compact_filelist_binding')
+
+
+def project(raw, current, storage, link, filelist, producer, *, user_exception_fetch=False):
+    limit = FETCH_RAW_MAX if user_exception_fetch else RAW_MAX
+    require(type(raw) is bytes and 0 < len(raw) <= limit, 'compact_input_shape')
+    rows = json.loads(raw, object_pairs_hook=unique)
+    validate_rows(rows, current, storage, link, filelist, producer, user_exception_fetch=user_exception_fetch)
     compact = [{key: row[key] for key in (*CORE, *(['assembly_input'] if 'assembly_input' in row else []))} for row in rows]
-    value = dict(schema='note10-v174-compact-native-object-receipts-v1', raw_bytes=len(raw),
+    value = dict(schema='note10-v200-compact-native-object-receipts-v1' if user_exception_fetch else
+                 'note10-v174-compact-native-object-receipts-v1', raw_bytes=len(raw),
                  raw_sha256=hashlib.sha256(raw).hexdigest(), units=compact)
     output = (json.dumps(value, sort_keys=True, indent=2)+'\n').encode()
     require(len(output) <= COMPACT_MAX, 'compact_output_limit')

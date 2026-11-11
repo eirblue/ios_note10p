@@ -98,7 +98,8 @@ def collect_evidence(private, output):
             shutil.copyfile(path, dest)
 
 
-def aliases_for_current(source, rows, output, *, memdev_current=None, memdev_observation=None):
+def aliases_for_current(source, rows, output, *, memdev_current=None, memdev_observation=None,
+                        fetch_current=None, fetch_observation=None):
     from audit_link_inputs import symbols
     paths = [row['object_path'] for row in rows]
     raw = bootstrap.run(['xcrun', 'nm', '-g', *paths], ROOT, output / 'current-object-symbols.log')
@@ -124,6 +125,9 @@ def aliases_for_current(source, rows, output, *, memdev_current=None, memdev_obs
                 raise ValueError('ambiguous real export alias')
             aliases[name] = implementation
             pins[path.relative_to(source).as_posix()] = native.file_sha(path)
+    if fetch_current is not None:
+        from prepare_user_exception_fetch import bind_symbol_origins
+        bind_symbol_origins(fetch_current, rows, defined, references, aliases, fetch_observation)
     raw_alias = output / 'current-aliases.exports'
     raw_alias.write_text(''.join(a + ':' + b + '\n' for a, b in sorted(aliases.items())))
     result = output / 'current-aliases.exp'
@@ -247,6 +251,8 @@ def build(work, output, *, leaf=False, checked=False, storage=False, memdev=Fals
         state.update(kind='phase1-iostorage-final-link-pc', storage={'stage': 'pending'})
     if memdev:
         state.update(kind='v170-memdev-kernel-link-pc', memdev=memdev_scope.begin())
+    if user_exception_fetch:
+        state['user_exception_fetch_link'] = fetch_scope.link_begin()
     state['build_only_prior_pass'] = prior_pass
     bootstrap.write_json(output / 'result.json', state)
     original_env = dict(os.environ)
@@ -418,6 +424,8 @@ def build(work, output, *, leaf=False, checked=False, storage=False, memdev=Fals
                 storage_options['diagnostic_sink'] = memdev_scope.storage_sink(state['memdev'], diagnostic_roots)
             storage_rows = storage_link.compile_storage(current, work, output, state['storage'], **storage_options)
             alias_options = dict(memdev_current=current, memdev_observation=state['memdev']) if memdev else {}
+            if user_exception_fetch:
+                alias_options.update(fetch_current=current, fetch_observation=state['user_exception_fetch_link'])
             aliases, alias_evidence = aliases_for_current(source, objects + storage_rows, output, **alias_options)
             state['storage']['stage'] = 'storage-final-link'
             link_options = dict(storage_rows=storage_rows)
@@ -427,7 +435,8 @@ def build(work, output, *, leaf=False, checked=False, storage=False, memdev=Fals
             linked = native.direct_link(current, objects, output, provisioned['compiler'], provisioned['sdk'],
                                         flags, aliases, toolchain['runtime'], **link_options)
         else:
-            aliases, alias_evidence = aliases_for_current(source, objects, output)
+            fetch_options = dict(fetch_current=current, fetch_observation=state['user_exception_fetch_link']) if user_exception_fetch else {}
+            aliases, alias_evidence = aliases_for_current(source, objects, output, **fetch_options)
             linked = native.direct_link(current, objects, output, provisioned['compiler'], provisioned['sdk'],
                                         flags, aliases, toolchain['runtime'])
         state.update(link=linked, alias_evidence=alias_evidence, layout_variables=layout,
@@ -446,6 +455,8 @@ def build(work, output, *, leaf=False, checked=False, storage=False, memdev=Fals
             storage_link.verify_final_symbols(symbols, linked, state['storage'], current=current)
         if memdev:
             memdev_scope.final_symbols(symbols, linked, state['memdev'], current=current)
+        if user_exception_fetch:
+            fetch_scope.final_symbols(symbols, linked, current, state['user_exception_fetch_link'])
         state.update(phase='complete', passed=True, native_objects=len(rows), dependency_objects=len(current['dependencies']),
                      candidate_archive_used=False, old_suites_executed=0)
     except BaseException as error:
@@ -486,6 +497,11 @@ def build(work, output, *, leaf=False, checked=False, storage=False, memdev=Fals
             counts = [observation[k] for k in
                 ('native_compile_attempts', 'dependency_compile_attempts', 'storage_compile_attempts')]
             observation['total_target_compile_attempts'] = sum(counts) if all(type(n) is int for n in counts) else None
+        if user_exception_fetch and storage and memdev:
+            try:
+                state['user_exception_tool_counts'] = fetch_scope.tool_counts(private, state['memdev'], state['passed'])
+            except (OSError, ValueError, KeyError, TypeError) as error:
+                state.update(phase='failed', passed=False, error='new tool count proof: ' + type(error).__name__)
         bootstrap.write_json(output / 'result.json', state)
         if not storage:
             collect_evidence(private, output)

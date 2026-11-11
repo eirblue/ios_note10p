@@ -1,6 +1,7 @@
 """One reviewed PC-only final link with six fresh storage objects."""
 import argparse
 import json
+import os
 from pathlib import Path
 import re
 
@@ -134,7 +135,10 @@ def main():
     args = parser.parse_args()
     compact = args.memdev_compact_artifact
     artifact = args.memdev_handoff_artifact or compact
-    if args.user_exception_fetch and artifact:
+    fetch_artifact = args.user_exception_fetch and compact
+    if fetch_artifact:
+        require(os.environ.get('N10_LINK_MODE') == 'user_exception_fetch_compact_artifact', 'exact new artifact mode required')
+    if args.user_exception_fetch and artifact and not compact:
         parser.error('the frozen v173/v174 artifact routes do not accept the new caller/provider profile')
     memdev = args.memdev_wide_extent or artifact
     work = PRIVATE / 'v170-memdev-kernel-link-work' if memdev else WORK
@@ -148,6 +152,10 @@ def main():
         work = PRIVATE / 'v174-native-kernel-artifact-work'
         output = PRIVATE / 'v174-native-kernel-artifact-build'
         summary = PRIVATE / 'v174-native-kernel-artifact-result/result.json'
+    if fetch_artifact:
+        work = PRIVATE / 'v200-native-kernel-artifact-work'
+        output = PRIVATE / 'v200-native-kernel-artifact-build'
+        summary = PRIVATE / 'v200-native-kernel-artifact-result/result.json'
     ci = builder.ci_context(checked=True, storage=True)
     summary.parent.mkdir(parents=True)
     result = dict(schema='note10-phase1-iostorage-final-link-result-v1', passed=False,
@@ -161,7 +169,8 @@ def main():
                                                   if name != sdk.NATIVE_COMPLETE_SOURCE])})
     if memdev:
         result.update(schema='note10-v170-memdev-kernel-link-result-v1',
-            scope='public-reference-patched-memdev1077-kernel-link-no-runtime',
+            scope='public-reference-patched-memdev1078-kernel-link-no-runtime' if args.user_exception_fetch else
+                  'public-reference-patched-memdev1077-kernel-link-no-runtime',
             physical_ready=False, runtime_executed=False, firmware_abi_verified=False)
         result['source_sha256'].update({name: sha(ROOT / name) for name in (
             'note10/xnu26/phase1_memdev_kernel_integration.py', 'note10/xnu26/prepare_memdev_wide_extent.py',
@@ -176,6 +185,14 @@ def main():
         result.update(schema='note10-v174-native-kernel-artifact-result-v1',
                       scope='public-reference-patched-kernel-compact-retention-PC-handoff-no-runtime')
         result['source_sha256']['note10/xnu26/compact_native_receipts.py'] = sha(ROOT/'note10/xnu26/compact_native_receipts.py')
+    if fetch_artifact:
+        result.update(schema='note10-v200-user-exception-kernel-artifact-result-v1',
+                      scope='public-reference-real-user-exception-1078-link-provenance-no-runtime')
+        result['source_sha256'].update({name: sha(ROOT / name) for name in (
+            'note10/xnu26/prepare_user_exception_fetch.py', 'note10/xnu26/note10_user_instruction_fetch.c',
+            'note10/xnu26/note10_user_instruction_fetch.h', 'note10/xnu26/user_instruction_header_context.h',
+            'note10/xnu26/patches/0015-user-exception-checked-fetch.patch',
+            'note10/xnu26/test_user_exception_kernel_artifact.py')})
     try:
         builder.build(builder.bootstrap.private(work), builder.bootstrap.private(output), storage=True, memdev=memdev,
                       user_exception_fetch=args.user_exception_fetch)
@@ -209,6 +226,12 @@ def main():
             failure_code='provisioning_failed', patch_apply_attempts=0, final_link_attempts=0,
             total_target_compile_attempts=0, kernel_link_verified=False))
         result['passed'] = result['passed'] and result['memdev_integration']['kernel_link_verified'] is True
+    if fetch_artifact:
+        result['user_exception_fetch_link'] = state.get('user_exception_fetch_link', {})
+        result['user_exception_tool_counts'] = state.get('user_exception_tool_counts', {})
+        result['passed'] = (result['passed'] and result['user_exception_fetch_link'].get('passed') is True and
+                            result['user_exception_tool_counts'].get('counts_complete') is True and
+                            result['final_object_count'] == 1078)
     summary.write_bytes((json.dumps(result, sort_keys=True, indent=2) + '\n').encode())
     return 0 if result['passed'] else 1
 

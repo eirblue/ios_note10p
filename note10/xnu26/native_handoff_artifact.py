@@ -62,12 +62,48 @@ def read(path, limit, *, observations=None, member=None):
     return raw
 
 
-def success_payloads(build, producer, head, run_id, attempt, *, compact=False, observations=None):
+def verify_fetch_profile(current, rows, state, producer, link):
+    from prepare_user_exception_fetch import admit_provenance, LINK_SYMBOLS, REL, UNIT, COPYIN_REL, POSTIMAGE, PINS, SOURCE, COPYIN_SHA
+    try:
+        admit_provenance(current)
+    except ValueError:
+        raise Rejected('genuine_fetch_binding_required') from None
+    proof = state['user_exception_fetch_link']
+    require(proof == producer['user_exception_fetch_link'] and proof['schema'] == 'note10-v200-user-exception-symbol-provenance-v1' and
+            proof['producer_id'] == current['producer_id'] and proof['input_binding'] == current['input_binding'] and
+            proof['passed'] is True and proof['object_provenance_verified'] is True and
+            proof['final_symbols_verified'] is True and proof['linked_objects'] == link['object_count'] == 1078 and
+            proof['final_symbol_counts'] == {name: 1 for name in LINK_SYMBOLS} and
+            all(type(proof['final_symbol_counts'][name]) is int for name in LINK_SYMBOLS) and
+            proof['caller_references_fetch'] is True and proof['fetch_references_native_copyin'] is True and
+            proof['aliases_substituted'] is False, 'genuine_fetch_link_provenance_required')
+    require(all(proof[k] is False for k in ('runtime_copyin_verified', 'runtime_task_map_observed',
+                'native_activation', 'firmware_abi_verified', 'physical_ready')), 'no_runtime_authority_required')
+    expected = ((REL, POSTIMAGE, 'native'), (UNIT, PINS[SOURCE], 'port'), (COPYIN_REL, COPYIN_SHA, 'native'))
+    require(set(proof['members']) == set(LINK_SYMBOLS), 'exact_three_provenance_members_required')
+    for symbol, (name, source_sha, category) in zip(LINK_SYMBOLS, expected):
+        members = [row for row in rows if row['source'] == name]
+        require(len(members) == 1 and members[0]['source_sha256'] == source_sha and members[0]['category'] == category and
+                proof['members'][symbol] == {k: members[0][k] for k in
+                    ('source', 'source_sha256', 'object_path', 'object_sha256', 'category')}, 'exact_symbol_origin_member_required')
+    counts = state['user_exception_tool_counts']
+    require(counts == producer['user_exception_tool_counts'] and counts['counts_complete'] is True and
+            all(type(counts[k]) is int and counts[k] == v for k, v in dict(linked_unit_compile_attempts=1078,
+                auxiliary_genassym_target_compiles=1, total_target_driver_compile_jobs=1079,
+                host_config_compiler_drivers=1, host_config_C_units=9, host_config_links=1, bison=1, flex=1,
+                alias_map_generations=1, alias_assembler_invocations=0, nm_invocations=4).items()) and
+            all(type(counts[k]) is int and counts[k] >= 0 for k in ('IIG_attempts', 'IIG_successes', 'MIG_attempts', 'MIG_successes')) and
+            counts['IIG_attempts'] == counts['IIG_successes'] and counts['MIG_attempts'] == counts['MIG_successes'],
+            'complete_actual_tool_counts_required')
+
+
+def success_payloads(build, producer, head, run_id, attempt, *, compact=False, observations=None, user_exception_fetch=False):
+    require(type(user_exception_fetch) is bool and (not user_exception_fetch or compact), 'compact_fetch_profile_required')
     if compact:
-        from compact_native_receipts import RAW_MAX
+        from compact_native_receipts import RAW_MAX, FETCH_RAW_MAX
     receipts = {}
     for name, relative in RECEIPTS.items():
-        limit = RAW_MAX if compact and name == 'current-object-receipts.json' else META_MAX
+        limit = (FETCH_RAW_MAX if user_exception_fetch else RAW_MAX) if compact and name == 'current-object-receipts.json' else META_MAX
         receipts[name] = read(build / relative, limit, observations=observations, member='ownership/'+name)
     current = json.loads(receipts['producer-context.json'])
     rows = None if compact else json.loads(receipts['current-object-receipts.json'])
@@ -83,38 +119,46 @@ def success_payloads(build, producer, head, run_id, attempt, *, compact=False, o
     if compact:
         from compact_native_receipts import project
         rows, receipts['current-object-receipts.json'] = project(receipts['current-object-receipts.json'],
-            current, storage, link, receipts['native-objects.filelist'], producer)
+            current, storage, link, receipts['native-objects.filelist'], producer, user_exception_fetch=user_exception_fetch)
     for key in ('producer_id', 'input_binding'):
         require(state[key] == link[key] == current[key] and
                 all(row[key] == current[key] for row in rows + storage['units']), 'receipt_identity_required')
+    count, row_count = (1078, 1072) if user_exception_fetch else (1077, 1071)
     require(state['passed'] is True and state['phase'] == 'complete' and link['link_succeeded'] is True and
-            link['returncode'] == 0 and link['object_count'] == producer['final_object_count'] == 1077 and
-            len(current['inventory']) == 1067 and len(rows) == 1071 and len(storage['units']) == 6 and
+            link['returncode'] == 0 and link['object_count'] == producer['final_object_count'] == count and
+            len(current['inventory']) == 1067 and len(rows) == row_count and len(storage['units']) == 6 and
             all(row['passed'] is True for row in rows + storage['units']), 'complete_ownership_required')
     paths = receipts['native-objects.filelist'].decode('utf-8').splitlines()
-    require(paths == [row['object_path'] for row in rows + storage['units']] and len(set(paths)) == 1077 and
+    require(paths == [row['object_path'] for row in rows + storage['units']] and len(set(paths)) == count and
             link['filelist_sha256'] == sha(receipts['native-objects.filelist']), 'exact_filelist_required')
     proof = state['memdev']
     require(proof == producer['memdev_integration'] and proof['kernel_link_verified'] is True and
             proof['provider_binding_verified'] is True and proof['extra_patch']['postimage_sha256'] == POSTIMAGE_SHA256 and
             proof['extra_patch']['patch_sha256'] == PATCH_SHA256 and
             proof['memdev_member']['source_sha256'] == POSTIMAGE_SHA256, 'patched_consumer_required')
+    if user_exception_fetch:
+        verify_fetch_profile(current, rows, state, producer, link)
     kernel = read(build / 'current-native.macho', KERNEL_MAX, observations=observations, member='kernel/note10-experimental.macho')
-    require(sha(kernel) == state['output_sha256'] == producer['kernel_sha256'] and
+    kernel_sha = sha(kernel)
+    require(kernel_sha == state['output_sha256'] == producer['kernel_sha256'] and
             len(kernel) == state['output_bytes'] == producer['kernel_bytes'], 'kernel_identity_required')
     ownership = [{'file': 'ownership/' + name, 'bytes': len(raw), 'sha256': sha(raw)}
                  for name, raw in sorted(receipts.items())]
-    manifest = dict(schema='note10-v174-native-handoff-build-v1' if compact else 'note10-v173-native-handoff-build-v1', source_commit=head,
-                    run_id=run_id, run_attempt=attempt, output_sha256=sha(kernel), output_size=len(kernel),
+    manifest = dict(schema='note10-v200-user-exception-native-handoff-build-v1' if user_exception_fetch else
+                    'note10-v174-native-handoff-build-v1' if compact else 'note10-v173-native-handoff-build-v1', source_commit=head,
+                    run_id=run_id, run_attempt=attempt, output_sha256=kernel_sha, output_size=len(kernel),
                     kernel_file='note10-experimental.macho', producer_id=current['producer_id'],
                     input_binding=current['input_binding'], extra_memdev_patch=proof['extra_patch'],
                     ownership=ownership, physical_reservation_verified=False, hardware_verified=False,
                     deployment_ready=False, device_operations=[])
+    if user_exception_fetch:
+        manifest['user_exception_fetch_link'] = state['user_exception_fetch_link']
     return {'kernel/note10-experimental.macho': kernel, 'kernel/build-manifest.json': encoded(manifest),
             **{'ownership/' + name: raw for name, raw in receipts.items()}}
 
 
-def stage(build, summary, destination, *, head, run_id, attempt, compact=False):
+def stage(build, summary, destination, *, head, run_id, attempt, compact=False, user_exception_fetch=False):
+    require(type(user_exception_fetch) is bool and (not user_exception_fetch or compact), 'compact_fetch_profile_required')
     require(re.fullmatch('[0-9a-f]{40}', head) and type(run_id) is int and run_id > 0 and type(attempt) is int and attempt == 1,
             'exact_dispatch_identity_required')
     require(not destination.exists() and not destination.is_symlink() and
@@ -124,12 +168,14 @@ def stage(build, summary, destination, *, head, run_id, attempt, compact=False):
     failure_input = None
     try:
         producer = json.loads(read(summary, META_MAX, observations=observations, member='producer-result.json'))
-        expected_schema = 'note10-v174-native-kernel-artifact-result-v1' if compact else 'note10-v173-native-kernel-artifact-result-v1'
+        expected_schema = ('note10-v200-user-exception-kernel-artifact-result-v1' if user_exception_fetch else
+                           'note10-v174-native-kernel-artifact-result-v1' if compact else 'note10-v173-native-kernel-artifact-result-v1')
         require(producer['schema'] == expected_schema and
                 producer['source_head'] == head and producer['run_id'] == run_id and
                 producer['run_attempt'] == attempt, 'producer_identity_required')
         if producer['passed'] is True:
-            payloads = success_payloads(build, producer, head, run_id, attempt, compact=compact, observations=observations)
+            payloads = success_payloads(build, producer, head, run_id, attempt, compact=compact,
+                                        observations=observations, user_exception_fetch=user_exception_fetch)
             code = 'none'
     except (OSError, ValueError, KeyError, TypeError) as error:
         payloads = {}
@@ -141,7 +187,8 @@ def stage(build, summary, destination, *, head, run_id, attempt, compact=False):
             if code in {'ordinary_input_required', 'input_size_limit', 'input_size_changed'} and observations:
                 failure_input = dict(observations[-1])
         error_type = type(error).__name__
-    record = dict(schema='note10-v174-sealed-native-handoff-result-v1' if compact else 'note10-v173-sealed-native-handoff-result-v1', source_commit=head,
+    record = dict(schema='note10-v200-sealed-native-handoff-result-v1' if user_exception_fetch else
+                  'note10-v174-sealed-native-handoff-result-v1' if compact else 'note10-v173-sealed-native-handoff-result-v1', source_commit=head,
                   run_id=run_id, run_attempt=attempt, kernel_retained=code == 'none',
                   packaging_failure_code=code, producer_result=producer,
                   deployment_ready=False, physical_reservation_verified=False, device_operations=[])
@@ -160,7 +207,8 @@ def stage(build, summary, destination, *, head, run_id, attempt, compact=False):
                 record['native_state_retained'] = False
     payloads['result.json'] = encoded(record)
     members = [dict(file=name, bytes=len(raw), sha256=sha(raw)) for name, raw in sorted(payloads.items())]
-    payloads['members.json'] = encoded(dict(schema='note10-v174-sealed-native-members-v1' if compact else 'note10-v173-sealed-native-members-v1',
+    payloads['members.json'] = encoded(dict(schema='note10-v200-sealed-native-members-v1' if user_exception_fetch else
+        'note10-v174-sealed-native-members-v1' if compact else 'note10-v173-sealed-native-members-v1',
         source_commit=head, run_id=run_id, run_attempt=attempt, kernel_retained=record['kernel_retained'], members=members))
     require(all(len(raw) <= (KERNEL_MAX if name.endswith('.macho') else META_MAX)
                 for name, raw in payloads.items()) and sum(map(len, payloads.values())) <= TOTAL_MAX, 'stage_total_limit')
@@ -176,7 +224,10 @@ def stage(build, summary, destination, *, head, run_id, attempt, compact=False):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--compact', action='store_true')
-    compact = parser.parse_args().compact
+    parser.add_argument('--user-exception-fetch', action='store_true')
+    args = parser.parse_args()
+    compact = args.compact
+    require(not args.user_exception_fetch or compact, 'compact_fetch_profile_required')
     head, run = os.environ.get('GITHUB_SHA', ''), os.environ.get('GITHUB_RUN_ID', '')
     require(os.environ.get('GITHUB_REPOSITORY') == 'eirblue/ios_note10p' and
             sys.platform == 'darwin' and os.environ.get('GITHUB_ACTIONS') == 'true' and
@@ -191,8 +242,15 @@ def main():
         summary = PRIVATE / 'v174-native-kernel-artifact-result/result.json'
         destination = PRIVATE / 'v174-native-kernel-artifact-stage'
         output = PRIVATE / 'v174-native-kernel-artifact.zip'
-    record = stage(build, summary, destination, head=head, run_id=int(run), attempt=1, compact=compact)
-    absent_tests = PRIVATE / ('v174-no-old-tests' if compact else 'v173-no-old-tests')
+    if args.user_exception_fetch:
+        require(os.environ.get('N10_LINK_MODE') == 'user_exception_fetch_compact_artifact', 'exact_fetch_artifact_mode_required')
+        build = PRIVATE / 'v200-native-kernel-artifact-build'
+        summary = PRIVATE / 'v200-native-kernel-artifact-result/result.json'
+        destination = PRIVATE / 'v200-native-kernel-artifact-stage'
+        output = PRIVATE / 'v200-native-kernel-artifact.zip'
+    record = stage(build, summary, destination, head=head, run_id=int(run), attempt=1, compact=compact,
+                   user_exception_fetch=args.user_exception_fetch)
+    absent_tests = PRIVATE / ('v200-no-old-tests' if args.user_exception_fetch else 'v174-no-old-tests' if compact else 'v173-no-old-tests')
     require(not absent_tests.exists(), 'no_old_test_root_required')
     subprocess.run([sys.executable, '-B', str(ROOT / 'note10/device_test/bundle_affinity_evidence.py'),
                     '--tests', str(absent_tests), '--build', str(destination), '--output', str(output), '--source', head],
