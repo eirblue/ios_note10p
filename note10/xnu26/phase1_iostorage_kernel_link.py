@@ -96,7 +96,8 @@ def admit_storage(current, rows, output, native_paths):
             complete.GENERATION_HEADER_SHA256 and
             native.digest(proof['public_sdk_header_sha256']) == sdk.CLOSURE_PUBLIC_SDK_SHA256,
             'storage input binding differs')
-    require(len(native_paths) == 1071 and len(rows) == len(units) == 6, 'exact final object counts required')
+    require(len(native_paths) == native.expected_objects(current) and len(rows) == len(units) == 6,
+            'exact final object counts required')
     admitted = []
     for row, (source, obj, digest) in zip(rows, units):
         path = native.owned(row['object_path'], directory)
@@ -112,11 +113,12 @@ def admit_storage(current, rows, output, native_paths):
     return admitted
 
 
-def verify_final_symbols(symbols, linked, result):
+def verify_final_symbols(symbols, linked, result, *, current=None):
     required, vtable = sdk.closure_symbols()
     defined = [parts[-1] for line in symbols.splitlines() if len(parts := line.split()) >= 3 and
                re.fullmatch(r'[0-9a-fA-F]+', parts[0]) and parts[-2].isupper()]
-    require(linked['object_count'] == 1077 and all(defined.count(name) == 1 for name in (*required, vtable)),
+    count = native.expected_objects(current, storage=True) if current is not None else 1077
+    require(linked['object_count'] == count and all(defined.count(name) == 1 for name in (*required, vtable)),
             'final storage definitions or object count differ')
     result.update(stage='storage-linked', final_storage_symbols_verified=True)
 
@@ -127,9 +129,13 @@ def main():
     modes.add_argument('--memdev-wide-extent', action='store_true')
     modes.add_argument('--memdev-handoff-artifact', action='store_true')
     modes.add_argument('--memdev-compact-artifact', action='store_true')
+    parser.add_argument('--user-exception-fetch', action='store_true',
+                        help='opt-in checked USER64 caller and genuine fetch provider for normal builds')
     args = parser.parse_args()
     compact = args.memdev_compact_artifact
     artifact = args.memdev_handoff_artifact or compact
+    if args.user_exception_fetch and artifact:
+        parser.error('the frozen v173/v174 artifact routes do not accept the new caller/provider profile')
     memdev = args.memdev_wide_extent or artifact
     work = PRIVATE / 'v170-memdev-kernel-link-work' if memdev else WORK
     output = PRIVATE / 'v170-memdev-kernel-link-once' if memdev else OUTPUT
@@ -171,7 +177,8 @@ def main():
                       scope='public-reference-patched-kernel-compact-retention-PC-handoff-no-runtime')
         result['source_sha256']['note10/xnu26/compact_native_receipts.py'] = sha(ROOT/'note10/xnu26/compact_native_receipts.py')
     try:
-        builder.build(builder.bootstrap.private(work), builder.bootstrap.private(output), storage=True, memdev=memdev)
+        builder.build(builder.bootstrap.private(work), builder.bootstrap.private(output), storage=True, memdev=memdev,
+                      user_exception_fetch=args.user_exception_fetch)
     except BaseException as error:
         if not memdev and not isinstance(error, Exception):
             raise

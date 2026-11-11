@@ -96,16 +96,34 @@ def stamp(current, row, category):
     return row
 
 
+def extra_sources(current):
+    extras = dict(EXTRAS)
+    if 'user_exception_fetch' in current['producer']:
+        from prepare_user_exception_fetch import UNIT, admit_binding
+        admit_binding(current)
+        extras[UNIT] = 'port'
+    elif 'user_exception_fetch' in current['bindings']:
+        raise ValueError('caller binding without opt-in producer')
+    if set(current['dependencies']) != set(extras):
+        raise ValueError('exact default-off/on extra-source set required')
+    return extras
+
+
+def expected_objects(current, *, storage=False):
+    return len(current['inventory']) + len(extra_sources(current)) + (6 if storage else 0)
+
+
 def admit_objects(current, rows):
     check_context(current)
     expected = {r['source']: r for r in current['inventory']}
     if len(expected) != len(current['inventory']):
         raise ValueError('duplicate inventory identity')
-    if set(expected) & set(EXTRAS):
+    extras = extra_sources(current)
+    if set(expected) & set(extras):
         raise ValueError('dependency identity collision')
-    expected_categories = {name: 'native' for name in expected} | EXTRAS
-    if set(current['dependencies']) != set(EXTRAS):
-        raise ValueError('exact four genuine current dependency sources required')
+    expected_categories = {name: 'native' for name in expected} | extras
+    if set(current['dependencies']) != set(extras):
+        raise ValueError('exact genuine current dependency sources required')
     seen, paths = set(), set()
     for row in rows:
         name = row['source']
@@ -116,7 +134,7 @@ def admit_objects(current, rows):
             raise ValueError('missing, stale, failed or mixed current object')
         if name in expected and row.get('source_sha256') != expected[name]['source_sha256']:
             raise ValueError('object source mismatch')
-        if name in EXTRAS and row.get('source_sha256') != current['dependencies'][name]['source_sha256']:
+        if name in extras and row.get('source_sha256') != current['dependencies'][name]['source_sha256']:
             raise ValueError('current dependency source mismatch')
         if name in expected and expected[name]['kind'] == 'assembly' and row.get('assembly_input') != current.get('assembly_input'):
             raise ValueError('assembly generator mismatch')

@@ -70,7 +70,7 @@ def bind_providers(current, rows, defined, references, observation):
     observation.update(stage='provider-binding', failure_code='provider_binding_failed')
     by_path = {row['object_path']: row for row in rows}
     memdev = [row for row in rows if row['source'] == REL]
-    gate(observation, 'one_current_memdev_object', len(rows) == len(by_path) == 1077 and len(memdev) == 1 and
+    gate(observation, 'one_current_memdev_object', len(rows) == len(by_path) == native.expected_objects(current, storage=True) and len(memdev) == 1 and
          memdev[0]['source_sha256'] == POSTIMAGE_SHA256)
     member = memdev[0]
     own_exports = sorted(name for name, owners in defined.items() if member['object_path'] in owners)
@@ -92,13 +92,14 @@ def bind_providers(current, rows, defined, references, observation):
     observation['provider_binding_verified'] = True
 
 
-def final_symbols(symbols, linked, observation):
+def final_symbols(symbols, linked, observation, *, current=None):
     observation.update(stage='final-symbols', failure_code='final_memdev_symbols_failed')
     names = [parts[-1] for line in symbols.splitlines() if len(parts := line.split()) >= 3 and
              re.fullmatch(r'[0-9a-fA-F]+', parts[0]) and parts[-2].isupper()]
     counts = {name: names.count(name) for name in EXPORTS + sorted(PROVIDERS)}
     observation['final_symbol_counts'] = counts
-    gate(observation, 'final35_names_once', linked['object_count'] == 1077 and all(n == 1 for n in counts.values()))
+    expected = native.expected_objects(current, storage=True) if current is not None else 1077
+    gate(observation, 'final35_names_once', linked['object_count'] == expected and all(n == 1 for n in counts.values()))
     observation.update(stage='complete', failure_code='none', kernel_link_verified=True)
 
 
@@ -135,12 +136,15 @@ def link_runner(observation, diagnostic_roots):
     return run
 
 
-def collect_compile_reports(private, observation, diagnostic_roots):
+def collect_compile_reports(private, observation, diagnostic_roots, *, user_exception_fetch=False):
     native_attempts = native_successes = dependency_attempts = dependency_successes = 0
     failed, seen = [], []
-    for relative, dependency in [('objects/DEVELOPMENT/current-c-result.json', False),
+    reports = [('objects/DEVELOPMENT/current-c-result.json', False),
         ('objects/DEVELOPMENT/current-cxx-result.json', False), ('objects/DEVELOPMENT/current-asm-result.json', False),
-        ('current-public-result.json', True), ('current-link-metadata-result.json', True)]:
+        ('current-public-result.json', True), ('current-link-metadata-result.json', True)]
+    if user_exception_fetch:
+        reports.append(('current-user-exception-fetch-result.json', True))
+    for relative, dependency in reports:
         path = private / relative
         if not path.is_file():
             continue
@@ -172,7 +176,8 @@ def collect_compile_reports(private, observation, diagnostic_roots):
                 compiler_diagnostics=summarize(row['diagnostics'].encode(), diagnostic_roots))
         else:
             observation['first_compiler_failure'] = dict(source=row['source'], failure_code='dependency_compile_failed')
-            log = (private / 'public-dependencies.log' if row['source'].startswith('@public/') else
+            log = (private / 'user-exception-fetch.log' if row['source'] == '@port/note10_user_instruction_fetch.c' else
+                   private / 'public-dependencies.log' if row['source'].startswith('@public/') else
                    private / 'native-link' / (Path(row['source']).stem + '.log'))
             if log.is_file():
                 with log.open('rb') as stream:

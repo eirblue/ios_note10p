@@ -1,0 +1,28 @@
+--- a/osfmk/arm64/sleh.c
++++ b/osfmk/arm64/sleh.c
+@@ -37,6 +37,9 @@
+ #include <arm64/machine_machdep.h>
+ #include <kern/cpc.h>
+ #include <arm64/instructions.h>
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++#include <arm64/note10_user_instruction_fetch.h>
++#endif
+ 
+ #include <kern/debug.h>
+ #include <kern/exc_guard.h>
+@@ -1191,7 +1194,15 @@
+ 	mach_msg_type_number_t     numcodes  = 2;
+ 	uint32_t                   instr     = 0;
+ 
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	if (PSR64_IS_USER64(get_saved_state_cpsr(state))) {
++		struct n10_user_instruction fetched = n10_fetch_user_instruction(state);
++		instr = fetched.status == N10_USER_FETCH_OK ? fetched.word : 0;
++	} else
++#endif
++	{
+ 	COPYIN(get_saved_state_pc(state), (char *)&instr, sizeof(instr));
++	}
+ 
+ #if CONFIG_DTRACE
+ 

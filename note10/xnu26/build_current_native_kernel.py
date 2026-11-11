@@ -209,12 +209,17 @@ def intrinsic_kernel_result(path, symbols_text, undefined, *, leaf=False):
     return result
 
 
-def build(work, output, *, leaf=False, checked=False, storage=False, memdev=False):
+def build(work, output, *, leaf=False, checked=False, storage=False, memdev=False, user_exception_fetch=False):
     # Reuse only provisioning/configuration primitives; never the v83 tests/build.
+    if type(user_exception_fetch) is not bool:
+        raise ValueError('explicit boolean user exception fetch opt-in required')
     if memdev and not storage:
         raise ValueError('memdev integration requires the storage final-link lane')
     if memdev:
         import phase1_memdev_kernel_integration as memdev_scope
+    if user_exception_fetch:
+        import prepare_user_exception_fetch as fetch_scope
+        checked = True
     if storage:
         checked = True
     if checked:leaf=True
@@ -249,6 +254,9 @@ def build(work, output, *, leaf=False, checked=False, storage=False, memdev=Fals
         if memdev:
             extra_patch = memdev_scope.apply_patch(source, output, provisioned['sdk'], state['memdev'])
             state['memdev'].update(stage='configuration', failure_code='configuration_failed')
+        if user_exception_fetch:
+            fetch_patch = fetch_scope.apply(source, output)
+            state['user_exception_fetch'] = fetch_patch
         os.environ.update(N10_CC=provisioned['compiler'], N10_SDKROOT=provisioned['sdk'],
                           N10_MAKE=shutil.which('make') or 'make')
         makefiles, configured = {}, []
@@ -266,6 +274,9 @@ def build(work, output, *, leaf=False, checked=False, storage=False, memdev=Fals
                     patched[name] = native.file_sha(source / name)
         if memdev:
             patched[extra_patch['source']] = extra_patch['postimage_sha256']
+        if user_exception_fetch:
+            patched[fetch_scope.REL] = fetch_patch['postimage_sha256']
+            patched[fetch_scope.HEADER_REL] = fetch_patch['header_sha256']
         configuration = dict(source_directory=source.relative_to(ROOT).as_posix(),
             source_commit=COMMIT, configured=configured, patched_source_sha256=patched)
         if memdev:
@@ -337,6 +348,11 @@ def build(work, output, *, leaf=False, checked=False, storage=False, memdev=Fals
             producer['recipe_sha256'].update({n: native.file_sha(ROOT / 'note10/xnu26' / n) for n in
                 ('phase1_memdev_kernel_integration.py', 'prepare_memdev_wide_extent.py',
                  'phase1_iostorage_declaration.py', 'phase1_iostorage_native_complete.py', 'user_instruction_diagnostics.py')})
+        if user_exception_fetch:
+            producer['user_exception_fetch'] = fetch_patch
+            producer['recipe_sha256'].update({n: native.file_sha(ROOT / 'note10/xnu26' / n) for n in
+                ('prepare_user_exception_fetch.py', 'user_instruction_header_context.h',
+                 'note10_user_instruction_fetch.c', 'note10_user_instruction_fetch.h')})
         binding_files = ('configure-result.json', 'exports-result.json', 'native-mig-result.json',
                          'native-extra-result.json', 'native-link/generate-result.json')
         bindings = {n: native.file_sha(private / n) for n in binding_files}
@@ -346,10 +362,14 @@ def build(work, output, *, leaf=False, checked=False, storage=False, memdev=Fals
                         link_flags_sha256=native.digest(flags))
         if memdev:
             bindings['extra_memdev_patch_binding'] = native.digest(extra_patch)
+        if user_exception_fetch:
+            bindings['user_exception_fetch'] = native.digest(fetch_patch)
         dep_paths = {'@public/libdispatch/firehose_buffer.c': library / 'src/firehose/firehose_buffer.c',
             '@metadata/version.c': private / 'native-link/version.c',
             '@metadata/lastkerneldataconst.c': source / 'libsa/lastkerneldataconst.c',
             '@metadata/lastkernelconstructor.c': source / 'libsa/lastkernelconstructor.c'}
+        if user_exception_fetch:
+            dep_paths[fetch_scope.UNIT] = ROOT / fetch_scope.SOURCE
         current = dict(kind='v84-current-native', producer=producer, producer_id=native.digest(producer),
             bindings=bindings, input_binding=native.digest(bindings), inventory=rows,
             dependencies={n: dict(path=str(p), source_sha256=native.file_sha(p)) for n, p in dep_paths.items()})
@@ -378,11 +398,18 @@ def build(work, output, *, leaf=False, checked=False, storage=False, memdev=Fals
             if memdev:
                 state['memdev'].update(stage='metadata', failure_code='metadata_compile_failed')
             metadata = compile_link_metadata.main(current, base)
+            if user_exception_fetch:
+                if memdev:
+                    state['memdev'].update(stage='user-exception-fetch', failure_code='fetch_provider_compile_failed')
+                fetch_report = fetch_scope.compile_provider(current, source, private)
         if memdev:
             state['memdev']['failure_code'] = 'compile_metadata_failed'
-            memdev_scope.collect_compile_reports(private, state['memdev'], diagnostic_roots)
+            memdev_scope.collect_compile_reports(private, state['memdev'], diagnostic_roots,
+                                                 user_exception_fetch=user_exception_fetch)
         bootstrap.write_json(output / 'producer-context.json', current)
         objects = [r for report in (c, cxx, assembly, firehose, metadata) for r in report['units']]
+        if user_exception_fetch:
+            objects += fetch_report['units']
         bootstrap.write_json(output / 'current-object-receipts.json', objects)
         if storage:
             storage_options = {}
@@ -416,20 +443,22 @@ def build(work, output, *, leaf=False, checked=False, storage=False, memdev=Fals
         if storage:
             if memdev:
                 state['memdev'].update(stage='storage-final-symbols', failure_code='storage_final_symbols_failed')
-            storage_link.verify_final_symbols(symbols, linked, state['storage'])
+            storage_link.verify_final_symbols(symbols, linked, state['storage'], current=current)
         if memdev:
-            memdev_scope.final_symbols(symbols, linked, state['memdev'])
-        state.update(phase='complete', passed=True, native_objects=len(rows), dependency_objects=4,
+            memdev_scope.final_symbols(symbols, linked, state['memdev'], current=current)
+        state.update(phase='complete', passed=True, native_objects=len(rows), dependency_objects=len(current['dependencies']),
                      candidate_archive_used=False, old_suites_executed=0)
     except BaseException as error:
         if memdev:
             try:
                 diagnostic_roots = memdev_scope.roots(source, output, provisioned['sdk'])
-                memdev_scope.collect_compile_reports(private, state['memdev'], diagnostic_roots)
+                memdev_scope.collect_compile_reports(private, state['memdev'], diagnostic_roots,
+                                                     user_exception_fetch=user_exception_fetch)
                 reports = state['memdev']['completed_compile_reports']
                 expected = {'native-c': 'current-c-result.json', 'native-cxx': 'current-cxx-result.json',
                     'native-asm': 'current-asm-result.json', 'firehose': 'current-public-result.json',
-                    'metadata': 'current-link-metadata-result.json'}.get(state['memdev']['stage'])
+                    'metadata': 'current-link-metadata-result.json',
+                    'user-exception-fetch': 'current-user-exception-fetch-result.json'}.get(state['memdev']['stage'])
                 if expected is not None and expected not in reports:
                     observation = state['memdev']
                     observation.update(compile_counts_complete=False,
@@ -470,12 +499,14 @@ def main():
     p.add_argument('--output', required=True)
     p.add_argument('--exynos-leaf',action='store_true',help='closed v93 PC-only EXYNOS mapper source candidate')
     p.add_argument('--exynos-checked-pages',action='store_true',help='closed v94 PC-only checked allocator plus mapper')
+    p.add_argument('--user-exception-fetch', action='store_true', help='opt-in checked USER64 caller plus genuine fetch provider')
     args = p.parse_args()
     work, output = bootstrap.private(args.work), bootstrap.private(args.output)
     if work == output or work.is_relative_to(output) or output.is_relative_to(work):
         p.error('disjoint fresh private roots required')
     try:
-        build(work, output,leaf=args.exynos_leaf,checked=args.exynos_checked_pages)
+        build(work, output,leaf=args.exynos_leaf,checked=args.exynos_checked_pages,
+              user_exception_fetch=args.user_exception_fetch)
     except BaseException:
         print('current native payload build failed; private evidence retained', file=sys.stderr)
         return 1
