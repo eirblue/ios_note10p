@@ -99,7 +99,7 @@ def collect_evidence(private, output):
 
 
 def aliases_for_current(source, rows, output, *, memdev_current=None, memdev_observation=None,
-                        fetch_current=None, fetch_observation=None):
+                        fetch_current=None, fetch_observation=None, nub_current=None, nub_observation=None):
     from audit_link_inputs import symbols
     paths = [row['object_path'] for row in rows]
     raw = bootstrap.run(['xcrun', 'nm', '-g', *paths], ROOT, output / 'current-object-symbols.log')
@@ -128,6 +128,9 @@ def aliases_for_current(source, rows, output, *, memdev_current=None, memdev_obs
     if fetch_current is not None:
         from prepare_user_exception_fetch import bind_symbol_origins
         bind_symbol_origins(fetch_current, rows, defined, references, aliases, fetch_observation)
+    if nub_current is not None:
+        from phase1_readonly_ram_block_device import bind_origins
+        bind_origins(nub_current, rows, defined, references, aliases, pins, nub_observation)
     raw_alias = output / 'current-aliases.exports'
     raw_alias.write_text(''.join(a + ':' + b + '\n' for a, b in sorted(aliases.items())))
     result = output / 'current-aliases.exp'
@@ -213,8 +216,12 @@ def intrinsic_kernel_result(path, symbols_text, undefined, *, leaf=False):
     return result
 
 
-def build(work, output, *, leaf=False, checked=False, storage=False, memdev=False, user_exception_fetch=False):
+def build(work, output, *, leaf=False, checked=False, storage=False, memdev=False, user_exception_fetch=False, readonly_ram_nub=False):
     # Reuse only provisioning/configuration primitives; never the v83 tests/build.
+    if type(readonly_ram_nub) is not bool or (readonly_ram_nub and not storage):
+        raise ValueError('explicit nub opt-in requires the storage lane')
+    if readonly_ram_nub:
+        import phase1_readonly_ram_block_device as ram
     if type(user_exception_fetch) is not bool:
         raise ValueError('explicit boolean user exception fetch opt-in required')
     if memdev and not storage:
@@ -230,7 +237,7 @@ def build(work, output, *, leaf=False, checked=False, storage=False, memdev=Fals
     ci = ci_context(leaf, checked, storage=True) if storage else ci_context(leaf, checked)
     if storage:
         import phase1_iostorage_kernel_link as storage_link
-        storage_link.verify_sources()
+        storage_link.verify_sources(readonly_ram_nub)
     if leaf and os.environ.get('N10_BUILD_ONLY','false')!='false':
         raise ValueError('new leaf scope has no retained-PASS skip gate')
     prior_pass = None if leaf else prior_pass_authorization(ci)
@@ -253,6 +260,8 @@ def build(work, output, *, leaf=False, checked=False, storage=False, memdev=Fals
         state.update(kind='v170-memdev-kernel-link-pc', memdev=memdev_scope.begin())
     if user_exception_fetch:
         state['user_exception_fetch_link'] = fetch_scope.link_begin()
+    if readonly_ram_nub:
+        state['readonly_ram_nub'] = ram.begin()
     state['build_only_prior_pass'] = prior_pass
     bootstrap.write_json(output / 'result.json', state)
     original_env = dict(os.environ)
@@ -359,6 +368,9 @@ def build(work, output, *, leaf=False, checked=False, storage=False, memdev=Fals
             producer['recipe_sha256'].update({n: native.file_sha(ROOT / 'note10/xnu26' / n) for n in
                 ('prepare_user_exception_fetch.py', 'user_instruction_header_context.h',
                  'note10_user_instruction_fetch.c', 'note10_user_instruction_fetch.h')})
+        if readonly_ram_nub:
+            producer['readonly_ram_nub'] = ram.profile()
+            producer['recipe_sha256']['phase1_readonly_ram_block_device.py'] = native.file_sha(ROOT / 'note10/xnu26/phase1_readonly_ram_block_device.py')
         binding_files = ('configure-result.json', 'exports-result.json', 'native-mig-result.json',
                          'native-extra-result.json', 'native-link/generate-result.json')
         bindings = {n: native.file_sha(private / n) for n in binding_files}
@@ -370,6 +382,8 @@ def build(work, output, *, leaf=False, checked=False, storage=False, memdev=Fals
             bindings['extra_memdev_patch_binding'] = native.digest(extra_patch)
         if user_exception_fetch:
             bindings['user_exception_fetch'] = native.digest(fetch_patch)
+        if readonly_ram_nub:
+            bindings['readonly_ram_nub'] = native.digest(ram.profile())
         dep_paths = {'@public/libdispatch/firehose_buffer.c': library / 'src/firehose/firehose_buffer.c',
             '@metadata/version.c': private / 'native-link/version.c',
             '@metadata/lastkerneldataconst.c': source / 'libsa/lastkerneldataconst.c',
@@ -426,6 +440,8 @@ def build(work, output, *, leaf=False, checked=False, storage=False, memdev=Fals
             alias_options = dict(memdev_current=current, memdev_observation=state['memdev']) if memdev else {}
             if user_exception_fetch:
                 alias_options.update(fetch_current=current, fetch_observation=state['user_exception_fetch_link'])
+            if readonly_ram_nub:
+                alias_options.update(nub_current=current, nub_observation=state['readonly_ram_nub'])
             aliases, alias_evidence = aliases_for_current(source, objects + storage_rows, output, **alias_options)
             state['storage']['stage'] = 'storage-final-link'
             link_options = dict(storage_rows=storage_rows)
@@ -457,6 +473,8 @@ def build(work, output, *, leaf=False, checked=False, storage=False, memdev=Fals
             memdev_scope.final_symbols(symbols, linked, state['memdev'], current=current)
         if user_exception_fetch:
             fetch_scope.final_symbols(symbols, linked, current, state['user_exception_fetch_link'])
+        if readonly_ram_nub:
+            ram.final_symbols(symbols, linked, current, state['readonly_ram_nub'])
         state.update(phase='complete', passed=True, native_objects=len(rows), dependency_objects=len(current['dependencies']),
                      candidate_archive_used=False, old_suites_executed=0)
     except BaseException as error:

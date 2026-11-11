@@ -335,7 +335,7 @@ def compile_probe(result, mode, source):
             result['declaration_overrides_verified'] = 14
 
 
-def compile_closure_objects(result, output, *, native_work=None, diagnostic_sink=None):
+def compile_closure_objects(result, output, *, native_work=None, diagnostic_sink=None, readonly_ram_nub=False):
     sdk_context = public_sdk_context(result, 'base_object')
     if sdk_context is None:
         return
@@ -344,6 +344,11 @@ def compile_closure_objects(result, output, *, native_work=None, diagnostic_sink
     require(sha(sdk_json) == CLOSURE_PUBLIC_SDK_SHA256, 'accepted public SDK header set differs')
 
     from phase1_iostorage_native_complete import compile_complete, compile_generated_complete
+    from phase1_readonly_ram_block_device import NUB_SOURCE, profile, sdk_delta, selected_sources
+    selected_sources(readonly_ram_nub)
+    if readonly_ram_nub:
+        result['readonly_ram_nub'] = profile()
+        result['readonly_ram_sdk_delta_sha256'] = sdk_delta(sdk, kernel)
     public = output / 'public-sdk-objects'
     include = public / 'include'
     base = public / BASE_MEMBER
@@ -371,7 +376,8 @@ def compile_closure_objects(result, output, *, native_work=None, diagnostic_sink
                 '-isystem', str(kernel), '-isystem', str(sdk / 'usr/include')]
     units = (
         (str(base), COMPILE_FLAGS[:-1], ()),
-        (PROVIDER_SOURCE, COMPILE_FLAGS[:-1], ('-DN10_RAM_PROVIDER_OBJECT_PROBE=1',)),
+        (NUB_SOURCE if readonly_ram_nub else PROVIDER_SOURCE, COMPILE_FLAGS[:-1],
+         () if readonly_ram_nub else ('-DN10_RAM_PROVIDER_OBJECT_PROBE=1',)),
         (PIO_SOURCE, COMPILE_FLAGS[:-1], ()),
         *((source, C_OBJECT_FLAGS, ()) for source in PIO_LINK_C_SOURCES),
     )

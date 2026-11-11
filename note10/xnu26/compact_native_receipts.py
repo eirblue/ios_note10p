@@ -36,7 +36,10 @@ def hex64(value):
     return type(value) is str and re.fullmatch('[0-9a-f]{64}', value) is not None
 
 
-def validate_rows(rows, current, storage, link, filelist, producer, *, user_exception_fetch=False):
+def validate_rows(rows, current, storage, link, filelist, producer, *, user_exception_fetch=False, readonly_ram_nub=False):
+    from phase1_readonly_ram_block_device import enabled, NUB_SOURCE, profile, SDK_DELTA
+    require(type(readonly_ram_nub) is bool and enabled(current) is readonly_ram_nub, 'compact_context_binding')
+    selected_storage = tuple(PurePosixPath(NUB_SOURCE).name if name == 'phase1_iostorage_provider_object.cpp' and readonly_ram_nub else name for name in STORAGE)
     require(type(user_exception_fetch) is bool, 'compact_input_shape')
     extras = dict(EXTRAS)
     if user_exception_fetch:
@@ -98,13 +101,16 @@ def validate_rows(rows, current, storage, link, filelist, producer, *, user_exce
     binding = storage['binding']
     from phase1_iostorage_kernel_link import storage_units
     expected_storage = {'@storage/'+source.name: source_sha
-                        for source, _, source_sha in storage_units(PurePosixPath('/source-proof'))}
-    require(len(expected_storage) == 6 and list(expected_storage) == ['@storage/'+name for name in STORAGE] and
+                        for source, _, source_sha in storage_units(PurePosixPath('/source-proof'), readonly_ram_nub)}
+    require(len(expected_storage) == 6 and list(expected_storage) == ['@storage/'+name for name in selected_storage] and
             type(units) is list and len(units) == 6 and
-            [row['source'] for row in units] == ['@storage/'+name for name in STORAGE] and
+            [row['source'] for row in units] == ['@storage/'+name for name in selected_storage] and
             binding['binding'] == digest(binding['proof']) == producer['storage_binding_sha256'] and
             binding['proof']['producer_id'] == current['producer_id'] and
             binding['proof']['input_binding'] == current['input_binding'], 'compact_storage_binding')
+    require((binding['proof'].get('readonly_ram_nub') == profile() and
+             binding['proof'].get('readonly_ram_sdk_delta_sha256') == SDK_DELTA) if readonly_ram_nub else
+            not ({'readonly_ram_nub', 'readonly_ram_sdk_delta_sha256'} & set(binding['proof'])), 'compact_storage_binding')
     for row in units:
         require(row['passed'] is True and row['category'] == 'storage' and
                 row['producer_id'] == current['producer_id'] and row['input_binding'] == current['input_binding'] and
@@ -123,13 +129,14 @@ def validate_rows(rows, current, storage, link, filelist, producer, *, user_exce
             hashlib.sha256(filelist).hexdigest() == link['filelist_sha256'], 'compact_filelist_binding')
 
 
-def project(raw, current, storage, link, filelist, producer, *, user_exception_fetch=False):
+def project(raw, current, storage, link, filelist, producer, *, user_exception_fetch=False, readonly_ram_nub=False):
     limit = FETCH_RAW_MAX if user_exception_fetch else RAW_MAX
     require(type(raw) is bytes and 0 < len(raw) <= limit, 'compact_input_shape')
     rows = json.loads(raw, object_pairs_hook=unique)
-    validate_rows(rows, current, storage, link, filelist, producer, user_exception_fetch=user_exception_fetch)
+    validate_rows(rows, current, storage, link, filelist, producer, user_exception_fetch=user_exception_fetch, readonly_ram_nub=readonly_ram_nub)
     compact = [{key: row[key] for key in (*CORE, *(['assembly_input'] if 'assembly_input' in row else []))} for row in rows]
-    value = dict(schema='note10-v200-compact-native-object-receipts-v1' if user_exception_fetch else
+    value = dict(schema='note10-v204-compact-native-object-receipts-v1' if readonly_ram_nub else
+                 'note10-v200-compact-native-object-receipts-v1' if user_exception_fetch else
                  'note10-v174-compact-native-object-receipts-v1', raw_bytes=len(raw),
                  raw_sha256=hashlib.sha256(raw).hexdigest(), units=compact)
     output = (json.dumps(value, sort_keys=True, indent=2)+'\n').encode()

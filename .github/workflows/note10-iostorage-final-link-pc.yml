@@ -18,6 +18,7 @@ on:
           - memdev_handoff_artifact
           - memdev_handoff_compact_artifact
           - user_exception_fetch_compact_artifact
+          - readonly_ram_nub_compact_artifact
       recipient_public_key_b64:
         description: RSA3072 public recipient only, used by sealed artifact modes
         required: false
@@ -37,11 +38,11 @@ jobs:
         with:
           python-version: '3.13'
       - uses: actions/setup-node@v4
-        if: ${{ inputs.mode == 'memdev_handoff_artifact' || inputs.mode == 'memdev_handoff_compact_artifact' || inputs.mode == 'user_exception_fetch_compact_artifact' }}
+        if: ${{ inputs.mode == 'memdev_handoff_artifact' || inputs.mode == 'memdev_handoff_compact_artifact' || inputs.mode == 'user_exception_fetch_compact_artifact' || inputs.mode == 'readonly_ram_nub_compact_artifact' }}
         with:
           node-version: '24'
       - name: Validate artifact public recipient
-        if: ${{ inputs.mode == 'memdev_handoff_artifact' || inputs.mode == 'memdev_handoff_compact_artifact' || inputs.mode == 'user_exception_fetch_compact_artifact' }}
+        if: ${{ inputs.mode == 'memdev_handoff_artifact' || inputs.mode == 'memdev_handoff_compact_artifact' || inputs.mode == 'user_exception_fetch_compact_artifact' || inputs.mode == 'readonly_ram_nub_compact_artifact' }}
         env:
           N10_RECIPIENT_PUBLIC_KEY_B64: ${{ inputs.recipient_public_key_b64 }}
         run: node note10/device_test/sealed_affinity_artifact.cjs recipient
@@ -67,6 +68,9 @@ jobs:
             user_exception_fetch_compact_artifact)
               python -B note10/xnu26/phase1_iostorage_kernel_link.py --memdev-compact-artifact --user-exception-fetch > note10/private/v200-native-kernel-artifact.internal.log 2>&1
               ;;
+            readonly_ram_nub_compact_artifact)
+              python -B note10/xnu26/phase1_iostorage_kernel_link.py --memdev-compact-artifact --user-exception-fetch --readonly-ram-nub > note10/private/v204-native-kernel-artifact.internal.log 2>&1
+              ;;
             *) exit 2 ;;
           esac
       - name: Stage native handoff evidence including failures
@@ -82,7 +86,7 @@ jobs:
           N10_RECIPIENT_PUBLIC_KEY_B64: ${{ inputs.recipient_public_key_b64 }}
         run: node note10/device_test/sealed_affinity_artifact.cjs seal note10/private/v173-native-kernel-artifact.zip note10/private/v173-native-kernel-artifact.n10sealed "$GITHUB_SHA"
       - uses: actions/upload-artifact@v4
-        if: ${{ always() && inputs.mode != 'memdev_handoff_artifact' && inputs.mode != 'memdev_handoff_compact_artifact' && inputs.mode != 'user_exception_fetch_compact_artifact' }}
+        if: ${{ always() && inputs.mode != 'memdev_handoff_artifact' && inputs.mode != 'memdev_handoff_compact_artifact' && inputs.mode != 'user_exception_fetch_compact_artifact' && inputs.mode != 'readonly_ram_nub_compact_artifact' }}
         with:
           name: ${{ inputs.mode == 'memdev_wide_extent' && 'note10-v170-memdev-kernel-link-result' || 'note10-phase1-iostorage-final-link-result' }}
           path: ${{ inputs.mode == 'memdev_wide_extent' && 'note10/private/v170-memdev-kernel-link-result/result.json' || 'note10/private/phase1-iostorage-final-link-result/result.json' }}
@@ -130,5 +134,23 @@ jobs:
         with:
           name: note10-user-exception-fetch-native-kernel-sealed-evidence
           path: note10/private/v200-native-kernel-artifact.n10sealed
+          retention-days: 7
+          if-no-files-found: error
+      - name: Stage read-only RAM nub native provenance including failures
+        if: ${{ always() && inputs.mode == 'readonly_ram_nub_compact_artifact' }}
+        env:
+          N10_EXPECTED_SOURCE_HEAD: ${{ inputs.expected_source_head }}
+          N10_LINK_MODE: ${{ inputs.mode }}
+        run: python -B note10/xnu26/native_handoff_artifact.py --compact --user-exception-fetch --readonly-ram-nub > note10/private/v204-native-kernel-artifact-pack.internal.log 2>&1
+      - name: Seal read-only RAM nub native kernel and compact provenance
+        if: ${{ always() && inputs.mode == 'readonly_ram_nub_compact_artifact' }}
+        env:
+          N10_RECIPIENT_PUBLIC_KEY_B64: ${{ inputs.recipient_public_key_b64 }}
+        run: node note10/device_test/sealed_affinity_artifact.cjs seal note10/private/v204-native-kernel-artifact.zip note10/private/v204-native-kernel-artifact.n10sealed "$GITHUB_SHA"
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() && inputs.mode == 'readonly_ram_nub_compact_artifact' }}
+        with:
+          name: note10-readonly-ram-nub-native-kernel-sealed-evidence
+          path: note10/private/v204-native-kernel-artifact.n10sealed
           retention-days: 7
           if-no-files-found: error
