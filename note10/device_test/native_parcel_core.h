@@ -60,6 +60,7 @@ _Static_assert(sizeof(struct n209_destination) == 80, "destination facts80");
 _Static_assert(sizeof(struct n209_layout) == 40, "relative layout40");
 
 int n209_decode_payload(const n209_u8 *, unsigned long, struct n209_payload *);
+int n209_layout_bounds(const struct n209_payload *, const struct n209_destination *, n209_u64, struct n209_layout *);
 int n209_prepare_layout(const struct n209_payload *, const struct n209_destination *,
                        n209_u64, const struct n209_prerequisites *, void *, struct n209_layout *);
 #endif

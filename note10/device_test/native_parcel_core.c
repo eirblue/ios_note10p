@@ -41,12 +41,11 @@ int n209_decode_payload(const n209_u8 *wire, unsigned long bytes, struct n209_pa
 }
 static int extent(n209_u64 start, n209_u64 bytes, n209_u64 limit)
 { return bytes && start <= limit && bytes <= limit-start; }
-int n209_prepare_layout(const struct n209_payload *p, const struct n209_destination *d,
-                       n209_u64 adt_bytes, const struct n209_prerequisites *ops, void *context,
-                       struct n209_layout *out)
+int n209_layout_bounds(const struct n209_payload *p, const struct n209_destination *d,
+                       n209_u64 adt_bytes, struct n209_layout *out)
 {
     struct n209_layout candidate; unsigned int i, build_nonzero = 0;
-    if (!p || !d || !ops || !out || !ops->source_live || !ops->destination_current || !ops->return_qualified ||
+    if (!p || !d || !out ||
         !magic(p->magic) || p->schema != 1 || p->bytes != N209_PAYLOAD_BYTES ||
         !p->kernel_span || p->kernel_span > N209_DESTINATION_BYTES || p->kernel_span%N209_PAGE ||
         p->virtual_base%N209_PAGE || p->virtual_base > ~(n209_u64)0-N209_DESTINATION_BYTES ||
@@ -77,7 +76,17 @@ int n209_prepare_layout(const struct n209_payload *p, const struct n209_destinat
     candidate.adapter_offset=(candidate.adt_offset+adt_bytes+N209_PAGE-1)&~(N209_PAGE-1);
     if (!extent(candidate.adapter_offset,N209_PAGE,d->size)) return -22;
     candidate.top_offset=candidate.adapter_offset+N209_PAGE;
-    if (ops->source_live(context,p) || ops->destination_current(context,d) || ops->return_qualified(context)) return -5;
     *out=candidate;
     return 0;
+}
+
+int n209_prepare_layout(const struct n209_payload *p, const struct n209_destination *d,
+                       n209_u64 adt_bytes, const struct n209_prerequisites *ops, void *context,
+                       struct n209_layout *out)
+{
+    struct n209_layout candidate;
+    if (!ops || !out || !ops->source_live || !ops->destination_current || !ops->return_qualified ||
+        n209_layout_bounds(p,d,adt_bytes,&candidate)) return -22;
+    if (ops->source_live(context,p) || ops->destination_current(context,d) || ops->return_qualified(context)) return -5;
+    *out=candidate; return 0;
 }
