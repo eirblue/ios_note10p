@@ -19,7 +19,7 @@ JOB='v219-native-source-budget'
 BUILD_SCHEMA='note10-v219-source-budget-object-build-v1'
 CONTEXT_SCHEMA='note10-v219-source-budget-public-input-v1'
 MANIFEST_SCHEMA='note10-v219-source-budget-sealed-members-v1'
-FIXTURE_SCHEMA='note10-v219-source-budget-fixture-result-v1'
+FIXTURE_SCHEMA='note10-v219-fixed-source-request-budget-fixture-result-v1'
 PUBLIC_NEW=('native_source_sha256.h','native_source_sha256.c','native_source_sha256_fixture.c','v219_source_owner_kernel.c',
             'native_source_request_budget.py','test_native_source_request_budget.py','v219_native_source_prepare.py')
 SUCCESS_MEMBERS=retained.SUCCESS_MEMBERS+('owner-init.su','stack-frames.json')
