@@ -8,4 +8,10 @@
  * No start/publication/boot hook or hardware memory authority is supplied. */
 Note10ReadOnlyRAMBlockDevice *note10_create_owned_readonly_ram_nub(
     const void *source, UInt64 extent, UInt64 block_bytes, UInt64 requested_copy_limit);
+/* Explicit unpublished session: provider must remain live and lifecycle calls
+ * serialized. On success caller owns one reference and must stop(provider),
+ * detach(provider), release(), once in that order. No matching/publication. */
+Note10ReadOnlyRAMBlockDevice *note10_attach_owned_readonly_ram_nub(
+    IOService *provider, const void *source, UInt64 extent, UInt64 block_bytes,
+    UInt64 requested_copy_limit);
 #endif

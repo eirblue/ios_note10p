@@ -158,7 +158,7 @@ def success_payloads(build, producer, head, run_id, attempt, *, compact=False, o
             len(kernel) == state['output_bytes'] == producer['kernel_bytes'], 'kernel_identity_required')
     ownership = [{'file': 'ownership/' + name, 'bytes': len(raw), 'sha256': sha(raw)}
                  for name, raw in sorted(receipts.items())]
-    manifest = dict(schema='note10-v261-owned-ram-factory-native-handoff-build-v1' if owned_ram_factory else
+    manifest = dict(schema='note10-v262-owned-ram-attach-start-native-handoff-build-v1' if owned_ram_factory else
                     'note10-v204-readonly-ram-nub-native-handoff-build-v1' if readonly_ram_nub else
                     'note10-v200-user-exception-native-handoff-build-v1' if user_exception_fetch else
                     'note10-v174-native-handoff-build-v1' if compact else 'note10-v173-native-handoff-build-v1', source_commit=head,
@@ -189,7 +189,7 @@ def stage(build, summary, destination, *, head, run_id, attempt, compact=False, 
     failure_input = None
     try:
         producer = json.loads(read(summary, META_MAX, observations=observations, member='producer-result.json'))
-        expected_schema = ('note10-v261-owned-ram-integrated-build-v1' if owned_ram_factory else
+        expected_schema = ('note10-v262-owned-ram-attach-start-build-v1' if owned_ram_factory else
                            'note10-v204-readonly-ram-nub-kernel-artifact-result-v1' if readonly_ram_nub else
                            'note10-v200-user-exception-kernel-artifact-result-v1' if user_exception_fetch else
                            'note10-v174-native-kernel-artifact-result-v1' if compact else 'note10-v173-native-kernel-artifact-result-v1')
@@ -210,7 +210,7 @@ def stage(build, summary, destination, *, head, run_id, attempt, compact=False, 
             if code in {'ordinary_input_required', 'input_size_limit', 'input_size_changed'} and observations:
                 failure_input = dict(observations[-1])
         error_type = type(error).__name__
-    record = dict(schema='note10-v261-sealed-native-handoff-result-v1' if owned_ram_factory else
+    record = dict(schema='note10-v262-sealed-native-handoff-result-v1' if owned_ram_factory else
                   'note10-v204-sealed-native-handoff-result-v1' if readonly_ram_nub else
                   'note10-v200-sealed-native-handoff-result-v1' if user_exception_fetch else
                   'note10-v174-sealed-native-handoff-result-v1' if compact else 'note10-v173-sealed-native-handoff-result-v1', source_commit=head,
@@ -232,7 +232,7 @@ def stage(build, summary, destination, *, head, run_id, attempt, compact=False, 
                 record['native_state_retained'] = False
     payloads['result.json'] = encoded(record)
     members = [dict(file=name, bytes=len(raw), sha256=sha(raw)) for name, raw in sorted(payloads.items())]
-    payloads['members.json'] = encoded(dict(schema='note10-v261-sealed-native-members-v1' if owned_ram_factory else
+    payloads['members.json'] = encoded(dict(schema='note10-v262-sealed-native-members-v1' if owned_ram_factory else
         'note10-v204-sealed-native-members-v1' if readonly_ram_nub else
         'note10-v200-sealed-native-members-v1' if user_exception_fetch else
         'note10-v174-sealed-native-members-v1' if compact else 'note10-v173-sealed-native-members-v1',

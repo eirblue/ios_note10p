@@ -23,3 +23,20 @@ Note10ReadOnlyRAMBlockDevice *note10_create_owned_readonly_ram_nub(
     owner->release();
     return device;
 }
+
+Note10ReadOnlyRAMBlockDevice *note10_attach_owned_readonly_ram_nub(
+    IOService *provider, const void *source, UInt64 extent, UInt64 block_bytes,
+    UInt64 requested_copy_limit)
+{
+    if (!provider) return nullptr;
+    auto *device = note10_create_owned_readonly_ram_nub(
+        source, extent, block_bytes, requested_copy_limit);
+    if (!device) return nullptr;
+    if (!device->attach(provider)) {
+        device->release(); return nullptr;
+    }
+    if (!device->start(provider)) {
+        device->detach(provider); device->release(); return nullptr;
+    }
+    return device;
+}
