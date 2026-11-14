@@ -56,7 +56,10 @@ def validate_rows(rows, current, storage, link, filelist, producer, *, user_exce
         extras[UNIT] = 'port'
     else:
         require('user_exception_fetch' not in current['producer'], 'compact_context_binding')
-    row_count, linked_count = (1072, 1078) if user_exception_fetch else (1071, 1077)
+    from phase1_owned_ram_kernel_integration import enabled as factory_enabled, UNIT as FACTORY_UNIT
+    factory_selected=factory_enabled(current)
+    if factory_selected:extras[FACTORY_UNIT]='port'
+    row_count, linked_count = (1073,1079) if factory_selected else (1072, 1078) if user_exception_fetch else (1071, 1077)
     require(type(rows) is list and len(rows) == row_count and all(type(row) is dict for row in rows), 'compact_input_shape')
     require(current['kind'] == 'v84-current-native' and current['producer_id'] == digest(current['producer']) and
             current['input_binding'] == digest(current['bindings']) and
@@ -135,7 +138,9 @@ def project(raw, current, storage, link, filelist, producer, *, user_exception_f
     rows = json.loads(raw, object_pairs_hook=unique)
     validate_rows(rows, current, storage, link, filelist, producer, user_exception_fetch=user_exception_fetch, readonly_ram_nub=readonly_ram_nub)
     compact = [{key: row[key] for key in (*CORE, *(['assembly_input'] if 'assembly_input' in row else []))} for row in rows]
-    value = dict(schema='note10-v204-compact-native-object-receipts-v1' if readonly_ram_nub else
+    from phase1_owned_ram_kernel_integration import enabled as factory_enabled
+    value = dict(schema='note10-v261-compact-native-object-receipts-v1' if factory_enabled(current) else
+                 'note10-v204-compact-native-object-receipts-v1' if readonly_ram_nub else
                  'note10-v200-compact-native-object-receipts-v1' if user_exception_fetch else
                  'note10-v174-compact-native-object-receipts-v1', raw_bytes=len(raw),
                  raw_sha256=hashlib.sha256(raw).hexdigest(), units=compact)

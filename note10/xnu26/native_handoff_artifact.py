@@ -68,11 +68,13 @@ def verify_fetch_profile(current, rows, state, producer, link):
         admit_provenance(current)
     except ValueError:
         raise Rejected('genuine_fetch_binding_required') from None
+    from phase1_owned_ram_kernel_integration import enabled as factory_enabled
+    linked_count=1079 if factory_enabled(current) else 1078
     proof = state['user_exception_fetch_link']
     require(proof == producer['user_exception_fetch_link'] and proof['schema'] == 'note10-v200-user-exception-symbol-provenance-v1' and
             proof['producer_id'] == current['producer_id'] and proof['input_binding'] == current['input_binding'] and
             proof['passed'] is True and proof['object_provenance_verified'] is True and
-            proof['final_symbols_verified'] is True and proof['linked_objects'] == link['object_count'] == 1078 and
+            proof['final_symbols_verified'] is True and proof['linked_objects'] == link['object_count'] == linked_count and
             proof['final_symbol_counts'] == {name: 1 for name in LINK_SYMBOLS} and
             all(type(proof['final_symbol_counts'][name]) is int for name in LINK_SYMBOLS) and
             proof['caller_references_fetch'] is True and proof['fetch_references_native_copyin'] is True and
@@ -88,8 +90,8 @@ def verify_fetch_profile(current, rows, state, producer, link):
                     ('source', 'source_sha256', 'object_path', 'object_sha256', 'category')}, 'exact_symbol_origin_member_required')
     counts = state['user_exception_tool_counts']
     require(counts == producer['user_exception_tool_counts'] and counts['counts_complete'] is True and
-            all(type(counts[k]) is int and counts[k] == v for k, v in dict(linked_unit_compile_attempts=1078,
-                auxiliary_genassym_target_compiles=1, total_target_driver_compile_jobs=1079,
+            all(type(counts[k]) is int and counts[k] == v for k, v in dict(linked_unit_compile_attempts=linked_count,
+                auxiliary_genassym_target_compiles=1, total_target_driver_compile_jobs=linked_count+1,
                 host_config_compiler_drivers=1, host_config_C_units=9, host_config_links=1, bison=1, flex=1,
                 alias_map_generations=1, alias_assembler_invocations=0, nm_invocations=4).items()) and
             all(type(counts[k]) is int and counts[k] >= 0 for k in ('IIG_attempts', 'IIG_successes', 'MIG_attempts', 'MIG_successes')) and
@@ -97,7 +99,7 @@ def verify_fetch_profile(current, rows, state, producer, link):
             'complete_actual_tool_counts_required')
 
 
-def success_payloads(build, producer, head, run_id, attempt, *, compact=False, observations=None, user_exception_fetch=False, readonly_ram_nub=False):
+def success_payloads(build, producer, head, run_id, attempt, *, compact=False, observations=None, user_exception_fetch=False, readonly_ram_nub=False, owned_ram_factory=False):
     require(type(readonly_ram_nub) is bool and (not readonly_ram_nub or (compact and user_exception_fetch)), 'nub_compact_fetch_required')
     require(type(user_exception_fetch) is bool and (not user_exception_fetch or compact), 'compact_fetch_profile_required')
     if compact:
@@ -124,7 +126,9 @@ def success_payloads(build, producer, head, run_id, attempt, *, compact=False, o
     for key in ('producer_id', 'input_binding'):
         require(state[key] == link[key] == current[key] and
                 all(row[key] == current[key] for row in rows + storage['units']), 'receipt_identity_required')
-    count, row_count = (1078, 1072) if user_exception_fetch else (1077, 1071)
+    from phase1_owned_ram_kernel_integration import enabled as factory_enabled, verify_profile as verify_factory
+    require(type(owned_ram_factory)is bool and factory_enabled(current)is owned_ram_factory,'closed_factory_profile')
+    count, row_count = (1079,1073) if owned_ram_factory else (1078, 1072) if user_exception_fetch else (1077, 1071)
     require(state['passed'] is True and state['phase'] == 'complete' and link['link_succeeded'] is True and
             link['returncode'] == 0 and link['object_count'] == producer['final_object_count'] == count and
             len(current['inventory']) == 1067 and len(rows) == row_count and len(storage['units']) == 6 and
@@ -147,13 +151,15 @@ def success_payloads(build, producer, head, run_id, attempt, *, compact=False, o
         verify_profile(current, rows, storage, state, producer, link)
     else:
         require('readonly_ram_nub' not in state and 'readonly_ram_nub' not in producer, 'closed_nub_profile_required')
+    if owned_ram_factory:verify_factory(current,rows,state,producer,link)
     kernel = read(build / 'current-native.macho', KERNEL_MAX, observations=observations, member='kernel/note10-experimental.macho')
     kernel_sha = sha(kernel)
     require(kernel_sha == state['output_sha256'] == producer['kernel_sha256'] and
             len(kernel) == state['output_bytes'] == producer['kernel_bytes'], 'kernel_identity_required')
     ownership = [{'file': 'ownership/' + name, 'bytes': len(raw), 'sha256': sha(raw)}
                  for name, raw in sorted(receipts.items())]
-    manifest = dict(schema='note10-v204-readonly-ram-nub-native-handoff-build-v1' if readonly_ram_nub else
+    manifest = dict(schema='note10-v261-owned-ram-factory-native-handoff-build-v1' if owned_ram_factory else
+                    'note10-v204-readonly-ram-nub-native-handoff-build-v1' if readonly_ram_nub else
                     'note10-v200-user-exception-native-handoff-build-v1' if user_exception_fetch else
                     'note10-v174-native-handoff-build-v1' if compact else 'note10-v173-native-handoff-build-v1', source_commit=head,
                     run_id=run_id, run_attempt=attempt, output_sha256=kernel_sha, output_size=len(kernel),
@@ -165,11 +171,13 @@ def success_payloads(build, producer, head, run_id, attempt, *, compact=False, o
         manifest['user_exception_fetch_link'] = state['user_exception_fetch_link']
     if readonly_ram_nub:
         manifest['readonly_ram_nub'] = state['readonly_ram_nub']
+    if owned_ram_factory:manifest['owned_ram_factory'] = state['owned_ram_factory']
     return {'kernel/note10-experimental.macho': kernel, 'kernel/build-manifest.json': encoded(manifest),
             **{'ownership/' + name: raw for name, raw in receipts.items()}}
 
 
-def stage(build, summary, destination, *, head, run_id, attempt, compact=False, user_exception_fetch=False, readonly_ram_nub=False):
+def stage(build, summary, destination, *, head, run_id, attempt, compact=False, user_exception_fetch=False, readonly_ram_nub=False, owned_ram_factory=False):
+    require(type(owned_ram_factory)is bool and(not owned_ram_factory or readonly_ram_nub),'factory_requires_nub')
     require(type(readonly_ram_nub) is bool and (not readonly_ram_nub or (compact and user_exception_fetch)), 'nub_compact_fetch_required')
     require(type(user_exception_fetch) is bool and (not user_exception_fetch or compact), 'compact_fetch_profile_required')
     require(re.fullmatch('[0-9a-f]{40}', head) and type(run_id) is int and run_id > 0 and type(attempt) is int and attempt == 1,
@@ -181,7 +189,8 @@ def stage(build, summary, destination, *, head, run_id, attempt, compact=False, 
     failure_input = None
     try:
         producer = json.loads(read(summary, META_MAX, observations=observations, member='producer-result.json'))
-        expected_schema = ('note10-v204-readonly-ram-nub-kernel-artifact-result-v1' if readonly_ram_nub else
+        expected_schema = ('note10-v261-owned-ram-integrated-build-v1' if owned_ram_factory else
+                           'note10-v204-readonly-ram-nub-kernel-artifact-result-v1' if readonly_ram_nub else
                            'note10-v200-user-exception-kernel-artifact-result-v1' if user_exception_fetch else
                            'note10-v174-native-kernel-artifact-result-v1' if compact else 'note10-v173-native-kernel-artifact-result-v1')
         require(producer['schema'] == expected_schema and
@@ -189,7 +198,7 @@ def stage(build, summary, destination, *, head, run_id, attempt, compact=False, 
                 producer['run_attempt'] == attempt, 'producer_identity_required')
         if producer['passed'] is True:
             payloads = success_payloads(build, producer, head, run_id, attempt, compact=compact,
-                                        observations=observations, user_exception_fetch=user_exception_fetch, readonly_ram_nub=readonly_ram_nub)
+                                        observations=observations, user_exception_fetch=user_exception_fetch, readonly_ram_nub=readonly_ram_nub, owned_ram_factory=owned_ram_factory)
             code = 'none'
     except (OSError, ValueError, KeyError, TypeError) as error:
         payloads = {}
@@ -201,7 +210,8 @@ def stage(build, summary, destination, *, head, run_id, attempt, compact=False, 
             if code in {'ordinary_input_required', 'input_size_limit', 'input_size_changed'} and observations:
                 failure_input = dict(observations[-1])
         error_type = type(error).__name__
-    record = dict(schema='note10-v204-sealed-native-handoff-result-v1' if readonly_ram_nub else
+    record = dict(schema='note10-v261-sealed-native-handoff-result-v1' if owned_ram_factory else
+                  'note10-v204-sealed-native-handoff-result-v1' if readonly_ram_nub else
                   'note10-v200-sealed-native-handoff-result-v1' if user_exception_fetch else
                   'note10-v174-sealed-native-handoff-result-v1' if compact else 'note10-v173-sealed-native-handoff-result-v1', source_commit=head,
                   run_id=run_id, run_attempt=attempt, kernel_retained=code == 'none',
@@ -222,7 +232,8 @@ def stage(build, summary, destination, *, head, run_id, attempt, compact=False, 
                 record['native_state_retained'] = False
     payloads['result.json'] = encoded(record)
     members = [dict(file=name, bytes=len(raw), sha256=sha(raw)) for name, raw in sorted(payloads.items())]
-    payloads['members.json'] = encoded(dict(schema='note10-v204-sealed-native-members-v1' if readonly_ram_nub else
+    payloads['members.json'] = encoded(dict(schema='note10-v261-sealed-native-members-v1' if owned_ram_factory else
+        'note10-v204-sealed-native-members-v1' if readonly_ram_nub else
         'note10-v200-sealed-native-members-v1' if user_exception_fetch else
         'note10-v174-sealed-native-members-v1' if compact else 'note10-v173-sealed-native-members-v1',
         source_commit=head, run_id=run_id, run_attempt=attempt, kernel_retained=record['kernel_retained'], members=members))

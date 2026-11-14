@@ -162,7 +162,7 @@ def final_symbols(symbols, linked, current, observation):
                        final_symbol_counts={name: names.count(name) for name in LINK_SYMBOLS}, linked_objects=count)
 
 
-def tool_counts(native, observation, complete):
+def tool_counts(native, observation, complete, *, owned_ram_factory=False):
     """Report completed recorded work; unobservable partial generator counts stay null."""
     counts = dict(counts_complete=False, linked_unit_compile_attempts=observation.get('total_target_compile_attempts'),
                   auxiliary_genassym_target_compiles=None, total_target_driver_compile_jobs=None,
@@ -176,11 +176,12 @@ def tool_counts(native, observation, complete):
     assym = json.loads(read(native / 'current-genassym-result.json', 8388608))
     commands = [r for r in extra['commands'] if '--def' in r['command']]
     migrations = mig['interfaces'] + mig['generated_sources']
-    require(assym['passed'] is True and observation['total_target_compile_attempts'] == 1078 and
+    linked_count=1079 if owned_ram_factory else 1078
+    require(assym['passed'] is True and observation['total_target_compile_attempts'] == linked_count and
             all(r['exit_code'] == 0 for r in commands) and all(r['passed'] is True for r in migrations),
             'complete actual generator/target reports required')
-    counts.update(counts_complete=True, linked_unit_compile_attempts=1078, auxiliary_genassym_target_compiles=1,
-                  total_target_driver_compile_jobs=1079, host_config_compiler_drivers=1, host_config_C_units=9,
+    counts.update(counts_complete=True, linked_unit_compile_attempts=linked_count, auxiliary_genassym_target_compiles=1,
+                  total_target_driver_compile_jobs=linked_count+1, host_config_compiler_drivers=1, host_config_C_units=9,
                   host_config_links=1, bison=1, flex=1, IIG_attempts=len(commands),
                   IIG_successes=sum(r['exit_code'] == 0 for r in commands), MIG_attempts=len(migrations),
                   MIG_successes=sum(r['passed'] is True for r in migrations), alias_map_generations=1, nm_invocations=4)

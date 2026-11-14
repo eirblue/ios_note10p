@@ -88,7 +88,7 @@ def compile_storage(current, work, output, result, *, diagnostic_sink=None):
 
 
 def admit_storage(current, rows, output, native_paths):
-    require(current['producer']['ci_context'] == builder.ci_context(checked=True, storage=True),
+    require(current['producer']['ci_context'] == builder.ci_context(checked=True, storage=True, owned_ram_factory=__import__('phase1_owned_ram_kernel_integration').enabled(current)),
             'dedicated same-run storage producer required')
     directory = output / 'storage'
     selected = ram.enabled(current)

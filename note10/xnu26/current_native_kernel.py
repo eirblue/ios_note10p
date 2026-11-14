@@ -104,6 +104,8 @@ def extra_sources(current):
         extras[UNIT] = 'port'
     elif 'user_exception_fetch' in current['bindings']:
         raise ValueError('caller binding without opt-in producer')
+    from phase1_owned_ram_kernel_integration import enabled as owned_factory_enabled, UNIT as FACTORY_UNIT
+    if owned_factory_enabled(current):extras[FACTORY_UNIT] = 'port'
     if set(current['dependencies']) != set(extras):
         raise ValueError('exact default-off/on extra-source set required')
     return extras
@@ -170,8 +172,10 @@ def direct_link(current, rows, directory, compiler, sdk, flags, aliases, runtime
         raise ValueError('current compiler runtime changed')
     filelist = directory / 'native-objects.filelist'
     filelist.write_text('\n'.join(str(p) for p in paths) + '\n', encoding='utf-8')
+    from phase1_owned_ram_kernel_integration import link_root
+    retention = link_root(current)
     command = [compiler, '--target=arm64-apple-ios26.5.2', '-mcpu=generic', '-march=armv8.2-a+crypto',
-               '-isysroot', sdk, *flags, '-Wl,-filelist,' + str(filelist),
+               '-isysroot', sdk, *flags, *retention, '-Wl,-filelist,' + str(filelist),
                '-Wl,-alias_list,' + str(aliases), runtime['path'], '-o', str(output)]
     result = runner(command, capture_output=True, text=True, timeout=240)
     (directory / 'kernel-link.log').write_text(result.stdout + result.stderr, encoding='utf-8')
