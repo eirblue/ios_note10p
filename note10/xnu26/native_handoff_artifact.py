@@ -69,7 +69,7 @@ def verify_fetch_profile(current, rows, state, producer, link):
     except ValueError:
         raise Rejected('genuine_fetch_binding_required') from None
     from phase1_owned_ram_kernel_integration import enabled as factory_enabled
-    linked_count=1080 if factory_enabled(current) else 1078
+    linked_count=__import__('phase1_genuine_block_driver_native').linked_count(current)
     proof = state['user_exception_fetch_link']
     require(proof == producer['user_exception_fetch_link'] and proof['schema'] == 'note10-v200-user-exception-symbol-provenance-v1' and
             proof['producer_id'] == current['producer_id'] and proof['input_binding'] == current['input_binding'] and
@@ -99,7 +99,7 @@ def verify_fetch_profile(current, rows, state, producer, link):
             'complete_actual_tool_counts_required')
 
 
-def success_payloads(build, producer, head, run_id, attempt, *, compact=False, observations=None, user_exception_fetch=False, readonly_ram_nub=False, owned_ram_factory=False):
+def success_payloads(build, producer, head, run_id, attempt, *, compact=False, observations=None, user_exception_fetch=False, readonly_ram_nub=False, owned_ram_factory=False, genuine_block_driver=False):
     require(type(readonly_ram_nub) is bool and (not readonly_ram_nub or (compact and user_exception_fetch)), 'nub_compact_fetch_required')
     require(type(user_exception_fetch) is bool and (not user_exception_fetch or compact), 'compact_fetch_profile_required')
     if compact:
@@ -128,10 +128,11 @@ def success_payloads(build, producer, head, run_id, attempt, *, compact=False, o
                 all(row[key] == current[key] for row in rows + storage['units']), 'receipt_identity_required')
     from phase1_owned_ram_kernel_integration import enabled as factory_enabled, verify_profile as verify_factory
     require(type(owned_ram_factory)is bool and factory_enabled(current)is owned_ram_factory,'closed_factory_profile')
-    count, row_count = (1080,1073) if owned_ram_factory else (1078, 1072) if user_exception_fetch else (1077, 1071)
+    require(__import__('phase1_genuine_block_driver_native').enabled(current)is genuine_block_driver,'closed_driver_profile')
+    count, row_count = (1085,1073)if genuine_block_driver else (1080,1073) if owned_ram_factory else (1078, 1072) if user_exception_fetch else (1077, 1071)
     require(state['passed'] is True and state['phase'] == 'complete' and link['link_succeeded'] is True and
             link['returncode'] == 0 and link['object_count'] == producer['final_object_count'] == count and
-            len(current['inventory']) == 1067 and len(rows) == row_count and len(storage['units']) == (7 if owned_ram_factory else 6) and
+            len(current['inventory']) == 1067 and len(rows) == row_count and len(storage['units']) == (12 if genuine_block_driver else 7 if owned_ram_factory else 6) and
             all(row['passed'] is True for row in rows + storage['units']), 'complete_ownership_required')
     paths = receipts['native-objects.filelist'].decode('utf-8').splitlines()
     require(paths == [row['object_path'] for row in rows + storage['units']] and len(set(paths)) == count and
@@ -158,7 +159,7 @@ def success_payloads(build, producer, head, run_id, attempt, *, compact=False, o
             len(kernel) == state['output_bytes'] == producer['kernel_bytes'], 'kernel_identity_required')
     ownership = [{'file': 'ownership/' + name, 'bytes': len(raw), 'sha256': sha(raw)}
                  for name, raw in sorted(receipts.items())]
-    manifest = dict(schema='note10-v264-native-capture-receipt-native-handoff-build-v1' if owned_ram_factory else
+    manifest = dict(schema='note10-v266-genuine-block-driver-native-handoff-build-v1'if genuine_block_driver else 'note10-v264-native-capture-receipt-native-handoff-build-v1' if owned_ram_factory else
                     'note10-v204-readonly-ram-nub-native-handoff-build-v1' if readonly_ram_nub else
                     'note10-v200-user-exception-native-handoff-build-v1' if user_exception_fetch else
                     'note10-v174-native-handoff-build-v1' if compact else 'note10-v173-native-handoff-build-v1', source_commit=head,
@@ -176,8 +177,9 @@ def success_payloads(build, producer, head, run_id, attempt, *, compact=False, o
             **{'ownership/' + name: raw for name, raw in receipts.items()}}
 
 
-def stage(build, summary, destination, *, head, run_id, attempt, compact=False, user_exception_fetch=False, readonly_ram_nub=False, owned_ram_factory=False):
+def stage(build, summary, destination, *, head, run_id, attempt, compact=False, user_exception_fetch=False, readonly_ram_nub=False, owned_ram_factory=False, genuine_block_driver=False):
     require(type(owned_ram_factory)is bool and(not owned_ram_factory or readonly_ram_nub),'factory_requires_nub')
+    __import__('phase1_genuine_block_driver_native').mode(genuine_block_driver,owned_ram_factory)
     require(type(readonly_ram_nub) is bool and (not readonly_ram_nub or (compact and user_exception_fetch)), 'nub_compact_fetch_required')
     require(type(user_exception_fetch) is bool and (not user_exception_fetch or compact), 'compact_fetch_profile_required')
     require(re.fullmatch('[0-9a-f]{40}', head) and type(run_id) is int and run_id > 0 and type(attempt) is int and attempt == 1,
@@ -190,7 +192,7 @@ def stage(build, summary, destination, *, head, run_id, attempt, compact=False, 
     failure_input = None
     try:
         producer = json.loads(read(summary, META_MAX, observations=observations, member='producer-result.json'))
-        expected_schema = ('note10-v264-native-capture-receipt-build-v1' if owned_ram_factory else
+        expected_schema = ('note10-v266-genuine-block-driver-build-v1'if genuine_block_driver else 'note10-v264-native-capture-receipt-build-v1' if owned_ram_factory else
                            'note10-v204-readonly-ram-nub-kernel-artifact-result-v1' if readonly_ram_nub else
                            'note10-v200-user-exception-kernel-artifact-result-v1' if user_exception_fetch else
                            'note10-v174-native-kernel-artifact-result-v1' if compact else 'note10-v173-native-kernel-artifact-result-v1')
@@ -199,7 +201,7 @@ def stage(build, summary, destination, *, head, run_id, attempt, compact=False, 
                 producer['run_attempt'] == attempt, 'producer_identity_required')
         if producer['passed'] is True:
             payloads = success_payloads(build, producer, head, run_id, attempt, compact=compact,
-                                        observations=observations, user_exception_fetch=user_exception_fetch, readonly_ram_nub=readonly_ram_nub, owned_ram_factory=owned_ram_factory)
+                                        observations=observations, user_exception_fetch=user_exception_fetch, readonly_ram_nub=readonly_ram_nub, owned_ram_factory=owned_ram_factory,genuine_block_driver=genuine_block_driver)
             code = 'none'
     except (OSError, ValueError, KeyError, TypeError) as error:
         payloads = {}
@@ -212,7 +214,7 @@ def stage(build, summary, destination, *, head, run_id, attempt, compact=False, 
                 failure_input = dict(observations[-1])
         error_type = type(error).__name__
         error_detail = str(error)[:1024]
-    record = dict(schema='note10-v264-sealed-native-handoff-result-v1' if owned_ram_factory else
+    record = dict(schema='note10-v266-sealed-native-handoff-result-v1'if genuine_block_driver else 'note10-v264-sealed-native-handoff-result-v1' if owned_ram_factory else
                   'note10-v204-sealed-native-handoff-result-v1' if readonly_ram_nub else
                   'note10-v200-sealed-native-handoff-result-v1' if user_exception_fetch else
                   'note10-v174-sealed-native-handoff-result-v1' if compact else 'note10-v173-sealed-native-handoff-result-v1', source_commit=head,
@@ -238,7 +240,7 @@ def stage(build, summary, destination, *, head, run_id, attempt, compact=False, 
                 record['native_state_retained'] = False
     payloads['result.json'] = encoded(record)
     members = [dict(file=name, bytes=len(raw), sha256=sha(raw)) for name, raw in sorted(payloads.items())]
-    payloads['members.json'] = encoded(dict(schema='note10-v264-sealed-native-members-v1' if owned_ram_factory else
+    payloads['members.json'] = encoded(dict(schema='note10-v266-sealed-native-members-v1'if genuine_block_driver else 'note10-v264-sealed-native-members-v1' if owned_ram_factory else
         'note10-v204-sealed-native-members-v1' if readonly_ram_nub else
         'note10-v200-sealed-native-members-v1' if user_exception_fetch else
         'note10-v174-sealed-native-members-v1' if compact else 'note10-v173-sealed-native-members-v1',

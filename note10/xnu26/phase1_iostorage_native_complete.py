@@ -139,7 +139,7 @@ def compile_complete(result, output, open_archive, commit, header_sha, require_a
 
 
 def compile_generated_complete(result, output, work, open_archive, commit, header_sha, require_arm64_object,
-                               *, existing_exports=False, diagnostic_sink=None, media=False):
+                               *, existing_exports=False, diagnostic_sink=None, media=False, driver=False):
     result.update(passed=False, stage='native-complete-input-binding')
     require(result['fresh_tool_sha256'] == GENERATION_TOOL_SHA256 and
             {name: item['sha256'] for name, item in result['fresh_generated_headers'].items()} ==
@@ -164,6 +164,7 @@ def compile_generated_complete(result, output, work, open_archive, commit, heade
     result['archive_fetch_attempts'] = 1
     with open_archive() as archive:
         stage_apple(archive, apple, commit, header_sha, media=media)
+        if driver:__import__('phase1_genuine_block_driver_native').stage(archive,apple,commit)
     result.update(archive_verified=True, archive_source_verified=True)
     require(fresh_headers(native) == result['fresh_generated_headers'], 'same-run generated headers changed')
     tools = {name: sha(Path(command('xcrun', '-f', name))) for name in ('clang', 'iig', 'mig', 'unifdef')}
@@ -198,6 +199,7 @@ def compile_generated_complete(result, output, work, open_archive, commit, heade
     symbols = command('xcrun', '--sdk', 'macosx', 'nm', '-g', '-U', '-j', str(obj)).splitlines()
     require(symbols.count(COMPLETE_SYMBOL) == 1, 'exact external completion definition required')
     if media and not compile_media(result, apple, argv, require_arm64_object, diagnostic_sink=diagnostic_sink):return
+    if driver and not __import__('phase1_genuine_block_driver_native').compile_members(result,apple,argv,source,sdk,require_arm64_object,diagnostic_sink=diagnostic_sink):return
     result.update(stage='complete', passed=True, native_complete_verified=True,
                   defined_completion_symbol=COMPLETE_SYMBOL)
 

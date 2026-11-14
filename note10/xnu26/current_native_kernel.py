@@ -113,7 +113,7 @@ def extra_sources(current):
 
 def expected_objects(current, *, storage=False):
     from phase1_owned_ram_kernel_integration import enabled as factory_enabled
-    return len(current['inventory']) + len(extra_sources(current)) + ((7 if factory_enabled(current)else 6)if storage else 0)
+    return len(current['inventory']) + len(extra_sources(current)) + (__import__('phase1_genuine_block_driver_native').storage_count(current)if storage else 0)
 
 
 def admit_objects(current, rows):

@@ -31,12 +31,13 @@ CASE_IDS = ('test_current_inventory_resolves_owner_and_generated_identity',
             'test_direct_native_link_uses_current_filelist_and_reports_failure')
 
 
-def ci_context(leaf=False, checked=False, storage=False, owned_ram_factory=False):
+def ci_context(leaf=False, checked=False, storage=False, owned_ram_factory=False, genuine_block_driver=False):
+    __import__('phase1_genuine_block_driver_native').mode(genuine_block_driver,owned_ram_factory)
     result = {k: os.environ.get(k, '') for k in ('GITHUB_SHA', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT',
         'GITHUB_JOB', 'GITHUB_WORKFLOW_REF', 'GITHUB_WORKFLOW_SHA', 'GITHUB_REPOSITORY')}
-    workflow = '.github/workflows/note10-v264-native-capture-receipt.yml' if owned_ram_factory else STORAGE_WORKFLOW if storage else (CHECKED_WORKFLOW if checked else (LEAF_WORKFLOW if leaf else WORKFLOW))
+    workflow = '.github/workflows/note10-v266-genuine-block-driver.yml' if genuine_block_driver else '.github/workflows/note10-v264-native-capture-receipt.yml' if owned_ram_factory else STORAGE_WORKFLOW if storage else (CHECKED_WORKFLOW if checked else (LEAF_WORKFLOW if leaf else WORKFLOW))
     if (not re.fullmatch('[0-9a-f]{40}', result['GITHUB_SHA']) or
-        result['GITHUB_WORKFLOW_SHA'] != result['GITHUB_SHA'] or result['GITHUB_JOB'] != ('v264-native-capture-receipt' if owned_ram_factory else JOB) or
+        result['GITHUB_WORKFLOW_SHA'] != result['GITHUB_SHA'] or result['GITHUB_JOB'] != ('v266-genuine-block-driver' if genuine_block_driver else 'v264-native-capture-receipt' if owned_ram_factory else JOB) or
         result['GITHUB_REPOSITORY'] != 'eirblue/ios_note10p' or
         not result['GITHUB_WORKFLOW_REF'].startswith('eirblue/ios_note10p/' + workflow + '@') or
         any(not re.fullmatch('[1-9][0-9]*', result[k]) for k in ('GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT'))):
@@ -133,7 +134,7 @@ def aliases_for_current(source, rows, output, *, memdev_current=None, memdev_obs
         bind_origins(nub_current, rows, defined, references, aliases, pins, nub_observation)
     from phase1_owned_ram_kernel_integration import enabled as factory_enabled, bind_origins as factory_origins
     if nub_current is not None and factory_enabled(nub_current):
-        factory_origins(nub_current,rows,defined,references,aliases,nub_observation['owned_ram_factory_link'])
+        factory_origins(nub_current,rows,defined,references,aliases,nub_observation['owned_ram_factory_link'],source_exports=pins)
     raw_alias = output / 'current-aliases.exports'
     raw_alias.write_text(''.join(a + ':' + b + '\n' for a, b in sorted(aliases.items())))
     result = output / 'current-aliases.exp'
@@ -219,9 +220,11 @@ def intrinsic_kernel_result(path, symbols_text, undefined, *, leaf=False):
     return result
 
 
-def build(work, output, *, leaf=False, checked=False, storage=False, memdev=False, user_exception_fetch=False, readonly_ram_nub=False, owned_ram_factory=False):
+def build(work, output, *, leaf=False, checked=False, storage=False, memdev=False, user_exception_fetch=False, readonly_ram_nub=False, owned_ram_factory=False, genuine_block_driver=False):
     import phase1_owned_ram_kernel_integration as factory
     factory.mode(owned_ram_factory,storage,memdev,user_exception_fetch,readonly_ram_nub)
+    import phase1_genuine_block_driver_native as driver
+    driver.mode(genuine_block_driver,owned_ram_factory)
     # Reuse only provisioning/configuration primitives; never the v83 tests/build.
     if type(readonly_ram_nub) is not bool or (readonly_ram_nub and not storage):
         raise ValueError('explicit nub opt-in requires the storage lane')
@@ -239,7 +242,7 @@ def build(work, output, *, leaf=False, checked=False, storage=False, memdev=Fals
     if storage:
         checked = True
     if checked:leaf=True
-    ci = ci_context(leaf, checked, storage=True, owned_ram_factory=owned_ram_factory) if storage else ci_context(leaf, checked)
+    ci = ci_context(leaf, checked, storage=True, owned_ram_factory=owned_ram_factory,genuine_block_driver=genuine_block_driver) if storage else ci_context(leaf, checked)
     if storage:
         import phase1_iostorage_kernel_link as storage_link
         storage_link.verify_sources(readonly_ram_nub)
@@ -381,6 +384,8 @@ def build(work, output, *, leaf=False, checked=False, storage=False, memdev=Fals
         if owned_ram_factory:
             producer[factory.KEY] = factory.profile()
             producer['recipe_sha256'].update({n:native.file_sha(ROOT/'note10/xnu26'/n) for n in ('phase1_owned_ram_kernel_integration.py','phase1_owned_ram_factory_object.py','note10_owned_ram_nub.cpp','note10_owned_ram_nub.h')})
+        if genuine_block_driver:
+            producer[driver.KEY]=driver.profile();producer['recipe_sha256']['phase1_genuine_block_driver_native.py']=native.file_sha(ROOT/'note10/xnu26/phase1_genuine_block_driver_native.py')
         binding_files = ('configure-result.json', 'exports-result.json', 'native-mig-result.json',
                          'native-extra-result.json', 'native-link/generate-result.json')
         bindings = {n: native.file_sha(private / n) for n in binding_files}
@@ -395,6 +400,7 @@ def build(work, output, *, leaf=False, checked=False, storage=False, memdev=Fals
         if readonly_ram_nub:
             bindings['readonly_ram_nub'] = native.digest(ram.profile())
         if owned_ram_factory:bindings[factory.KEY] = native.digest(factory.profile())
+        if genuine_block_driver:bindings[driver.KEY]=native.digest(driver.profile())
         dep_paths = {'@public/libdispatch/firehose_buffer.c': library / 'src/firehose/firehose_buffer.c',
             '@metadata/version.c': private / 'native-link/version.c',
             '@metadata/lastkerneldataconst.c': source / 'libsa/lastkerneldataconst.c',
@@ -538,7 +544,7 @@ def build(work, output, *, leaf=False, checked=False, storage=False, memdev=Fals
             observation['total_target_compile_attempts'] = sum(counts) if all(type(n) is int for n in counts) else None
         if user_exception_fetch and storage and memdev:
             try:
-                state['user_exception_tool_counts'] = fetch_scope.tool_counts(private, state['memdev'], state['passed'], owned_ram_factory=owned_ram_factory)
+                state['user_exception_tool_counts'] = fetch_scope.tool_counts(private, state['memdev'], state['passed'], owned_ram_factory=owned_ram_factory,genuine_block_driver=genuine_block_driver,family_IIG=state['storage'].get('driver_compile',{}).get('IIG'))
             except (OSError, ValueError, KeyError, TypeError) as error:
                 state.update(phase='failed', passed=False, error='new tool count proof: ' + type(error).__name__)
         bootstrap.write_json(output / 'result.json', state)

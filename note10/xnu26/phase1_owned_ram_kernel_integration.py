@@ -49,7 +49,7 @@ def compile_provider(current,source,private,apple):
     return report
 
 
-def bind_origins(current,rows,defined,references,aliases,observation):
+def bind_origins(current,rows,defined,references,aliases,observation,source_exports=None):
     require(enabled(current),'factory profile required')
     own=[row for row in rows if row['source']==UNIT]
     require(len(own)==1,'one factory current row');row=own[0]
@@ -71,6 +71,7 @@ def bind_origins(current,rows,defined,references,aliases,observation):
     require(providers,'factory genuine imports required')
     observation.update(profile=profile(),producer_id=current['producer_id'],input_binding=current['input_binding'],row={k:row[k]for k in ('source','category','source_sha256','object_path','object_sha256')},symbol=symbol,consumer_symbol=consumer,providers=providers,object_provenance_verified=True,local_factory_source_consumer='note10_attach_owned_readonly_ram_nub',local_factory_source_calls=1,external_consumer_callers=0,factory_same_object_reference_observed=bool(references.get(symbol)),consumer_invoked=False,factory_invoked=False,provider_started=False,provider_registered=False,native_activation=False,physical_ready=False)
     observation['media']=bind_media_origins(current,rows,defined,references,aliases)
+    if __import__('phase1_genuine_block_driver_native').enabled(current):observation['driver']=__import__('phase1_genuine_block_driver_native').bind_origins(current,rows,defined,references,aliases,source_exports)
     current['owned_ram_factory_link']=dict(observation)
 
 
@@ -80,27 +81,32 @@ def link_root(current):
     require(proof['object_provenance_verified']is True and proof['profile']==profile()and proof['producer_id']==current['producer_id']and proof['input_binding']==current['input_binding']and proof['external_consumer_callers']==0 and proof['consumer_invoked']is False and re.fullmatch(r'[_A-Za-z][_A-Za-z0-9$]{0,383}',proof['symbol']),'bound factory retention root')
     require(re.fullmatch(r'[_A-Za-z][_A-Za-z0-9$]{0,383}',proof['consumer_symbol'])and proof['consumer_symbol']!=proof['symbol'],'separate consumer retention root')
     media=proof['media'];require(media['object_provenance_verified']is True and media['instantiated']is media['started']is False and re.fullmatch(r'[_A-Za-z][_A-Za-z0-9$]{0,383}',media['symbol']),'bound uninstantiated media retention root')
-    return ['-Wl,-u,'+name for name in (proof['symbol'],proof['consumer_symbol'],media['symbol'])]
+    roots=[proof['symbol'],proof['consumer_symbol'],media['symbol']]
+    if __import__('phase1_genuine_block_driver_native').enabled(current):roots.extend(proof['driver']['roots'].values())
+    return ['-Wl,-u,'+name for name in roots]
 
 
 def final_symbols(text,linked,current,observation):
-    require(enabled(current)and linked['link_succeeded']is True and linked['object_count']==native.expected_objects(current,storage=True)==1080,'complete current factory link')
+    require(enabled(current)and linked['link_succeeded']is True and linked['object_count']==native.expected_objects(current,storage=True)==__import__('phase1_genuine_block_driver_native').linked_count(current),'complete current factory link')
     names=[p[-1]for line in text.splitlines()if len(p:=line.split())>=3 and re.fullmatch('[0-9a-fA-F]+',p[0])and p[-2].isupper()]
     require(observation['object_provenance_verified']is True and names.count(observation['symbol'])==names.count(observation['consumer_symbol'])==1,'factory definition retained once')
     require(names.count(observation['media']['symbol'])==1,'real IOMedia class retained once')
     observation['media'].update(class_retained=True,instantiated=False,started=False)
-    observation.update(passed=True,final_symbols_verified=True,native_kernel_contains_factory=True,consumer_retained=True,linked_objects=1080)
+    if __import__('phase1_genuine_block_driver_native').enabled(current):
+        __import__('phase1_genuine_block_driver_native').final_symbols(text,observation['driver'])
+    observation.update(passed=True,final_symbols_verified=True,native_kernel_contains_factory=True,consumer_retained=True,linked_objects=__import__('phase1_genuine_block_driver_native').linked_count(current))
 
 
 def verify_profile(current,rows,storage,state,producer,link):
     require(enabled(current),'closed factory profile');proof=state[KEY]
     own=[row for row in rows if row['source']==UNIT]
-    require(len(own)==1 and proof==producer[KEY]and proof['profile']==profile()and proof['producer_id']==current['producer_id']and proof['input_binding']==current['input_binding']and proof['passed']is proof['object_provenance_verified']is proof['final_symbols_verified']is proof['native_kernel_contains_factory']is True and proof['linked_objects']==link['object_count']==1080,'retained current factory provenance')
+    require(len(own)==1 and proof==producer[KEY]and proof['profile']==profile()and proof['producer_id']==current['producer_id']and proof['input_binding']==current['input_binding']and proof['passed']is proof['object_provenance_verified']is proof['final_symbols_verified']is proof['native_kernel_contains_factory']is True and proof['linked_objects']==link['object_count']==__import__('phase1_genuine_block_driver_native').linked_count(current),'retained current factory provenance')
     media=proof['media'];binding=storage['binding'];source=binding['proof']['media_compile']
     require(binding['binding']==native.digest(binding['proof'])and binding['proof']['producer_id']==current['producer_id']and binding['proof']['input_binding']==current['input_binding'],'explicit current storage receipt binding')
     matches=[row for row in storage['units']if row['source']=='@storage/IOMedia.cpp'];require(len(matches)==1,'one explicit actual media receipt');row=matches[0]
     require(row['passed']is True and row['category']=='storage'and row['producer_id']==current['producer_id']and row['input_binding']==current['input_binding']and row['storage_binding']==binding['binding']and media['row']=={k:row[k]for k in ('source','source_sha256','object_path','object_sha256','category')}and source['passed']is True and source['object_path']==row['object_path'],'explicit actual media row/compiler proof join')
     require(media['class_retained']is media['object_provenance_verified']is True and media['instantiated']is media['started']is False and media['row']['object_sha256']==source['object_sha256']and media['row']['source_sha256']==source['source_sha256'],'retained actual current media provenance')
+    if __import__('phase1_genuine_block_driver_native').enabled(current):__import__('phase1_genuine_block_driver_native').verify(current,storage,proof['driver'])
     require(proof['row']=={k:own[0][k]for k in ('source','category','source_sha256','object_path','object_sha256')}and proof['external_consumer_callers']==0 and proof['consumer_invoked']is False and proof['consumer_retained']is True and proof['local_factory_source_consumer']=='note10_attach_owned_readonly_ram_nub'and proof['local_factory_source_calls']==1 and all(proof[k]is False for k in ('consumer_invoked','factory_invoked','provider_started','provider_registered','native_activation','physical_ready')),'unstarted exact factory row')
 
 
@@ -113,7 +119,9 @@ def bind_media_origins(current,rows,defined,references,aliases):
     require(compile_proof['passed']is True and compile_proof['target_compile_attempts']==1 and compile_proof['source']=='IOMedia.cpp'and compile_proof['source_bytes']==MEDIA_BYTES and compile_proof['source_sha256']==MEDIA_SHA256 and compile_proof['object_path']==row['object_path']and compile_proof['object_sha256']==row['object_sha256'],'actual media source/command/object binding')
     roots=[n for n,owners in defined.items()if row['object_path']in owners and 'IOMedia10gMetaClassE'in n]
     require(len(roots)==1,'one actual emitted IOMedia metaclass');symbol=roots[0]
-    require(re.fullmatch(r'[_A-Za-z][_A-Za-z0-9$]{0,383}',symbol)and defined[symbol]==[row['object_path']]and symbol not in aliases and not references.get(symbol),'real uninstantiated media class root')
+    require(re.fullmatch(r'[_A-Za-z][_A-Za-z0-9$]{0,383}',symbol)and defined[symbol]==[row['object_path']]and symbol not in aliases,'real uninstantiated media class root')
+    users=references.get(symbol,[]);allowed=[r['object_path']for r in rows if r['source']=='@storage/IOBlockStorageDriver.cpp']if __import__('phase1_genuine_block_driver_native').enabled(current)else []
+    require(all(path in allowed for path in users),'only selected genuine driver may reference media class; no runtime invocation')
     by_path={r['object_path']:r for r in rows};providers={}
     for name,users in references.items():
         if row['object_path']not in users:continue

@@ -27,8 +27,9 @@ def verify_sources(readonly_ram_nub=False):
     require(all(sha(ROOT / path) == digest for path, digest in pins.items()), 'storage source pins differ')
 
 
-def storage_units(directory, readonly_ram_nub=False, *, media=False):
+def storage_units(directory, readonly_ram_nub=False, *, media=False, driver=False, driver_proof=None):
     require(type(media)is bool and(not media or readonly_ram_nub),'media requires selected nub')
+    __import__('phase1_genuine_block_driver_native').mode(driver,media)
     pins = ram.selected_sources(readonly_ram_nub)
     apple = directory / 'apple-implementation'
     public = directory / 'public-sdk-objects'
@@ -37,6 +38,7 @@ def storage_units(directory, readonly_ram_nub=False, *, media=False):
         (public / sdk.BASE_MEMBER, public, sdk.BASE_MEMBER_SHA),
     ]
     if media:units.insert(1,(apple / complete.MEDIA_MEMBER,apple,complete.MEDIA_SHA256))
+    if driver:units[2:2]=[(src,obj.parent,h)for src,obj,h in __import__('phase1_genuine_block_driver_native').unit_rows(apple,driver_proof)]
     units.extend((ROOT / source, public, pins[source])
                  for source in (ram.NUB_SOURCE if readonly_ram_nub else sdk.PROVIDER_SOURCE, sdk.PIO_SOURCE, *sdk.PIO_LINK_C_SOURCES))
     return [(source, owner / (source.stem + '.o'), digest) for source, owner, digest in units]
@@ -62,10 +64,11 @@ def compile_storage(current, work, output, result, *, diagnostic_sink=None):
                                      for name in complete.GENERATION_TOOL_SHA256})
     selected = ram.enabled(current)
     media = __import__('phase1_owned_ram_kernel_integration').enabled(current)
+    driver = __import__('phase1_genuine_block_driver_native').enabled(current)
     objects = sdk.compile_closure_objects(result, directory, native_work=work, diagnostic_sink=diagnostic_sink,
-                                          readonly_ram_nub=selected, media=media)
-    units = storage_units(directory, selected, media=media)
-    require(objects == [str(obj) for _, obj, _ in units] and result['compile_attempts'] == (7 if media else 6) and
+                                          readonly_ram_nub=selected, media=media, driver=driver)
+    units = storage_units(directory, selected, media=media, driver=driver, driver_proof=result.get('driver_compile'))
+    require(objects == [str(obj) for _, obj, _ in units] and result['compile_attempts'] == (12 if driver else 7 if media else 6) and
             result['archive_fetch_attempts'] == 1 and result['fresh_inputs_reverified'],
             'six exact same-run storage objects required')
 
@@ -78,12 +81,13 @@ def compile_storage(current, work, output, result, *, diagnostic_sink=None):
     if media:
         require(result['media_compile']['passed']is True,'real media compile success')
         proof['media_compile']=result['media_compile']
+    if driver:proof['driver_compile']=result['driver_compile']
     binding = native.digest(proof)
     current['storage'] = {'proof': proof, 'binding': binding}
     rows = []
     for source, obj, digest in units:
         require(sha(source) == digest, 'compiled storage source pin differs')
-        row = dict(source='@storage/' + source.name, source_sha256=digest, passed=True, object_path=str(obj),
+        row = dict(source=('@storage-generated/'if source.name==__import__('phase1_genuine_block_driver_native').GENERATED else '@storage/') + source.name, source_sha256=digest, passed=True, object_path=str(obj),
                    object_sha256=sha(obj), storage_binding=binding)
         native.stamp(current, row, 'storage')
         rows.append(row)
@@ -94,12 +98,13 @@ def compile_storage(current, work, output, result, *, diagnostic_sink=None):
 
 
 def admit_storage(current, rows, output, native_paths):
-    require(current['producer']['ci_context'] == builder.ci_context(checked=True, storage=True, owned_ram_factory=__import__('phase1_owned_ram_kernel_integration').enabled(current)),
+    require(current['producer']['ci_context'] == builder.ci_context(checked=True, storage=True, owned_ram_factory=__import__('phase1_owned_ram_kernel_integration').enabled(current),genuine_block_driver=__import__('phase1_genuine_block_driver_native').enabled(current)),
             'dedicated same-run storage producer required')
     directory = output / 'storage'
     selected = ram.enabled(current)
     media = __import__('phase1_owned_ram_kernel_integration').enabled(current)
-    units = storage_units(directory, selected, media=media)
+    driver = __import__('phase1_genuine_block_driver_native').enabled(current)
+    units = storage_units(directory, selected, media=media, driver=driver, driver_proof=current['storage']['proof'].get('driver_compile'))
     storage = current['storage']
     proof = storage['proof']
     toolchain = current['producer']['toolchain']
@@ -114,13 +119,13 @@ def admit_storage(current, rows, output, native_paths):
     require((proof.get('readonly_ram_nub') == ram.profile() and
              proof.get('readonly_ram_sdk_delta_sha256') == ram.SDK_DELTA) if selected else
             not ({'readonly_ram_nub', 'readonly_ram_sdk_delta_sha256'} & set(proof)), 'closed storage profile required')
-    require(len(native_paths) == native.expected_objects(current) and len(rows) == len(units) == (7 if media else 6),
+    require(len(native_paths) == native.expected_objects(current) and len(rows) == len(units) == (12 if driver else 7 if media else 6),
             'exact final object counts required')
     if media:require(proof['media_compile']['passed']is True and proof['media_compile']['source_sha256']==complete.MEDIA_SHA256,'bound real media compiler proof')
     admitted = []
     for row, (source, obj, digest) in zip(rows, units):
         path = native.owned(row['object_path'], directory)
-        require(row['source'] == '@storage/' + source.name and row['source_sha256'] == digest and
+        require(row['source'] == ('@storage-generated/'if source.name==__import__('phase1_genuine_block_driver_native').GENERATED else '@storage/') + source.name and row['source_sha256'] == digest and
                 row['category'] == 'storage' and row['passed'] is True and
                 row['producer_id'] == current['producer_id'] and row['input_binding'] == current['input_binding'] and
                 row['storage_binding'] == storage['binding'] and path == obj and
@@ -128,7 +133,7 @@ def admit_storage(current, rows, output, native_paths):
                 'storage object ownership or source binding differs')
         sdk.require_arm64_object(path)
         admitted.append(path)
-    require(len(set(admitted)) == (7 if media else 6) and not (set(admitted) & set(native_paths)), 'storage object path collision')
+    require(len(set(admitted)) == (12 if driver else 7 if media else 6) and not (set(admitted) & set(native_paths)), 'storage object path collision')
     return admitted
 
 
