@@ -11,6 +11,14 @@ from phase1_iostorage_native_inputs import ROOT, command, fresh_headers, generat
 MEMBER = 'IOStorage.cpp'
 MEMBER_BYTES = 11675
 MEMBER_SHA256 = '26dc9ccabccb23a24862b4ce0b4ab6cbe73319743df10fa17f8fb5a0b1943966'
+MEDIA_MEMBER = 'IOMedia.cpp'
+MEDIA_BYTES = 40031
+MEDIA_SHA256 = '38de6ac74dab48808261eed136137107a30a826e0845c9c5c6d039b53141da30'
+MEDIA_HEADER_SHA256 = {
+    'IOMedia.h':'f8d96b002ec37bdc32e8b715394b8324e399f73ede88ac5d2d9770780e7a3bab',
+    'IOBlockStorageDevice.h':'afe6609327355c84a70f764c55291d41931e47dedbfb49dc9a2b3601902cdd9c',
+    'IOStorage.h':'28a83281984b4ba81e1bbb2455b6e55c3881095de06c5b92c32d1b64536da123',
+}
 COMPLETE_SYMBOL = '__ZN9IOStorage8completeEP19IOStorageCompletioniy'
 CONFIG_DEFINES_SHA256 = '39fdf9bb9b9f9b724485bff2ac4d9f5fe8a238d9e56e5728f20f52c43e670a60'
 CORE_ENTITLEMENTS_SHA256 = 'e786a99b0221e67e501ad0229596b80ff6bb6fc95a7c9c23f092750bbcd28658'
@@ -88,11 +96,16 @@ def stage_exports(source, native, *, existing=False):
     bind(support / entitlement, native / 'kernel-support-declarations' / entitlement, CORE_ENTITLEMENTS_SHA256)
 
 
-def stage_apple(archive, stage, commit, header_sha):
+def stage_apple(archive, stage, commit, header_sha, *, media=False):
     members = (
         (MEMBER, MEMBER_BYTES, MEMBER_SHA256, stage / MEMBER),
         ('IOStorage.h', 28158, header_sha, stage / 'include/IOKit/storage/IOStorage.h'),
     )
+    require(type(media)is bool,'closed media selection')
+    if media:
+        expected=f'IOStorageFamily-{commit}/{MEDIA_MEMBER}'
+        require(sum(m.name==expected for m in archive.getmembers())==1,'exact one selected media member')
+        members += ((MEDIA_MEMBER, MEDIA_BYTES, MEDIA_SHA256, stage / MEDIA_MEMBER),)
     for name, size, digest, destination in members:
         member = archive.getmember(f'IOStorageFamily-{commit}/{name}')
         require(member.isfile() and member.size == size, 'Apple storage member size differs')
@@ -126,7 +139,7 @@ def compile_complete(result, output, open_archive, commit, header_sha, require_a
 
 
 def compile_generated_complete(result, output, work, open_archive, commit, header_sha, require_arm64_object,
-                               *, existing_exports=False, diagnostic_sink=None):
+                               *, existing_exports=False, diagnostic_sink=None, media=False):
     result.update(passed=False, stage='native-complete-input-binding')
     require(result['fresh_tool_sha256'] == GENERATION_TOOL_SHA256 and
             {name: item['sha256'] for name, item in result['fresh_generated_headers'].items()} ==
@@ -150,7 +163,7 @@ def compile_generated_complete(result, output, work, open_archive, commit, heade
     apple = output / 'apple-implementation'
     result['archive_fetch_attempts'] = 1
     with open_archive() as archive:
-        stage_apple(archive, apple, commit, header_sha)
+        stage_apple(archive, apple, commit, header_sha, media=media)
     result.update(archive_verified=True, archive_source_verified=True)
     require(fresh_headers(native) == result['fresh_generated_headers'], 'same-run generated headers changed')
     tools = {name: sha(Path(command('xcrun', '-f', name))) for name in ('clang', 'iig', 'mig', 'unifdef')}
@@ -184,5 +197,37 @@ def compile_generated_complete(result, output, work, open_archive, commit, heade
     result.update(stage='native-complete-symbol-audit', compiled_arm64_objects=1)
     symbols = command('xcrun', '--sdk', 'macosx', 'nm', '-g', '-U', '-j', str(obj)).splitlines()
     require(symbols.count(COMPLETE_SYMBOL) == 1, 'exact external completion definition required')
+    if media and not compile_media(result, apple, argv, require_arm64_object, diagnostic_sink=diagnostic_sink):return
     result.update(stage='complete', passed=True, native_complete_verified=True,
                   defined_completion_symbol=COMPLETE_SYMBOL)
+
+
+def compile_media(result, apple, storage_argv, require_arm64_object, *, diagnostic_sink=None, runner=subprocess.run):
+    """Compile the one closed extra member in the exact already-bound native context."""
+    source=apple/MEDIA_MEMBER;obj=apple/'IOMedia.o'
+    require(source.is_file()and source.stat().st_size==MEDIA_BYTES and sha(source)==MEDIA_SHA256,'exact unmodified media source')
+    require(storage_argv[-4:]==['-c',str(apple/MEMBER),'-o',str(apple/'IOStorage.o')],'actual storage command tail')
+    header_root=apple.parent/'public-sdk-objects/include'
+    require(header_root.is_absolute()and header_root==header_root.resolve()and header_root.is_dir(),'canonical staged media include root')
+    for name,digest in MEDIA_HEADER_SHA256.items():
+        header=header_root/'IOKit/storage'/name
+        require(header.is_file()and not header.is_symlink()and sha(header)==digest,'exact staged media header before compilation')
+    argv=[storage_argv[0],'-I',str(header_root),*storage_argv[1:-4],'-c',str(source),'-o',str(obj)]
+    proof=dict(source=MEDIA_MEMBER,source_sha256=MEDIA_SHA256,source_bytes=MEDIA_BYTES,header_root=str(header_root),staged_header_sha256=dict(MEDIA_HEADER_SHA256),argv=argv,target_compile_attempts=1,passed=False)
+    result['media_compile']=proof;result['media_target_compile_attempts']=1
+    result['compile_attempts']+=1;result['target_object_compile_attempts']+=1
+    (apple/'IOMedia-COMPILE-STARTED.json').write_text(json.dumps(proof,indent=2)+'\n')
+    try:
+        call=runner(argv,cwd=ROOT,capture_output=True,timeout=60);proof['returncode']=call.returncode
+        (apple/'IOMedia.compiler.log').write_bytes(call.stdout+call.stderr)
+        if diagnostic_sink is not None:diagnostic_sink(MEDIA_MEMBER,call.returncode,call.stderr,False)
+        if call.returncode:return False
+        require_arm64_object(obj);proof.update(passed=True,object_path=str(obj),object_sha256=sha(obj),object_bytes=obj.stat().st_size)
+        result['compiled_arm64_objects']+=1
+        return True
+    except subprocess.TimeoutExpired as error:
+        proof.update(error_type=type(error).__name__)
+        (apple/'IOMedia.compiler.log').write_bytes((error.stdout or b'')+(error.stderr or b''))
+        if diagnostic_sink is not None:diagnostic_sink(MEDIA_MEMBER,None,error.stderr or b'',True)
+        raise
+    finally:(apple/'IOMedia-compile.json').write_text(json.dumps(proof,indent=2)+'\n')

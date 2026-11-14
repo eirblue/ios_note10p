@@ -58,8 +58,10 @@ def validate_rows(rows, current, storage, link, filelist, producer, *, user_exce
         require('user_exception_fetch' not in current['producer'], 'compact_context_binding')
     from phase1_owned_ram_kernel_integration import enabled as factory_enabled, UNIT as FACTORY_UNIT
     factory_selected=factory_enabled(current)
-    if factory_selected:extras[FACTORY_UNIT]='port'
-    row_count, linked_count = (1073,1079) if factory_selected else (1072, 1078) if user_exception_fetch else (1071, 1077)
+    if factory_selected:
+        extras[FACTORY_UNIT]='port'
+        selected_storage=(selected_storage[0],'IOMedia.cpp',*selected_storage[1:])
+    row_count, linked_count = (1073,1080) if factory_selected else (1072, 1078) if user_exception_fetch else (1071, 1077)
     require(type(rows) is list and len(rows) == row_count and all(type(row) is dict for row in rows), 'compact_input_shape')
     require(current['kind'] == 'v84-current-native' and current['producer_id'] == digest(current['producer']) and
             current['input_binding'] == digest(current['bindings']) and
@@ -104,9 +106,9 @@ def validate_rows(rows, current, storage, link, filelist, producer, *, user_exce
     binding = storage['binding']
     from phase1_iostorage_kernel_link import storage_units
     expected_storage = {'@storage/'+source.name: source_sha
-                        for source, _, source_sha in storage_units(PurePosixPath('/source-proof'), readonly_ram_nub)}
-    require(len(expected_storage) == 6 and list(expected_storage) == ['@storage/'+name for name in selected_storage] and
-            type(units) is list and len(units) == 6 and
+                        for source, _, source_sha in storage_units(PurePosixPath('/source-proof'), readonly_ram_nub, media=factory_selected)}
+    require(len(expected_storage) == (7 if factory_selected else 6) and list(expected_storage) == ['@storage/'+name for name in selected_storage] and
+            type(units) is list and len(units) == (7 if factory_selected else 6) and
             [row['source'] for row in units] == ['@storage/'+name for name in selected_storage] and
             binding['binding'] == digest(binding['proof']) == producer['storage_binding_sha256'] and
             binding['proof']['producer_id'] == current['producer_id'] and

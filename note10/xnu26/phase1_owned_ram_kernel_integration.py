@@ -22,7 +22,7 @@ def mode(value,storage,memdev,fetch,nub):
     return value
 
 
-def profile():return dict(schema='note10-v262-owned-ram-attach-start-link-profile-v1',source_sha256=PINS,unit=UNIT,owner='iokit',factory_returns_unstarted=True,consumer='note10_attach_owned_readonly_ram_nub',consumer_invoked=False)
+def profile():return dict(schema='note10-v263-real-iomedia-native-link-profile-v1',source_sha256=PINS,unit=UNIT,owner='iokit',factory_returns_unstarted=True,consumer='note10_attach_owned_readonly_ram_nub',consumer_invoked=False,media_source=dict(member='IOMedia.cpp',bytes=40031,sha256='38de6ac74dab48808261eed136137107a30a826e0845c9c5c6d039b53141da30',unit='@storage/IOMedia.cpp'))
 
 
 def enabled(current):
@@ -70,6 +70,7 @@ def bind_origins(current,rows,defined,references,aliases,observation):
         providers[name]=dict(symbol=target,source=actual['source'],source_sha256=actual['source_sha256'],object_sha256=actual['object_sha256'])
     require(providers,'factory genuine imports required')
     observation.update(profile=profile(),producer_id=current['producer_id'],input_binding=current['input_binding'],row={k:row[k]for k in ('source','category','source_sha256','object_path','object_sha256')},symbol=symbol,consumer_symbol=consumer,providers=providers,object_provenance_verified=True,local_factory_source_consumer='note10_attach_owned_readonly_ram_nub',local_factory_source_calls=1,external_consumer_callers=0,factory_same_object_reference_observed=bool(references.get(symbol)),consumer_invoked=False,factory_invoked=False,provider_started=False,provider_registered=False,native_activation=False,physical_ready=False)
+    observation['media']=bind_media_origins(current,rows,defined,references,aliases)
     current['owned_ram_factory_link']=dict(observation)
 
 
@@ -78,18 +79,46 @@ def link_root(current):
     proof=current['owned_ram_factory_link']
     require(proof['object_provenance_verified']is True and proof['profile']==profile()and proof['producer_id']==current['producer_id']and proof['input_binding']==current['input_binding']and proof['external_consumer_callers']==0 and proof['consumer_invoked']is False and re.fullmatch(r'[_A-Za-z][_A-Za-z0-9$]{0,383}',proof['symbol']),'bound factory retention root')
     require(re.fullmatch(r'[_A-Za-z][_A-Za-z0-9$]{0,383}',proof['consumer_symbol'])and proof['consumer_symbol']!=proof['symbol'],'separate consumer retention root')
-    return ['-Wl,-u,'+proof[name]for name in ('symbol','consumer_symbol')]
+    media=proof['media'];require(media['object_provenance_verified']is True and media['instantiated']is media['started']is False and re.fullmatch(r'[_A-Za-z][_A-Za-z0-9$]{0,383}',media['symbol']),'bound uninstantiated media retention root')
+    return ['-Wl,-u,'+name for name in (proof['symbol'],proof['consumer_symbol'],media['symbol'])]
 
 
 def final_symbols(text,linked,current,observation):
-    require(enabled(current)and linked['link_succeeded']is True and linked['object_count']==native.expected_objects(current,storage=True)==1079,'complete current factory link')
+    require(enabled(current)and linked['link_succeeded']is True and linked['object_count']==native.expected_objects(current,storage=True)==1080,'complete current factory link')
     names=[p[-1]for line in text.splitlines()if len(p:=line.split())>=3 and re.fullmatch('[0-9a-fA-F]+',p[0])and p[-2].isupper()]
     require(observation['object_provenance_verified']is True and names.count(observation['symbol'])==names.count(observation['consumer_symbol'])==1,'factory definition retained once')
-    observation.update(passed=True,final_symbols_verified=True,native_kernel_contains_factory=True,consumer_retained=True,linked_objects=1079)
+    require(names.count(observation['media']['symbol'])==1,'real IOMedia class retained once')
+    observation['media'].update(class_retained=True,instantiated=False,started=False)
+    observation.update(passed=True,final_symbols_verified=True,native_kernel_contains_factory=True,consumer_retained=True,linked_objects=1080)
 
 
 def verify_profile(current,rows,state,producer,link):
     require(enabled(current),'closed factory profile');proof=state[KEY]
     own=[row for row in rows if row['source']==UNIT]
-    require(len(own)==1 and proof==producer[KEY]and proof['profile']==profile()and proof['producer_id']==current['producer_id']and proof['input_binding']==current['input_binding']and proof['passed']is proof['object_provenance_verified']is proof['final_symbols_verified']is proof['native_kernel_contains_factory']is True and proof['linked_objects']==link['object_count']==1079,'retained current factory provenance')
+    require(len(own)==1 and proof==producer[KEY]and proof['profile']==profile()and proof['producer_id']==current['producer_id']and proof['input_binding']==current['input_binding']and proof['passed']is proof['object_provenance_verified']is proof['final_symbols_verified']is proof['native_kernel_contains_factory']is True and proof['linked_objects']==link['object_count']==1080,'retained current factory provenance')
+    media=proof['media'];source=current['storage']['proof']['media_compile']
+    require(media['class_retained']is media['object_provenance_verified']is True and media['instantiated']is media['started']is False and media['row']['object_sha256']==source['object_sha256']and media['row']['source_sha256']==source['source_sha256'],'retained actual current media provenance')
     require(proof['row']=={k:own[0][k]for k in ('source','category','source_sha256','object_path','object_sha256')}and proof['external_consumer_callers']==0 and proof['consumer_invoked']is False and proof['consumer_retained']is True and proof['local_factory_source_consumer']=='note10_attach_owned_readonly_ram_nub'and proof['local_factory_source_calls']==1 and all(proof[k]is False for k in ('consumer_invoked','factory_invoked','provider_started','provider_registered','native_activation','physical_ready')),'unstarted exact factory row')
+
+
+def bind_media_origins(current,rows,defined,references,aliases):
+    from phase1_iostorage_native_complete import MEDIA_SHA256,MEDIA_BYTES
+    require(enabled(current),'closed real media profile')
+    matches=[r for r in rows if r['source']=='@storage/IOMedia.cpp'];require(len(matches)==1,'one actual media row');row=matches[0]
+    require(row['category']=='storage'and row['passed']is True and row['source_sha256']==MEDIA_SHA256 and row['producer_id']==current['producer_id']and row['input_binding']==current['input_binding']and row['storage_binding']==current['storage']['binding'],'same-job media row')
+    compile_proof=current['storage']['proof']['media_compile']
+    require(compile_proof['passed']is True and compile_proof['target_compile_attempts']==1 and compile_proof['source']=='IOMedia.cpp'and compile_proof['source_bytes']==MEDIA_BYTES and compile_proof['source_sha256']==MEDIA_SHA256 and compile_proof['object_path']==row['object_path']and compile_proof['object_sha256']==row['object_sha256'],'actual media source/command/object binding')
+    roots=[n for n,owners in defined.items()if row['object_path']in owners and 'IOMedia10gMetaClassE'in n]
+    require(len(roots)==1,'one actual emitted IOMedia metaclass');symbol=roots[0]
+    require(re.fullmatch(r'[_A-Za-z][_A-Za-z0-9$]{0,383}',symbol)and defined[symbol]==[row['object_path']]and symbol not in aliases and not references.get(symbol),'real uninstantiated media class root')
+    by_path={r['object_path']:r for r in rows};providers={}
+    for name,users in references.items():
+        if row['object_path']not in users:continue
+        owners=defined.get(name,[])
+        if owners==[row['object_path']]:continue
+        require(name not in aliases and len(owners)==1 and owners[0]in by_path,'new media import needs genuine current definition, no alias/stub')
+        target=by_path[owners[0]]
+        require(target['category']in ('native','storage')and target['passed']is True and target['producer_id']==current['producer_id']and target['input_binding']==current['input_binding'],'new media provider same-job identity')
+        providers[name]={k:target[k]for k in ('source','source_sha256','object_sha256','category')}
+    require(providers,'actual media imports required')
+    return dict(row={k:row[k]for k in ('source','source_sha256','object_path','object_sha256','category')},symbol=symbol,providers=providers,object_provenance_verified=True,instantiated=False,started=False,class_retained=False)

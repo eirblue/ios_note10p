@@ -18,15 +18,15 @@ import phase1_owned_ram_kernel_integration as factory
 
 ROOT=Path(__file__).resolve().parents[2]
 HERE=ROOT/'note10/xnu26'
-WORKFLOW='.github/workflows/note10-v262-owned-ram-attach-start.yml'
-JOB='v262-owned-ram-attach-start'
-ARTIFACT='note10-v262-owned-ram-attach-start-sealed-evidence'
-STEM='note10-v262-owned-ram-attach-start'
-OUT=ROOT/'note10/private/v262-native-integrated-build'
-WORK=ROOT/'note10/private/v262-native-integrated-work'
-STAGE=ROOT/'note10/private/v262-native-integrated-evidence'
-SUMMARY=ROOT/'note10/private/v262-native-integrated-summary.json'
-SEALED=ROOT/'note10/private/v262-native-integrated.n10sealed'
+WORKFLOW='.github/workflows/note10-v263-real-iomedia-native.yml'
+JOB='v263-real-iomedia-native'
+ARTIFACT='note10-v263-real-iomedia-native-sealed-evidence'
+STEM='note10-v263-real-iomedia-native'
+OUT=ROOT/'note10/private/v263-native-integrated-build'
+WORK=ROOT/'note10/private/v263-native-integrated-work'
+STAGE=ROOT/'note10/private/v263-native-integrated-evidence'
+SUMMARY=ROOT/'note10/private/v263-native-integrated-summary.json'
+SEALED=ROOT/'note10/private/v263-native-integrated.n10sealed'
 CAP=67108864
 
 
@@ -42,8 +42,8 @@ def save(path,value):
 
 
 def source_files():
-    names=set(retained.public_files())|{WORKFLOW,'note10/target.json','note10/device_test/v262_current_native_parcel.py'}
-    names.update('note10/xnu26/'+name for name in ('phase1_owned_ram_integrated_candidate.py','phase1_owned_ram_kernel_integration.py','test_owned_ram_attach_start.py','native_handoff_artifact.py','compact_native_receipts.py','build_current_native_kernel.py','phase1_iostorage_kernel_link.py','owned_ram_attach_fixture.cpp','owned_ram_attach_fixture_support.h'))
+    names=set(retained.public_files())|{WORKFLOW,'note10/target.json','note10/device_test/v263_current_native_parcel.py'}
+    names.update('note10/xnu26/'+name for name in ('phase1_owned_ram_integrated_candidate.py','phase1_owned_ram_kernel_integration.py','test_real_iomedia_native.py','native_handoff_artifact.py','compact_native_receipts.py','build_current_native_kernel.py','phase1_iostorage_kernel_link.py'))
     names.update('note10/xnu26/patches/'+name for name in ('0014-memdev-wide-byte-extent.patch','0015-user-exception-checked-fetch.patch'))
     pending=list(names)
     while pending:
@@ -68,28 +68,28 @@ def public_context(head,fixture,fixture_sha,predecessor,predecessor_sha):
     def summary(row,count,digest):
         require(row['passed']is True and(row['groups'],row['variants'],row['assertions'])==(1,count,count)and re.fullmatch('[0-9a-f]{64}',digest),'actual new/carried PASS')
         return dict(passed=True,groups=1,variants=count,assertions=count,result_sha256=digest)
-    return dict(schema=STEM+'-public-input-v1',source_head=head,source_sha256=sources(),fixture=summary(fixture,7,fixture_sha),predecessor261=summary(predecessor,7,predecessor_sha))
+    return dict(schema=STEM+'-public-input-v1',source_head=head,source_sha256=sources(),fixture=summary(fixture,3,fixture_sha),predecessor262=summary(predecessor,7,predecessor_sha))
 
 
 def produce(head,context):
     ci=builder.ci_context(storage=True,checked=True,owned_ram_factory=True)
     require(sys.platform=='darwin'and os.environ.get('GITHUB_EVENT_NAME')=='workflow_dispatch'and head==ci['GITHUB_SHA']and os.environ.get('GITHUB_RUN_ATTEMPT')=='1','new genuine SDK first build')
-    require(set(context)=={'schema','source_head','source_sha256','fixture','predecessor261'}and context['schema']==STEM+'-public-input-v1'and context['source_head']==head and context['source_sha256']==sources(),'exact new public closure')
-    for key,count in (('fixture',7),('predecessor261',7)):
+    require(set(context)=={'schema','source_head','source_sha256','fixture','predecessor262'}and context['schema']==STEM+'-public-input-v1'and context['source_head']==head and context['source_sha256']==sources(),'exact new public closure')
+    for key,count in (('fixture',3),('predecessor262',7)):
         row=context[key];require(set(row)=={'passed','groups','variants','assertions','result_sha256'}and row['passed']is True and(row['groups'],row['variants'],row['assertions'])==(1,count,count)and re.fullmatch('[0-9a-f]{64}',row['result_sha256']),'actual source-bound new/carried predicates')
     require(all(not p.exists()for p in (OUT,WORK,STAGE,SUMMARY,SEALED)),'new native build roots only')
     SUMMARY.parent.mkdir(parents=True,exist_ok=True);save(SUMMARY.with_suffix('.STARTED.json'),dict(source_head=head,public_input=context))
     producer_log=SUMMARY.with_suffix('.log')
-    result=dict(schema='note10-v262-owned-ram-attach-start-build-v1',source_head=head,run_id=int(ci['GITHUB_RUN_ID']),run_attempt=1,passed=False,runtime_executed=False,physical_ready=False,native_activation=False,consumer_invoked=False,factory_invoked=False,provider_started=False,provider_registered=False,source_sha256=context['source_sha256'],public_input=context,old_tests_replayed=0,old_proof_replays=0,Linux_Image_build_attempts=0,PID1_compile_attempts=0,full_native_build_attempts=0,tool_preflight={})
+    result=dict(schema='note10-v263-real-iomedia-native-build-v1',source_head=head,run_id=int(ci['GITHUB_RUN_ID']),run_attempt=1,passed=False,runtime_executed=False,physical_ready=False,native_activation=False,media_instantiated=False,media_started=False,consumer_invoked=False,factory_invoked=False,provider_started=False,provider_registered=False,source_sha256=context['source_sha256'],public_input=context,old_tests_replayed=0,old_proof_replays=0,Linux_Image_build_attempts=0,PID1_compile_attempts=0,full_native_build_attempts=0,tool_preflight={})
     try:
         with producer_log.open('x',encoding='utf-8')as log,redirect_stdout(log),redirect_stderr(log):
-            log.write('[v262 full selected native build]\n');log.flush()
+            log.write('[v263 full selected native build]\n');log.flush()
             preflight=result['tool_preflight'];preflight['compiler']=retained.inputs.command('xcrun','-f','clang');preflight['compiler_version']=retained.inputs.command(preflight['compiler'],'--version');preflight['SDK_version']=retained.inputs.command('xcrun','--sdk','macosx','--show-sdk-version');preflight['SDK_path']=retained.inputs.command('xcrun','--sdk','macosx','--show-sdk-path')
             require(retained.inputs.CLANG_VERSION in preflight['compiler_version']and preflight['SDK_version']==retained.inputs.SDK_VERSION,'genuine Apple compiler21/SDK26.5 before target build')
             result['full_native_build_attempts']=1
             builder.build(WORK,OUT,storage=True,memdev=True,user_exception_fetch=True,readonly_ram_nub=True,owned_ram_factory=True)
         state=json.loads((OUT/'result.json').read_text(encoding='utf-8'));link=state.get('link',{});storage=state.get('storage',{})
-        require(state['passed']is True and state['phase']=='complete'and link['link_succeeded']is True and link['object_count']==1079 and state['owned_ram_factory']['passed']is True,'complete native factory selection/link')
+        require(state['passed']is True and state['phase']=='complete'and link['link_succeeded']is True and link['object_count']==1080 and state['owned_ram_factory']['passed']is True,'complete native factory selection/link')
         toolchain=json.loads((OUT/'producer-context.json').read_text(encoding='utf-8'))['producer']['toolchain'];preflight=result['tool_preflight']
         require(toolchain['compiler']==preflight['compiler']and toolchain['sdk']==preflight['SDK_path']and toolchain['compiler_version'].strip()==preflight['compiler_version'],'actual full-build tool context matches early observed compiler/SDK')
         result.update(passed=True,kernel_sha256=state['output_sha256'],kernel_bytes=state['output_bytes'],final_object_count=link['object_count'],storage_binding_sha256=storage['storage_binding_sha256'],storage_object_sha256=storage['storage_object_sha256'],memdev_integration=state['memdev'],user_exception_fetch_link=state['user_exception_fetch_link'],user_exception_tool_counts=state['user_exception_tool_counts'],readonly_ram_nub=state['readonly_ram_nub'],owned_ram_factory=state['owned_ram_factory'])
@@ -99,7 +99,7 @@ def produce(head,context):
         if OUT.is_dir()and producer_log.is_file():
             (OUT/'producer.log').write_bytes(producer_log.read_bytes())
         state=json.loads((OUT/'result.json').read_text(encoding='utf-8'))if (OUT/'result.json').is_file()else{}
-        result.update(native_link_attempts=int(state.get('link',{}).get('attempted',False)),linked_unit_compile_attempts=state.get('memdev',{}).get('total_target_compile_attempts'),auxiliary_genassym_target_compiles=state.get('user_exception_tool_counts',{}).get('auxiliary_genassym_target_compiles'),factory_target_compile_attempts=state.get('owned_ram_factory',{}).get('compile_attempts',0),host_preparation_compiler_total=None)
+        result.update(native_link_attempts=int(state.get('link',{}).get('attempted',False)),linked_unit_compile_attempts=state.get('memdev',{}).get('total_target_compile_attempts'),auxiliary_genassym_target_compiles=state.get('user_exception_tool_counts',{}).get('auxiliary_genassym_target_compiles'),factory_target_compile_attempts=state.get('owned_ram_factory',{}).get('compile_attempts',0),media_target_compile_attempts=state.get('storage',{}).get('media_target_compile_attempts',0),host_preparation_compiler_total=None)
         save(SUMMARY,result)
         record=artifact.stage(OUT,SUMMARY,STAGE,head=head,run_id=result['run_id'],attempt=1,compact=True,user_exception_fetch=True,readonly_ram_nub=True,owned_ram_factory=True)
         require(record['kernel_retained']is result['passed'],'truthful authenticated native capture')

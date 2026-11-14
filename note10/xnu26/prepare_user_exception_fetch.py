@@ -176,7 +176,7 @@ def tool_counts(native, observation, complete, *, owned_ram_factory=False):
     assym = json.loads(read(native / 'current-genassym-result.json', 8388608))
     commands = [r for r in extra['commands'] if '--def' in r['command']]
     migrations = mig['interfaces'] + mig['generated_sources']
-    linked_count=1079 if owned_ram_factory else 1078
+    linked_count=1080 if owned_ram_factory else 1078
     require(assym['passed'] is True and observation['total_target_compile_attempts'] == linked_count and
             all(r['exit_code'] == 0 for r in commands) and all(r['passed'] is True for r in migrations),
             'complete actual generator/target reports required')
