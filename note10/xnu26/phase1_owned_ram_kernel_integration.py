@@ -92,11 +92,14 @@ def final_symbols(text,linked,current,observation):
     observation.update(passed=True,final_symbols_verified=True,native_kernel_contains_factory=True,consumer_retained=True,linked_objects=1080)
 
 
-def verify_profile(current,rows,state,producer,link):
+def verify_profile(current,rows,storage,state,producer,link):
     require(enabled(current),'closed factory profile');proof=state[KEY]
     own=[row for row in rows if row['source']==UNIT]
     require(len(own)==1 and proof==producer[KEY]and proof['profile']==profile()and proof['producer_id']==current['producer_id']and proof['input_binding']==current['input_binding']and proof['passed']is proof['object_provenance_verified']is proof['final_symbols_verified']is proof['native_kernel_contains_factory']is True and proof['linked_objects']==link['object_count']==1080,'retained current factory provenance')
-    media=proof['media'];source=current['storage']['proof']['media_compile']
+    media=proof['media'];binding=storage['binding'];source=binding['proof']['media_compile']
+    require(binding['binding']==native.digest(binding['proof'])and binding['proof']['producer_id']==current['producer_id']and binding['proof']['input_binding']==current['input_binding'],'explicit current storage receipt binding')
+    matches=[row for row in storage['units']if row['source']=='@storage/IOMedia.cpp'];require(len(matches)==1,'one explicit actual media receipt');row=matches[0]
+    require(row['passed']is True and row['category']=='storage'and row['producer_id']==current['producer_id']and row['input_binding']==current['input_binding']and row['storage_binding']==binding['binding']and media['row']=={k:row[k]for k in ('source','source_sha256','object_path','object_sha256','category')}and source['passed']is True and source['object_path']==row['object_path'],'explicit actual media row/compiler proof join')
     require(media['class_retained']is media['object_provenance_verified']is True and media['instantiated']is media['started']is False and media['row']['object_sha256']==source['object_sha256']and media['row']['source_sha256']==source['source_sha256'],'retained actual current media provenance')
     require(proof['row']=={k:own[0][k]for k in ('source','category','source_sha256','object_path','object_sha256')}and proof['external_consumer_callers']==0 and proof['consumer_invoked']is False and proof['consumer_retained']is True and proof['local_factory_source_consumer']=='note10_attach_owned_readonly_ram_nub'and proof['local_factory_source_calls']==1 and all(proof[k]is False for k in ('consumer_invoked','factory_invoked','provider_started','provider_registered','native_activation','physical_ready')),'unstarted exact factory row')
 

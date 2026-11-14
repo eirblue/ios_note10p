@@ -34,9 +34,9 @@ CASE_IDS = ('test_current_inventory_resolves_owner_and_generated_identity',
 def ci_context(leaf=False, checked=False, storage=False, owned_ram_factory=False):
     result = {k: os.environ.get(k, '') for k in ('GITHUB_SHA', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT',
         'GITHUB_JOB', 'GITHUB_WORKFLOW_REF', 'GITHUB_WORKFLOW_SHA', 'GITHUB_REPOSITORY')}
-    workflow = '.github/workflows/note10-v263-real-iomedia-native.yml' if owned_ram_factory else STORAGE_WORKFLOW if storage else (CHECKED_WORKFLOW if checked else (LEAF_WORKFLOW if leaf else WORKFLOW))
+    workflow = '.github/workflows/note10-v264-native-capture-receipt.yml' if owned_ram_factory else STORAGE_WORKFLOW if storage else (CHECKED_WORKFLOW if checked else (LEAF_WORKFLOW if leaf else WORKFLOW))
     if (not re.fullmatch('[0-9a-f]{40}', result['GITHUB_SHA']) or
-        result['GITHUB_WORKFLOW_SHA'] != result['GITHUB_SHA'] or result['GITHUB_JOB'] != ('v263-real-iomedia-native' if owned_ram_factory else JOB) or
+        result['GITHUB_WORKFLOW_SHA'] != result['GITHUB_SHA'] or result['GITHUB_JOB'] != ('v264-native-capture-receipt' if owned_ram_factory else JOB) or
         result['GITHUB_REPOSITORY'] != 'eirblue/ios_note10p' or
         not result['GITHUB_WORKFLOW_REF'].startswith('eirblue/ios_note10p/' + workflow + '@') or
         any(not re.fullmatch('[1-9][0-9]*', result[k]) for k in ('GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT'))):

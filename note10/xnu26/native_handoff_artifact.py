@@ -151,14 +151,14 @@ def success_payloads(build, producer, head, run_id, attempt, *, compact=False, o
         verify_profile(current, rows, storage, state, producer, link)
     else:
         require('readonly_ram_nub' not in state and 'readonly_ram_nub' not in producer, 'closed_nub_profile_required')
-    if owned_ram_factory:verify_factory(current,rows,state,producer,link)
+    if owned_ram_factory:verify_factory(current,rows,storage,state,producer,link)
     kernel = read(build / 'current-native.macho', KERNEL_MAX, observations=observations, member='kernel/note10-experimental.macho')
     kernel_sha = sha(kernel)
     require(kernel_sha == state['output_sha256'] == producer['kernel_sha256'] and
             len(kernel) == state['output_bytes'] == producer['kernel_bytes'], 'kernel_identity_required')
     ownership = [{'file': 'ownership/' + name, 'bytes': len(raw), 'sha256': sha(raw)}
                  for name, raw in sorted(receipts.items())]
-    manifest = dict(schema='note10-v263-real-iomedia-native-native-handoff-build-v1' if owned_ram_factory else
+    manifest = dict(schema='note10-v264-native-capture-receipt-native-handoff-build-v1' if owned_ram_factory else
                     'note10-v204-readonly-ram-nub-native-handoff-build-v1' if readonly_ram_nub else
                     'note10-v200-user-exception-native-handoff-build-v1' if user_exception_fetch else
                     'note10-v174-native-handoff-build-v1' if compact else 'note10-v173-native-handoff-build-v1', source_commit=head,
@@ -185,11 +185,12 @@ def stage(build, summary, destination, *, head, run_id, attempt, compact=False, 
     require(not destination.exists() and not destination.is_symlink() and
             destination.resolve() == destination.absolute(), 'fresh_stage_required')
     producer, payloads, code, error_type = None, {}, 'producer_not_passed', None
+    error_detail = None
     observations = [] if compact else None
     failure_input = None
     try:
         producer = json.loads(read(summary, META_MAX, observations=observations, member='producer-result.json'))
-        expected_schema = ('note10-v263-real-iomedia-native-build-v1' if owned_ram_factory else
+        expected_schema = ('note10-v264-native-capture-receipt-build-v1' if owned_ram_factory else
                            'note10-v204-readonly-ram-nub-kernel-artifact-result-v1' if readonly_ram_nub else
                            'note10-v200-user-exception-kernel-artifact-result-v1' if user_exception_fetch else
                            'note10-v174-native-kernel-artifact-result-v1' if compact else 'note10-v173-native-kernel-artifact-result-v1')
@@ -210,13 +211,18 @@ def stage(build, summary, destination, *, head, run_id, attempt, compact=False, 
             if code in {'ordinary_input_required', 'input_size_limit', 'input_size_changed'} and observations:
                 failure_input = dict(observations[-1])
         error_type = type(error).__name__
-    record = dict(schema='note10-v263-sealed-native-handoff-result-v1' if owned_ram_factory else
+        error_detail = str(error)[:1024]
+    record = dict(schema='note10-v264-sealed-native-handoff-result-v1' if owned_ram_factory else
                   'note10-v204-sealed-native-handoff-result-v1' if readonly_ram_nub else
                   'note10-v200-sealed-native-handoff-result-v1' if user_exception_fetch else
                   'note10-v174-sealed-native-handoff-result-v1' if compact else 'note10-v173-sealed-native-handoff-result-v1', source_commit=head,
                   run_id=run_id, run_attempt=attempt, kernel_retained=code == 'none',
                   packaging_failure_code=code, producer_result=producer,
                   deployment_ready=False, physical_reservation_verified=False, device_operations=[])
+    if owned_ram_factory:
+        observed=producer.get('passed')if isinstance(producer,dict)else None
+        record.update(producer_passed=observed if type(observed)is bool else None,capture_passed=record['kernel_retained'],final_passed=observed is True and record['kernel_retained'])
+        if error_detail is not None:record['capture_rejection_detail']=error_detail
     if compact:
         record['member_observations'] = observations
         if failure_input is not None:
@@ -232,7 +238,7 @@ def stage(build, summary, destination, *, head, run_id, attempt, compact=False, 
                 record['native_state_retained'] = False
     payloads['result.json'] = encoded(record)
     members = [dict(file=name, bytes=len(raw), sha256=sha(raw)) for name, raw in sorted(payloads.items())]
-    payloads['members.json'] = encoded(dict(schema='note10-v263-sealed-native-members-v1' if owned_ram_factory else
+    payloads['members.json'] = encoded(dict(schema='note10-v264-sealed-native-members-v1' if owned_ram_factory else
         'note10-v204-sealed-native-members-v1' if readonly_ram_nub else
         'note10-v200-sealed-native-members-v1' if user_exception_fetch else
         'note10-v174-sealed-native-members-v1' if compact else 'note10-v173-sealed-native-members-v1',
@@ -296,3 +302,18 @@ def main():
 
 if __name__ == '__main__':
     raise SystemExit(main())
+
+
+def capture_verdict(record):
+    producer=record['producer_result'];observed=producer.get('passed')if isinstance(producer,dict)else None
+    observed=observed if type(observed)is bool else None;retained=record['kernel_retained']
+    require(type(retained)is bool and(not retained or observed is True),'capture_requires_successful_producer')
+    wanted=dict(producer_passed=observed,capture_passed=retained,final_passed=observed is True and retained)
+    require(all(type(record[k])is type(v)and record[k]==v for k,v in wanted.items()),'exact_distinct_capture_verdicts')
+    return wanted
+
+
+def apply_capture_verdict(result,record):
+    verdict=capture_verdict(record)
+    result.update(verdict,passed=verdict['final_passed'],candidate_usable=verdict['final_passed'])
+    return result
