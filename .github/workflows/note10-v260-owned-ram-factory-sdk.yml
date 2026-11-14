@@ -1,0 +1,44 @@
+name: Owned RAM factory genuine SDK object
+run-name: "v260 factory SDK | ${{ inputs.expected_source_head }}"
+on:
+  workflow_dispatch:
+    inputs:
+      expected_source_head:
+        required: true
+        type: string
+      passed_new_test_context_b64:
+        required: true
+        type: string
+      recipient_public_key_b64:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  v260-owned-ram-factory-sdk:
+    runs-on: macos-26
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: One genuine SDK factory object
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+          N10_HEAD: ${{ inputs.expected_source_head }}
+          N10_NEW_PASS_B64: ${{ inputs.passed_new_test_context_b64 }}
+          N10_RECIPIENT_PUBLIC_KEY_B64: ${{ inputs.recipient_public_key_b64 }}
+        run: python -B note10/xnu26/phase1_owned_ram_factory_object.py --expected-source-head "$N10_HEAD" --passed-new-test-context "$N10_NEW_PASS_B64"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: note10-v260-owned-ram-factory-sdk-sealed-evidence
+          path: note10/private/v260-owned-ram-factory-sdk-once.n10sealed
+          retention-days: 7
+          if-no-files-found: error

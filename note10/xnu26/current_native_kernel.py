@@ -181,3 +181,39 @@ def direct_link(current, rows, directory, compiler, sdk, flags, aliases, runtime
                   full_upstream_make_build=False, hardware_verified=False, deployment_ready=False)
     (directory / 'link-result.json').write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
     return report
+
+
+def admit_owned_ram_factory_object(profile):
+    """One fixed port object; never a complete v84 inventory or link profile."""
+    root=Path(__file__).resolve().parents[2]
+    if set(profile)!={'kind','producer','producer_id','bindings','input_binding','unit'} or profile['kind']!='note10-v260-owned-ram-factory-object-v1':
+        raise ValueError('dedicated single-factory profile required')
+    producer=profile['producer'];unit=profile['unit'];bindings=profile['bindings']
+    if (profile['producer_id']!=digest(producer) or profile['input_binding']!=digest(bindings) or
+        not re.fullmatch('[0-9a-f]{40}',producer['source_commit']) or
+        producer['public_source_commit']!='ac9718fb1af618d5ce8678d0dc6e8a58f252216f' or
+        producer['configuration']!='DEVELOPMENT_ARM64_EXYNOS9825'):
+        raise ValueError('fresh native generation/producer identity required')
+    expected=root/'note10/xnu26/note10_owned_ram_nub.cpp'
+    if (set(unit)!={'source','component','kind','path','source_sha256','object_path'} or
+        unit['source']!='@port/note10_owned_ram_nub.cpp' or unit['component']!='iokit' or unit['kind']!='C++' or
+        unit['path']!=str(expected) or file_sha(owned(expected,root/'note10/xnu26'))!=unit['source_sha256']):
+        raise ValueError('only the exact owned-RAM factory input is admitted')
+    private=Path(producer['generated_root']);objects=Path(producer['objects_root']);apple=Path(producer['apple_headers_root'])
+    if (private.resolve()!=private or not private.is_relative_to(root/'note10/private') or
+        objects!=private/'objects/DEVELOPMENT' or unit['object_path']!=str(objects/'port_note10_owned_ram_nub.cpp.o') or
+        apple.resolve()!=apple or not apple.is_relative_to(root/'note10/private')):
+        raise ValueError('fixed private factory outputs/header root required')
+    if any(Path(path).exists()for path in (unit['object_path'],str(Path(unit['object_path']).with_suffix('.d')),str(objects/'FACTORY-COMPILE-STARTED.json'))):raise ValueError('fresh one-object attempt required')
+    for key in ('configure-result.json','exports-result.json','native-mig-result.json','native-extra-result.json','native-link/generate-result.json'):
+        if file_sha(owned(private/key,private))!=bindings[key]:raise ValueError('same-job native generation changed')
+    for name,value in bindings['port_source_sha256'].items():
+        if name not in ('note10_owned_ram_nub.cpp','note10_owned_ram_nub.h','note10_readonly_ram_block_device.h') or file_sha(owned(root/'note10/xnu26'/name,root/'note10/xnu26'))!=value:
+            raise ValueError('closed factory declarations changed')
+    if unit['source_sha256']!=bindings['port_source_sha256']['note10_owned_ram_nub.cpp']:raise ValueError('factory row/source binding differs')
+    for name,value in bindings['apple_header_sha256'].items():
+        if file_sha(owned(apple/name,apple))!=value:raise ValueError('pinned original storage header changed')
+    if not bindings['apple_header_sha256']:raise ValueError('original storage headers required')
+    if set(bindings['port_source_sha256'])!={'note10_owned_ram_nub.cpp','note10_owned_ram_nub.h','note10_readonly_ram_block_device.h'}:
+        raise ValueError('exact factory declaration closure required')
+    return dict(units=[unit['source']],owners={unit['source']:'iokit'},input_files={unit['source']:expected},language='C++',native_headers_only=True)

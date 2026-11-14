@@ -29,11 +29,132 @@ PLATFORM_ASM = tuple('osfmk/arm64/' + n + '.s' for n in
                      ('caches_asm', 'locore', 'cswitch', 'machine_routines_asm', 'start'))
 
 
-def main(current=None, current_language=None):
+def compile_one(name, context, *, runner=subprocess.run):
+    source,private,compiler,sdk,owners,input_files,current,mode,exported,support_export,borrowed_mig,mig,native_mig,extra_report,output,audit,private_flags,factory_profile,deployment_target = (context[k]for k in ('source','private','compiler','sdk','owners','input_files','current','mode','exported','support_export','borrowed_mig','mig','native_mig','extra_report','output','audit','private_flags','factory_profile','deployment_target'))
+    original = input_files.get(name, source / name)
+    if (name not in input_files and not original.resolve().is_relative_to(source.resolve())) or Path(name).suffix not in ('.c', '.cpp', '.cc', '.cxx', '.S', '.s'):
+        raise ValueError('Invalid source input')
+    # kperfbsd.c lives under osfmk/ but is selected by bsd/conf/files.
+    component = owners.get(name, name.split('/')[0])
+    config = private / 'configured/DEVELOPMENT' / component
+    text = (config / 'Makefile').read_text()
+    defines = re.search(r'^export CONFIG_DEFINES =(.*)$', text, re.MULTILINE).group(1)
+    flags = shlex.split(defines)
+    semantic_type_flags = []
+    if name.startswith(('osfmk/vm/', 'bsd/vm/')) or name == 'bsd/kern/kern_mman.c':
+        # These are the actual FORCE_UNSAFE_TYPES rules in the component
+        # Makefile templates, not replacement typedefs or a safety opt-out.
+        template = (source / component / 'conf/Makefile.template').read_text()
+        if '$1_CFLAGS_ADD += -DVM_UNSAFE_TYPES' not in template:
+            raise ValueError('Upstream semantic type rule changed')
+        semantic_type_flags = ['-DVM_UNSAFE_TYPES=1']
+    includes = [config, exported, source / 'EXTERNAL_HEADERS']
+    if sdk and (private / 'native-link/generate-result.json').exists():
+        stamp = json.loads((private / 'native-link/generate-result.json').read_text())
+        header = private / 'native-link/include/libkern/version.h'
+        if hashlib.sha256(header.read_bytes()).hexdigest() != stamp['version_header_sha256']:
+            raise ValueError('Native version header changed')
+        includes.insert(0, private / 'native-link/include')
+    if sdk and extra_report.exists():
+        includes += [private / 'generated-extra' / c for c in (component, 'bsd', 'iokit')]
+    if native_mig:
+        if component == 'osfmk':includes.append(native_mig / 'kernel/osfmk')
+        includes.append(native_mig / 'export/osfmk')
+    includes.extend(private / 'source-exports' / c for c in
+                    (component, *[c for c in ('osfmk', 'bsd', 'pexpert', 'libkern', 'iokit', 'libsa', 'security', 'san', 'EXTERNAL_HEADERS') if c != component]))
+    includes.extend(private / 'configured/DEVELOPMENT' / c for c in
+                    ('osfmk', 'bsd', 'iokit', 'libkern', 'pexpert', 'libsa', 'security', 'san') if c != component)
+    includes.extend(source / c for c in ('osfmk', 'bsd', 'pexpert', 'libkern', 'libsa', 'iokit', 'security', 'san', '.'))
+    if component == 'osfmk':
+        includes.append(source / 'osfmk/libsa')  # Template's libsa include; keep BSD machine headers first.
+        includes.append(source / 'EXTERNAL_HEADERS/corecrypto')
+    if current is None and factory_profile is None:
+        includes.extend(borrowed_mig / c for c in ('osfmk', 'bsd', 'iokit'))
+        includes.extend(mig / c for c in ('osfmk', 'bsd', 'iokit', 'libkern'))
+    includes.append(ROOT / 'host-tools/kdk/headers/KDK_SDK.pkg/System/Library/Frameworks/Kernel.framework/Versions/A/PrivateHeaders/platform')
+    includes.append(support_export)
+    if sdk:
+        includes.append(ROOT / 'host-tools/opensource-declarations')
+        includes.extend(Path(sdk) / p for p in (
+            'System/Library/Frameworks/Kernel.framework/Versions/A/Headers',
+            'System/Library/Frameworks/Kernel.framework/Versions/A/PrivateHeaders',
+            'System/Library/Frameworks/Kernel.framework/Headers',
+            'System/Library/Frameworks/Kernel.framework/PrivateHeaders',
+            'usr/local/include', 'usr/include'))
+    if factory_profile is not None:includes.insert(0,Path(factory_profile['producer']['apple_headers_root']))
+    object_file = output / (name.replace('/', '_').replace('@', '') + '.o')
+    command = [compiler, '--target=' + deployment_target, '-march=armv8.2-a+crypto', '-mcpu=generic',
+               '-std=gnu11', '-O2', '-ffreestanding', '-fno-builtin', '-fno-common', '-fblocks',
+               '-nostdlibinc', '-fno-stack-protector', '-mno-implicit-float', '-mstrict-align',
+               '-ferror-limit=8', '-Darm64', '-DARM64', '-D__ARM64__', '-DLP64', '-DAPPLE', '-DKERNEL',
+               '-DKERNEL_PRIVATE', '-DXNU_KERNEL_PRIVATE', '-DPRIVATE', '-D__API__=v4',
+               '-DPAGE_SIZE_FIXED', '-DARM_LARGE_MEMORY=0', '-DVM_KERNEL_LINK_ADDRESS=0xfffffff007004000',
+               '-DCURRENT_MACHINE_CONFIG_LC=exynos9825',
+               '-DXNU_TARGET_OS_IOS', '-DXNU_PLATFORM_iPhoneOS', '-DARM64_BOARD_CONFIG_EXYNOS9825',
+               '-DN10_BOARD_SCHEMA=1', '-DN10_ICACHE_LINE_LOG2=6', '-DN10_DCACHE_LINE_LOG2=6',
+               '-DN10_MAX_CACHE_LINE_LOG2=7', '-DN10_KERNEL_PAGE_SHIFT=14',
+               '-include', str(config / 'meta_features.h'), *flags]
+    if sdk:command.extend(['-isysroot', sdk])
+    language = mode[1] if mode else 'C'
+    if language != 'assembly':
+        # Match the real XNU kernel code-generation context: no user
+        # red zone/PIC/static destructors and no Apple BTI default.
+        command += ['-mkernel', '-fno-c++-static-destructors', '-ftrivial-auto-var-init=zero',
+                    '-fsigned-bitfields', '-fmerge-all-constants', '-fno-strict-aliasing',
+                    '-momit-leaf-frame-pointer']
+        command += (['-fno-branch-target-identification', '-mno-implicit-sme'] if sdk
+                    else ['-mbranch-protection=none'])
+    if language == 'C++':
+        command[command.index('-std=gnu11')] = '-std=gnu++2b'
+        command += ['-fapple-kext', '-fsized-deallocation', '-nostdinc++']
+    elif language == 'assembly':
+        command.remove('-std=gnu11')
+        command += ['-x', 'assembler-with-cpp', '-DASSEMBLER', '-D__ASSEMBLER__']
+    command += ([] if language == 'assembly' else private_flags[component]) + semantic_type_flags
+    if sdk:
+        # Documented image4 kernel-build option: SDK availability macros
+        # otherwise mix with the pinned public AvailabilityInternal.h.
+        command.append('-DIMAGE4_STRIP_AVAILABILITY=1')
+        if name in ('bsd/kern/subr_log.c', 'libkern/os/log.c'):
+            command.append('-DOS_FIREHOSE_SPI=1')
+    for directory in includes:
+        command.extend(['-I', str(directory)])
+    if factory_profile is not None:command.extend(['-MD','-MF',str(object_file.with_suffix('.d'))])
+    command.extend(['-c', str(original), '-o', str(object_file)])
+    if factory_profile is not None:
+        with (output/'FACTORY-COMPILE-STARTED.json').open('x',encoding='utf-8')as started:json.dump(dict(attempt=1,argv=command,unit=factory_profile['unit'],producer_id=factory_profile['producer_id'],input_binding=factory_profile['input_binding']),started)
+    try:result = runner(command, cwd=ROOT, capture_output=True, timeout=60)
+    except subprocess.TimeoutExpired as error:
+        if factory_profile is not None:object_file.with_suffix('.log').write_bytes((error.stdout or b'')+(error.stderr or b''))
+        raise
+    log = object_file.with_suffix('.log')
+    log.write_bytes(result.stdout + result.stderr)
+    passed = result.returncode == 0
+    diagnostics = result.stderr.decode('utf-8', errors='replace')
+    row = {'source': name, 'component': component, 'passed': passed, 'command': command,
+                    'source_sha256': hashlib.sha256(original.read_bytes()).hexdigest(),
+                    'object_sha256': hashlib.sha256(object_file.read_bytes()).hexdigest() if passed else None,
+                    'diagnostics': diagnostics}
+    if current is not None:
+        import current_native_kernel as native_current
+        native_current.stamp(current, row, 'native')
+        row['object_path'] = str(object_file)
+    if factory_profile is not None:row.update(producer_id=factory_profile['producer_id'],input_binding=factory_profile['input_binding'],category='port',object_path=str(object_file))
+    if not audit:
+        print(name + ': ' + ('compiled' if passed else 'blocked'), flush=True)
+        if not passed:print(diagnostics[-6000:], flush=True)
+    return row
+
+def main(current=None, current_language=None, *, owned_ram_factory_profile=None):
+    selection=None
+    if owned_ram_factory_profile is not None:
+        if current is not None or current_language is not None:raise ValueError('single-factory and complete-current modes cannot mix')
+        import current_native_kernel as factory_native
+        selection=factory_native.admit_owned_ram_factory_object(owned_ram_factory_profile)
     if current is not None:
         import current_native_kernel as native_current
         native_current.check_context(current)
-    private = ROOT / 'note10/private/windows-xnu'
+    private = (Path(owned_ram_factory_profile['producer']['generated_root'])if owned_ram_factory_profile is not None else ROOT / 'note10/private/windows-xnu')
     configured = json.loads((private / 'configure-result.json').read_text())
     source = ROOT / configured['source_directory']
     for name, expected in configured.get('patched_source_sha256', {}).items():
@@ -54,6 +175,7 @@ def main(current=None, current_language=None):
     if current is not None and (compiler != current['producer']['toolchain']['compiler'] or
                                 sdk != current['producer']['toolchain']['sdk']):
         raise ValueError('current native compiler/SDK binding required')
+    if owned_ram_factory_profile is not None and (compiler!=owned_ram_factory_profile['producer']['compiler']or sdk!=owned_ram_factory_profile['producer']['sdk']or source!=Path(owned_ram_factory_profile['producer']['source_root'])):raise ValueError('single-factory actual generation/toolchain differs')
     mig = ROOT / target['research_directory'] / 'generated-headers-vmapple/RELEASE_ARM64_VMAPPLE'
     exported = private / 'exports'
     # Export only the KDK KernelSupport declarations this target actually uses.
@@ -117,7 +239,7 @@ def main(current=None, current_language=None):
                     raise ValueError('Generated MIG source changed')
                 generated_mig[item['selected_name']] = generated_path
     mig_hashes = {}
-    for component in (() if current is not None else ('osfmk', 'bsd', 'iokit')):
+    for component in (() if current is not None or owned_ram_factory_profile is not None else ('osfmk', 'bsd', 'iokit')):
         directory = mig / component / 'RELEASE'
         for header in directory.rglob('*.h'):
             relative = header.relative_to(directory)
@@ -150,12 +272,17 @@ def main(current=None, current_language=None):
         mode = {'C': ('CFILES', 'C', 'current-c'),
                 'C++': ('CXXFILES', 'C++', 'current-cxx'),
                 'assembly': ('SFILES', 'assembly', 'current-asm')}[current_language]
+    if selection is not None:
+        if native_mig is None or not extra_report.exists()or json.loads(extra_report.read_text())['iig_available']is not True:raise ValueError('fresh native MIG/IIG required; no foreign fallback')
+        mode=('FIXED_FACTORY','C++','owned-ram-factory')
     audit = mode is not None
     skipped = []
     units = list(sys.argv[1:]) or list(UNITS)
     owners = {}
     input_files = {}
-    if audit:
+    if selection is not None:
+        units=selection['units'];owners=selection['owners'];input_files=selection['input_files']
+    elif audit:
         units = []
         for component in ('osfmk', 'bsd', 'iokit', 'libkern', 'pexpert', 'libsa', 'security', 'san'):
             text = (private / 'configured/DEVELOPMENT' / component / 'Makefile').read_text().replace('\\\n', ' ')
@@ -193,114 +320,13 @@ def main(current=None, current_language=None):
         'pexpert': ['-DPEXPERT_KERNEL_PRIVATE'], 'libsa': ['-DLIBSA_KERNEL_PRIVATE'],
         'security': ['-DBSD_KERNEL_PRIVATE'], 'san': [],
     }
-    def compile_one(name):
-        original = input_files.get(name, source / name)
-        if (name not in input_files and not original.resolve().is_relative_to(source.resolve())) or Path(name).suffix not in ('.c', '.cpp', '.cc', '.cxx', '.S', '.s'):
-            raise ValueError('Invalid source input')
-        # kperfbsd.c lives under osfmk/ but is selected by bsd/conf/files.
-        component = owners.get(name, name.split('/')[0])
-        config = private / 'configured/DEVELOPMENT' / component
-        text = (config / 'Makefile').read_text()
-        defines = re.search(r'^export CONFIG_DEFINES =(.*)$', text, re.MULTILINE).group(1)
-        flags = shlex.split(defines)
-        semantic_type_flags = []
-        if name.startswith(('osfmk/vm/', 'bsd/vm/')) or name == 'bsd/kern/kern_mman.c':
-            # These are the actual FORCE_UNSAFE_TYPES rules in the component
-            # Makefile templates, not replacement typedefs or a safety opt-out.
-            template = (source / component / 'conf/Makefile.template').read_text()
-            if '$1_CFLAGS_ADD += -DVM_UNSAFE_TYPES' not in template:
-                raise ValueError('Upstream semantic type rule changed')
-            semantic_type_flags = ['-DVM_UNSAFE_TYPES=1']
-        includes = [config, exported, source / 'EXTERNAL_HEADERS']
-        if sdk and (private / 'native-link/generate-result.json').exists():
-            stamp = json.loads((private / 'native-link/generate-result.json').read_text())
-            header = private / 'native-link/include/libkern/version.h'
-            if hashlib.sha256(header.read_bytes()).hexdigest() != stamp['version_header_sha256']:
-                raise ValueError('Native version header changed')
-            includes.insert(0, private / 'native-link/include')
-        if sdk and extra_report.exists():
-            includes += [private / 'generated-extra' / c for c in (component, 'bsd', 'iokit')]
-        if native_mig:
-            if component == 'osfmk':includes.append(native_mig / 'kernel/osfmk')
-            includes.append(native_mig / 'export/osfmk')
-        includes.extend(private / 'source-exports' / c for c in
-                        (component, *[c for c in ('osfmk', 'bsd', 'pexpert', 'libkern', 'iokit', 'libsa', 'security', 'san', 'EXTERNAL_HEADERS') if c != component]))
-        includes.extend(private / 'configured/DEVELOPMENT' / c for c in
-                        ('osfmk', 'bsd', 'iokit', 'libkern', 'pexpert', 'libsa', 'security', 'san') if c != component)
-        includes.extend(source / c for c in ('osfmk', 'bsd', 'pexpert', 'libkern', 'libsa', 'iokit', 'security', 'san', '.'))
-        if component == 'osfmk':
-            includes.append(source / 'osfmk/libsa')  # Template's libsa include; keep BSD machine headers first.
-            includes.append(source / 'EXTERNAL_HEADERS/corecrypto')
-        if current is None:
-            includes.extend(borrowed_mig / c for c in ('osfmk', 'bsd', 'iokit'))
-            includes.extend(mig / c for c in ('osfmk', 'bsd', 'iokit', 'libkern'))
-        includes.append(ROOT / 'host-tools/kdk/headers/KDK_SDK.pkg/System/Library/Frameworks/Kernel.framework/Versions/A/PrivateHeaders/platform')
-        includes.append(support_export)
-        if sdk:
-            includes.append(ROOT / 'host-tools/opensource-declarations')
-            includes.extend(Path(sdk) / p for p in (
-                'System/Library/Frameworks/Kernel.framework/Versions/A/Headers',
-                'System/Library/Frameworks/Kernel.framework/Versions/A/PrivateHeaders',
-                'System/Library/Frameworks/Kernel.framework/Headers',
-                'System/Library/Frameworks/Kernel.framework/PrivateHeaders',
-                'usr/local/include', 'usr/include'))
-        object_file = output / (name.replace('/', '_').replace('@', '') + '.o')
-        command = [compiler, '--target=' + deployment_target, '-march=armv8.2-a+crypto', '-mcpu=generic',
-                   '-std=gnu11', '-O2', '-ffreestanding', '-fno-builtin', '-fno-common', '-fblocks',
-                   '-nostdlibinc', '-fno-stack-protector', '-mno-implicit-float', '-mstrict-align',
-                   '-ferror-limit=8', '-Darm64', '-DARM64', '-D__ARM64__', '-DLP64', '-DAPPLE', '-DKERNEL',
-                   '-DKERNEL_PRIVATE', '-DXNU_KERNEL_PRIVATE', '-DPRIVATE', '-D__API__=v4',
-                   '-DPAGE_SIZE_FIXED', '-DARM_LARGE_MEMORY=0', '-DVM_KERNEL_LINK_ADDRESS=0xfffffff007004000',
-                   '-DCURRENT_MACHINE_CONFIG_LC=exynos9825',
-                   '-DXNU_TARGET_OS_IOS', '-DXNU_PLATFORM_iPhoneOS', '-DARM64_BOARD_CONFIG_EXYNOS9825',
-                   '-DN10_BOARD_SCHEMA=1', '-DN10_ICACHE_LINE_LOG2=6', '-DN10_DCACHE_LINE_LOG2=6',
-                   '-DN10_MAX_CACHE_LINE_LOG2=7', '-DN10_KERNEL_PAGE_SHIFT=14',
-                   '-include', str(config / 'meta_features.h'), *flags]
-        if sdk:command.extend(['-isysroot', sdk])
-        language = mode[1] if mode else 'C'
-        if language != 'assembly':
-            # Match the real XNU kernel code-generation context: no user
-            # red zone/PIC/static destructors and no Apple BTI default.
-            command += ['-mkernel', '-fno-c++-static-destructors', '-ftrivial-auto-var-init=zero',
-                        '-fsigned-bitfields', '-fmerge-all-constants', '-fno-strict-aliasing',
-                        '-momit-leaf-frame-pointer']
-            command += (['-fno-branch-target-identification', '-mno-implicit-sme'] if sdk
-                        else ['-mbranch-protection=none'])
-        if language == 'C++':
-            command[command.index('-std=gnu11')] = '-std=gnu++2b'
-            command += ['-fapple-kext', '-fsized-deallocation', '-nostdinc++']
-        elif language == 'assembly':
-            command.remove('-std=gnu11')
-            command += ['-x', 'assembler-with-cpp', '-DASSEMBLER', '-D__ASSEMBLER__']
-        command += ([] if language == 'assembly' else private_flags[component]) + semantic_type_flags
-        if sdk:
-            # Documented image4 kernel-build option: SDK availability macros
-            # otherwise mix with the pinned public AvailabilityInternal.h.
-            command.append('-DIMAGE4_STRIP_AVAILABILITY=1')
-            if name in ('bsd/kern/subr_log.c', 'libkern/os/log.c'):
-                command.append('-DOS_FIREHOSE_SPI=1')
-        for directory in includes:
-            command.extend(['-I', str(directory)])
-        command.extend(['-c', str(original), '-o', str(object_file)])
-        result = subprocess.run(command, cwd=ROOT, capture_output=True, timeout=60)
-        log = object_file.with_suffix('.log')
-        log.write_bytes(result.stdout + result.stderr)
-        passed = result.returncode == 0
-        diagnostics = result.stderr.decode('utf-8', errors='replace')
-        row = {'source': name, 'component': component, 'passed': passed, 'command': command,
-                        'source_sha256': hashlib.sha256(original.read_bytes()).hexdigest(),
-                        'object_sha256': hashlib.sha256(object_file.read_bytes()).hexdigest() if passed else None,
-                        'diagnostics': diagnostics}
-        if current is not None:
-            native_current.stamp(current, row, 'native')
-            row['object_path'] = str(object_file)
-        if not audit:
-            print(name + ': ' + ('compiled' if passed else 'blocked'), flush=True)
-            if not passed:print(diagnostics[-6000:], flush=True)
-        return row
-    if audit:
+    context=dict(deployment_target=deployment_target,source=source,private=private,compiler=compiler,sdk=sdk,owners=owners,input_files=input_files,current=current,mode=mode,exported=exported,support_export=support_export,borrowed_mig=borrowed_mig,mig=mig,native_mig=native_mig,extra_report=extra_report,output=output,audit=audit,private_flags=private_flags,factory_profile=owned_ram_factory_profile)
+    def selected_compile(name):return compile_one(name,context)
+    if selection is not None:
+        results=[selected_compile(units[0])]
+    elif audit:
         with ThreadPoolExecutor(max_workers=4) as pool:
-            pending = [pool.submit(compile_one, name) for name in units]
+            pending = [pool.submit(selected_compile, name) for name in units]
             for future in as_completed(pending):
                 results.append(future.result())
                 if len(results) % 25 == 0:
@@ -308,7 +334,7 @@ def main(current=None, current_language=None):
                           + str(sum(r['passed'] for r in results)) + ' compiled', flush=True)
         results.sort(key=lambda r: r['source'])
     else:
-        results = [compile_one(name) for name in units]
+        results = [selected_compile(name) for name in units]
     report = {'units': results, 'source_export_sha256': export_hashes,
               'borrowed_nested_generated_header_sha256': mig_hashes,
               'native_exynos_config': True, 'foreign_mig_version_headers': True, 'macos_kdk_declaration_headers': True,
@@ -316,6 +342,7 @@ def main(current=None, current_language=None):
               'deployment_target': deployment_target, 'kernel_codegen_mode': True,
               'kernel_support_declaration_sha256': support_hashes,
               'synthetic_board_inputs': True, 'whole_kernel_build': False, 'device_operations': []}
+    if selection is not None:report.update(kind='note10-v260-owned-ram-factory-object-v1',producer_id=owned_ram_factory_profile['producer_id'],input_binding=owned_ram_factory_profile['input_binding'],foreign_mig_version_headers=False,whole_native_inventory_compiled=False)
     report['skipped_generated_sources'] = skipped
     report['architecture_candidates_not_selected_in_native_config'] = bool(mode and mode[0].startswith('PLATFORM_'))
     report['scope'] = (mode[1] if mode else 'C') + ' compiler audit with component-private flags; not a full Make build or per-file instrumentation reproduction'
@@ -327,7 +354,7 @@ def main(current=None, current_language=None):
     print(json.dumps({'compiled': sum(r['passed'] for r in results), 'attempted': len(results),
                       'whole_kernel_build': False}))
     if not audit and not all(r['passed'] for r in results):raise SystemExit(1)
-    if current is not None and (skipped or not all(r['passed'] for r in results)):
+    if (current is not None or selection is not None)and(skipped or not all(r['passed'] for r in results)):
         raise RuntimeError('current native payload inputs did not all compile')
     return report
 
