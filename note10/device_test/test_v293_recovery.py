@@ -19,3 +19,21 @@ def predicate(fixture_result):
         raise AssertionError('already changed init route was admitted')
     assert fixture_result == dict(passed=True, groups=1, variants=2, assertions=8)
     return dict(passed=True, groups=2, variants=3, assertions=12)
+
+
+def recipient_predicate(encoded):
+    """New recipient binding only; do not call the spent park/seam predicate."""
+    value = producer.recipient(encoded)
+    assert value == dict(public_PEM_sha256=producer.PUBLIC_PEM_SHA256,
+                         public_SPKI_sha256=producer.PUBLIC_SPKI_SHA256)
+    raw = bytearray(producer.base64.b64decode(encoded, validate=True))
+    raw[100] = ord('B') if raw[100] != ord('B') else ord('C')
+    wrong = producer.base64.b64encode(raw).decode('ascii')
+    for invalid in (encoded + '\n', wrong):
+        try:
+            producer.recipient(invalid)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError('noncanonical or different recipient admitted')
+    return dict(passed=True, groups=1, variants=3, assertions=3)

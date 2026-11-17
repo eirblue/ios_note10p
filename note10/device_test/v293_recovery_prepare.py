@@ -1,5 +1,6 @@
 """One recovery-only Linux Image; no PID1, carrier ABI or physical operation."""
 import argparse
+import base64
 import hashlib
 import json
 import os
@@ -23,6 +24,8 @@ OUTPUT = ROOT / 'note10/private/v293-ci-recovery-only'
 NEW_FILES = ('v293_recovery_prepare.py', 'v293_recovery_only.inc',
              'v293_recovery_fixture.c', 'test_v293_recovery.py')
 CONTEXT_SCHEMA = 'note10-v293-recovery-only-public-input-v1'
+PUBLIC_PEM_SHA256 = '49e5e0607d3ed0e24e4be5dec4d44caef2cf794586f5c6e51120bf6ca8e07b1f'
+PUBLIC_SPKI_SHA256 = 'efd31438315ac3426ce98641e41b37fcf7dec5dd05284ff8c0597ec2dbc342d6'
 DECLARATION = b'extern void n154_require_return_armed(void);'
 ENTRY = b'\tn154_require_return_armed();\n\targv_init[1] = n10_builtin_init_argument();'
 NEW_ENTRY = b'''\tn154_require_return_armed();
@@ -46,6 +49,20 @@ SUCCESS_MEMBERS = {'result.json', 'actual-effective.config', 'Image',
 def require(value, message):
     if not value:
         raise ValueError(message)
+
+
+def recipient(encoded):
+    require(type(encoded) is str and 0 < len(encoded) <= 8192, 'bounded public recipient')
+    raw = base64.b64decode(encoded, validate=True)
+    require(base64.b64encode(raw).decode('ascii') == encoded and len(raw) == 625
+            and raw.startswith(b'-----BEGIN PUBLIC KEY-----\n')
+            and raw.endswith(b'-----END PUBLIC KEY-----\n') and b'PRIVATE KEY' not in raw,
+            'canonical current public PEM')
+    require(p.sha(raw) == PUBLIC_PEM_SHA256, 'current approved public PEM pin')
+    der = base64.b64decode(b''.join(raw.splitlines()[1:-1]), validate=True)
+    require(len(der) == 422 and p.sha(der) == PUBLIC_SPKI_SHA256, 'current approved public SPKI pin')
+    # The existing Node seal additionally parses this exact key and checks RSA3072.
+    return dict(public_PEM_sha256=PUBLIC_PEM_SHA256, public_SPKI_sha256=PUBLIC_SPKI_SHA256)
 
 
 def source_pins():
@@ -251,7 +268,7 @@ def main():
     parser.add_argument('--passed-new-test-context', required=True)
     args = parser.parse_args()
     context = json.loads(args.passed_new_test_context)
-    house.recipient(os.environ.get('N10_RECIPIENT_PUBLIC_KEY_B64'))
+    recipient(os.environ.get('N10_RECIPIENT_PUBLIC_KEY_B64'))
     try:
         run_build(args.output, context, args.expected_source_head)
     finally:
