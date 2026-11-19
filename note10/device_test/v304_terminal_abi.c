@@ -77,7 +77,7 @@ int noinline n304_enter(void)
         !(read_sysreg(sctlr_el1) & 1) || end <= start || end - start > 4096 ||
         entry < low || entry >= high || restart < low || restart >= high)
         return -EINVAL;
-    if (num_online_cpus() != 1)
+    if (num_online_cpus() > 8)
         return -EBUSY;
     /* One-shot: any failure after this point requires a fresh n304_prepare_args(). */
     if (cmpxchg(&meta->prepared, 1, 0) != 1)
