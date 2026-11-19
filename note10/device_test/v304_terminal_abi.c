@@ -8,6 +8,7 @@
 #include <linux/string.h>
 #include <asm/cacheflush.h>
 #include <asm/memory.h>
+#include <asm/mmu_context.h>
 #include <asm/sysreg.h>
 #include "cpu-reset.h"
 #include "n304_abi_contract.h"
