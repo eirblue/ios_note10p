@@ -1,0 +1,13 @@
+# v311 XNU kernel image loaded into a reserved window
+
+**Qualification PASS.** Source `1b7e0755a5f57b56de9243c16d0caabe231b97ed` built successfully in CI run `44792178584`. The new v311 fixture (4 groups, 79 variants, 86 assertions) passed; earlier checks were not replayed. The stub grew from 502 to 553 instructions. The self-imposed stub bound was raised from 512 to 640 instructions for this build, and the whole identity map stayed within the authoritative 4096 bytes.
+
+v311 is the first kernel-loading build. The candidate Linux kernel reserves a 256 MiB, 32 MiB-aligned memblock window at or above 2 GiB during early memory setup, and moves the boot_args, metadata and device-tree arena to the window base. Before the stop, it reads a private, pinned XNU kernel image (an arm64 `MH_EXECUTE` Mach-O built from the pinned XNU source) into the window and checks its size and header. boot_args now describes the window: `physBase` is the window base, `virtBase` is the XNU kernel base, `memSize` is 256 MiB, `topOfKernelData` ends after the loaded image, and `deviceTreeP` points at the unchanged 13-node device tree. No XNU code is executed and no CPU, MMIO or MMU behaviour changed.
+
+The host controller ran the read-only topology and DRAM-span checks in normal TWRP before any write. On the candidate, before the actor, it required exactly one kernel report of a valid window, checked that the window lies inside one `System RAM` resource and the DRAM span and is disjoint from the Linux kernel image, pushed the pinned image to the candidate and verified its size and SHA-256 on the device. It then computed the expected boot_args, device-tree and image hashes from host-side facts only.
+
+At terminal entry, with SCTLR_EL1 M, C and I clear, the stub ran the v310 device-tree checks, checked the new boot_args fields and the Mach-O header at the load address, and hashed the whole loaded image in place before committing. The `N311PS2T` record, bound to the current build, boot and cycle, showed the entry `x0` equal to the window base, matched the precomputed boot_args hash, device-tree hash and node count, and carried an image hash equal to the host hash of the pinned image.
+
+Normal TWRP returned in a distinct boot epoch. All five partition integrity checks passed, and the recovery setting and panel brightness both read back 10. The cycle used one BOOT write, one host reboot and one actor invocation; RECOVERY writes, rollback BOOT writes and XNU executions were zero.
+
+This qualifies an intact XNU kernel image resident in a reserved physical window with matching boot_args at the terminal entry point. Raw reset cause, independent native return and any XNU behaviour remain unproven.
