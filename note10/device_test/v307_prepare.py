@@ -145,7 +145,10 @@ def capture_park_flow(symbols,run,objects,out):
             label='15-park-'+str(len(entries))
             run(['aarch64-linux-gnu-objdump','-d','--disassemble-zeroes','--start-address='+hex(item['address']),
                  '--stop-address='+hex(item['address']+item['bytes']),objects/'vmlinux'],label)
-            raw=p.ordinary(out/(label+'.log'),32768);total+=len(raw);require(total<=131072,'bounded total park flow evidence')
+            # n304_prepare_args inlines the 12-node, 40-property n307_adt; its log is bounded by the 8192-byte symbol
+            # limit above (<=2048 instructions at ~57 log bytes each). Other flow logs keep 32768.
+            raw=p.ordinary(out/(label+'.log'),131072 if logical=='n304_prepare_args' else 32768);total+=len(raw)
+            require(total<=196608,'bounded total park flow evidence')
             entries.append(dict(item,logical=logical,log=label+'.log',sha256=p.sha(raw),log_bytes=len(raw)))
             if logical=='n304_post_abi':spin=stub_proof(raw.decode(),item)
     require(spin is not None,'actual compiled own MMU-off stub proof')
