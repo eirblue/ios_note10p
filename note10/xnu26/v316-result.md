@@ -1,0 +1,20 @@
+# v316 XNU runs past its first MMU enable
+
+**Qualification PASS.** Source `b9638bb0c9f7693335e92991e80fef017913447b` built successfully in CI run `44934287146`. The new v316 fixture (9 groups, 29 variants, 29 assertions) passed; earlier checks were not replayed. The stub grew from 599 to 617 instructions, within the 640-instruction self-imposed bound, and the whole identity map stayed within 4096 bytes. The first CI attempt (run `44932952695`, source `e87ae5c`) failed only because the stub proof rejected the GNU objdump spellings `b.cc`/`b.cs` of the expected branch conditions; commit `b9638bb` accepts those spellings and changes nothing else.
+
+In v315 execution reached the instruction before XNU's first MMU enable, but nothing after it was observable. After the MMU enable XNU maps only its image plus 32 MiB, and the boot_args and device tree lay outside that range. Offline emulation of the pinned image with the v315 layout faulted on the first boot_args read after the MMU enable, before any kernel stack existed.
+
+v316 bundles the fix and a new observation:
+
+- A 16 KiB handoff page now sits directly after the loaded image, inside XNU's early mapping. Linux zeroes it, copies the checked boot_args and device tree into it, flushes it with the image, and refuses to enter if the copy hashes differ. A new contract constant fixes the page size.
+- boot_args `topOfKernelData` and `deviceTreeP`, and the device tree memory-map entries, now point at the handoff page. The kernel offset, physical base and memory size are unchanged, so every early kernel virtual address keeps XNU's linear relation and falls inside the bootstrap map.
+- The stub keeps all its original checks, retargets the four layout-dependent compares to the handoff page, proves word by word that the copy equals the checked original, and passes the handoff page to XNU as `x0`.
+- The pinned image and its three v315 breadcrumb hooks are reused unchanged; there is no new XNU patch.
+- After the MMU enable, progress is read without new device code: the boot loader's log block after the watchdog reset reports each core's program counter, which the controller now parses and classifies against the image's symbols.
+- Before use, an offline check emulated the pinned image with the v316 layout. XNU ran through early platform, device tree, CPU topology, timer and VM setup, then stopped in `early_random` with the panic "no random seed" and spun in `_panic_spin_forever`. It made no access outside the bootstrap map.
+
+On the device, the stub ran every check, committed the `N316PS2T` record and branched to XNU. The record, bound to the current build, boot and cycle, matched the precomputed values exactly.
+
+After the reset, the log read back from the previous boot held all three v315 breadcrumbs, in order, directly after the record. The builder code was 0. XNU now reads its memory fields through the relocated copy, so this also shows the copy was correct. The boot loader's next log block reported a cluster-0 watchdog reset, with core 0 stopped in `_panic_spin_forever`, exactly as predicted. Normal TWRP returned in a distinct boot epoch about 57 seconds after the actor started, within the 240-second bound. All five partition integrity checks passed, and the recovery setting and panel brightness both read back 10. The cycle used one BOOT write, one host reboot, one actor invocation and one XNU branch; RECOVERY writes and rollback BOOT writes were zero.
+
+This qualifies the fix. With the boot_args and device tree inside the bootstrap map, XNU runs past its first MMU enable and stops in `_panic_spin_forever`, where the offline prediction ends after early kernel initialization and the panic for the missing random seed; the device program counter alone does not identify which panic fired. The offline lookahead shows the next stop after a seed is supplied will be a rejection of the current memory configuration, so the two are handled one at a time to keep each device result unambiguous. XNU progress past `early_random` and independent native return remain unproven.
