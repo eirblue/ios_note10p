@@ -1,0 +1,21 @@
+# v319 slid XNU passes its VM bootstrap checks without semantic patches
+
+**Qualification PASS.** Source `a68d9390e645bc6b67fc1152295b8f9a609c8b2f` built successfully on the first attempt in CI run `44953300766`. The new v319 fixture (4 groups, 9 variants, 9 assertions) passed; earlier checks were not replayed. The v316 stub and Linux sources were reused byte-identical. The only assembled stub difference is the immediates that build the new virtual base, and the stub stays at 617 instructions.
+
+In v318 a private patch got XNU past its memory-configuration check and a wrap in its page-table pass, but it then stopped on an empty top-level page-table slot. The analysis showed the underlying cause: this XNU expects its static kernel in a lower region of the kernel address space than the one the image was linked at.
+
+v319 moves the kernel instead of patching around the layout:
+
+- **Public contract.** The XNU link base becomes `0xfffffe0007004000` (`N312_LINK_BASE`) and the boot_args virtual base becomes `0xfffffe0006000000` (`N311_VIRT_BASE`). Two host-side static asserts mirror XNU's bootstrap rule for valid mapping addresses, and the record tag becomes `N319PS20`.
+- **Unchanged.** The physical layout, the reserved window, the memory size, the handoff page, the device tree and the seed.
+- **Private slide.** A host-side step slid the pinned image offline to the new link base. It used the image's own complete local relocation table and the loader-visible header addresses. Before sliding, an offline check confirmed that every pointer-like value in the data segments is covered by a relocation. The code reaches the kernel through PC-relative addressing, apart from three absolute link-address constants on paths this image does not take, so the v315 breadcrumb hooks and the markers move with it.
+- **Patches and markers.** The v318 semantic patches are dropped, because offline emulation showed the slid kernel passing all three earlier stops natively. One new marker turns the physmap-region overrun assertion into a distinct self-spin. The earlier markers remain.
+- **Offline check.** Before use, the slid image was emulated with the new virtual base. XNU passed the static-memory check, its page-table pass and the earlier faulting lookup, then stopped at the physmap-overrun marker. A counter-run with the unslid image confirmed the difference.
+
+On the device, the stub ran every check, committed the `N319PS2T` record and branched to XNU. The record, bound to the current build, boot and cycle, matched the precomputed values exactly.
+
+After the reset, the log read back from the previous boot held all three v315 breadcrumbs, in order, directly after the record. The builder code was 0, so XNU's bootstrap builder accepted the new virtual address range. The boot loader's next log block reported a cluster-0 watchdog reset, with core 0 stopped at the physmap-overrun marker spin, as predicted. That spin's address is relative to the new link base, not the old one. Normal TWRP returned in a distinct boot epoch about 57 seconds after the actor started, within the 240-second bound. All five partition integrity checks passed, and the recovery setting and panel brightness both read back 10. The cycle used one BOOT write, one host reboot, one actor invocation and one XNU branch; RECOVERY writes and rollback BOOT writes were zero.
+
+This qualifies the slide as far as the marker shows. The program counter identifies which marked spin core 0 was in at the reset, and nothing more. Core 0 was at the physmap-overrun site at the new link base, not at the earlier memory-configuration, page-allocator, illegal-physical-address or seed markers, and not at an old-base address. That is consistent with the slid image running and passing the earlier stops without the v318 semantic patches, as the offline prediction says. The marker does not show which code ran in between, or the contents of the tables XNU built.
+
+The offline analysis attributes the assertion to XNU's randomized physmap placement, which fits the current small memory window only when the random offset happens to be aligned. Making that placement fit is the next step, and the limited RAM behind XNU's 32 MiB bootstrap map will need a separate plan. XNU's switch to its own translation tables, later VM stages and independent native return remain unproven.
