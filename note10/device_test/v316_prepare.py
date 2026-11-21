@@ -242,7 +242,8 @@ def stub_proof(text,entry,rows_expected=STUB_ROWS):
     image_cmp,memsize_cmp=keys.index(('cmp','x1,x8')),keys.index(('cmp','x9,x8'))
     require(pair[0]+1<image_cmp<memsize_cmp and not any(re.match(r'[xw]8,',key[1]) for key in keys[pair[0]+2:memsize_cmp]),
             'v315 x8 live from the pair to the memSize compare')
-    names=[row[1] for row in rows]
+    # GNU objdump prints the unsigned-condition aliases b.cc (lo) and b.cs (hs); LLVM prints b.lo/b.hs. Same encoding.
+    names=[{'b.cc':'b.lo','b.cs':'b.hs'}.get(row[1],row[1]) for row in rows]
     target=lambda index:int(rows[index][2].split()[0],16)
     writes=[index for index,key in enumerate(keys) if key[0] not in ('cmp','ccmp','cmn','tst','str','strb','strh','stp','stur','sturb','sturh')
             and re.match(r'[xw]20,',key[1])]
@@ -292,7 +293,7 @@ def stub_proof_selftest():
           ('mrs','x15, mpidr_el1'),('mrs','x9, cntfrq_el0'),
           ('mrs','x28, cntvct_el0'),('add','x18, x7, x8'),('mrs','x9, id_aa64mmfr0_el1'),('b.hi','PARK'),
           ('mov','x7, #0x0'),('mov','x8, #0x480'),('ldr','w9, [x19, x7]'),('ldr','w10, [x20, x7]'),('cmp','w9, w10'),('b.ne','PARK'),
-          ('add','x7, x7, #0x4'),('cmp','x7, x8'),('b.lo','LOOP'),('cmp','x7, #0x800'),('b.hs','DONE'),('mov','x7, #0x800'),
+          ('add','x7, x7, #0x4'),('cmp','x7, x8'),('b.cc','LOOP'),('cmp','x7, #0x800'),('b.cs','DONE'),('mov','x7, #0x800'),
           ('add','x8, x25, #0x800'),('b','LOOP'),
           ('add','x0, x3, #0xfa'),('mrs','x9, ctr_el0'),('add','x0, x3, #0x112'),
           ('dc','civac, x9'),('dc','civac, x4'),('dsb','sy'),('cmp','x8, #0xfa'),('mov','w9, #0x54                \t// #84'),('strb','w9, [x3, #7]'),
