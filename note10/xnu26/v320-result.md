@@ -1,0 +1,20 @@
+# v320 XNU passes the physmap assertion and stops at the platform-contract check
+
+**Qualification PASS.** Source `a3567d56172cc4c6c4bd97f595454da56405ea11` built successfully on the first attempt in CI run `44957911191`. The new v320 fixture (2 groups, 4 variants, 4 assertions) passed; earlier checks were not replayed. The v319 contract body, including the link base and virtual base, and the v316 stub and Linux sources were reused unchanged. The only public change is the record tag `N320PS20`, so the cycle ran a new reviewed build and no spent build was replayed.
+
+In v319 core 0 stopped at the marked physmap-region overrun assertion. The offline analysis traced it to XNU's randomized physmap placement. The physmap has no slack at its end, and each region keeps its address congruent to its physical address modulo 32 MiB. So the regions fit only when the random offset happens to be 32 MiB aligned.
+
+v320 bundles a minimal private image patch on top of the v319 slid image:
+
+- **Patch.** One instruction that masks the random physmap offset now keeps only the bits that preserve 32 MiB alignment. In the offline model the physmap regions then end exactly at the physmap end and the assertion passes; by construction the same holds for every aligned random value, though the model ran only one.
+- **Marker.** One new marker turns the cold path of XNU's platform-contract check in its interrupt-controller initialization into a distinct self-spin. The earlier markers remain.
+- **Unchanged.** boot_args, the device tree, the seed, the handoff layout, the stub, the Linux code, the bootstrap map limit and the reservation are identical to v319.
+- **Offline prediction.** Before use, the host emulator was extended to follow XNU's own page tables after it switches translation tables. In that emulation XNU passed the physmap assertion and switched to its own tables. It then ran pmap bootstrap, serial and console setup and idle initialization, and entered interrupt-controller initialization. There it stopped at the platform-contract marker, because the device tree has no `/chosen/note10-platform` node. In the emulation no device mapping had been created at that point. A counter-run with the mask patch reverted stopped at the physmap marker again.
+
+On the device, the stub ran every check, committed the `N320PS2T` record and branched to XNU. The record, bound to the current build, boot and cycle, matched the precomputed values exactly.
+
+After the reset, the log read back from the previous boot held all three v315 breadcrumbs, in order, directly after the record. The builder code was 0. The boot loader's next log block reported a cluster-0 watchdog reset, with core 0 stopped at the platform-contract marker spin, as predicted. Normal TWRP returned in a distinct boot epoch about 57 seconds after the actor started, within the 240-second bound. All five partition integrity checks passed, and the recovery setting and panel brightness both read back 10. The cycle used one BOOT write, one host reboot, one actor invocation and one XNU branch; RECOVERY writes and rollback BOOT writes were zero.
+
+This qualifies the patch as far as the marker shows. The device shows only that core 0 was in the platform-contract marker spin at the reset. It was not at the physmap marker, any earlier marker, `_panic_spin_forever` or the debugger trap path. That is consistent with the offline prediction. The translation-table switch, the initialization steps in between and the absence of device mappings come from the offline emulation, not from the device. The marker does not show which code ran in between, or the state of XNU's tables.
+
+The next XNU requirement is the `/chosen/note10-platform` node. Supplying it would let XNU set up and access the interrupt controller itself, which is outside the current approvals, so the route needs a user decision. The limited RAM behind XNU's 32 MiB bootstrap map will need a plan alongside it. Interrupt-controller bring-up, later kernel bootstrap and independent native return remain unproven.
