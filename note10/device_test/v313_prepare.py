@@ -228,8 +228,9 @@ def capture_park_flow(symbols,run,objects,out):
             run(['aarch64-linux-gnu-objdump','-d','--disassemble-zeroes','--start-address='+hex(item['address']),
                  '--stop-address='+hex(item['address']+item['bytes']),objects/'vmlinux'],label)
             # n304_prepare_args inlines the 13-node, 43-property n310_adt; its log is bounded by the 8192-byte symbol
-            # limit above (<=2048 instructions at ~57 log bytes each). Other flow logs keep 32768.
-            raw=p.ordinary(out/(label+'.log'),131072 if logical=='n304_prepare_args' else 32768);total+=len(raw)
+            # limit above (<=2048 instructions at ~57 log bytes each). n304_post_abi (v313 stub, v312 log 31989 B + 31
+            # instructions) gets 65536. Total 196608 unchanged: v312 total 121340 + ~2 KiB growth. Others keep 32768.
+            raw=p.ordinary(out/(label+'.log'),131072 if logical=='n304_prepare_args' else 65536 if logical=='n304_post_abi' else 32768);total+=len(raw)
             require(total<=196608,'bounded total park flow evidence')
             entries.append(dict(item,logical=logical,log=label+'.log',sha256=p.sha(raw),log_bytes=len(raw)))
             if logical=='n304_post_abi':spin=stub_proof(raw.decode(),item)
