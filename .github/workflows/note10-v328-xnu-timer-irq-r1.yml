@@ -1,0 +1,80 @@
+name: v328 XNU timer IRQ build qualification (record tag N328 only; v321 ADT; no device execution, no XNU image or patch in CI)
+run-name: "v328 XNU timer IRQ R1 | ${{ inputs.expected_source_head }}"
+on:
+  workflow_dispatch:
+    inputs:
+      expected_source_head:
+        description: Exact reviewed public source commit
+        required: true
+        type: string
+      passed_new_test_context:
+        description: Source-bound v328 host fixture PASS
+        required: true
+        type: string
+      recipient_public_key_b64:
+        description: Original approved RSA3072 public recipient
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  v328-xnu-timer-irq-r1:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        id: python
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Guard exact first dispatch
+        shell: bash --noprofile --norc -euo pipefail {0}
+        env:
+          EXPECTED: ${{ inputs.expected_source_head }}
+        run: |
+          [[ "$EXPECTED" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$GITHUB_SHA" == "$EXPECTED" && "$GITHUB_WORKFLOW_SHA" == "$EXPECTED" && "$GITHUB_RUN_ATTEMPT" == 1 ]]
+      - name: Install Image toolchain using managed mirrors
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          packages=(clang-14 gcc gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi make bc bison flex libssl-dev libelf-dev)
+          missing=()
+          for package in "${packages[@]}"; do
+            if [ "$(dpkg-query -W -f='${Status}' "$package" 2>/dev/null || true)" != "install ok installed" ]; then missing+=("$package"); fi
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            sudo -n env DEBIAN_FRONTEND=noninteractive timeout --kill-after=30s 180s apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=30 update
+            sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a timeout --kill-after=30s 480s apt-get -o Dpkg::Use-Pty=0 -o DPkg::Lock::Timeout=60 install --no-install-recommends -y "${missing[@]}"
+          fi
+      - name: Run v328 tag host fixture and bind its output hash
+        shell: bash --noprofile --norc -euo pipefail {0}
+        env:
+          NEW_PASS: ${{ inputs.passed_new_test_context }}
+        run: |
+          cd note10/device_test
+          gcc -std=c11 -Wall -Wextra -Werror -O0 -I ../xnu26 -o "$RUNNER_TEMP/v328_fixture" v328_tag_fixture.c ../xnu26/v321_runtime_relocation.c
+          "$RUNNER_TEMP/v328_fixture" > "$RUNNER_TEMP/v328_fixture.out"
+          [ "$(cat "$RUNNER_TEMP/v328_fixture.out")" = "v328 tag fixture PASS" ]
+          actual="$(sha256sum "$RUNNER_TEMP/v328_fixture.out" | cut -d' ' -f1)"
+          declared="$(python3 -c 'import json,os;print(json.loads(os.environ["NEW_PASS"])["new_fixture_PASS"]["result_sha256"])')"
+          [ "$actual" = "$declared" ]
+      - name: One builtin-TWRP Image; no device execution
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+          N10_HEAD: ${{ inputs.expected_source_head }}
+          N10_NEW_PASS: ${{ inputs.passed_new_test_context }}
+          N10_RECIPIENT_PUBLIC_KEY_B64: ${{ inputs.recipient_public_key_b64 }}
+        run: '"${{ steps.python.outputs.python-path }}" -B "$GITHUB_WORKSPACE/note10/device_test/v328_prepare.py" --output "$GITHUB_WORKSPACE/note10/private/v328-ci-xnu-timer-irq-r1" --expected-source-head "$N10_HEAD" --passed-new-test-context "$N10_NEW_PASS"'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: note10-v328-xnu-timer-irq-r1-sealed-evidence
+          path: note10/private/v328-ci-xnu-timer-irq-r1.n10sealed
+          retention-days: 7
+          if-no-files-found: error
