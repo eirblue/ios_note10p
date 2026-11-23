@@ -1,0 +1,37 @@
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -8036,6 +8036,19 @@
+ 	"/sbin/launchd",
+ };
+ 
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++/* Opt-in init path lookup checkpoint: kernel-context result of the init path lookup. */
++void note10_init_lookup_checkpoint(int err, vnode_t vp);
++
++__attribute__((noinline)) __disable_tail_calls void
++note10_init_lookup_checkpoint(int err, vnode_t vp)
++{
++	if (err == 0) {
++		vnode_put(vp);
++	}
++}
++#endif /* ARM64_BOARD_CONFIG_EXYNOS9825 */
++
+ /*
+  * load_init_program
+  *
+@@ -8078,6 +8091,14 @@
+ 	/* Use the opportunity to initialize exec's debug log stream */
+ 	exec_log_handle = os_log_create("com.apple.xnu.bsd", "exec");
+ #endif /* DEVELOPMENT || DEBUG */
++
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	{
++		vnode_t n10_init_vp = NULLVP;
++		int n10_init_err = vnode_lookup("/sbin/launchd", 0, &n10_init_vp, vfs_context_kernel());
++		note10_init_lookup_checkpoint(n10_init_err, n10_init_vp);
++	}
++#endif /* ARM64_BOARD_CONFIG_EXYNOS9825 */
+ 
+ 	(void) mach_vm_allocate_kernel(map, &scratch_addr, map_page_size,
+ 	    VM_MAP_KERNEL_FLAGS_ANYWHERE());

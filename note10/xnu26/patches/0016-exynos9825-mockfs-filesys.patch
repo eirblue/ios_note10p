@@ -1,0 +1,11 @@
+--- a/config/MASTER.arm64.exynos9825
++++ b/config/MASTER.arm64.exynos9825
+@@ -30,7 +30,7 @@
+ #  BSD_RELEASE =    [ BSD_BASE no_printf_str no_kprintf_str secure_kernel config_imgsrc_access ]
+ #  BSD_DEV =        [ BSD_BASE config_netboot config_imgsrc_access pgo config_vnguard rosetta BSD_EXTRAS_DEV ]
+ #  BSD_DEBUG =      [ BSD_BASE config_netboot config_imgsrc_access pgo config_vnguard rosetta BSD_EXTRAS_DEBUG ]
+-#  FILESYS_BASE =   [ devfs fifo fs_compression config_protect config_mnt_rootsnap config_triggers config_fse routefs namedstreams config_dataless_files bindfs]
++#  FILESYS_BASE =   [ devfs fifo mockfs fs_compression config_protect config_mnt_rootsnap config_triggers config_fse routefs namedstreams config_dataless_files bindfs]
+ #  FILESYS_RELEASE= [ FILESYS_BASE ]
+ #  FILESYS_DEV =    [ FILESYS_BASE fdesc config_union_mounts ]
+ #  FILESYS_DEBUG =  [ FILESYS_BASE fdesc config_union_mounts ]
