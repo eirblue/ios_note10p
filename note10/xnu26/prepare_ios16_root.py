@@ -1,5 +1,6 @@
 """Exact, default-off v342 iOS 16 root overlay (0021..0026 + 0021-stage-hfs.sh; v344 adds 0027 n10_wdt early pet/kick and
-0028 n10_ufs stop ladder) after the MOCKFS overlay (0016..0020)."""
+0028 n10_ufs stop ladder; v346 adds 0029 n10_ufs task tag 0 and site-10 clock-stop/IS detail) after the MOCKFS
+overlay (0016..0020)."""
 import hashlib
 import json
 from pathlib import Path
@@ -30,6 +31,8 @@ OVERLAY = (
      ('osfmk/arm64/note10/n10_wdt.c',)),
     ('0028-exynos9825-n10-ufs-stop-ladder.patch', '9e085ec6c8e6623e0f235323be47648bd3a1f506ce34be8b183b0d664ec35bec',
      ('bsd/dev/n10_ufs.c',)),
+    ('0029-exynos9825-n10-ufs-tag-clkstop-detail.patch', 'c26a2528af697e87d6c0728e5b510bbb02f610f66ccae5532d1715f36d09efca',
+     ('bsd/dev/n10_ufs.c',)),
 )
 STAGED_DIRS = ('bsd/n10_hfs/core', 'bsd/n10_hfs/hfs_encodings')
 
@@ -53,7 +56,7 @@ def check_patches():
 
 
 def apply(source, output):
-    """Stage hfs-627.100.6, then apply 0021..0028 once after the MOCKFS overlay and before configure."""
+    """Stage hfs-627.100.6, then apply 0021..0029 once after the MOCKFS overlay and before configure."""
     check_patches()
     require(all(not (source / d).exists() for d in STAGED_DIRS), 'fresh source without staged HFS required')
     run(['bash', PATCHES / STAGE_HFS[0]], source, output / 'ios16-stage-hfs.log')

@@ -1,0 +1,98 @@
+diff --git a/bsd/dev/n10_ufs.c b/bsd/dev/n10_ufs.c
+index 1157d95..0085f5c 100644
+--- a/bsd/dev/n10_ufs.c
++++ b/bsd/dev/n10_ufs.c
+@@ -28,8 +28,9 @@
+  * does not match partition-lba or overlaps boot, recovery, dtb, dtbo or
+  * vbmeta; write opens and writes return EROFS.
+  *
+- * Register accesses: read HCS, IS, UTRLDBR, UTRLBA, UTRLBAU, UTRLRSR and the
+- * nexus register; write IE (0), IS (acknowledge), UTRLBA, UTRLBAU, UTRLRSR,
++ * Register accesses: read HCS, IS, UTRLDBR, UTRLBA, UTRLBAU, UTRLRSR, the
++ * nexus register and (v346, read-only, same vs-hci page as the nexus
++ * register) HCI_CLKSTOP_CTRL vs-hci+0xB0 and HCI_FORCE_HCS vs-hci+0xB4; write IE (0), IS (acknowledge), UTRLBA, UTRLBAU, UTRLRSR,
+  * UTRLDBR (slot 0) and the nexus register (bit 0). No UIC/DME commands, no
+  * task management, no HCE, no request-list clear.
+  *
+@@ -51,6 +52,13 @@
+  * the high nibble. n10_wdt_kick() pets the watchdog at entry and before each
+  * doorbell.
+  *
++ * v346: the task tag equals the slot (0), as Linux uses task_tag == tag.
++ * Site 10 detail is eight flags: bit0 IS.UTRCS; bit1 IS UE|UHXS|UHES|ULLS|ULSS
++ * (link/UIC event); bit2 IS DFES|UTPES; bit3 IS HCFES|SBFES; bit4 UTRLRSR bit0
++ * clear or UTRLBA/UTRLBAU not our list at timeout; bit5 HCS lacks DP or
++ * UTRLRDY at timeout; bit6 HCI_FORCE_HCS.CORECLK_STOP_EN set before the
++ * doorbell; bit7 HCI_CLKSTOP_CTRL & CLK_STOP_ALL nonzero before the doorbell.
++ *
+  * Root on it with rd=n10ufs0 (block n10ufs0, raw rn10ufs0), 512-byte
+  * logical sectors over the device's 4 KiB blocks.
+  */
+@@ -110,6 +118,21 @@ _Static_assert(UFS_BLOCK <= (1u << 12), "PRDT entry data size exceeds the Exynos
+ _Static_assert(PRDT_MAX * PRDT_ENTRY_SIZE + PRDT_LENGTH_BIAS <= UINT16_MAX, "PRDT length overflows UTRD dw7");
+ _Static_assert(N10_UFS_NEXUS_OFF >= N10_UFS_HCI_SIZE && N10_UFS_NEXUS_OFF + 4 <= 0x2000,
+     "nexus register outside the UFS HCI block");
++/* v346 read-only clock-stop sample (ufs-exynos.h vs-hci offsets; vs-hci = nexus - 0x40). */
++#define VS_FROM_NEXUS           0x40u
++#define VS_CLKSTOP_CTRL         0xB0u           /* HCI_CLKSTOP_CTRL */
++#define VS_FORCE_HCS            0xB4u           /* HCI_FORCE_HCS */
++#define CLK_STOP_ALL            0x17u           /* bits 4, 2, 1, 0 */
++#define CORECLK_STOP_EN         (1u << 4)
++_Static_assert(N10_UFS_NEXUS_OFF - VS_FROM_NEXUS + VS_FORCE_HCS + 4 <= 0x1100 + 0x200,
++    "clock-stop registers outside vs-hci reg[1]");
++_Static_assert(((N10_UFS_HCI_BASE + N10_UFS_NEXUS_OFF) & ~0xfffull) ==
++    ((N10_UFS_HCI_BASE + N10_UFS_NEXUS_OFF - VS_FROM_NEXUS + VS_FORCE_HCS) & ~0xfffull),
++    "clock-stop registers outside the mapped nexus page");
++#define IS_UTRCS                (1u << 0)
++#define IS_LINK                 ((1u << 2) | (1u << 5) | (1u << 6) | (1u << 7) | (1u << 8))
++#define IS_UTP                  ((1u << 11) | (1u << 12))
++#define IS_FATAL                ((1u << 16) | (1u << 17))
+ #define CMD_TIMEOUT_NS  (5ull * NSEC_PER_SEC)
+ 
+ /* Layout of the contiguous DMA allocation (UCD offsets are byte granular). */
+@@ -139,7 +162,6 @@ static struct {
+ 	uint64_t lo, hi;                        /* readable device-block window, inclusive */
+ 	uint64_t first_block, nblocks;          /* partition, in 4 KiB device blocks */
+ 	uint32_t secsize;                       /* logical sector size for the BSD layer */
+-	uint8_t tag;
+ 	int bmajor, cmajor;
+ 	dev_t bdev;
+ 	bool ready;
+@@ -233,7 +255,7 @@ n10_ufs_read_once(uint64_t lba, uint32_t count, uint32_t attempt)
+ 	ucd[0] = 0x01;                          /* COMMAND UPIU */
+ 	ucd[1] = 0x40;                          /* R: data in */
+ 	ucd[2] = 0;                             /* LUN 0 */
+-	ucd[3] = ++nu.tag;
++	ucd[3] = 0;                             /* task tag = slot 0 */
+ 	ucd[12] = (uint8_t)(len >> 24);
+ 	ucd[13] = (uint8_t)(len >> 16);
+ 	ucd[14] = (uint8_t)(len >> 8);
+@@ -265,6 +287,10 @@ n10_ufs_read_once(uint64_t lba, uint32_t count, uint32_t attempt)
+ 	if (!(nexus & 1)) {
+ 		wr32(nu.nexus, 0, nexus | 1);   /* slot 0 carries a SCSI command */
+ 	}
++	/* Read-only clock-stop sample; the doorbell is rung regardless. */
++	vm_offset_t vs = nu.nexus - VS_FROM_NEXUS;
++	uint32_t pre = (rd32(vs, VS_FORCE_HCS) & CORECLK_STOP_EN ? 0x40u : 0) |
++	    (rd32(vs, VS_CLKSTOP_CTRL) & CLK_STOP_ALL ? 0x80u : 0);
+ 	n10_wdt_kick();
+ 	wr32(nu.regs, REG_UTRLDBR, 1);
+ 
+@@ -273,7 +299,16 @@ n10_ufs_read_once(uint64_t lba, uint32_t count, uint32_t attempt)
+ 	deadline += mach_absolute_time();
+ 	while (rd32(nu.regs, REG_UTRLDBR) & 1) {
+ 		if (mach_absolute_time() > deadline) {
+-			n10_ufs_stop(10, rd32(nu.regs, REG_IS) & 0xff);       /* IS before any acknowledge */
++			/* One read of each register, before any acknowledge. */
++			uint32_t is = rd32(nu.regs, REG_IS), hcs = rd32(nu.regs, REG_HCS);
++			uint32_t rsr = rd32(nu.regs, REG_UTRLRSR);
++			uint32_t ba = rd32(nu.regs, REG_UTRLBA), bau = rd32(nu.regs, REG_UTRLBAU);
++			uint64_t list = nu.dma_pa + DMA_UTRL;
++			n10_ufs_stop(10, pre |
++			    (is & IS_UTRCS ? 0x01u : 0) | (is & IS_LINK ? 0x02u : 0) |
++			    (is & IS_UTP ? 0x04u : 0) | (is & IS_FATAL ? 0x08u : 0) |
++			    (!(rsr & 1) || ba != (uint32_t)list || bau != (uint32_t)(list >> 32) ? 0x10u : 0) |
++			    ((hcs & (HCS_DP | HCS_UTRLRDY)) != (HCS_DP | HCS_UTRLRDY) ? 0x20u : 0));
+ 		}
+ 		delay(1);
+ 	}
