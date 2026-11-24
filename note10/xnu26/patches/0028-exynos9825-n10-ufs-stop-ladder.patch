@@ -1,0 +1,476 @@
+diff --git a/bsd/dev/n10_ufs.c b/bsd/dev/n10_ufs.c
+index cb65986..1157d95 100644
+--- a/bsd/dev/n10_ufs.c
++++ b/bsd/dev/n10_ufs.c
+@@ -37,8 +37,19 @@
+  * kernel-managed RAM window: descriptors plus a 256 KiB bounce buffer, with
+  * one 4 KiB PRDT entry (128-byte FMP stride) per block and the FMP crypto
+  * fields left zero. Caches
+- * are cleaned and invalidated around each command. A timed-out command
+- * disables the driver permanently.
++ * are cleaned and invalidated around each command.
++ *
++ * v344: every failure stops the CPU instead of returning. n10_ufs_stop masks
++ * interrupts and branches into _n10_ufs_stop_ladder (4096 'b .' words), so
++ * the stopping PC encodes the site and one status byte:
++ *   PC = _n10_ufs_stop_ladder + 4 * (site << 8 | detail)
++ * and the watchdog reset reports it. Sites: 1 no handoff node, 2 property,
++ * 3 constants, 4 io map, 5 DMA allocation, 6 DMA/argument guard, 7 host not
++ * ready (HCS), 8 doorbell busy, 9 request list not taken, 10 READ timeout
++ * (IS), 11 OCS, 12 response UPIU, 13 SCSI status/sense key, 14 GPT,
++ * 15 partition/devsw. Sites 1, 2, 4, 5 and 6 carry min(n10_wdt_ticks, 15) in
++ * the high nibble. n10_wdt_kick() pets the watchdog at entry and before each
++ * doorbell.
+  *
+  * Root on it with rd=n10ufs0 (block n10ufs0, raw rn10ufs0), 512-byte
+  * logical sectors over the device's 4 KiB blocks.
+@@ -67,6 +78,9 @@ extern ppnum_t pmap_find_phys(pmap_t pmap, addr64_t va);
+ extern vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
+ extern void flush_dcache64(addr64_t addr, unsigned count, int phys);
+ extern unsigned long gPhysBase, gPhysSize;
++/* osfmk/arm64/note10/n10_wdt.c (v344) */
++extern void n10_wdt_kick(void);
++extern uint32_t n10_wdt_ticks;
+ 
+ #define REG_IS          0x20
+ #define REG_IE          0x24
+@@ -128,7 +142,7 @@ static struct {
+ 	uint8_t tag;
+ 	int bmajor, cmajor;
+ 	dev_t bdev;
+-	bool ready, dead;
++	bool ready;
+ } nu;
+ 
+ static LCK_GRP_DECLARE(n10_ufs_grp, "n10_ufs");
+@@ -146,6 +160,38 @@ wr32(vm_offset_t base, uint32_t off, uint32_t v)
+ 	*(volatile uint32_t *)(base + off) = v;
+ }
+ 
++/* v344 stop ladder (see header). */
++__asm__ (
++	"	.text\n"
++	"	.p2align 2\n"
++	"	.globl _n10_ufs_stop_ladder\n"
++	"_n10_ufs_stop_ladder:\n"
++	"	.rept 4096\n"
++	"	b .\n"
++	"	.endr\n");
++
++static void __attribute__((noreturn, noinline))
++n10_ufs_stop(uint32_t site, uint32_t detail)
++{
++	uint64_t code = (uint64_t)(site & 0xf) << 8 | (detail & 0xff);
++
++	__asm__ volatile (
++		"msr daifset, #0xf\n"
++		"adrp x16, _n10_ufs_stop_ladder@PAGE\n"
++		"add x16, x16, _n10_ufs_stop_ladder@PAGEOFF\n"
++		"add x16, x16, %0, lsl #2\n"
++		"br x16\n"
++		: : "r" (code) : "x16", "memory");
++	__builtin_unreachable();
++}
++
++/* Timer-path watchdog pets so far, saturated at 15, in the high nibble. */
++static uint32_t
++n10_ufs_ticks(void)
++{
++	return MIN(n10_wdt_ticks, 15u) << 4;
++}
++
+ static void
+ dma_sync(uint32_t off, uint32_t len)
+ {
+@@ -162,9 +208,9 @@ le(const uint8_t *p, unsigned bytes)
+ 	return v;
+ }
+ 
+-/* One READ(10) of count device blocks at lba into the bounce buffer. */
++/* One READ(10) of count device blocks at lba into the bounce buffer: 0, EAGAIN on CHECK CONDITION, else stops. */
+ static int
+-n10_ufs_read_once(uint64_t lba, uint32_t count)
++n10_ufs_read_once(uint64_t lba, uint32_t count, uint32_t attempt)
+ {
+ 	struct utrd *utrd = (struct utrd *)(nu.dma + DMA_UTRL);
+ 	uint8_t *ucd = (uint8_t *)(nu.dma + DMA_UCD);
+@@ -173,7 +219,7 @@ n10_ufs_read_once(uint64_t lba, uint32_t count)
+ 
+ 	/* Strides and length are reviewed constants; re-check before any DMA. */
+ 	if (count == 0 || count > PRDT_MAX || UCD_PRDT + count * PRDT_ENTRY_SIZE > DMA_BOUNCE - DMA_UCD) {
+-		return EINVAL;
++		n10_ufs_stop(6, n10_ufs_ticks() | 5);
+ 	}
+ 	uint8_t cdb[10] = {
+ 		SCSI_READ10, 0,
+@@ -219,6 +265,7 @@ n10_ufs_read_once(uint64_t lba, uint32_t count)
+ 	if (!(nexus & 1)) {
+ 		wr32(nu.nexus, 0, nexus | 1);   /* slot 0 carries a SCSI command */
+ 	}
++	n10_wdt_kick();
+ 	wr32(nu.regs, REG_UTRLDBR, 1);
+ 
+ 	uint64_t deadline;
+@@ -226,9 +273,7 @@ n10_ufs_read_once(uint64_t lba, uint32_t count)
+ 	deadline += mach_absolute_time();
+ 	while (rd32(nu.regs, REG_UTRLDBR) & 1) {
+ 		if (mach_absolute_time() > deadline) {
+-			nu.dead = true;
+-			printf("Note10 UFS: READ at block 0x%llx timed out; driver disabled\n", lba);
+-			return ETIMEDOUT;
++			n10_ufs_stop(10, rd32(nu.regs, REG_IS) & 0xff);       /* IS before any acknowledge */
+ 		}
+ 		delay(1);
+ 	}
+@@ -241,38 +286,46 @@ n10_ufs_read_once(uint64_t lba, uint32_t count)
+ 
+ 	uint32_t ocs = utrd->dw2 & 0x0f;
+ 	uint8_t const *resp = ucd + UCD_RESP;
+-	if (ocs || resp[0] != 0x21 || resp[6] || resp[7]) {
+-		printf("Note10 UFS: READ failed: ocs 0x%x upiu 0x%x response 0x%x status 0x%x\n",
+-		    ocs, resp[0], resp[6], resp[7]);
+-		return (!ocs && resp[0] == 0x21 && !resp[6] && resp[7] == SCSI_CHECK_COND) ? EAGAIN : EIO;
++	if (ocs) {
++		n10_ufs_stop(11, attempt << 4 | ocs);
++	}
++	if (resp[0] != 0x21 || resp[6]) {
++		n10_ufs_stop(12, resp[0] != 0x21 ? resp[0] & 0x7fu : 0x80u | (resp[6] & 0x7fu));
++	}
++	if (resp[7] == SCSI_CHECK_COND) {
++		return EAGAIN;
++	}
++	if (resp[7]) {
++		n10_ufs_stop(13, resp[7] & 0x7fu);
+ 	}
+ 	return 0;
+ }
+ 
+-/* Clamped read: only blocks inside the current window [lo, hi]. */
+-static int
++/* Clamped read: only blocks inside the current window [lo, hi]. Returns only on success. */
++static void
+ n10_ufs_read(uint64_t lba, uint32_t count)
+ {
+-	if (nu.dead) {
+-		return EIO;
+-	}
+ 	if (count == 0 || count > PRDT_MAX || lba > UINT32_MAX - count ||
+ 	    lba < nu.lo || lba + count - 1 > nu.hi) {
+-		return EINVAL;
++		n10_ufs_stop(6, n10_ufs_ticks() | 5);
+ 	}
+-	if (nu.dma_pa < gPhysBase || nu.dma_pa + DMA_SIZE > (uint64_t)gPhysBase + gPhysSize ||
+-	    nu.dma_pa + DMA_SIZE > (1ull << 32)) {
+-		return EIO;
++	if (nu.dma_pa < gPhysBase) {
++		n10_ufs_stop(6, n10_ufs_ticks() | 2);
++	}
++	if (nu.dma_pa + DMA_SIZE > (uint64_t)gPhysBase + gPhysSize) {
++		n10_ufs_stop(6, n10_ufs_ticks() | 3);
++	}
++	if (nu.dma_pa + DMA_SIZE > (1ull << 32)) {
++		n10_ufs_stop(6, n10_ufs_ticks() | 4);
+ 	}
+-	int error = EIO;
+ 	/* A command after the Linux stage may first report a unit attention. */
+-	for (int i = 0; i < 3; i++) {
+-		error = n10_ufs_read_once(lba, count);
+-		if (error != EAGAIN) {
+-			break;
++	for (uint32_t i = 0; i < 3; i++) {
++		if (n10_ufs_read_once(lba, count, i) == 0) {
++			return;
+ 		}
+ 	}
+-	return error;
++	/* CHECK CONDITION every time: sense key = fixed-format sense byte 2 (sense data at response UPIU byte 34). */
++	n10_ufs_stop(13, 0x80u | (((const uint8_t *)(nu.dma + DMA_UCD + UCD_RESP))[36] & 0x0fu));
+ }
+ 
+ static bool
+@@ -295,32 +348,34 @@ n10_ufs_entry_name(const uint8_t *e, char name[37])
+ 	name[c] = 0;
+ }
+ 
+-static int
++static void
+ n10_ufs_find_partition(void)
+ {
+ 	const uint8_t *b = (const uint8_t *)(nu.dma + DMA_BOUNCE);
+-	int error;
+ 
+ 	nu.lo = nu.hi = 1;
+-	if ((error = n10_ufs_read(1, 1))) {
+-		return error;
++	n10_ufs_read(1, 1);
++	if (memcmp(b, "EFI PART", 8) != 0) {
++		n10_ufs_stop(14, 1);
+ 	}
+-	if (memcmp(b, "EFI PART", 8) != 0 || le(b + 24, 8) != 1) {
+-		printf("Note10 UFS: LUN 0 has no GPT at 4 KiB block 1\n");
+-		return ENXIO;
++	if (le(b + 24, 8) != 1) {
++		n10_ufs_stop(14, 2);
+ 	}
+ 	uint64_t entry_lba = le(b + 72, 8);
+ 	uint32_t nent = (uint32_t)le(b + 80, 4), esz = (uint32_t)le(b + 84, 4);
+-	if (esz != 128 || nent == 0 || nent > BOUNCE_SIZE / esz || entry_lba < 2 || entry_lba > UINT32_MAX) {
+-		printf("Note10 UFS: unsupported GPT entries %u x %u at %llu\n", nent, esz, entry_lba);
+-		return ENXIO;
++	if (esz != 128) {
++		n10_ufs_stop(14, 3);
++	}
++	if (nent == 0 || nent > BOUNCE_SIZE / esz) {
++		n10_ufs_stop(14, 4);
++	}
++	if (entry_lba < 2 || entry_lba > UINT32_MAX) {
++		n10_ufs_stop(14, 5);
+ 	}
+ 	uint32_t eblocks = (nent * esz + UFS_BLOCK - 1) / UFS_BLOCK;
+ 	nu.lo = entry_lba;
+ 	nu.hi = entry_lba + eblocks - 1;
+-	if ((error = n10_ufs_read(entry_lba, eblocks))) {
+-		return error;
+-	}
++	n10_ufs_read(entry_lba, eblocks);
+ 
+ 	uint64_t first = 0, last = 0;
+ 	unsigned found = 0;
+@@ -333,13 +388,14 @@ n10_ufs_find_partition(void)
+ 			found++;
+ 		}
+ 	}
+-	if (found != 1 || last < first || first <= nu.hi || last > UINT32_MAX) {
+-		printf("Note10 UFS: need exactly one valid \"%s\" (found %u)\n", n10_ufs_part, found);
+-		return ENOENT;
++	if (found != 1) {
++		n10_ufs_stop(15, found ? 2 : 1);
++	}
++	if (last < first || first <= nu.hi || last > UINT32_MAX) {
++		n10_ufs_stop(15, 3);
+ 	}
+ 	if (first != nu.want_first || last != nu.want_last) {
+-		printf("Note10 UFS: \"%s\" 0x%llx-0x%llx differs from the handoff\n", n10_ufs_part, first, last);
+-		return EPERM;
++		n10_ufs_stop(15, 4);
+ 	}
+ 	for (uint32_t i = 0; i < nent; i++) {
+ 		char name[37];
+@@ -347,8 +403,7 @@ n10_ufs_find_partition(void)
+ 		for (unsigned g = 0; g < sizeof(n10_ufs_gated) / sizeof(n10_ufs_gated[0]); g++) {
+ 			if (strcmp(name, n10_ufs_gated[g]) == 0 &&
+ 			    n10_ufs_overlap(first, last, le(b + i * esz + 32, 8), le(b + i * esz + 40, 8))) {
+-				printf("Note10 UFS: \"%s\" overlaps \"%s\"; refused\n", n10_ufs_part, name);
+-				return EPERM;
++				n10_ufs_stop(15, 0x20 | g);
+ 			}
+ 		}
+ 	}
+@@ -356,20 +411,18 @@ n10_ufs_find_partition(void)
+ 	nu.nblocks = last - first + 1;
+ 	nu.lo = first;
+ 	nu.hi = last;
+-	return 0;
+ }
+ 
+-static int
++static void
+ n10_ufs_take_over_host(void)
+ {
+ 	uint32_t hcs = rd32(nu.regs, REG_HCS);
+ 	if (!(hcs & HCS_DP) || !(hcs & HCS_UTRLRDY)) {
+-		printf("Note10 UFS: host not ready (hcs 0x%x)\n", hcs);
+-		return ENXIO;
++		n10_ufs_stop(7, (hcs & 0x0f) | ((hcs >> 4) & 0x70));        /* DP, UTRLRDY, UTMRLRDY, UCRDY, UPMCRS */
+ 	}
+-	if (rd32(nu.regs, REG_UTRLDBR)) {
+-		printf("Note10 UFS: requests outstanding from the Linux stage\n");
+-		return EBUSY;
++	uint32_t dbr = rd32(nu.regs, REG_UTRLDBR);
++	if (dbr) {
++		n10_ufs_stop(8, dbr & 0xff);
+ 	}
+ 	wr32(nu.regs, REG_IE, 0);                       /* polled operation */
+ 	wr32(nu.regs, REG_IS, rd32(nu.regs, REG_IS));
+@@ -379,12 +432,12 @@ n10_ufs_take_over_host(void)
+ 	wr32(nu.regs, REG_UTRLBAU, (uint32_t)(list >> 32));
+ 	wr32(nu.regs, REG_UTRLRSR, 1);
+ 	/* Never ring a doorbell unless the host uses our list. */
+-	if (rd32(nu.regs, REG_UTRLBA) != (uint32_t)list || rd32(nu.regs, REG_UTRLBAU) != (uint32_t)(list >> 32) ||
+-	    !(rd32(nu.regs, REG_UTRLRSR) & 1)) {
+-		printf("Note10 UFS: host did not take our request list\n");
+-		return EIO;
++	uint32_t bad = (uint32_t)(rd32(nu.regs, REG_UTRLBA) != (uint32_t)list) |
++	    (uint32_t)(rd32(nu.regs, REG_UTRLBAU) != (uint32_t)(list >> 32)) << 1 |
++	    (uint32_t)!(rd32(nu.regs, REG_UTRLRSR) & 1) << 2;
++	if (bad) {
++		n10_ufs_stop(9, bad | (rd32(nu.regs, REG_HCS) & 0x0f) << 4);
+ 	}
+-	return 0;
+ }
+ 
+ static int
+@@ -435,10 +488,7 @@ n10_ufs_strategy(buf_t bp)
+ 		uint32_t skip = (uint32_t)(pos % UFS_BLOCK);
+ 		uint32_t want = MIN(count - done, BOUNCE_SIZE - skip);
+ 		uint32_t blocks = (skip + want + UFS_BLOCK - 1) / UFS_BLOCK;
+-		error = n10_ufs_read(nu.first_block + lba, blocks);
+-		if (error) {
+-			break;
+-		}
++		n10_ufs_read(nu.first_block + lba, blocks);
+ 		memcpy(vaddr + done, (const void *)(nu.dma + DMA_BOUNCE + skip), want);
+ 		done += want;
+ 		buf_setresid(bp, count - done);
+@@ -554,95 +604,83 @@ static const struct cdevsw n10_ufs_cdevsw = {
+ 	.d_type       = D_DISK,
+ };
+ 
++/* Property of the exact size, else stop at site 2 with its index (1..5). */
+ static const uint8_t *
+-n10_ufs_prop(DTEntry node, const char *name, unsigned int expected)
++n10_ufs_prop(DTEntry node, const char *name, unsigned int expected, uint32_t index)
+ {
+ 	void const *value = NULL;
+ 	unsigned int size = 0;
+ 	if (SecureDTGetProperty(node, name, &value, &size) != kSuccess || size != expected || !value) {
+-		printf("Note10 UFS: handoff property %s missing or malformed\n", name);
+-		return NULL;
++		n10_ufs_stop(2, n10_ufs_ticks() | index);
+ 	}
+ 	return value;
+ }
+ 
+-static int
++static void
+ n10_ufs_handoff(void)
+ {
+ 	DTEntry node;
+-	const uint8_t *hci, *nexus, *esz, *bias, *part;
+ 
+ 	if (SecureDTLookupEntry(NULL, "/chosen/note10-ufs", &node) != kSuccess) {
+-		printf("Note10 UFS: no /chosen/note10-ufs handoff node\n");
+-		return ENXIO;
+-	}
+-	if (!(hci = n10_ufs_prop(node, "hci-reg", 16)) || !(nexus = n10_ufs_prop(node, "nexus-reg", 8)) ||
+-	    !(esz = n10_ufs_prop(node, "prdt-entry-size", 4)) || !(bias = n10_ufs_prop(node, "prdt-length-bias", 4)) ||
+-	    !(part = n10_ufs_prop(node, "partition-lba", 16))) {
+-		return ENXIO;
++		n10_ufs_stop(1, n10_ufs_ticks());
+ 	}
++	const uint8_t *hci = n10_ufs_prop(node, "hci-reg", 16, 1);
++	const uint8_t *nexus = n10_ufs_prop(node, "nexus-reg", 8, 2);
++	const uint8_t *esz = n10_ufs_prop(node, "prdt-entry-size", 4, 3);
++	const uint8_t *bias = n10_ufs_prop(node, "prdt-length-bias", 4, 4);
++	const uint8_t *part = n10_ufs_prop(node, "partition-lba", 16, 5);
+ 	uint64_t hci_base = le(hci, 8), hci_size = le(hci + 8, 8), nexus_pa = le(nexus, 8);
+ 	uint32_t prdt_esz = (uint32_t)le(esz, 4), prdt_bias = (uint32_t)le(bias, 4);
+ 	nu.want_first = le(part, 8);
+ 	nu.want_last = le(part + 8, 8);
+ 	/* Assert the handoff against the reviewed constants before any mapping. */
+-	if (hci_base != N10_UFS_HCI_BASE || hci_size != N10_UFS_HCI_SIZE ||
+-	    nexus_pa != hci_base + N10_UFS_NEXUS_OFF ||
+-	    prdt_esz != PRDT_ENTRY_SIZE || prdt_bias != PRDT_LENGTH_BIAS ||
+-	    nu.want_first == 0 || nu.want_last < nu.want_first) {
+-		printf("Note10 UFS: handoff differs from the reviewed controller constants\n");
+-		return ENXIO;
++	uint32_t bad = (uint32_t)(hci_base != N10_UFS_HCI_BASE) | (uint32_t)(hci_size != N10_UFS_HCI_SIZE) << 1 |
++	    (uint32_t)(nexus_pa != hci_base + N10_UFS_NEXUS_OFF) << 2 | (uint32_t)(prdt_esz != PRDT_ENTRY_SIZE) << 3 |
++	    (uint32_t)(prdt_bias != PRDT_LENGTH_BIAS) << 4 | (uint32_t)(nu.want_first == 0) << 5 |
++	    (uint32_t)(nu.want_last < nu.want_first) << 6;
++	if (bad) {
++		n10_ufs_stop(3, bad);
+ 	}
+ 	nu.regs = ml_io_map((vm_offset_t)hci_base, (vm_size_t)hci_size);
++	if (!nu.regs) {
++		n10_ufs_stop(4, n10_ufs_ticks() | 1);
++	}
+ 	vm_offset_t nexus_page = ml_io_map((vm_offset_t)trunc_page_64(nexus_pa), PAGE_SIZE);
+-	if (!nu.regs || !nexus_page) {
+-		return ENXIO;
++	if (!nexus_page) {
++		n10_ufs_stop(4, n10_ufs_ticks() | 2);
+ 	}
+ 	nu.nexus = nexus_page + (vm_offset_t)(nexus_pa & PAGE_MASK);
+-	return 0;
+ }
+ 
+-static int
++static void
+ n10_ufs_init(void)
+ {
+-	int error;
+-
+-	if (nu.dead) {
+-		return EIO;
+-	}
+-	if ((error = n10_ufs_handoff())) {
+-		return error;
+-	}
+-	if (kmem_alloc_contig(kernel_map, &nu.dma, DMA_SIZE, PAGE_MASK,
++	n10_ufs_handoff();
++	kern_return_t kr = kmem_alloc_contig(kernel_map, &nu.dma, DMA_SIZE, PAGE_MASK,
+ 	    (ppnum_t)(((1ull << 32) >> PAGE_SHIFT) - 1), 0,
+-	    KMA_DATA | KMA_ZERO | KMA_PERMANENT, VM_KERN_MEMORY_IOKIT) != KERN_SUCCESS) {
+-		printf("Note10 UFS: no contiguous DMA memory below 4 GiB\n");
+-		return ENOMEM;
++	    KMA_DATA | KMA_ZERO | KMA_PERMANENT, VM_KERN_MEMORY_IOKIT);
++	if (kr != KERN_SUCCESS) {
++		n10_ufs_stop(5, n10_ufs_ticks() | ((uint32_t)kr & 0xf));
+ 	}
+ 	ppnum_t pn = pmap_find_phys(kernel_pmap, (addr64_t)nu.dma);
+ 	if (!pn) {
+-		return ENOMEM;
++		n10_ufs_stop(6, n10_ufs_ticks() | 1);
+ 	}
+ 	nu.dma_pa = ptoa_64(pn);
+ 	nu.secsize = DEV_BSIZE;
+ 
+ 	lck_mtx_lock(&n10_ufs_lock);
+-	error = n10_ufs_take_over_host();
+-	if (!error) {
+-		error = n10_ufs_find_partition();
+-	}
++	n10_ufs_take_over_host();
++	n10_ufs_find_partition();
+ 	lck_mtx_unlock(&n10_ufs_lock);
+-	if (error) {
+-		return error;
+-	}
+ 
+ 	nu.bmajor = bdevsw_add(-1, &n10_ufs_bdevsw);
+ 	if (nu.bmajor < 0) {
+-		return ENXIO;
++		n10_ufs_stop(15, 0x40);
+ 	}
+ 	nu.cmajor = cdevsw_add_with_bdev(-1, &n10_ufs_cdevsw, nu.bmajor);
+ 	if (nu.cmajor < 0) {
+-		return ENXIO;
++		n10_ufs_stop(15, 0x41);
+ 	}
+ 	nu.bdev = makedev(nu.bmajor, 0);
+ 	devfs_make_node(nu.bdev, DEVFS_BLOCK, UID_ROOT, GID_OPERATOR, 0640, "n10ufs0");
+@@ -650,20 +688,17 @@ n10_ufs_init(void)
+ 	nu.ready = true;
+ 	printf("Note10 UFS: \"%s\" on LUN 0: first block 0x%llx, %llu MiB, read-only\n",
+ 	    n10_ufs_part, nu.first_block, nu.nblocks * UFS_BLOCK >> 20);
+-	return 0;
+ }
+ 
+-/* Root device for rd=n10ufs0 (IOFindBSDRoot). */
++/* Root device for rd=n10ufs0 (IOFindBSDRoot). v344: failures stop on the ladder; 0 is the only return. */
+ int n10_ufs_rootdev(dev_t *dev);
+ 
+ int
+ n10_ufs_rootdev(dev_t *dev)
+ {
++	n10_wdt_kick();
+ 	if (!nu.ready) {
+-		int error = n10_ufs_init();
+-		if (error) {
+-			return error;
+-		}
++		n10_ufs_init();
+ 	}
+ 	*dev = nu.bdev;
+ 	return 0;

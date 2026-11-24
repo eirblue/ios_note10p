@@ -1,0 +1,93 @@
+diff --git a/osfmk/arm64/note10/n10_wdt.c b/osfmk/arm64/note10/n10_wdt.c
+index 9e14502..b9cfcb6 100644
+--- a/osfmk/arm64/note10/n10_wdt.c
++++ b/osfmk/arm64/note10/n10_wdt.c
+@@ -19,9 +19,16 @@
+  * It runs from the timer interrupt, so a panic, a debugger stop or a hang
+  * with interrupts masked stops petting and the reset follows within 10 s.
+  * After n10wdt_deadline seconds (boot-arg, default 300, clamped to 900,
+- * 0 = never pet), counted from this driver's start a few milliseconds after
+- * XNU entry, petting stops permanently: the one-way stopped flag is set and
+- * the timer is not re-armed. A changed WTCON or WTDAT also stops it.
++ * 0 = never pet), counted from this driver's start at STARTUP EARLY_BOOT
++ * (kernel_bootstrap_thread, before spllo), petting stops permanently: the
++ * one-way stopped flag is set and the timer is not re-armed. A changed WTCON
++ * or WTDAT also stops it.
++ *
++ * v344: n10_wdt_start pets once synchronously (the timer path can only fire
++ * after spllo). n10_wdt_kick() lets a polled driver (n10_ufs) pet with the
++ * same guards between commands; it never re-arms the timer. n10_wdt_ticks
++ * counts timer-path pets only, so a caller can report whether timer
++ * interrupts ever delivered one.
+  */
+ #if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
+ #include <stdint.h>
+@@ -47,7 +54,9 @@ static timer_call_data_t n10_wdt_call;
+ static vm_offset_t n10_wdt_regs;
+ static uint32_t n10_wdt_reload;
+ static uint64_t n10_wdt_period_abs, n10_wdt_deadline_abs;
+-static bool n10_wdt_stopped;
++static bool n10_wdt_stopped, n10_wdt_running;
++uint32_t n10_wdt_ticks;         /* timer-path pets (exported for n10_ufs) */
++void n10_wdt_kick(void);
+ 
+ static inline uint32_t
+ n10_wdt_rd(uint32_t off)
+@@ -64,22 +73,39 @@ n10_wdt_armed(void)
+ 	       n10_wdt_rd(N10_WTDAT) == n10_wdt_reload;
+ }
+ 
++/* One guarded pet: only while running, before the deadline and with the live arming unchanged. */
++static bool
++n10_wdt_pet(uint64_t now)
++{
++	if (!n10_wdt_running || n10_wdt_stopped) {
++		return false;
++	}
++	if (now >= n10_wdt_deadline_abs || !n10_wdt_armed()) {
++		n10_wdt_stopped = true;         /* one way: nothing re-arms the timer */
++		return false;
++	}
++	*(volatile uint32_t *)(n10_wdt_regs + N10_WTCNT) = n10_wdt_reload;
++	return true;
++}
++
+ static void
+ n10_wdt_tick(__unused timer_call_param_t p0, __unused timer_call_param_t p1)
+ {
+ 	uint64_t now = mach_absolute_time();
+ 
+-	if (n10_wdt_stopped) {
+-		return;
+-	}
+-	if (now >= n10_wdt_deadline_abs || !n10_wdt_armed()) {
+-		n10_wdt_stopped = true;         /* one way: nothing re-arms the timer */
++	if (!n10_wdt_pet(now)) {
+ 		return;
+ 	}
+-	*(volatile uint32_t *)(n10_wdt_regs + N10_WTCNT) = n10_wdt_reload;
++	n10_wdt_ticks++;
+ 	timer_call_enter(&n10_wdt_call, now + n10_wdt_period_abs, TIMER_CALL_SYS_CRITICAL);
+ }
+ 
++void
++n10_wdt_kick(void)
++{
++	(void)n10_wdt_pet(mach_absolute_time());
++}
++
+ static const uint8_t *
+ n10_wdt_prop(DTEntry node, const char *name, unsigned int expected)
+ {
+@@ -142,8 +168,10 @@ n10_wdt_start(void)
+ 	nanoseconds_to_absolutetime(N10_WDT_PERIOD_NS, &n10_wdt_period_abs);
+ 	nanoseconds_to_absolutetime((uint64_t)deadline_s * NSEC_PER_SEC, &deadline_abs);
+ 	n10_wdt_deadline_abs = start + deadline_abs;
++	n10_wdt_running = true;
++	n10_wdt_kick();                 /* synchronous first pet at EARLY_BOOT */
+ 	timer_call_setup(&n10_wdt_call, n10_wdt_tick, NULL);
+-	/* First pet as soon as timer interrupts are delivered. */
++	/* First timer-path pet as soon as timer interrupts are delivered. */
+ 	timer_call_enter(&n10_wdt_call, start, TIMER_CALL_SYS_CRITICAL);
+ 	printf("Note10 WDT: petting every 2 s until %u s\n", deadline_s);
+ }
