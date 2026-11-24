@@ -152,7 +152,7 @@ def encode_v342_handoff_adt(root, *, mapped_ram, ufs, partition_lba, wdt_reg, ar
     wdt_base, wdt_size = wdt_reg
     if not wdt_base or wdt_base & 0xfff or not V342_WDT_SIZE_RANGE[0] <= wdt_size <= V342_WDT_SIZE_RANGE[1]:
         raise ValueError('page-aligned WDT base and one-page register size required')
-    if not 0 < armed_wtdat <= 0xffff:
+    if not 0 <= armed_wtdat <= 0xffff:  # v343: 0 = n10_wdt never pets (0024 'live arming differs'; legacy 10 s budget)
         raise ValueError('16-bit armed WTDAT required')
     if not trust_cache.start or trust_cache.size < 16 or not mapped_ram.contains(trust_cache):
         raise ValueError('TrustCache segment must be inside mapped RAM')
