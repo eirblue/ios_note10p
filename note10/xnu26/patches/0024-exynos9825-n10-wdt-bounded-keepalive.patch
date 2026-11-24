@@ -1,0 +1,162 @@
+--- /dev/null
++++ b/osfmk/arm64/note10/n10_wdt.c
+@@ -0,0 +1,152 @@
++/*
++ * Note10 (EXYNOS9825) cluster-0 watchdog keepalive with a fixed deadline.
++ *
++ * The device actor arms the cl0 WDT for 10 s before XNU starts. This file
++ * only keeps that arming alive for a bounded time, then stops for good so
++ * the hardware reset and the automatic TWRP return still happen.
++ *
++ * Inputs come from the boot handoff node /chosen/note10-wdt:
++ *   reg          u64 base, u64 size: the cl0 WDT register window
++ *   armed-wtdat  u32: the WTDAT value the actor's 10 s arming produced
++ * Without the node, or if the live registers do not show exactly that
++ * arming (WTCON ENABLE and RSTEN set, INTEN clear, WTDAT equal), XNU never
++ * pets and the actor's 10 s budget applies unchanged.
++ *
++ * Register accesses: read WTCON, read WTDAT, write WTCNT. Nothing else
++ * (no WTCON/WTDAT/WTCLRINT writes, no prescaler, PMU or multistage WDT).
++ *
++ * A timer_call pets every 2 s by writing the read WTDAT value to WTCNT.
++ * It runs from the timer interrupt, so a panic, a debugger stop or a hang
++ * with interrupts masked stops petting and the reset follows within 10 s.
++ * After n10wdt_deadline seconds (boot-arg, default 300, clamped to 900,
++ * 0 = never pet), counted from this driver's start a few milliseconds after
++ * XNU entry, petting stops permanently: the one-way stopped flag is set and
++ * the timer is not re-armed. A changed WTCON or WTDAT also stops it.
++ */
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++#include <stdint.h>
++#include <mach/vm_types.h>
++#include <machine/machine_routines.h>
++#include <kern/clock.h>
++#include <kern/startup.h>
++#include <kern/timer_call.h>
++#include <pexpert/pexpert.h>
++#include <pexpert/device_tree.h>
++
++#define N10_WTCON               0x0
++#define N10_WTDAT               0x4
++#define N10_WTCNT               0x8
++#define N10_WTCON_RSTEN         (1u << 0)
++#define N10_WTCON_INTEN         (1u << 2)
++#define N10_WTCON_ENABLE        (1u << 5)
++#define N10_WDT_PERIOD_NS       (2ull * NSEC_PER_SEC)
++#define N10_WDT_DEADLINE_S      300u
++#define N10_WDT_DEADLINE_MAX_S  900u
++
++static timer_call_data_t n10_wdt_call;
++static vm_offset_t n10_wdt_regs;
++static uint32_t n10_wdt_reload;
++static uint64_t n10_wdt_period_abs, n10_wdt_deadline_abs;
++static bool n10_wdt_stopped;
++
++static inline uint32_t
++n10_wdt_rd(uint32_t off)
++{
++	return *(volatile uint32_t *)(n10_wdt_regs + off);
++}
++
++static bool
++n10_wdt_armed(void)
++{
++	uint32_t con = n10_wdt_rd(N10_WTCON);
++	return (con & (N10_WTCON_ENABLE | N10_WTCON_RSTEN | N10_WTCON_INTEN)) ==
++	       (N10_WTCON_ENABLE | N10_WTCON_RSTEN) &&
++	       n10_wdt_rd(N10_WTDAT) == n10_wdt_reload;
++}
++
++static void
++n10_wdt_tick(__unused timer_call_param_t p0, __unused timer_call_param_t p1)
++{
++	uint64_t now = mach_absolute_time();
++
++	if (n10_wdt_stopped) {
++		return;
++	}
++	if (now >= n10_wdt_deadline_abs || !n10_wdt_armed()) {
++		n10_wdt_stopped = true;         /* one way: nothing re-arms the timer */
++		return;
++	}
++	*(volatile uint32_t *)(n10_wdt_regs + N10_WTCNT) = n10_wdt_reload;
++	timer_call_enter(&n10_wdt_call, now + n10_wdt_period_abs, TIMER_CALL_SYS_CRITICAL);
++}
++
++static const uint8_t *
++n10_wdt_prop(DTEntry node, const char *name, unsigned int expected)
++{
++	void const *value = NULL;
++	unsigned int size = 0;
++	if (SecureDTGetProperty(node, name, &value, &size) != kSuccess || size != expected || !value) {
++		return NULL;
++	}
++	return value;
++}
++
++static uint64_t
++n10_wdt_le(const uint8_t *p, unsigned bytes)
++{
++	uint64_t v = 0;
++	for (unsigned i = 0; i < bytes; i++) {
++		v |= (uint64_t)p[i] << (8 * i);
++	}
++	return v;
++}
++
++static void
++n10_wdt_start(void)
++{
++	uint64_t start = mach_absolute_time();
++	DTEntry node;
++	const uint8_t *reg, *wtdat;
++	uint32_t deadline_s = N10_WDT_DEADLINE_S;
++
++	if (SecureDTLookupEntry(NULL, "/chosen/note10-wdt", &node) != kSuccess ||
++	    !(reg = n10_wdt_prop(node, "reg", 16)) || !(wtdat = n10_wdt_prop(node, "armed-wtdat", 4))) {
++		printf("Note10 WDT: no handoff; not petting\n");
++		return;
++	}
++	uint64_t base = n10_wdt_le(reg, 8), size = n10_wdt_le(reg + 8, 8);
++	if ((base & 3) || size < N10_WTCNT + 4 || size > PAGE_SIZE || (base & PAGE_MASK) + size > PAGE_SIZE) {
++		printf("Note10 WDT: handoff window out of range; not petting\n");
++		return;
++	}
++	vm_offset_t page = ml_io_map((vm_offset_t)(base & ~(uint64_t)PAGE_MASK), PAGE_SIZE);
++	if (!page) {
++		printf("Note10 WDT: map failed; not petting\n");
++		return;
++	}
++	n10_wdt_regs = page + (vm_offset_t)(base & PAGE_MASK);
++	n10_wdt_reload = (uint32_t)n10_wdt_le(wtdat, 4);
++	if (n10_wdt_reload == 0 || !n10_wdt_armed()) {
++		printf("Note10 WDT: live arming differs from the handoff; not petting\n");
++		return;
++	}
++	PE_parse_boot_argn("n10wdt_deadline", &deadline_s, sizeof(deadline_s));
++	if (deadline_s > N10_WDT_DEADLINE_MAX_S) {
++		deadline_s = N10_WDT_DEADLINE_MAX_S;
++	}
++	if (deadline_s == 0) {
++		printf("Note10 WDT: deadline 0; not petting\n");
++		return;
++	}
++	uint64_t deadline_abs;
++	nanoseconds_to_absolutetime(N10_WDT_PERIOD_NS, &n10_wdt_period_abs);
++	nanoseconds_to_absolutetime((uint64_t)deadline_s * NSEC_PER_SEC, &deadline_abs);
++	n10_wdt_deadline_abs = start + deadline_abs;
++	timer_call_setup(&n10_wdt_call, n10_wdt_tick, NULL);
++	/* First pet as soon as timer interrupts are delivered. */
++	timer_call_enter(&n10_wdt_call, start, TIMER_CALL_SYS_CRITICAL);
++	printf("Note10 WDT: petting every 2 s until %u s\n", deadline_s);
++}
++
++STARTUP(EARLY_BOOT, STARTUP_RANK_FIRST, n10_wdt_start);
++#endif /* ARM64_BOARD_CONFIG_EXYNOS9825 */
+--- a/osfmk/conf/files.arm64
++++ b/osfmk/conf/files.arm64
+@@ -147,3 +147,4 @@ osfmk/arm64/locore.s optional config_note10_native_bootstrap
+ osfmk/arm64/cswitch.s optional config_note10_native_bootstrap
+ osfmk/arm64/machine_routines_asm.s optional config_note10_native_bootstrap
+ osfmk/arm64/start.s optional config_note10_native_bootstrap
++osfmk/arm64/note10/n10_wdt.c optional config_note10_native_bootstrap

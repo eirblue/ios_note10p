@@ -1,0 +1,297 @@
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -477,6 +477,7 @@ bsd/kern/kpi_mbuf.c			optional sockets bound-checks
+ bsd/kern/kern_sfi.c			standard
+ bsd/kern/kern_time.c			standard
+ bsd/kern/kern_trustcache.c  standard
++bsd/kern/n10_trustcache.c	standard
+ bsd/kern/kern_codesigning.c standard
+ bsd/kern/code_signing/txm.c standard
+ bsd/kern/code_signing/ppl.c standard
+--- a/bsd/kern/kern_trustcache.c
++++ b/bsd/kern/kern_trustcache.c
+@@ -579,6 +579,16 @@ trust_cache_runtime_init(void)
+ 	allow_legacy_caches = true;
+ #endif
+ 
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	/* Note10 has no AppleImage4/AMFI: only boot-supplied static caches (n10_trustcache.c). */
++	if (amfi == NULL) {
++		extern void n10_tc_enable(void);
++		n10_tc_enable();
++		lck_rw_init(&trust_cache_rt_lock, &trust_cache_lck_grp, 0);
++		return;
++	}
++#endif
++
+ 	/* Image4 interface needs to be available */
+ 	if (img4if == NULL) {
+ 		panic("image4 interface not available");
+@@ -679,6 +689,12 @@ xnu_load_legacy_trust_cache(
+ 	__unused const uint8_t *module_data, __unused const size_t module_size)
+ {
+ #if XNU_HAS_LEGACY_TRUST_CACHE_LOADING
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	if (amfi == NULL) {
++		return KERN_NOT_SUPPORTED;
++	}
++#endif
++
+ 	kern_return_t ret = KERN_DENIED;
+ 
+ 	/* Allocate the trust cache data structure -- Z_WAITOK_ZERO means this can't fail */
+@@ -742,6 +758,16 @@ xnu_query_trust_cache(
+ 		return KERN_INVALID_ARGUMENT;
+ 	}
+ 
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	if (amfi == NULL) {
++		extern bool n10_tc_lookup(const uint8_t cdhash[kTCEntryHashSize]);
++		if (query_type == kTCQueryTypeLoadable || !n10_tc_lookup(cdhash)) {
++			return KERN_NOT_FOUND;
++		}
++		return KERN_SUCCESS;
++	}
++#endif
++
+ 	/* Lock the runtime as shared */
+ 	lck_rw_lock_shared(&trust_cache_rt_lock);
+ 
+@@ -809,6 +835,12 @@ check_trust_cache_runtime_for_uuid(
+ 		return KERN_INVALID_ARGUMENT;
+ 	}
+ 
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	if (amfi == NULL) {
++		return KERN_NOT_FOUND;
++	}
++#endif
++
+ #if CONFIG_SPTM
+ 	ret = txm_check_trust_cache_runtime_for_uuid(check_uuid);
+ #elif PMAP_CS_PPL_MONITOR
+@@ -903,6 +935,12 @@ load_trust_cache_with_type(
+ 	const uint8_t *img4_manifest = NULL;
+ 	size_t img4_manifest_len = 0;
+ 
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	if (amfi == NULL) {
++		return KERN_NOT_SUPPORTED;
++	}
++#endif
++
+ 	/* img4_object is required */
+ 	if (!img4_object || (img4_object_len == 0)) {
+ 		printf("unable to load trust cache (type: %u): no img4_object provided\n", type);
+@@ -1222,6 +1260,15 @@ load_static_trust_cache(void)
+ 		panic("trust cache segment length smaller than required: %lu | %lu",
+ 		    (unsigned long)tc_segment_length, (unsigned long)struct_length);
+ 	}
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	if (amfi == NULL) {
++		extern uint32_t n10_tc_load_static(const uint8_t *segment, size_t length);
++		uint32_t n10_loaded = n10_tc_load_static((const uint8_t *)tc_offsets, tc_segment_length);
++		trust_cache_static_loaded = (n10_loaded != 0);
++		num_static_trust_caches = n10_loaded;
++		return;
++	}
++#endif
+ 	const uintptr_t tc_region_end = (uintptr_t)tc_offsets + tc_segment_length;
+ 
+ 	printf("attempting to load %u external trust cache modules\n", tc_offsets->num_caches);
+@@ -1319,6 +1366,12 @@ static_trust_cache_capabilities(
+ 		panic("attempted to query static trust cache capabilities without init");
+ 	}
+ 
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	if (amfi == NULL) {
++		return KERN_SUCCESS;
++	}
++#endif
++
+ #if CONFIG_SPTM
+ 	if (txm_static_trust_caches > 0) {
+ 		/* Copy in the data received from TrustedExecutionMonitor */
+--- /dev/null
++++ b/bsd/kern/n10_trustcache.c
+@@ -0,0 +1,148 @@
++/*
++ * Note10 (EXYNOS9825) static trust caches without AMFI.
++ *
++ * Apple's trust cache library ships inside AMFI, which the Note10 kernel
++ * does not have. This file holds only the boot-supplied static trust caches
++ * (the /chosen/memory-map TrustCache segment, trust_cache_offsets_t layout)
++ * and answers cdhash lookups from them. Nothing can be loaded at run time.
++ *
++ * It accepts exactly the iOS 16.7.16 (20H392) set the payload carries: three
++ * raw version-2 modules with 2760 (OS), 61 (SystemOS) and 30 (AppOS)
++ * entries, each module inside the segment and its cdhashes strictly
++ * ascending. Anything else loads nothing (no lookup succeeds).
++ * Which bytes are genuine is bound by the private packager, which places
++ * the IPSW's own trust cache payloads by hash; this file checks shape only.
++ *
++ * Module layout: u32 version, u8 uuid[16], u32 count, then count entries of
++ * u8 cdhash[20], u8 hash type, u8 flags, u8 constraint category, u8 reserved.
++ */
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++#include <stdint.h>
++#include <stdbool.h>
++#include <sys/types.h>
++#include <sys/systm.h>
++#include <libkern/libkern.h>
++#include <libkern/section_keywords.h>
++
++#define N10_TC_MODULES  3
++#define N10_TC_HEADER   24
++#define N10_TC_ENTRY    24
++#define N10_TC_HASH     20
++
++static const uint32_t n10_tc_counts[N10_TC_MODULES] = { 2760, 61, 30 };
++
++static SECURITY_READ_ONLY_LATE(bool) n10_tc_active = false;
++static SECURITY_READ_ONLY_LATE(bool) n10_tc_loaded = false;
++static SECURITY_READ_ONLY_LATE(const uint8_t *) n10_tc_entries[N10_TC_MODULES] = { NULL };
++static SECURITY_READ_ONLY_LATE(uint32_t) n10_tc_nentries[N10_TC_MODULES] = { 0 };
++
++void n10_tc_enable(void);
++bool n10_tc_is_active(void);
++uint32_t n10_tc_load_static(const uint8_t *segment, size_t length);
++bool n10_tc_lookup(const uint8_t cdhash[N10_TC_HASH]);
++bool n10_tc_platform_cdhash(const uint8_t cdhash[N10_TC_HASH], uint8_t hash_type);
++
++static uint32_t
++n10_tc_u32(const uint8_t *p)
++{
++	return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
++}
++
++/* Called from trust_cache_runtime_init when AMFI is absent. */
++void
++n10_tc_enable(void)
++{
++	n10_tc_active = true;
++}
++
++bool
++n10_tc_is_active(void)
++{
++	return n10_tc_active;
++}
++
++/* Returns the number of modules loaded: 3, or 0 when the segment is refused. */
++uint32_t
++n10_tc_load_static(const uint8_t *segment, size_t length)
++{
++	const uint8_t *entries[N10_TC_MODULES] = { NULL };
++
++	if (!n10_tc_active || n10_tc_loaded || length < 4 + 4 * N10_TC_MODULES ||
++	    n10_tc_u32(segment) != N10_TC_MODULES) {
++		printf("Note10 trust cache: segment refused (expected %u modules)\n", N10_TC_MODULES);
++		return 0;
++	}
++	for (uint32_t i = 0; i < N10_TC_MODULES; i++) {
++		uint32_t off = n10_tc_u32(segment + 4 + 4 * i);
++		if (off < 4 + 4 * N10_TC_MODULES || off >= length || length - off < N10_TC_HEADER) {
++			printf("Note10 trust cache: module %u outside the segment\n", i);
++			return 0;
++		}
++		const uint8_t *m = segment + off;
++		uint32_t count = n10_tc_u32(m + 20);
++		unsigned slot;
++		for (slot = 0; slot < N10_TC_MODULES && n10_tc_counts[slot] != count; slot++) {
++		}
++		if (n10_tc_u32(m) != 2 || slot == N10_TC_MODULES || entries[slot] != NULL ||
++		    length - off < (size_t)N10_TC_HEADER + (size_t)count * N10_TC_ENTRY) {
++			printf("Note10 trust cache: module %u is not an expected version-2 module\n", i);
++			return 0;
++		}
++		const uint8_t *e = m + N10_TC_HEADER;
++		for (uint32_t k = 1; k < count; k++) {
++			if (memcmp(e + (k - 1) * N10_TC_ENTRY, e + k * N10_TC_ENTRY, N10_TC_HASH) >= 0) {
++				printf("Note10 trust cache: module %u is not sorted\n", i);
++				return 0;
++			}
++		}
++		entries[slot] = e;
++	}
++	for (uint32_t s = 0; s < N10_TC_MODULES; s++) {
++		n10_tc_entries[s] = entries[s];
++		n10_tc_nentries[s] = n10_tc_counts[s];
++	}
++	n10_tc_loaded = true;
++	printf("Note10 trust cache: loaded %u static modules (%u, %u, %u entries)\n", N10_TC_MODULES,
++	    n10_tc_counts[0], n10_tc_counts[1], n10_tc_counts[2]);
++	return N10_TC_MODULES;
++}
++
++static const uint8_t *
++n10_tc_find(const uint8_t cdhash[N10_TC_HASH])
++{
++	if (!n10_tc_loaded) {
++		return NULL;
++	}
++	for (uint32_t s = 0; s < N10_TC_MODULES; s++) {
++		uint32_t lo = 0, hi = n10_tc_nentries[s];
++		while (lo < hi) {
++			uint32_t mid = lo + (hi - lo) / 2;
++			const uint8_t *e = n10_tc_entries[s] + (size_t)mid * N10_TC_ENTRY;
++			int c = memcmp(cdhash, e, N10_TC_HASH);
++			if (c == 0) {
++				return e;
++			}
++			if (c < 0) {
++				hi = mid;
++			} else {
++				lo = mid + 1;
++			}
++		}
++	}
++	return NULL;
++}
++
++bool
++n10_tc_lookup(const uint8_t cdhash[N10_TC_HASH])
++{
++	return n10_tc_find(cdhash) != NULL;
++}
++
++/* Genuine static membership with a matching code-directory hash type. */
++bool
++n10_tc_platform_cdhash(const uint8_t cdhash[N10_TC_HASH], uint8_t hash_type)
++{
++	const uint8_t *e = n10_tc_active ? n10_tc_find(cdhash) : NULL;
++	return e != NULL && e[N10_TC_HASH] == hash_type;
++}
++#endif /* ARM64_BOARD_CONFIG_EXYNOS9825 */
+--- a/bsd/kern/ubc_subr.c
++++ b/bsd/kern/ubc_subr.c
+@@ -4875,6 +4875,15 @@ ubc_cs_blob_add(
+ 		goto out;
+ 	}
+ 
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	{
++		extern bool n10_tc_platform_cdhash(const uint8_t cdhash[CS_CDHASH_LEN], uint8_t hash_type);
++		if (n10_tc_platform_cdhash(tmp_blob.csb_cdhash, tmp_blob.csb_hashtype->cs_type)) {
++			cs_flags |= CS_PLATFORM_BINARY;
++		}
++	}
++#endif
++
+ #if HAS_APPLE_PAC
+ 	signed_entitlements = ptrauth_sign_unauthenticated(
+ 		tmp_blob.csb_entitlements,
+--- a/bsd/vm/vm_unix.c
++++ b/bsd/vm/vm_unix.c
+@@ -1620,6 +1620,11 @@ shared_region_map_and_slide_setup(
+ 
+ 		bool in_trust_cache = false;
+ 		TrustCacheQueryToken_t qt;
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++		if (amfi == NULL) {
++			in_trust_cache = (query_trust_cache(kTCQueryTypeStatic, cdhash, &qt) == KERN_SUCCESS);
++		} else
++#endif
+ 		if (query_trust_cache(kTCQueryTypeAll, cdhash, &qt) == KERN_SUCCESS) {
+ 			TCType_t tc_type = kTCTypeInvalid;
+ 			TCReturn_t tc_ret = amfi->TrustCache.queryGetTCType(&qt, &tc_type);

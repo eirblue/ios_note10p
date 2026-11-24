@@ -1,0 +1,55 @@
+name: Note10 v342 XNU iOS 16 root (HFS + n10_ufs + n10_wdt + static trust caches) compile and link
+on:
+  workflow_dispatch:
+    inputs:
+      recipient_public_key_b64:
+        description: Public RSA3072 recipient only; private key stays local
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  current-native-selected-link:
+    runs-on: macos-26
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate public recipient only
+        env:
+          N10_RECIPIENT_PUBLIC_KEY_B64: ${{ inputs.recipient_public_key_b64 }}
+        run: node note10/device_test/sealed_affinity_artifact.cjs recipient
+      - name: NEW v342 overlay pins (0021-0026 + HFS stage script)
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          mkdir -p note10/private/v342-ci-new-tests
+          cd note10/xnu26
+          python -B -c 'import json, prepare_ios16_root as s; s.check_patches(); open("../private/v342-ci-new-tests/overlay-pins.json", "x").write(json.dumps(dict(kind=s.KIND, stage_hfs=s.STAGE_HFS, patches=[r[:2] for r in s.OVERLAY]), indent=2) + "\n")'
+      - name: One fresh source-owned XNU compile and direct link (MOCKFS 0016-0020 then v342 0021-0026)
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+          N10_BUILD_ONLY: 'false'
+        run: python -B note10/xnu26/build_current_native_kernel.py --ios16-root --work note10/private/v342-ci-work --output note10/private/v342-ci-build
+      - name: Seal new objects payload and diagnostics including failures
+        if: always()
+        env:
+          N10_RECIPIENT_PUBLIC_KEY_B64: ${{ inputs.recipient_public_key_b64 }}
+        run: |
+          python -B note10/device_test/bundle_affinity_evidence.py --tests note10/private/v342-ci-new-tests --build note10/private/v342-ci-build --output note10/private/v342-evidence.zip --source "$GITHUB_SHA"
+          node note10/device_test/sealed_affinity_artifact.cjs seal note10/private/v342-evidence.zip note10/private/v342-sealed-evidence.n10sealed "$GITHUB_SHA"
+      - name: Upload ciphertext only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: note10-v342-sealed-evidence
+          if-no-files-found: error
+          retention-days: 7
+          path: note10/private/v342-sealed-evidence.n10sealed

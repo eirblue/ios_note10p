@@ -26,17 +26,18 @@ LEAF_WORKFLOW = '.github/workflows/note10-exynos-leaf-bootstrap-pc.yml'
 CHECKED_WORKFLOW = '.github/workflows/note10-exynos-checked-ptpage-pc.yml'
 STORAGE_WORKFLOW = '.github/workflows/note10-iostorage-final-link-pc.yml'
 MOCKFS_WORKFLOW = '.github/workflows/note10-v340-xnu-mockfs-base.yml'
+IOS16_WORKFLOW = '.github/workflows/note10-v342-xnu-ios16-root.yml'
 LIBDISPATCH = '2361ffb78a76f7ee488cd052eb0bc5c767118bf9'
 CASE_IDS = ('test_current_inventory_resolves_owner_and_generated_identity',
             'test_current_context_rejects_stale_candidate_and_partial_objects',
             'test_direct_native_link_uses_current_filelist_and_reports_failure')
 
 
-def ci_context(leaf=False, checked=False, storage=False, owned_ram_factory=False, genuine_block_driver=False, mockfs_root=False):
+def ci_context(leaf=False, checked=False, storage=False, owned_ram_factory=False, genuine_block_driver=False, mockfs_root=False, ios16_root=False):
     __import__('phase1_genuine_block_driver_native').mode(genuine_block_driver,owned_ram_factory)
     result = {k: os.environ.get(k, '') for k in ('GITHUB_SHA', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT',
         'GITHUB_JOB', 'GITHUB_WORKFLOW_REF', 'GITHUB_WORKFLOW_SHA', 'GITHUB_REPOSITORY')}
-    workflow = '.github/workflows/note10-v266-genuine-block-driver.yml' if genuine_block_driver else '.github/workflows/note10-v264-native-capture-receipt.yml' if owned_ram_factory else STORAGE_WORKFLOW if storage else MOCKFS_WORKFLOW if mockfs_root else (CHECKED_WORKFLOW if checked else (LEAF_WORKFLOW if leaf else WORKFLOW))
+    workflow = '.github/workflows/note10-v266-genuine-block-driver.yml' if genuine_block_driver else '.github/workflows/note10-v264-native-capture-receipt.yml' if owned_ram_factory else STORAGE_WORKFLOW if storage else IOS16_WORKFLOW if ios16_root else MOCKFS_WORKFLOW if mockfs_root else (CHECKED_WORKFLOW if checked else (LEAF_WORKFLOW if leaf else WORKFLOW))
     if (not re.fullmatch('[0-9a-f]{40}', result['GITHUB_SHA']) or
         result['GITHUB_WORKFLOW_SHA'] != result['GITHUB_SHA'] or result['GITHUB_JOB'] != ('v266-genuine-block-driver' if genuine_block_driver else 'v264-native-capture-receipt' if owned_ram_factory else JOB) or
         result['GITHUB_REPOSITORY'] != 'eirblue/ios_note10p' or
@@ -221,7 +222,12 @@ def intrinsic_kernel_result(path, symbols_text, undefined, *, leaf=False):
     return result
 
 
-def build(work, output, *, leaf=False, checked=False, storage=False, memdev=False, user_exception_fetch=False, readonly_ram_nub=False, owned_ram_factory=False, genuine_block_driver=False, mockfs_root=False):
+def build(work, output, *, leaf=False, checked=False, storage=False, memdev=False, user_exception_fetch=False, readonly_ram_nub=False, owned_ram_factory=False, genuine_block_driver=False, mockfs_root=False, ios16_root=False):
+    if type(ios16_root) is not bool or (ios16_root and mockfs_root):
+        raise ValueError('v342 iOS 16 root overlay is its own opt-in on top of MOCKFS')
+    if ios16_root:
+        import prepare_ios16_root as ios16_scope
+        mockfs_root = True
     if type(mockfs_root) is not bool or (mockfs_root and (storage or memdev or user_exception_fetch or
             readonly_ram_nub or owned_ram_factory or genuine_block_driver)):
         raise ValueError('MOCKFS memory-root overlay is a closed checked-lane opt-in only')
@@ -249,7 +255,7 @@ def build(work, output, *, leaf=False, checked=False, storage=False, memdev=Fals
     if storage:
         checked = True
     if checked:leaf=True
-    ci = ci_context(leaf, checked, storage=True, owned_ram_factory=owned_ram_factory,genuine_block_driver=genuine_block_driver) if storage else ci_context(leaf, checked, mockfs_root=mockfs_root)
+    ci = ci_context(leaf, checked, storage=True, owned_ram_factory=owned_ram_factory,genuine_block_driver=genuine_block_driver) if storage else ci_context(leaf, checked, mockfs_root=mockfs_root, ios16_root=ios16_root)
     if storage:
         import phase1_iostorage_kernel_link as storage_link
         storage_link.verify_sources(readonly_ram_nub)
@@ -270,6 +276,7 @@ def build(work, output, *, leaf=False, checked=False, storage=False, memdev=Fals
     if leaf:state.update(kind='v93-exynos-leaf-bootstrap-pc',PC_only=True,physical_ready=False,whole_XNU_kernel_entry_executed=False,hardware_XNU_executed=False)
     if checked:state.update(kind='v94-exynos-checked-ptpage-pc')
     if mockfs_root:state.update(kind=mockfs_scope.KIND)
+    if ios16_root:state.update(kind=ios16_scope.KIND)
     if storage:
         state.update(kind='phase1-iostorage-final-link-pc', storage={'stage': 'pending'})
     if memdev:
@@ -293,6 +300,9 @@ def build(work, output, *, leaf=False, checked=False, storage=False, memdev=Fals
         if mockfs_root:
             mockfs_patch = mockfs_scope.apply(source, output)
             state['mockfs_root'] = mockfs_patch
+        if ios16_root:
+            ios16_patch = ios16_scope.apply(source, output)
+            state['ios16_root'] = ios16_patch
         os.environ.update(N10_CC=provisioned['compiler'], N10_SDKROOT=provisioned['sdk'],
                           N10_MAKE=shutil.which('make') or 'make')
         makefiles, configured = {}, []
@@ -315,12 +325,16 @@ def build(work, output, *, leaf=False, checked=False, storage=False, memdev=Fals
             patched[fetch_scope.HEADER_REL] = fetch_patch['header_sha256']
         if mockfs_root:
             patched.update({row['source']: row['postimage_sha256'] for row in mockfs_patch['patches']})
+        if ios16_root:
+            patched.update(ios16_patch['postimage_sha256'])
         configuration = dict(source_directory=source.relative_to(ROOT).as_posix(),
             source_commit=COMMIT, configured=configured, patched_source_sha256=patched)
         if memdev:
             configuration['extra_memdev_patch'] = extra_patch
         if mockfs_root:
             configuration['mockfs_root_overlay'] = mockfs_patch
+        if ios16_root:
+            configuration['ios16_root_overlay'] = ios16_patch
         bootstrap.write_json(private / 'configure-result.json', configuration)
         target = json.loads((ROOT / 'note10/target.json').read_text())
         library = ROOT / target['research_directory'] / ('libdispatch-' + LIBDISPATCH)
@@ -386,6 +400,9 @@ def build(work, output, *, leaf=False, checked=False, storage=False, memdev=Fals
         if mockfs_root:
             producer['mockfs_root'] = mockfs_patch
             producer['recipe_sha256']['prepare_mockfs_root.py'] = native.file_sha(ROOT / 'note10/xnu26/prepare_mockfs_root.py')
+        if ios16_root:
+            producer['ios16_root'] = ios16_patch
+            producer['recipe_sha256']['prepare_ios16_root.py'] = native.file_sha(ROOT / 'note10/xnu26/prepare_ios16_root.py')
         if memdev:
             producer['extra_memdev_patch'] = extra_patch
             producer['recipe_sha256'].update({n: native.file_sha(ROOT / 'note10/xnu26' / n) for n in
@@ -417,6 +434,8 @@ def build(work, output, *, leaf=False, checked=False, storage=False, memdev=Fals
             bindings['user_exception_fetch'] = native.digest(fetch_patch)
         if mockfs_root:
             bindings['mockfs_root'] = native.digest(mockfs_patch)
+        if ios16_root:
+            bindings['ios16_root'] = native.digest(ios16_patch)
         if readonly_ram_nub:
             bindings['readonly_ram_nub'] = native.digest(ram.profile())
         if owned_ram_factory:bindings[factory.KEY] = native.digest(factory.profile())
@@ -582,13 +601,15 @@ def main():
     p.add_argument('--exynos-checked-pages',action='store_true',help='closed v94 PC-only checked allocator plus mapper')
     p.add_argument('--user-exception-fetch', action='store_true', help='opt-in checked USER64 caller plus genuine fetch provider')
     p.add_argument('--mockfs-root', action='store_true', help='opt-in MOCKFS memory root overlay')
+    p.add_argument('--ios16-root', action='store_true', help='opt-in v342 iOS 16 root overlay (implies MOCKFS)')
     args = p.parse_args()
     work, output = bootstrap.private(args.work), bootstrap.private(args.output)
     if work == output or work.is_relative_to(output) or output.is_relative_to(work):
         p.error('disjoint fresh private roots required')
     try:
         build(work, output,leaf=args.exynos_leaf,checked=args.exynos_checked_pages,
-              user_exception_fetch=args.user_exception_fetch, mockfs_root=args.mockfs_root)
+              user_exception_fetch=args.user_exception_fetch, mockfs_root=args.mockfs_root,
+              ios16_root=args.ios16_root)
     except BaseException:
         print('current native payload build failed; private evidence retained', file=sys.stderr)
         return 1
