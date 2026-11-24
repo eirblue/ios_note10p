@@ -8,11 +8,11 @@ from build_native_bootstrap_selection import run
 ROOT = Path(__file__).resolve().parents[2]
 PATCHES = ROOT / 'note10/xnu26/patches'
 KIND = 'v342-ios16-root-pc'
-STAGE_HFS = ('0021-stage-hfs.sh', 'ccc47054f36ee066d9876a12ffd2362c74e384af35709d2756a0b004cc6b7e8f')
+STAGE_HFS = ('0021-stage-hfs.sh', '8ff66a932ad2a706aae5ad3a162149f6550230020b0d2bab868d276d06621c71')
 # (patch file, patch sha256, exact '+++ b/' file list)
 OVERLAY = (
-    ('0021-exynos9825-builtin-hfs.patch', 'ed746938210703487aef815781683a919e0422c956fee8b0bfc206310b64fd8d',
-     ('bsd/conf/Makefile.template', 'bsd/conf/files', 'bsd/kern/bsd_init.c', 'bsd/n10_hfs/n10_hfs_compat.h',
+    ('0021-exynos9825-builtin-hfs.patch', 'b10fcd64013ec6832d5d30398634ef23c03b9f2c85f3a1424072097cdad76b02',
+     ('bsd/conf/files', 'bsd/kern/bsd_init.c', 'bsd/n10_hfs/n10_hfs_compat.h',
       'bsd/n10_hfs/n10_hfs_iokit.c', 'config/MASTER', 'config/MASTER.arm64.exynos9825')),
     ('0022-exynos9825-unsealed-root-continue.patch', '2fe6eef33baa5d3adefcd31791d8cd8dfcfb93f084fa4fd9b90dc9e0aa43c073',
      ('bsd/kern/bsd_init.c',)),

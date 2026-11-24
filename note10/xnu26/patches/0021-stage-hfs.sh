@@ -46,6 +46,11 @@ text = text.replace(include, '#if CONFIG_PROTECT\n' + include + '#endif\n')
 i, j = text.index(first), text.index(end)
 text = text[:i] + '#if CONFIG_PROTECT\n' + text[i:j].rstrip('\n') + '\n#endif\n\n' + text[j:]
 path.write_text(text)
+
+# The build compiles every bsd/conf/files source with the same flags, so each
+# HFS source includes the compat header itself (kext view + kext-config.h).
+for path in sorted((target / 'core').glob('*.c')):
+    path.write_bytes(b'#include "../n10_hfs_compat.h"\n' + path.read_bytes())
 PY
 
 # Kernel builds use -nostdinc; HFS's kext-config.h needs the SDK's target macros.
