@@ -1,5 +1,6 @@
 """Exact, default-off v342 iOS 16 root overlay (0021..0026 + 0021-stage-hfs.sh; v344 adds 0027 n10_wdt early pet/kick and
-0028 n10_ufs stop ladder; v346 adds 0029 n10_ufs task tag 0 and site-10 clock-stop/IS detail) after the MOCKFS
+0028 n10_ufs stop ladder; v346 adds 0029 n10_ufs task tag 0 and site-10 clock-stop/IS detail; v347 adds 0030 n10_dsslog
+synchronous-exception capture into the Linux dss log ring and 0031 console/kprintf text copy into it) after the MOCKFS
 overlay (0016..0020)."""
 import hashlib
 import json
@@ -33,6 +34,10 @@ OVERLAY = (
      ('bsd/dev/n10_ufs.c',)),
     ('0029-exynos9825-n10-ufs-tag-clkstop-detail.patch', 'c26a2528af697e87d6c0728e5b510bbb02f610f66ccae5532d1715f36d09efca',
      ('bsd/dev/n10_ufs.c',)),
+    ('0030-exynos9825-n10-dss-sync-capture.patch', '1a2a8b314737b82d1d2b6092991dd7599c9de523f3513c7d8575a0e778b0edbd',
+     ('osfmk/arm64/note10/n10_dsslog.c', 'osfmk/conf/files.arm64')),
+    ('0031-exynos9825-n10-dss-console-log.patch', '6547a28df4561b487b6c4646e0b88891200d70839a16883a2ec5be07b0398c3d',
+     ('osfmk/console/serial_console.c', 'pexpert/arm/pe_kprintf.c')),
 )
 STAGED_DIRS = ('bsd/n10_hfs/core', 'bsd/n10_hfs/hfs_encodings')
 
@@ -56,7 +61,7 @@ def check_patches():
 
 
 def apply(source, output):
-    """Stage hfs-627.100.6, then apply 0021..0029 once after the MOCKFS overlay and before configure."""
+    """Stage hfs-627.100.6, then apply 0021..0031 once after the MOCKFS overlay and before configure."""
     check_patches()
     require(all(not (source / d).exists() for d in STAGED_DIRS), 'fresh source without staged HFS required')
     run(['bash', PATCHES / STAGE_HFS[0]], source, output / 'ios16-stage-hfs.log')

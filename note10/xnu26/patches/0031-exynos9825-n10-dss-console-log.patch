@@ -1,0 +1,63 @@
+diff --git a/osfmk/console/serial_console.c b/osfmk/console/serial_console.c
+index 7784e72..b3a1e56 100644
+--- a/osfmk/console/serial_console.c
++++ b/osfmk/console/serial_console.c
+@@ -112,6 +112,10 @@ static struct {
+ 
+ extern int serial_getc(void);
+ extern void serial_putc_options(char, bool);
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++/* osfmk/arm64/note10/n10_dsslog.c (v347): copy console text into the Linux dss log ring. */
++extern void n10_dsslog_write(const char *s, int n);
++#endif
+ 
+ #if DEBUG || DEVELOPMENT
+ TUNABLE(bool, allow_printf_from_interrupts_disabled_context, "nointr_consio", false);
+@@ -523,6 +527,9 @@ console_resume()
+ void
+ console_write(char *str, int size)
+ {
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	n10_dsslog_write(str, size);  /* v347: every console write, also when output is disabled */
++#endif
+ 	if (disableConsoleOutput) {
+ 		return;
+ 	}
+@@ -608,6 +615,9 @@ console_write(char *str, int size)
+ void
+ console_write_unbuffered(char c)
+ {
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	n10_dsslog_write(&c, 1);
++#endif
+ 	if (disableConsoleOutput) {
+ 		return;
+ 	}
+diff --git a/pexpert/arm/pe_kprintf.c b/pexpert/arm/pe_kprintf.c
+index 7a4bbd3..e295bc4 100644
+--- a/pexpert/arm/pe_kprintf.c
++++ b/pexpert/arm/pe_kprintf.c
+@@ -96,6 +96,11 @@ _kprintf(const char *format, ...)
+ 
+ static int      cpu_last_locked = 0;
+ 
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++/* osfmk/arm64/note10/n10_dsslog.c (v347): kprintf text while serial/kprintf output is disabled. */
++extern void n10_dsslog_putc(char c);
++#endif
++
+ __attribute__((noinline, not_tail_called))
+ void
+ kprintf(const char *fmt, ...)
+@@ -150,6 +155,11 @@ kprintf(const char *fmt, ...)
+ 		os_log_with_args(OS_LOG_DEFAULT, OS_LOG_TYPE_DEFAULT, fmt, listp2, caller);
+ 		va_end(listp2);
+ 	} else {
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++		va_start(listp, fmt);
++		_doprnt_log(fmt, &listp, n10_dsslog_putc, 16);
++		va_end(listp);
++#endif
+ 		va_start(listp, fmt);
+ 		os_log_with_args(OS_LOG_DEFAULT, OS_LOG_TYPE_DEFAULT, fmt, listp, caller);
+ 		va_end(listp);

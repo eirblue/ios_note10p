@@ -1,0 +1,451 @@
+diff --git a/osfmk/arm64/note10/n10_dsslog.c b/osfmk/arm64/note10/n10_dsslog.c
+new file mode 100644
+index 0000000..9598d73
+--- /dev/null
++++ b/osfmk/arm64/note10/n10_dsslog.c
+@@ -0,0 +1,436 @@
++/*
++ * Note10 (EXYNOS9825) boot log and synchronous-exception capture into the
++ * Linux debug-snapshot (dss) kernel-log ring (v347).
++ *
++ * After the watchdog reset S-Boot appends its own log at the dss cursor and
++ * TWRP shows the ring as /proc/last_kmsg. Linux leaves its record and the
++ * three N315 XNU crumbs at the cursor; this file appends XNU's console text
++ * and, on a synchronous exception, its context right after them, so they
++ * appear between the crumbs and the S-Boot block.
++ *
++ * Input: /chosen/note10-ufs "dss-capture" (24 bytes) = u64 cursor_pa (the dss
++ * header word that holds the PA of the next log byte, u32), u64 log_base,
++ * u64 log_size (the dss kernel-log ring). Capture is enabled only when:
++ *   cursor_pa 4-aligned; log_base/log_size 8-aligned, log_size <= 4 MiB;
++ *   the cursor word and the ring lie in [2 GiB, 4 GiB), are disjoint from each
++ *   other and from the XNU window [gPhysBase, gPhysBase + 64 MiB);
++ *   the live cursor c0 satisfies log_base + 8 <= c0 and
++ *   c0 + N10_DSS_CAPTURE_MIN <= log_base + log_size - 8 (Linux guarantees
++ *   this span past the crumbs and cleans it to PoC before the transfer);
++ *   the 8 bytes before c0 are the third crumb "N315M3-\n".
++ * The capture area is [c0, hi), hi = min(log_base + log_size - 8,
++ * c0 + N10_DSS_AREA_MAX): never past the ring end and its last 8 bytes, never
++ * before c0 (Linux text and crumbs stay intact), no wrap.
++ *
++ * Writes: byte stores into the area through a Device mapping (ml_io_map),
++ * then dsb sy, one aligned u32 store of the new cursor (= PA of the next
++ * byte), dsb sy. Each append first requires the live cursor to equal the
++ * last value written here; otherwise capture stops for good. Loads: the
++ * cursor word and, once at init, the 8 crumb bytes. The area is cleaned and
++ * invalidated by VA once at init (dc civac) before the first store.
++ *
++ * Console text (0031 hooks console_write, console_write_unbuffered and the
++ * disabled kprintf path) is framed as lines "N347L <text>\n" (control bytes
++ * -> '?', CR dropped, lines split every N10_DSS_LINE bytes). Before init
++ * (STARTUP KPRINTF, last rank) framed lines go to a 4 KiB static buffer that
++ * init appends first. Appends run with DAIF masked, single CPU, no locks; a
++ * busy flag drops re-entrant text. When the area minus N10_DSS_RESERVE is
++ * full, lines are dropped and counted (no overwrite).
++ *
++ * Synchronous exception (the chain branches the two sleh filter stop words
++ * here with x0 = saved state, x1 = ESR, x2 = FAR, DAIF masked): one
++ * "N347X ..." line (ESR/FAR/ELR/SPSR/LR/SP/FP, capacity, drops) and then one
++ * "N347R ..." line (x0-x28 and a bounded frame-pointer backtrace), both
++ * allowed into the reserve; then the CPU stops on _n10_sync_stop_ladder
++ * (131072 'b .' words) at index:
++ *   bit16 1 = kother entry, 0 = class entry; bit15 N347X committed;
++ *   class [14:9] ESR.EC, [8:0] ESR.ISS[8:0];
++ *   kother [14:9] DFSC, [8] WnR, [7] FAR bit63, [6] FAR < 0x10000,
++ *          [5:0] (ELR - vm_kernel_stext) >> 18, 63 outside 16 MiB;
++ *   a fault inside this routine stops at the index already computed
++ *   (0 if none yet).
++ * No printf, panic, lock, allocation or system-register write on that path.
++ */
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++#include <stdint.h>
++#include <mach/vm_types.h>
++#include <mach/vm_param.h>
++#include <mach/arm/thread_status.h>
++#include <machine/machine_routines.h>
++#include <kern/startup.h>
++#include <pexpert/pexpert.h>
++#include <pexpert/device_tree.h>
++
++#define N10_DSS_RAM_LO          0x80000000ull
++#define N10_DSS_RAM_HI          0x100000000ull
++#define N10_DSS_WINDOW          0x4000000ull    /* XNU window (Linux N311_WINDOW_BYTES) */
++#define N10_DSS_LOG_MAX         0x400000ull
++#define N10_DSS_CAPTURE_MIN     512u            /* Linux N347_CAPTURE_BYTES */
++#define N10_DSS_AREA_MAX        0x40000u        /* 256 KiB of log text at most */
++#define N10_DSS_RESERVE         1280u           /* kept free for N347X + N347R */
++#define N10_DSS_EARLY           4096u
++#define N10_DSS_LINE            200u
++#define N10_SYNC_TEXT           768u
++#define N10_SYNC_BT             6u
++
++enum { N10_DSS_EARLY_STATE = 0, N10_DSS_ON = 1, N10_DSS_OFF = 2 };
++
++void n10_dsslog_write(const char *s, int n);
++void n10_dsslog_putc(char c);
++void n10_sync_class_entry(arm_saved_state_t *ss, uint64_t esr, uint64_t far) __attribute__((noreturn));
++void n10_sync_kother_entry(arm_saved_state_t *ss, uint64_t esr, uint64_t far) __attribute__((noreturn));
++
++static uint32_t n10_dss_state;          /* bss: early buffering until init */
++static uint32_t n10_dss_busy;
++static volatile uint32_t *n10_dss_cursor;
++static vm_offset_t n10_dss_map;         /* VA of PA n10_dss_map_pa */
++static uint64_t n10_dss_map_pa, n10_dss_lo, n10_dss_hi, n10_dss_pos;
++static uint32_t n10_dss_dropped;
++static char n10_dss_early[N10_DSS_EARLY];
++static uint32_t n10_dss_early_len;
++static char n10_dss_line[6 + N10_DSS_LINE + 1] = "N347L ";
++static uint32_t n10_dss_line_len;
++static char n10_sync_text[N10_SYNC_TEXT];
++static uint32_t n10_sync_entered, n10_sync_index;
++
++/* 131072 'b .' words; the stop PC encodes the index (see header). */
++__asm__ (
++	"	.text\n"
++	"	.p2align 2\n"
++	"	.globl _n10_sync_stop_ladder\n"
++	"_n10_sync_stop_ladder:\n"
++	"	.rept 131072\n"
++	"	b .\n"
++	"	.endr\n");
++
++static inline uint64_t
++n10_dss_irq_off(void)
++{
++	uint64_t daif;
++	__asm__ volatile ("mrs %0, daif\n\tmsr daifset, #0xf" : "=r" (daif) : : "memory");
++	return daif;
++}
++
++static inline void
++n10_dss_irq_restore(uint64_t daif)
++{
++	__asm__ volatile ("msr daif, %0" : : "r" (daif) : "memory");
++}
++
++/* Append len bytes at the cursor, leaving reserve bytes free; true when committed. DAIF masked. */
++static bool
++n10_dss_append(const char *p, uint32_t len, uint32_t reserve)
++{
++	if (n10_dss_state != N10_DSS_ON) {
++		return false;
++	}
++	if (len > n10_dss_hi - n10_dss_pos || n10_dss_hi - n10_dss_pos - len < reserve) {
++		n10_dss_dropped++;
++		return false;
++	}
++	if (*n10_dss_cursor != (uint32_t)n10_dss_pos) {
++		n10_dss_state = N10_DSS_OFF;    /* someone else moved the cursor: stop for good */
++		return false;
++	}
++	volatile uint8_t *dst = (volatile uint8_t *)(n10_dss_map + (vm_offset_t)(n10_dss_pos - n10_dss_map_pa));
++	for (uint32_t i = 0; i < len; i++) {
++		dst[i] = (uint8_t)p[i];
++	}
++	__asm__ volatile ("dsb sy" : : : "memory");
++	*n10_dss_cursor = (uint32_t)(n10_dss_pos + len);
++	__asm__ volatile ("dsb sy" : : : "memory");
++	n10_dss_pos += len;
++	return true;
++}
++
++/* Close the pending line: "N347L <text>\n" to the ring, or to the early buffer before init. */
++static void
++n10_dss_emit(void)
++{
++	uint32_t len = 6 + n10_dss_line_len + 1;
++
++	n10_dss_line[len - 1] = '\n';
++	n10_dss_line_len = 0;
++	if (n10_dss_state == N10_DSS_ON) {
++		(void)n10_dss_append(n10_dss_line, len, N10_DSS_RESERVE);
++	} else if (n10_dss_state == N10_DSS_EARLY_STATE) {
++		if (len <= N10_DSS_EARLY - n10_dss_early_len) {
++			for (uint32_t i = 0; i < len; i++) {
++				n10_dss_early[n10_dss_early_len + i] = n10_dss_line[i];
++			}
++			n10_dss_early_len += len;
++		} else {
++			n10_dss_dropped++;
++		}
++	}
++}
++
++static void
++n10_dss_char(char c)
++{
++	if (c == '\n') {
++		n10_dss_emit();
++		return;
++	}
++	if (c == '\r' || c == 0) {
++		return;
++	}
++	if ((c < 0x20 && c != '\t') || c > 0x7e) {
++		c = '?';
++	}
++	n10_dss_line[6 + n10_dss_line_len++] = c;
++	if (n10_dss_line_len == N10_DSS_LINE) {
++		n10_dss_emit();
++	}
++}
++
++void
++n10_dsslog_write(const char *s, int n)
++{
++	if (n10_dss_state == N10_DSS_OFF || !s || n <= 0) {
++		return;
++	}
++	uint64_t daif = n10_dss_irq_off();
++	if (!n10_dss_busy) {
++		n10_dss_busy = 1;
++		for (int i = 0; i < n; i++) {
++			n10_dss_char(s[i]);
++		}
++		n10_dss_busy = 0;
++	}
++	n10_dss_irq_restore(daif);
++}
++
++void
++n10_dsslog_putc(char c)
++{
++	n10_dsslog_write(&c, 1);
++}
++
++static uint32_t
++n10_hex(char *out, uint32_t at, uint64_t value, uint32_t digits)
++{
++	for (uint32_t i = 0; i < digits; i++) {
++		out[at + i] = "0123456789abcdef"[(value >> (4 * (digits - 1 - i))) & 0xf];
++	}
++	return at + digits;
++}
++
++static uint32_t
++n10_str(char *out, uint32_t at, const char *s)
++{
++	while (*s) {
++		out[at++] = *s++;
++	}
++	return at;
++}
++
++static bool
++n10_dss_outside(uint64_t lo, uint64_t len, uint64_t blo, uint64_t blen)
++{
++	return lo + len <= blo || blo + blen <= lo;
++}
++
++static uint64_t
++n10_dss_le(const uint8_t *p)
++{
++	uint64_t v = 0;
++	for (unsigned i = 0; i < 8; i++) {
++		v |= (uint64_t)p[i] << (8 * i);
++	}
++	return v;
++}
++
++static void
++n10_dss_init(void)
++{
++	DTEntry node;
++	void const *value = NULL;
++	unsigned int size = 0;
++	uint64_t daif;
++
++	if (SecureDTLookupEntry(NULL, "/chosen/note10-ufs", &node) != kSuccess ||
++	    SecureDTGetProperty(node, "dss-capture", &value, &size) != kSuccess || size != 24 || !value) {
++		goto off;
++	}
++	uint64_t cursor = n10_dss_le(value), base = n10_dss_le((const uint8_t *)value + 8);
++	uint64_t bytes = n10_dss_le((const uint8_t *)value + 16);
++	if ((cursor & 3) || (base & 7) || (bytes & 7) || bytes < 4096 || bytes > N10_DSS_LOG_MAX ||
++	    cursor < N10_DSS_RAM_LO || cursor > N10_DSS_RAM_HI - 4 ||
++	    base < N10_DSS_RAM_LO || base > N10_DSS_RAM_HI - bytes ||
++	    !n10_dss_outside(cursor, 4, base, bytes) ||
++	    !n10_dss_outside(cursor, 4, gPhysBase, N10_DSS_WINDOW) ||
++	    !n10_dss_outside(base, bytes, gPhysBase, N10_DSS_WINDOW)) {
++		goto off;
++	}
++	vm_offset_t page = ml_io_map((vm_offset_t)trunc_page(cursor), PAGE_SIZE);
++	if (!page) {
++		goto off;
++	}
++	volatile uint32_t *word = (volatile uint32_t *)(page + (vm_offset_t)(cursor & PAGE_MASK));
++	uint64_t c0 = *word;
++	if (c0 < base + 8 || c0 + N10_DSS_CAPTURE_MIN > base + bytes - 8) {
++		goto off;
++	}
++	uint64_t hi = MIN(base + bytes - 8, c0 + N10_DSS_AREA_MAX);
++	uint64_t map_pa = trunc_page(c0 - 8);
++	vm_offset_t map = ml_io_map((vm_offset_t)map_pa, (vm_size_t)(round_page(hi) - map_pa));
++	if (!map) {
++		goto off;
++	}
++	volatile const uint8_t *crumb = (volatile const uint8_t *)(map + (vm_offset_t)(c0 - 8 - map_pa));
++	static const char m3[8] = { 'N', '3', '1', '5', 'M', '3', '-', '\n' };
++	for (unsigned i = 0; i < 8; i++) {
++		if (crumb[i] != (uint8_t)m3[i]) {
++			goto off;
++		}
++	}
++	/* Remove any stale cache line of the area (mismatched alias) before the first Device store. */
++	uint64_t ctr;
++	__asm__ volatile ("mrs %0, ctr_el0" : "=r" (ctr));
++	uint64_t line = 4ull << ((ctr >> 16) & 0xf);
++	for (uint64_t pa = c0 & ~(line - 1); pa < hi; pa += line) {
++		__asm__ volatile ("dc civac, %0" : : "r" (map + (vm_offset_t)(pa - map_pa)) : "memory");
++	}
++	__asm__ volatile ("dsb sy" : : : "memory");
++
++	daif = n10_dss_irq_off();
++	n10_dss_cursor = word;
++	n10_dss_map = map;
++	n10_dss_map_pa = map_pa;
++	n10_dss_lo = c0;
++	n10_dss_hi = hi;
++	n10_dss_pos = c0;
++	n10_dss_state = N10_DSS_ON;
++	char head[48];
++	uint32_t at = n10_str(head, 0, "N347L dss-log v347 cap=");
++	at = n10_hex(head, at, hi - c0, 8);
++	head[at++] = '\n';
++	(void)n10_dss_append(head, at, N10_DSS_RESERVE);
++	if (n10_dss_early_len) {
++		(void)n10_dss_append(n10_dss_early, n10_dss_early_len, N10_DSS_RESERVE);
++	}
++	n10_dss_early_len = 0;
++	n10_dss_irq_restore(daif);
++	return;
++off:
++	daif = n10_dss_irq_off();
++	n10_dss_state = N10_DSS_OFF;
++	n10_dss_early_len = 0;
++	n10_dss_irq_restore(daif);
++}
++
++STARTUP(KPRINTF, STARTUP_RANK_LAST, n10_dss_init);
++
++static void __attribute__((noreturn, noinline))
++n10_sync_stop(uint64_t index)
++{
++	__asm__ volatile (
++		"msr daifset, #0xf\n"
++		"adrp x16, _n10_sync_stop_ladder@PAGE\n"
++		"add x16, x16, _n10_sync_stop_ladder@PAGEOFF\n"
++		"add x16, x16, %0, lsl #2\n"
++		"br x16\n"
++		: : "r" (index & 0x1ffff) : "x16", "memory");
++	__builtin_unreachable();
++}
++
++static uint32_t
++n10_sync_reg(uint32_t at, const char *name, uint64_t value)
++{
++	at = n10_str(n10_sync_text, at, name);
++	at = n10_hex(n10_sync_text, at, value, 16);
++	n10_sync_text[at++] = ' ';
++	return at;
++}
++
++static void __attribute__((noreturn, noinline))
++n10_sync_capture(uint32_t kother, arm_saved_state_t *ss, uint64_t esr, uint64_t far)
++{
++	if (n10_sync_entered) {
++		n10_sync_stop(n10_sync_index);  /* fault inside the capture */
++	}
++	n10_sync_entered = 1;
++	const struct arm_saved_state64 *s = &ss->ss_64;
++	uint64_t elr = s->pc, index;
++	if (kother) {
++		uint64_t bucket = elr - vm_kernel_stext < 0x1000000ull ? (elr - vm_kernel_stext) >> 18 : 63;
++		index = 1ull << 16 | (esr & 0x3f) << 9 | ((esr >> 6) & 1) << 8 | (far >> 63) << 7 |
++		    (uint64_t)(far < 0x10000) << 6 | bucket;
++	} else {
++		index = ((esr >> 26) & 0x3f) << 9 | (esr & 0x1ff);
++	}
++	n10_sync_index = (uint32_t)index;
++	if (n10_dss_state == N10_DSS_ON) {
++		n10_dss_busy = 1;
++		if (n10_dss_line_len) {
++			n10_dss_emit();         /* pending partial console line */
++		}
++		uint32_t at = n10_str(n10_sync_text, 0, kother ? "N347X k=1 esr=" : "N347X k=0 esr=");
++		at = n10_hex(n10_sync_text, at, esr, 8);
++		at = n10_str(n10_sync_text, at, " ");
++		at = n10_sync_reg(at, "far=", far);
++		at = n10_sync_reg(at, "elr=", elr);
++		at = n10_str(n10_sync_text, at, "spsr=");
++		at = n10_hex(n10_sync_text, at, s->cpsr, 8);
++		at = n10_str(n10_sync_text, at, " ");
++		at = n10_sync_reg(at, "lr=", s->lr);
++		at = n10_sync_reg(at, "sp=", s->sp);
++		at = n10_sync_reg(at, "fp=", s->fp);
++		at = n10_str(n10_sync_text, at, "cap=");
++		at = n10_hex(n10_sync_text, at, n10_dss_hi - n10_dss_lo, 8);
++		at = n10_str(n10_sync_text, at, " drop=");
++		at = n10_hex(n10_sync_text, at, n10_dss_dropped, 8);
++		n10_sync_text[at++] = '\n';
++		if (n10_dss_append(n10_sync_text, at, 0)) {
++			index |= 1ull << 15;
++			n10_sync_index = (uint32_t)index;
++		}
++		/* Registers and backtrace after the committed N347X: a fault here keeps the index above. */
++		at = n10_str(n10_sync_text, 0, "N347R ");
++		for (uint32_t r = 0; r < 29; r++) {
++			char name[5] = { 'x', 0, 0, 0, 0 };
++			if (r < 10) {
++				name[1] = (char)('0' + r);
++				name[2] = '=';
++			} else {
++				name[1] = (char)('0' + r / 10);
++				name[2] = (char)('0' + r % 10);
++				name[3] = '=';
++			}
++			at = n10_sync_reg(at, name, s->x[r]);
++		}
++		at = n10_str(n10_sync_text, at, "bt=");
++		uint64_t sp = s->sp, fp = s->fp;
++		for (uint32_t frame = 0; frame < N10_SYNC_BT; frame++) {
++			if ((fp & 0xf) || fp < sp || fp - sp > 0x4000 - 16) {
++				break;
++			}
++			uint64_t next = ((const uint64_t *)fp)[0], lr = ((const uint64_t *)fp)[1];
++			if (frame) {
++				n10_sync_text[at++] = ',';
++			}
++			at = n10_hex(n10_sync_text, at, lr, 16);
++			if (next <= fp) {
++				break;
++			}
++			fp = next;
++		}
++		n10_sync_text[at++] = '\n';
++		(void)n10_dss_append(n10_sync_text, at, 0);
++	}
++	n10_sync_stop(index);
++}
++
++__attribute__((used, noreturn, noinline)) void
++n10_sync_class_entry(arm_saved_state_t *ss, uint64_t esr, uint64_t far)
++{
++	n10_sync_capture(0, ss, esr, far);
++}
++
++__attribute__((used, noreturn, noinline)) void
++n10_sync_kother_entry(arm_saved_state_t *ss, uint64_t esr, uint64_t far)
++{
++	n10_sync_capture(1, ss, esr, far);
++}
++#endif /* ARM64_BOARD_CONFIG_EXYNOS9825 */
+diff --git a/osfmk/conf/files.arm64 b/osfmk/conf/files.arm64
+index a89b944..b902567 100644
+--- a/osfmk/conf/files.arm64
++++ b/osfmk/conf/files.arm64
+@@ -148,3 +148,4 @@ osfmk/arm64/cswitch.s optional config_note10_native_bootstrap
+ osfmk/arm64/machine_routines_asm.s optional config_note10_native_bootstrap
+ osfmk/arm64/start.s optional config_note10_native_bootstrap
+ osfmk/arm64/note10/n10_wdt.c optional config_note10_native_bootstrap
++osfmk/arm64/note10/n10_dsslog.c optional config_note10_native_bootstrap
