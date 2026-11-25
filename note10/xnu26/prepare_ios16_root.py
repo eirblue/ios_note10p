@@ -38,6 +38,8 @@ OVERLAY = (
      ('osfmk/arm64/note10/n10_dsslog.c', 'osfmk/conf/files.arm64')),
     ('0031-exynos9825-n10-dss-console-log.patch', '6547a28df4561b487b6c4646e0b88891200d70839a16883a2ec5be07b0398c3d',
      ('osfmk/console/serial_console.c', 'pexpert/arm/pe_kprintf.c')),
+    ('0032-exynos9825-amfi-absent-der-entitlements.patch', '0197c10f61f27fb03d16b9c3198c24e1fe657e5631f5a6208d69dde8e1daa787',
+     ('bsd/kern/kern_cs.c', 'iokit/bsddev/IOKitBSDInit.cpp')),
 )
 STAGED_DIRS = ('bsd/n10_hfs/core', 'bsd/n10_hfs/hfs_encodings')
 

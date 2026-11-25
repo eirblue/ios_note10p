@@ -1,0 +1,139 @@
+diff --git a/bsd/kern/kern_cs.c b/bsd/kern/kern_cs.c
+index c1c3929..d43be2b 100644
+--- a/bsd/kern/kern_cs.c
++++ b/bsd/kern/kern_cs.c
+@@ -593,6 +593,105 @@ csproc_get_blob(struct proc *p)
+ 	return ubc_cs_blob_get(p->p_textvp, -1, -1, p->p_textoff);
+ }
+ 
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++/*
++ * Note10: boolean entitlement query used when AMFI is not loaded.
++ * Answers from the process's own embedded DER entitlements blob
++ * (CSSLOT_DER_ENTITLEMENTS).  Returns 0 only when the key is present
++ * with BOOLEAN true; anything else (no text vnode, no cs_blob, no DER
++ * slot, malformed DER, absent key, non-boolean or false value) is nonzero.
++ * Does not use csproc_get_blob(): CS_SIGNED is not set on this port.
++ */
++static int
++n10_der_len(const uint8_t **cursor, const uint8_t *end, size_t *out)
++{
++	const uint8_t *p = *cursor;
++	size_t len, n;
++
++	if (p >= end) {
++		return EINVAL;
++	}
++	len = *p++;
++	if (len & 0x80) {
++		n = len & 0x7f;
++		if (n == 0 || n > sizeof(uint32_t) || (size_t)(end - p) < n) {
++			return EINVAL;
++		}
++		for (len = 0; n > 0; n--) {
++			len = (len << 8) | *p++;
++		}
++	}
++	if (len > (size_t)(end - p)) {
++		return EINVAL;
++	}
++	*cursor = p;
++	*out = len;
++	return 0;
++}
++
++int
++n10_csproc_der_entitlement_bool(proc_t p, const char *entitlement)
++{
++	struct cs_blob *csblob;
++	const CS_GenericBlob *der;
++	const uint8_t *cur, *end, *set_end, *seq_end;
++	size_t len, keylen;
++
++	if (p == NULL || entitlement == NULL || p->p_textvp == NULL) {
++		return EPERM;
++	}
++	csblob = ubc_cs_blob_get(p->p_textvp, -1, -1, p->p_textoff);
++	if (csblob == NULL) {
++		return EPERM;
++	}
++	der = csblob_find_blob(csblob, CSSLOT_DER_ENTITLEMENTS, CSMAGIC_EMBEDDED_DER_ENTITLEMENTS);
++	if (der == NULL || ntohl(der->length) < sizeof(*der)) {
++		return EPERM;
++	}
++	cur = (const uint8_t *)der->data;
++	end = (const uint8_t *)(const void *)der + ntohl(der->length);
++	keylen = strlen(entitlement);
++
++	/* 0x70 <len> ; INTEGER 02 <len> <version> ; [16] dictionary b0 <len> */
++	if (cur >= end || *cur++ != 0x70 || n10_der_len(&cur, end, &len)) {
++		return EPERM;
++	}
++	if (cur >= end || *cur++ != 0x02 || n10_der_len(&cur, end, &len)) {
++		return EPERM;
++	}
++	cur += len;
++	if (cur >= end || *cur++ != 0xb0 || n10_der_len(&cur, end, &len)) {
++		return EPERM;
++	}
++	set_end = cur + len;
++
++	/* each entry: 30 <len> { 0c <len> <key> <value> } */
++	while (cur < set_end) {
++		if (*cur++ != 0x30 || n10_der_len(&cur, set_end, &len)) {
++			return EPERM;
++		}
++		seq_end = cur + len;
++		if (cur < seq_end && *cur == 0x0c) {
++			cur++;
++			if (n10_der_len(&cur, seq_end, &len)) {
++				return EPERM;
++			}
++			if (len == keylen && memcmp(cur, entitlement, keylen) == 0) {
++				cur += len;
++				/* BOOLEAN 01 <len> <value>; only true is entitled */
++				if (cur >= seq_end || *cur++ != 0x01 ||
++				    n10_der_len(&cur, seq_end, &len) || len < 1) {
++					return EPERM;
++				}
++				return (*cur != 0) ? 0 : EPERM;
++			}
++		}
++		cur = seq_end;
++	}
++	return ENOENT;
++}
++#endif /* ARM64_BOARD_CONFIG_EXYNOS9825 */
++
+ /*
+  * Function: csvnode_get_blob
+  *
+diff --git a/iokit/bsddev/IOKitBSDInit.cpp b/iokit/bsddev/IOKitBSDInit.cpp
+index 45be207..54756eb 100644
+--- a/iokit/bsddev/IOKitBSDInit.cpp
++++ b/iokit/bsddev/IOKitBSDInit.cpp
+@@ -1614,6 +1614,10 @@ IOCurrentTaskHasEntitlement(const char *entitlement)
+ 	return IOTaskHasEntitlement(NULL, entitlement);
+ }
+ 
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++extern "C" int n10_csproc_der_entitlement_bool(proc_t p, const char *entitlement);
++#endif
++
+ /*
+  * Reminder to reader: This only returns `true` if:
+  *  - The entitlement is boolean-valued
+@@ -1639,6 +1643,13 @@ IOTaskHasEntitlement(task_t task, const char *entitlement)
+ 		return false;
+ 	}
+ 
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	/* Note10: AMFI is not loaded; answer from the process's own DER entitlements. */
++	if (amfi == NULL) {
++		return n10_csproc_der_entitlement_bool(proc, entitlement) == 0;
++	}
++#endif
++
+ 	kern_return_t ret = amfi->OSEntitlements.queryEntitlementBooleanWithProc(
+ 		proc,
+ 		entitlement);
