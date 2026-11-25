@@ -1,0 +1,9 @@
+iokit/Families/IONVRAM/IONVRAMController.cpp				optional iokitcpp
+
+# Power Domains
+iokit/Kernel/IOPMrootDomain.cpp    					optional iokitcpp
+
+# SMP
+iokit/Kernel/arm/AppleARMSMP.cpp    					optional iokitcpp
+
+iokit/Kernel/arm/NoteKeyStore.cpp    					optional iokitcpp

@@ -10,6 +10,7 @@ from build_native_bootstrap_selection import run
 
 ROOT = Path(__file__).resolve().parents[2]
 PATCHES = ROOT / 'note10/xnu26/patches'
+FILE_OVERLAY = ROOT / 'note10/xnu26/overlay'
 KIND = 'v342-ios16-root-pc'
 STAGE_HFS = ('0021-stage-hfs.sh', '8ff66a932ad2a706aae5ad3a162149f6550230020b0d2bab868d276d06621c71')
 # (patch file, patch sha256, exact '+++ b/' file list)
@@ -73,7 +74,12 @@ def apply(source, output):
     for n, (name, _, _) in enumerate(OVERLAY):
         run([*command, '--check', PATCHES / name], source, output / ('ios16-check-' + str(n + 21) + '.log'))
         run([*command, PATCHES / name], source, output / ('ios16-patch-' + str(n + 21) + '.log'))
-    files = sorted({rel for _, _, rels in OVERLAY for rel in rels})
+    # Whole-file source overlay (note10/xnu26/overlay mirrors the XNU tree), copied after the patches.
+    copied = [p.relative_to(FILE_OVERLAY).as_posix() for p in sorted(FILE_OVERLAY.rglob('*')) if p.is_file()]
+    for rel in copied:
+        (source / rel).parent.mkdir(parents=True, exist_ok=True)
+        (source / rel).write_bytes((FILE_OVERLAY / rel).read_bytes())
+    files = sorted({rel for _, _, rels in OVERLAY for rel in rels} | set(copied))
     observation = dict(schema='note10-v342-ios16-root-overlay-v1', kind=KIND,
                        stage_hfs=dict(script=STAGE_HFS[0], sha256=STAGE_HFS[1]),
                        patches=[dict(patch=name, patch_sha256=patch_sha) for name, patch_sha, _ in OVERLAY],
