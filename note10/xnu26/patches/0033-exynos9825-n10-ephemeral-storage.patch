@@ -1,0 +1,21 @@
+diff --git a/bsd/kern/kern_mib.c b/bsd/kern/kern_mib.c
+index e67ea79..d3ec809 100644
+--- a/bsd/kern/kern_mib.c
++++ b/bsd/kern/kern_mib.c
+@@ -741,6 +741,16 @@ sysctl_load_devicetree_entries(void)
+ 			property_existence.ephemeral_storage = 1;
+ 		}
+ 	}
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	/*
++	 * Note10: no SEP / AppleKeyStore. Use XNU's existing ephemeral-data-volume
++	 * mode (hw.ephemeral_storage) unless the device tree already states it.
++	 */
++	if (!property_existence.ephemeral_storage) {
++		ephemeral_storage = 1;
++		property_existence.ephemeral_storage = 1;
++	}
++#endif
+ 
+ 	/* load use_recovery_securityd */
+ 	if (kSuccess == SecureDTGetProperty(chosen, "use-recovery-securityd", (void const **) &value, &size)) {

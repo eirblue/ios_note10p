@@ -41,6 +41,8 @@ OVERLAY = (
      ('osfmk/console/serial_console.c', 'pexpert/arm/pe_kprintf.c')),
     ('0032-exynos9825-amfi-absent-der-entitlements.patch', '0197c10f61f27fb03d16b9c3198c24e1fe657e5631f5a6208d69dde8e1daa787',
      ('bsd/kern/kern_cs.c', 'iokit/bsddev/IOKitBSDInit.cpp')),
+    ('0033-exynos9825-n10-ephemeral-storage.patch', 'c21abc250152fbb13320bd55aee52c2ef44a5cb2b49f8ef79f96e3312331890f',
+     ('bsd/kern/kern_mib.c',)),
 )
 STAGED_DIRS = ('bsd/n10_hfs/core', 'bsd/n10_hfs/hfs_encodings')
 
