@@ -1,0 +1,757 @@
+diff --git a/bsd/conf/files b/bsd/conf/files
+index b84c053..4138871 100644
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -383,6 +383,7 @@ bsd/security/audit/audit_worker.c		optional config_audit
+ bsd/pthread/pthread_shims.c		standard
+ bsd/pthread/pthread_priority.c		standard
+ bsd/pthread/pthread_workqueue.c		standard
++bsd/pthread/n10_psynch.c		standard
+ 
+ bsd/kern/bsd_init.c			standard
+ ./init_sysent.c				standard
+diff --git a/bsd/kern/hvg_sysctl.c b/bsd/kern/hvg_sysctl.c
+index fb0b67c..834450e 100644
+--- a/bsd/kern/hvg_sysctl.c
++++ b/bsd/kern/hvg_sysctl.c
+@@ -30,6 +30,10 @@
+ #include <libkern/libkern.h>
+ #include <kern/hvg_hypercall.h>
+ #include <stdbool.h>
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++#include <sys/param.h>
++#include <sys/proc.h>
++#endif
+ 
+ /* Translate hypercall error code to syscall error code */
+ static int
+@@ -146,6 +150,23 @@ sysctl_vmm_present(__unused struct sysctl_oid *oidp,
+ 	vmm_present = cpuid_vmm_present();
+ #endif
+ 
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	/*
++	 * Note10 (v383): this platform has no hardware watchdog kext (IOWatchdog
++	 * class). The iOS 16 watchdogd traps when it finds none (v382: SIGTRAP,
++	 * "failed to discover watchdog KEXT service"), and launchd panics the
++	 * device on its second consecutive crash (_PanicOnCrash); on a VM it
++	 * takes its own "no watchdog KEXT found, exiting" path (sleep 2, exit 0,
++	 * not relaunched: KeepAlive SuccessfulExit false). Report a VM to
++	 * watchdogd only; every other process reads the ADT value.
++	 */
++	if (!vmm_present) {
++		char n10_name[MAXCOMLEN + 1];
++
++		proc_selfname(n10_name, (int)sizeof(n10_name));
++		vmm_present = strcmp(n10_name, "watchdogd") == 0;
++	}
++#endif
+ 	vmm_present = !!vmm_present;
+ 	return SYSCTL_OUT(req, &vmm_present, sizeof(vmm_present));
+ }
+diff --git a/bsd/kern/kern_exit.c b/bsd/kern/kern_exit.c
+index 941ef5f..3455d42 100644
+--- a/bsd/kern/kern_exit.c
++++ b/bsd/kern/kern_exit.c
+@@ -177,6 +177,43 @@ void proc_prepareexit(proc_t p, int rv, boolean_t perf_notify);
+ #if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
+ /* osfmk/arm64/note10/n10_dsslog.c (v376): one bounded line into the dss log ring. */
+ extern void n10_dsslog_trace(const char *fmt, ...) __printflike(1, 2);
++struct vm_shared_region;
++extern struct vm_shared_region *vm_shared_region_get(struct task *task);
++extern kern_return_t vm_shared_region_start_address(struct vm_shared_region *shared_region,
++    mach_vm_offset_t *start_address);
++extern void vm_shared_region_deallocate(struct vm_shared_region *shared_region);
++
++/*
++ * Note10 (v383): for a crash signal taken by the exiting thread itself
++ * (abort, fault, trap), one "N383A" line with the user PC and up to six
++ * frame-pointer return addresses plus the slid shared-cache start, so the
++ * host can symbolize where SpringBoard/backboardd/mediaserverd died.
++ */
++static void
++n10_exit_frames(proc_t p, int sig)
++{
++	uintptr_t bt[7] = { 0 };
++	struct backtrace_user_info info = BTUINFO_INIT;
++	struct vm_shared_region *sr;
++	mach_vm_offset_t sc = 0;
++	unsigned int n;
++
++	if (sig != SIGABRT && sig != SIGSEGV && sig != SIGBUS && sig != SIGILL &&
++	    sig != SIGTRAP && sig != SIGFPE) {
++		return;
++	}
++	n = backtrace_user(bt, 7, NULL, &info);
++	sr = vm_shared_region_get(current_task());
++	if (sr != NULL) {
++		if (vm_shared_region_start_address(sr, &sc) != KERN_SUCCESS) {
++			sc = 0;
++		}
++		vm_shared_region_deallocate(sr);
++	}
++	n10_dsslog_trace("N383A pid=%d sig=%d n=%u pc=%lx f=%lx,%lx,%lx,%lx,%lx,%lx sc=%llx",
++	    proc_getpid(p), sig, n, bt[0], bt[1], bt[2], bt[3], bt[4], bt[5], bt[6],
++	    (unsigned long long)sc);
++}
+ #endif
+ void gather_populate_corpse_crashinfo(proc_t p, task_t corpse_task,
+     mach_exception_data_type_t code, mach_exception_data_type_t subcode,
+@@ -2053,6 +2090,9 @@ proc_prepareexit(proc_t p, int rv, boolean_t perf_notify)
+ 		    PROC_HAS_EXITREASON(p) ? p->p_exit_reason->osr_namespace : 0u,
+ 		    PROC_HAS_EXITREASON(p) ? (unsigned long long)p->p_exit_reason->osr_code : 0ull,
+ 		    n10_desc ? n10_desc : "");
++		if (WIFSIGNALED(rv) && p == current_proc()) {
++			n10_exit_frames(p, WTERMSIG(rv));
++		}
+ 	}
+ #endif
+ 
+diff --git a/bsd/pthread/n10_psynch.c b/bsd/pthread/n10_psynch.c
+new file mode 100644
+index 0000000..bf3ce8e
+--- /dev/null
++++ b/bsd/pthread/n10_psynch.c
+@@ -0,0 +1,397 @@
++/*
++ * Copyright (c) 2026 Apple Inc. All rights reserved.
++ *
++ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
++ *
++ * This file contains Original Code and/or Modifications of Original Code
++ * as defined in and that are subject to the Apple Public Source License
++ * Version 2.0 (the 'License'). You may not use this file except in
++ * compliance with the License. The rights granted to you under the License
++ * may not be used to create, or enable the creation or redistribution of,
++ * unlawful or unlicensed forms of the Original Code.
++ *
++ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
++ */
++
++/*
++ * Note10 (v383): built-in psynch for the iOS 16 userland.
++ *
++ * The pthread kext is not part of this kernel; pthread_functions is a static
++ * table whose psynch slots are brk sleds, so the first contended
++ * pthread_cond_wait (v382: sleepd, psynch_cvwait, brk #0x7014) stopped the
++ * kernel with IRQs masked. This file implements the condition-variable and
++ * first-fit mutex calls on the libpthread sequence words, without the
++ * kext's prepost/handoff machinery:
++ *
++ * cv waiter   ordinal = its own L (cvlsgen low word). It returns PTHRW_INC on
++ *             wakeup, so userland adds exactly one to S per departed waiter
++ *             (errors add one in userland). cvsignal/cvbroad return 0.
++ * cvsignal    releases the oldest sleeper whose ordinal <= the signal's L;
++ *             with no such sleeper it leaves one credit (bounded by the
++ *             pending L - S) for a waiter still on its way into the kernel.
++ * cvbroad     releases every sleeper with ordinal <= L and leaves credits for
++ *             the pending waiters that are not asleep yet.
++ * mutexwait   (first-fit: the woken thread retries in userland) sleeps unless
++ *             a drop left a credit.
++ * mutexdrop   releases the oldest sleeper or leaves one credit: each drop
++ *             answers one waiter registered in L, so none is lost.
++ *
++ * An arriving waiter takes any credit: the wake calls can reach the kernel
++ * out of order, so credits are counted, not matched to sequence numbers.
++ * The number of wakeups equals the number of signals/drops; an extra one is
++ * a spurious wakeup, which POSIX allows and libpthread handles. One global mutex
++ * (num_cpus == 1 on this platform). Objects are keyed by (proc, address,
++ * kind), referenced by the calls using them and freed when idle;
++ * pth_proc_hashdelete purges the rest.
++ * Limits: process-shared objects are keyed per process; targeted
++ * pthread_cond_signal_thread_np wakes any eligible waiter; rwlocks
++ * (handoff protocol) are refused with ENOTSUP and one N383P line.
++ */
++
++#include <stdbool.h>
++#include <sys/param.h>
++#include <sys/errno.h>
++#include <sys/systm.h>
++#include <sys/proc_internal.h>
++#include <sys/queue.h>
++#include <kern/clock.h>
++#include <kern/locks.h>
++#include <kern/sched_prim.h>
++#include <kern/thread.h>
++#include <kern/zalloc.h>
++
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++
++/* osfmk/arm64/note10/n10_dsslog.c (v376): one bounded line into the dss log ring. */
++extern void n10_dsslog_trace(const char *fmt, ...) __printflike(1, 2);
++
++/* called from the psynch shims in bsd/pthread/pthread_shims.c */
++int n10_psynch_mutexwait(proc_t, user_addr_t, uint32_t, uint32_t, uint64_t, uint32_t, uint32_t *);
++int n10_psynch_mutexdrop(proc_t, user_addr_t, uint32_t, uint32_t, uint64_t, uint32_t, uint32_t *);
++int n10_psynch_cvwait(proc_t, user_addr_t, uint64_t, uint32_t, user_addr_t, uint64_t, uint32_t,
++    int64_t, uint32_t, uint32_t *);
++int n10_psynch_cvsignal(proc_t, user_addr_t, uint64_t, uint32_t, int, user_addr_t, uint64_t, uint64_t,
++    uint32_t, uint32_t *);
++int n10_psynch_cvbroad(proc_t, user_addr_t, uint64_t, uint64_t, uint32_t, user_addr_t, uint64_t, uint64_t,
++    uint32_t *);
++int n10_psynch_cvclrprepost(proc_t, user_addr_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
++    int *);
++int n10_psynch_rw_refuse(proc_t, const char *, user_addr_t, uint32_t, uint32_t);
++void n10_psynch_proc_purge(proc_t);
++
++#define N10_PS_INC              0x100u
++#define N10_PS_COUNT            0xffffff00u
++#define N10_PS_BUCKETS          64u
++#define N10_PS_MAX_SEC          100000000ll
++#define N10_PS_RW_LINES         32u
++
++enum { N10_PS_MUTEX = 1, N10_PS_CV = 2 };
++
++struct n10_ps_waiter {
++	TAILQ_ENTRY(n10_ps_waiter) link;
++	uint32_t                ord;    /* cv: own L */
++	int                     released;
++};
++
++struct n10_ps_obj {
++	LIST_ENTRY(n10_ps_obj)  link;
++	TAILQ_HEAD(, n10_ps_waiter) waiters;
++	proc_t                  p;
++	user_addr_t             addr;
++	uint32_t                kind;
++	uint32_t                refs;           /* calls currently using the object */
++	uint32_t                credits;        /* wakeups not delivered to a sleeper */
++};
++
++static LIST_HEAD(, n10_ps_obj) n10_ps_hash[N10_PS_BUCKETS];
++static LCK_GRP_DECLARE(n10_ps_grp, "n10_psynch");
++static LCK_MTX_DECLARE(n10_ps_lock, &n10_ps_grp);
++static uint32_t n10_ps_rw_lines;
++
++/* a <= b on the 24-bit sequence counts (wrap aware) */
++static inline bool
++n10_ps_le(uint32_t a, uint32_t b)
++{
++	return (int32_t)((b & N10_PS_COUNT) - (a & N10_PS_COUNT)) >= 0;
++}
++
++/* waiters counted by hi - lo, 0 when not ahead */
++static inline uint32_t
++n10_ps_pending(uint32_t hi, uint32_t lo)
++{
++	int32_t d = (int32_t)((hi & N10_PS_COUNT) - (lo & N10_PS_COUNT));
++
++	return d > 0 ? (uint32_t)d >> 8 : 0;
++}
++
++static inline uint32_t
++n10_ps_bucket(proc_t p, user_addr_t addr)
++{
++	return (uint32_t)(((uintptr_t)p >> 4) ^ (addr >> 3)) % N10_PS_BUCKETS;
++}
++
++static struct n10_ps_obj *
++n10_ps_lookup(proc_t p, user_addr_t addr, uint32_t kind, bool create)
++{
++	struct n10_ps_obj *o;
++	uint32_t b = n10_ps_bucket(p, addr);
++
++	LIST_FOREACH(o, &n10_ps_hash[b], link) {
++		if (o->p == p && o->addr == addr && o->kind == kind) {
++			o->refs++;
++			return o;
++		}
++	}
++	if (!create) {
++		return NULL;
++	}
++	o = kalloc_type(struct n10_ps_obj, Z_WAITOK | Z_ZERO | Z_NOFAIL);
++	TAILQ_INIT(&o->waiters);
++	o->p = p;
++	o->addr = addr;
++	o->kind = kind;
++	o->refs = 1;
++	LIST_INSERT_HEAD(&n10_ps_hash[b], o, link);
++	return o;
++}
++
++static void
++n10_ps_release(struct n10_ps_obj *o)
++{
++	if (--o->refs == 0 && TAILQ_EMPTY(&o->waiters) && o->credits == 0) {
++		LIST_REMOVE(o, link);
++		kfree_type(struct n10_ps_obj, o);
++	}
++}
++
++static void
++n10_ps_wake(struct n10_ps_obj *o, struct n10_ps_waiter *w)
++{
++	TAILQ_REMOVE(&o->waiters, w, link);
++	w->released = 1;
++	thread_wakeup((event_t)w);
++}
++
++/* Sleep on w (queued on o) until released, timed out or interrupted. Lock held. */
++static int
++n10_ps_sleep(struct n10_ps_obj *o, struct n10_ps_waiter *w, uint64_t deadline)
++{
++	wait_result_t wr;
++	int error = 0;
++
++	TAILQ_INSERT_TAIL(&o->waiters, w, link);
++	while (!w->released) {
++		if (deadline != 0) {
++			wr = lck_mtx_sleep_deadline(&n10_ps_lock, LCK_SLEEP_DEFAULT, (event_t)w,
++			    THREAD_ABORTSAFE, deadline);
++		} else {
++			wr = lck_mtx_sleep(&n10_ps_lock, LCK_SLEEP_DEFAULT, (event_t)w, THREAD_ABORTSAFE);
++		}
++		if (w->released) {
++			break;
++		}
++		if (wr == THREAD_TIMED_OUT) {
++			error = ETIMEDOUT;
++			break;
++		}
++		if (wr == THREAD_INTERRUPTED || wr == THREAD_RESTART) {
++			error = EINTR;
++			break;
++		}
++	}
++	if (!w->released) {
++		TAILQ_REMOVE(&o->waiters, w, link);
++	}
++	return w->released ? 0 : error;
++}
++
++/* First-fit mutex drop: wake the oldest sleeper or leave one credit. Lock held. */
++static void
++n10_ps_mutex_drop_locked(proc_t p, user_addr_t mutex)
++{
++	struct n10_ps_obj *o = n10_ps_lookup(p, mutex, N10_PS_MUTEX, true);
++	struct n10_ps_waiter *w = TAILQ_FIRST(&o->waiters);
++
++	if (w != NULL) {
++		n10_ps_wake(o, w);
++	} else {
++		/* every drop answers one waiter registered in L: keep each undelivered one */
++		o->credits++;
++	}
++	n10_ps_release(o);
++}
++
++int
++n10_psynch_mutexwait(proc_t p, user_addr_t mutex, uint32_t mgen __unused, uint32_t ugen __unused,
++    uint64_t tid __unused, uint32_t flags __unused, uint32_t *retval)
++{
++	struct n10_ps_waiter w = { .ord = 0 };
++	struct n10_ps_obj *o;
++	int error = 0;
++
++	lck_mtx_lock(&n10_ps_lock);
++	o = n10_ps_lookup(p, mutex, N10_PS_MUTEX, true);
++	if (o->credits != 0) {
++		o->credits--;
++	} else {
++		error = n10_ps_sleep(o, &w, 0);
++	}
++	n10_ps_release(o);
++	lck_mtx_unlock(&n10_ps_lock);
++	*retval = 0;
++	return error;
++}
++
++int
++n10_psynch_mutexdrop(proc_t p, user_addr_t mutex, uint32_t mgen __unused, uint32_t ugen __unused,
++    uint64_t tid __unused, uint32_t flags __unused, uint32_t *retval)
++{
++	lck_mtx_lock(&n10_ps_lock);
++	n10_ps_mutex_drop_locked(p, mutex);
++	lck_mtx_unlock(&n10_ps_lock);
++	*retval = 0;
++	return 0;
++}
++
++int
++n10_psynch_cvwait(proc_t p, user_addr_t cv, uint64_t cvlsgen, uint32_t cvugen __unused,
++    user_addr_t mutex, uint64_t mugen __unused, uint32_t flags __unused, int64_t sec, uint32_t nsec,
++    uint32_t *retval)
++{
++	struct n10_ps_waiter w = { .ord = (uint32_t)cvlsgen };
++	struct n10_ps_obj *o;
++	uint64_t deadline = 0;
++	int error = 0;
++
++	/* relative timeout, as the kext reads it (nsec low 30 bits) */
++	nsec &= 0x3fffffffu;
++	if (sec < 0) {
++		return EINVAL;
++	}
++	if (sec != 0 || nsec != 0) {
++		uint64_t abstime;
++
++		nanoseconds_to_absolutetime((uint64_t)MIN(sec, N10_PS_MAX_SEC) * NSEC_PER_SEC + nsec, &abstime);
++		clock_absolutetime_interval_to_deadline(abstime, &deadline);
++	}
++
++	lck_mtx_lock(&n10_ps_lock);
++	if (mutex != 0) {
++		/* userland passed the mutex because it has kernel waiters: drop it here */
++		n10_ps_mutex_drop_locked(p, mutex);
++	}
++	o = n10_ps_lookup(p, cv, N10_PS_CV, true);
++	if (o->credits != 0) {
++		o->credits--;
++	} else {
++		error = n10_ps_sleep(o, &w, deadline);
++	}
++	n10_ps_release(o);
++	lck_mtx_unlock(&n10_ps_lock);
++	if (error == 0) {
++		*retval = N10_PS_INC;
++	}
++	return error;
++}
++
++int
++n10_psynch_cvsignal(proc_t p, user_addr_t cv, uint64_t cvlsgen, uint32_t cvugen __unused,
++    int thread_port __unused, user_addr_t mutex __unused, uint64_t mugen __unused,
++    uint64_t tid __unused, uint32_t flags __unused, uint32_t *retval)
++{
++	uint32_t lgen = (uint32_t)cvlsgen, sgen = (uint32_t)(cvlsgen >> 32);
++	uint32_t pending = n10_ps_pending(lgen, sgen);
++	struct n10_ps_waiter *w;
++	struct n10_ps_obj *o;
++
++	lck_mtx_lock(&n10_ps_lock);
++	o = n10_ps_lookup(p, cv, N10_PS_CV, true);
++	TAILQ_FOREACH(w, &o->waiters, link) {
++		if (n10_ps_le(w->ord, lgen)) {
++			break;
++		}
++	}
++	if (w != NULL) {
++		n10_ps_wake(o, w);
++	} else if (o->credits < pending) {
++		o->credits++;
++	}
++	n10_ps_release(o);
++	lck_mtx_unlock(&n10_ps_lock);
++	*retval = 0;
++	return 0;
++}
++
++int
++n10_psynch_cvbroad(proc_t p, user_addr_t cv, uint64_t cvlsgen, uint64_t cvudgen __unused,
++    uint32_t flags __unused, user_addr_t mutex __unused, uint64_t mugen __unused,
++    uint64_t tid __unused, uint32_t *retval)
++{
++	uint32_t lgen = (uint32_t)cvlsgen, sgen = (uint32_t)(cvlsgen >> 32);
++	uint32_t pending = n10_ps_pending(lgen, sgen), woken = 0;
++	struct n10_ps_waiter *w, *next;
++	struct n10_ps_obj *o;
++
++	lck_mtx_lock(&n10_ps_lock);
++	o = n10_ps_lookup(p, cv, N10_PS_CV, true);
++	TAILQ_FOREACH_SAFE(w, &o->waiters, link, next) {
++		if (n10_ps_le(w->ord, lgen)) {
++			n10_ps_wake(o, w);
++			woken++;
++		}
++	}
++	if (pending > woken) {
++		o->credits = MAX(o->credits, pending - woken);
++	}
++	n10_ps_release(o);
++	lck_mtx_unlock(&n10_ps_lock);
++	*retval = 0;
++	return 0;
++}
++
++int
++n10_psynch_cvclrprepost(proc_t p, user_addr_t cv, uint32_t cvgen __unused, uint32_t cvugen __unused,
++    uint32_t cvsgen __unused, uint32_t prepocnt __unused, uint32_t preposeq __unused,
++    uint32_t flags __unused, int *retval)
++{
++	struct n10_ps_obj *o;
++
++	lck_mtx_lock(&n10_ps_lock);
++	o = n10_ps_lookup(p, cv, N10_PS_CV, false);
++	if (o != NULL) {
++		o->credits = 0;
++		n10_ps_release(o);
++	}
++	lck_mtx_unlock(&n10_ps_lock);
++	*retval = 0;
++	return 0;
++}
++
++int
++n10_psynch_rw_refuse(proc_t p, const char *op, user_addr_t rwlock, uint32_t lgenval, uint32_t ugenval)
++{
++	if (__atomic_fetch_add(&n10_ps_rw_lines, 1u, __ATOMIC_RELAXED) < N10_PS_RW_LINES) {
++		n10_dsslog_trace("N383P rw %s pid=%d %s lock=0x%llx l=0x%x u=0x%x ENOTSUP", op, proc_getpid(p),
++		    p->p_comm, (unsigned long long)rwlock, lgenval, ugenval);
++	}
++	return ENOTSUP;
++}
++
++void
++n10_psynch_proc_purge(proc_t p)
++{
++	struct n10_ps_obj *o, *next;
++
++	lck_mtx_lock(&n10_ps_lock);
++	for (uint32_t b = 0; b < N10_PS_BUCKETS; b++) {
++		LIST_FOREACH_SAFE(o, &n10_ps_hash[b], link, next) {
++			if (o->p == p && o->refs == 0) {
++				LIST_REMOVE(o, link);
++				kfree_type(struct n10_ps_obj, o);
++			}
++		}
++	}
++	lck_mtx_unlock(&n10_ps_lock);
++}
++
++#endif /* ARM64_BOARD_CONFIG_EXYNOS9825 */
+diff --git a/bsd/pthread/pthread_shims.c b/bsd/pthread/pthread_shims.c
+index e5e58b5..9cfbb37 100644
+--- a/bsd/pthread/pthread_shims.c
++++ b/bsd/pthread/pthread_shims.c
+@@ -321,6 +321,25 @@ pthread_init(void)
+ 	pthread_functions->pthread_init();
+ }
+ 
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++/*
++ * Note10 (v383): bsd/pthread/n10_psynch.c implements the psynch calls; the
++ * pthread kext is absent and the static table's psynch slots are brk sleds.
++ */
++extern int n10_psynch_mutexwait(proc_t, user_addr_t, uint32_t, uint32_t, uint64_t, uint32_t, uint32_t *);
++extern int n10_psynch_mutexdrop(proc_t, user_addr_t, uint32_t, uint32_t, uint64_t, uint32_t, uint32_t *);
++extern int n10_psynch_cvwait(proc_t, user_addr_t, uint64_t, uint32_t, user_addr_t, uint64_t, uint32_t,
++    int64_t, uint32_t, uint32_t *);
++extern int n10_psynch_cvsignal(proc_t, user_addr_t, uint64_t, uint32_t, int, user_addr_t, uint64_t, uint64_t,
++    uint32_t, uint32_t *);
++extern int n10_psynch_cvbroad(proc_t, user_addr_t, uint64_t, uint64_t, uint32_t, user_addr_t, uint64_t, uint64_t,
++    uint32_t *);
++extern int n10_psynch_cvclrprepost(proc_t, user_addr_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
++    int *);
++extern int n10_psynch_rw_refuse(proc_t, const char *, user_addr_t, uint32_t, uint32_t);
++extern void n10_psynch_proc_purge(proc_t);
++#endif
++
+ void
+ pth_proc_hashinit(proc_t p)
+ {
+@@ -330,6 +349,9 @@ pth_proc_hashinit(proc_t p)
+ void
+ pth_proc_hashdelete(proc_t p)
+ {
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	n10_psynch_proc_purge(p);
++#endif
+ 	pthread_functions->pth_proc_hashdelete(p);
+ }
+ 
+@@ -409,55 +431,91 @@ thread_selfid(struct proc *p, __unused struct thread_selfid_args *uap, uint64_t
+ int
+ psynch_mutexwait(proc_t p, struct psynch_mutexwait_args *uap, uint32_t *retval)
+ {
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	return n10_psynch_mutexwait(p, uap->mutex, uap->mgen, uap->ugen, uap->tid, uap->flags, retval);
++#else
+ 	return pthread_functions->psynch_mutexwait(p, uap->mutex, uap->mgen, uap->ugen, uap->tid, uap->flags, retval);
++#endif
+ }
+ 
+ int
+ psynch_mutexdrop(proc_t p, struct psynch_mutexdrop_args *uap, uint32_t *retval)
+ {
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	return n10_psynch_mutexdrop(p, uap->mutex, uap->mgen, uap->ugen, uap->tid, uap->flags, retval);
++#else
+ 	return pthread_functions->psynch_mutexdrop(p, uap->mutex, uap->mgen, uap->ugen, uap->tid, uap->flags, retval);
++#endif
+ }
+ 
+ int
+ psynch_cvbroad(proc_t p, struct psynch_cvbroad_args *uap, uint32_t *retval)
+ {
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	return n10_psynch_cvbroad(p, uap->cv, uap->cvlsgen, uap->cvudgen, uap->flags, uap->mutex, uap->mugen, uap->tid, retval);
++#else
+ 	return pthread_functions->psynch_cvbroad(p, uap->cv, uap->cvlsgen, uap->cvudgen, uap->flags, uap->mutex, uap->mugen, uap->tid, retval);
++#endif
+ }
+ 
+ int
+ psynch_cvsignal(proc_t p, struct psynch_cvsignal_args *uap, uint32_t *retval)
+ {
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	return n10_psynch_cvsignal(p, uap->cv, uap->cvlsgen, uap->cvugen, uap->thread_port, uap->mutex, uap->mugen, uap->tid, uap->flags, retval);
++#else
+ 	return pthread_functions->psynch_cvsignal(p, uap->cv, uap->cvlsgen, uap->cvugen, uap->thread_port, uap->mutex, uap->mugen, uap->tid, uap->flags, retval);
++#endif
+ }
+ 
+ int
+ psynch_cvwait(proc_t p, struct psynch_cvwait_args * uap, uint32_t * retval)
+ {
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	return n10_psynch_cvwait(p, uap->cv, uap->cvlsgen, uap->cvugen, uap->mutex, uap->mugen, uap->flags, uap->sec, uap->nsec, retval);
++#else
+ 	return pthread_functions->psynch_cvwait(p, uap->cv, uap->cvlsgen, uap->cvugen, uap->mutex, uap->mugen, uap->flags, uap->sec, uap->nsec, retval);
++#endif
+ }
+ 
+ int
+ psynch_cvclrprepost(proc_t p, struct psynch_cvclrprepost_args * uap, int *retval)
+ {
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	return n10_psynch_cvclrprepost(p, uap->cv, uap->cvgen, uap->cvugen, uap->cvsgen, uap->prepocnt, uap->preposeq, uap->flags, retval);
++#else
+ 	return pthread_functions->psynch_cvclrprepost(p, uap->cv, uap->cvgen, uap->cvugen, uap->cvsgen, uap->prepocnt, uap->preposeq, uap->flags, retval);
++#endif
+ }
+ 
+ int
+ psynch_rw_longrdlock(proc_t p, struct psynch_rw_longrdlock_args * uap, uint32_t *retval)
+ {
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	return n10_psynch_rw_refuse(p, "longrdlock", uap->rwlock, uap->lgenval, uap->ugenval);
++#else
+ 	return pthread_functions->psynch_rw_longrdlock(p, uap->rwlock, uap->lgenval, uap->ugenval, uap->rw_wc, uap->flags, retval);
++#endif
+ }
+ 
+ int
+ psynch_rw_rdlock(proc_t p, struct psynch_rw_rdlock_args * uap, uint32_t * retval)
+ {
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	return n10_psynch_rw_refuse(p, "rdlock", uap->rwlock, uap->lgenval, uap->ugenval);
++#else
+ 	return pthread_functions->psynch_rw_rdlock(p, uap->rwlock, uap->lgenval, uap->ugenval, uap->rw_wc, uap->flags, retval);
++#endif
+ }
+ 
+ int
+ psynch_rw_unlock(proc_t p, struct psynch_rw_unlock_args *uap, uint32_t *retval)
+ {
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	return n10_psynch_rw_refuse(p, "unlock", uap->rwlock, uap->lgenval, uap->ugenval);
++#else
+ 	return pthread_functions->psynch_rw_unlock(p, uap->rwlock, uap->lgenval, uap->ugenval, uap->rw_wc, uap->flags, retval);
++#endif
+ }
+ 
+ int
+@@ -469,13 +527,21 @@ psynch_rw_unlock2(__unused proc_t p, __unused struct psynch_rw_unlock2_args *uap
+ int
+ psynch_rw_wrlock(proc_t p, struct psynch_rw_wrlock_args *uap, uint32_t *retval)
+ {
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	return n10_psynch_rw_refuse(p, "wrlock", uap->rwlock, uap->lgenval, uap->ugenval);
++#else
+ 	return pthread_functions->psynch_rw_wrlock(p, uap->rwlock, uap->lgenval, uap->ugenval, uap->rw_wc, uap->flags, retval);
++#endif
+ }
+ 
+ int
+ psynch_rw_yieldwrlock(proc_t p, struct psynch_rw_yieldwrlock_args *uap, uint32_t *retval)
+ {
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	return n10_psynch_rw_refuse(p, "yieldwrlock", uap->rwlock, uap->lgenval, uap->ugenval);
++#else
+ 	return pthread_functions->psynch_rw_yieldwrlock(p, uap->rwlock, uap->lgenval, uap->ugenval, uap->rw_wc, uap->flags, retval);
++#endif
+ }
+ 
+ int
+diff --git a/iokit/Kernel/IOPlatformExpert.cpp b/iokit/Kernel/IOPlatformExpert.cpp
+index 76555f6..4024523 100644
+--- a/iokit/Kernel/IOPlatformExpert.cpp
++++ b/iokit/Kernel/IOPlatformExpert.cpp
+@@ -994,6 +994,11 @@ PEInitiatePanic(void)
+ #endif // defined(__arm64__)
+ }
+ 
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++/* osfmk/arm64/note10/n10_dsslog.c (v376): one bounded line into the dss log ring. */
++extern "C" void n10_dsslog_trace(const char *fmt, ...) __printflike(1, 2);
++#endif
++
+ int
+ PEHaltRestartInternal(unsigned int type, uint32_t details)
+ {
+@@ -1005,6 +1010,17 @@ PEHaltRestartInternal(unsigned int type, uint32_t details)
+ 	uint32_t          timeout = kShutdownTimeout;
+ 	static boolean_t  panic_begin_called = FALSE;
+ 
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	/*
++	 * Note10 (v383): halt/restart/hang requests that do not come through
++	 * reboot_kernel (N376R), e.g. host_reboot or IOPMrootDomain; panic-path
++	 * types are not traced here.
++	 */
++	if (type <= kPEUPSDelayHaltCPU) {
++		n10_dsslog_trace("N383R PEHaltRestart type=%u details=0x%x", type, details);
++	}
++#endif
++
+ 	if (type == kPEHaltCPU || type == kPERestartCPU || type == kPEUPSDelayHaltCPU) {
+ 		/* If we're in the panic path, the locks and memory allocations required below
+ 		 *  could fail. So just try to reboot instead of risking a nested panic.
+diff --git a/osfmk/ipc/ipc_policy.c b/osfmk/ipc/ipc_policy.c
+index 171e310..8f1889f 100644
+--- a/osfmk/ipc/ipc_policy.c
++++ b/osfmk/ipc/ipc_policy.c
+@@ -555,6 +555,27 @@ ipc_sec_commit_policy_violation_to_ca(
+ 	CA_EVENT_SEND(ca_event);
+ }
+ 
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++/*
++ * Note10 (v383): iOS (platform 2) binaries built with SDK <= 16 predate the
++ * kernel-enforced reply-port semantics for bootstrap and service ports; their
++ * MIG bootstrap calls (bootstrap_check_in/look_up via mig_get_reply_port)
++ * use an ordinary receive right as the reply port. v382: notifyd, driverkitd,
++ * remoted and nfcd were killed with EXC_GUARD kGUARD_EXC_REQUIRE_REPLY_PORT_SEMANTICS
++ * (flavor 10, subcode 1 = bootstrap port). Same SDK bincompat rule as the
++ * legacy mach_msg trap (0026) and ipc_policy_allow_send_only_kobject_calls;
++ * the kobject rule is unchanged.
++ */
++static bool
++ipc_policy_n10_ios16_sender(void)
++{
++	struct proc_ro *pro = current_thread_ro()->tro_proc_ro;
++	uint32_t sdk = pro->p_platform_data.p_sdk;
++
++	return pro->p_platform_data.p_platform == PLATFORM_IOS && sdk != 0 && (sdk >> 16) <= 16;
++}
++#endif /* ARM64_BOARD_CONFIG_EXYNOS9825 */
++
+ /*!
+  * @brief
+  * Checks that this message conforms to reply port policies, which are:
+@@ -604,14 +625,22 @@ ipc_validate_local_port(
+ 		/* bootstrap port defense */
+ 		if (ipc_should_apply_policy(pol, IPC_POLICY_ENHANCED_V2) &&
+ 		    !ip_is_reply_port(reply_port) &&
+-		    !ip_is_weak_reply_port(reply_port)) {
++		    !ip_is_weak_reply_port(reply_port)
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++		    && !ipc_policy_n10_ios16_sender()
++#endif
++		    ) {
+ 			policy_violation = IPC_SEC_POLICY_REQUIRE_REPLY_PORT_SEMANTICS_BOOTSTRAP_PORT;
+ 			exc_payload = 1;
+ 		}
+ 	} else {
+ 		/* regular enforcement */
+ 		if (!ip_is_reply_port(reply_port) &&
+-		    !ip_is_weak_reply_port(reply_port)) {
++		    !ip_is_weak_reply_port(reply_port)
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++		    && !ipc_policy_n10_ios16_sender()
++#endif
++		    ) {
+ 			policy_violation = IPC_SEC_POLICY_REQUIRE_REPLY_PORT_SEMANTICS_SERVICE_PORT;
+ 		}
+ 	}

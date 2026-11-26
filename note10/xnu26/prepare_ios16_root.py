@@ -92,6 +92,10 @@ OVERLAY = (
     ('0050-exynos9825-n10-ufs-stop-dss-line.patch',
      '4f6f5e9b919f324327dace9991f6d8e3c8c2892853ed560c9d2d8fbcd83a777c',
      ('bsd/dev/n10_ufs.c',)),
+    ('0051-exynos9825-n10-psynch-ipc-bincompat-watchdogd.patch',
+     '12908b2e246a7a65b4cafcba67e6cc84c0f9c7c1ff02aca4b7491a4f4b7f48bd',
+     ('bsd/conf/files', 'bsd/kern/hvg_sysctl.c', 'bsd/kern/kern_exit.c', 'bsd/pthread/n10_psynch.c',
+      'bsd/pthread/pthread_shims.c', 'iokit/Kernel/IOPlatformExpert.cpp', 'osfmk/ipc/ipc_policy.c')),
 )
 STAGED_DIRS = ('bsd/n10_hfs/core', 'bsd/n10_hfs/hfs_encodings')
 
