@@ -52,6 +52,9 @@ OVERLAY = (
     ('0037-exynos9825-n10-dataprotect-class0-panic-note.patch',
      '76c84c46dbf531e411eb23f81847ca96f0e861ba3e7345044785cdd7faabca10',
      ('bsd/vfs/vfs_attrlist.c', 'osfmk/kern/debug.c')),
+    ('0038-exynos9825-n10-ufs-readonly-root-data-volume.patch',
+     '8e23342676a356d4bca0daa9caf91fcc9cb3e37c0572fded455e875d0ad40d78',
+     ('bsd/dev/n10_ufs.c', 'bsd/vfs/vfs_subr.c', 'bsd/vfs/vfs_syscalls.c')),
 )
 STAGED_DIRS = ('bsd/n10_hfs/core', 'bsd/n10_hfs/hfs_encodings')
 
