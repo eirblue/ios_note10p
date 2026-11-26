@@ -1,0 +1,29 @@
+diff --git a/osfmk/arm64/note10/n10_dsslog.c b/osfmk/arm64/note10/n10_dsslog.c
+index 5473798..cfa7a11 100644
+--- a/osfmk/arm64/note10/n10_dsslog.c
++++ b/osfmk/arm64/note10/n10_dsslog.c
+@@ -515,4 +515,24 @@ n10_sync_kother_capture(arm_saved_state_t *ss, uint64_t esr, uint64_t far)
+ {
+ 	n10_sync_capture(1, ss, esr, far);
+ }
++
++/*
++ * v384: text padding. The binary chain places its caves (v315 cave, v324/v325/
++ * v334 stubs, pthread trap sled) in the zero tail between the end of
++ * __TEXT_EXEC,__text and the 16 KiB end of the __TEXT_EXEC segment and needs
++ * >= 0x1168 bytes there. 0051 moved the __text end to image offset 0xc17e98,
++ * leaving 0x48 bytes before the segment end 0xc18000. These 0x800 bytes of
++ * "brk #0" grow __text so its end crosses into the next 16 KiB page (expected
++ * end 0xc18698, segment end 0xc1c000, tail 0x3968). Never referenced or
++ * executed; .no_dead_strip keeps it under -dead_strip. Resize when later
++ * patches move the __text end (keep segment end - __text end >= 0x1168).
++ */
++__asm__(
++	"	.section __TEXT,__text,regular,pure_instructions\n"
++	"	.p2align 2\n"
++	"	.globl _n10_text_tail_pad\n"
++	"	.no_dead_strip _n10_text_tail_pad\n"
++	"_n10_text_tail_pad:\n"
++	"	.fill 512, 4, 0xd4200000\n"
++	"	.text\n");
+ #endif /* ARM64_BOARD_CONFIG_EXYNOS9825 */

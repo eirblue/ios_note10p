@@ -96,6 +96,9 @@ OVERLAY = (
      '12908b2e246a7a65b4cafcba67e6cc84c0f9c7c1ff02aca4b7491a4f4b7f48bd',
      ('bsd/conf/files', 'bsd/kern/hvg_sysctl.c', 'bsd/kern/kern_exit.c', 'bsd/pthread/n10_psynch.c',
       'bsd/pthread/pthread_shims.c', 'iokit/Kernel/IOPlatformExpert.cpp', 'osfmk/ipc/ipc_policy.c')),
+    ('0052-exynos9825-n10-text-tail-pad.patch',
+     'dfd8503ba543b3461f5a9215aa37b8637a9b4ad962c691634726b4250e822387',
+     ('osfmk/arm64/note10/n10_dsslog.c',)),
 )
 STAGED_DIRS = ('bsd/n10_hfs/core', 'bsd/n10_hfs/hfs_encodings')
 
