@@ -1,0 +1,107 @@
+diff --git a/osfmk/arm64/note10/n10_dsslog.c b/osfmk/arm64/note10/n10_dsslog.c
+index 0eaa19c..55e007d 100644
+--- a/osfmk/arm64/note10/n10_dsslog.c
++++ b/osfmk/arm64/note10/n10_dsslog.c
+@@ -81,7 +81,7 @@ enum { N10_DSS_EARLY_STATE = 0, N10_DSS_ON = 1, N10_DSS_OFF = 2 };
+ void n10_dsslog_write(const char *s, int n);
+ void n10_dsslog_putc(char c);
+ void n10_sync_class_entry(arm_saved_state_t *ss, uint64_t esr, uint64_t far) __attribute__((noreturn));
+-void n10_sync_kother_entry(arm_saved_state_t *ss, uint64_t esr, uint64_t far) __attribute__((noreturn));
++void n10_sync_kother_capture(arm_saved_state_t *ss, uint64_t esr, uint64_t far) __attribute__((noreturn));
+ 
+ static uint32_t n10_dss_state;          /* bss: early buffering until init */
+ static uint32_t n10_dss_busy;
+@@ -95,6 +95,7 @@ static char n10_dss_line[6 + N10_DSS_LINE + 1] = "N347L ";
+ static uint32_t n10_dss_line_len;
+ static char n10_sync_text[N10_SYNC_TEXT];
+ static uint32_t n10_sync_entered, n10_sync_index;
++uint32_t n10_sync_kfast;                /* v377: kernel AF/permission faults forwarded to sleh */
+ 
+ /* 131072 'b .' words; the stop PC encodes the index (see header). */
+ __asm__ (
+@@ -106,6 +107,47 @@ __asm__ (
+ 	"	b .\n"
+ 	"	.endr\n");
+ 
++/*
++ * v377: the chain's sleh filter sends every kernel-VA data abort that is not
++ * a translation fault (DFSC 0x04-0x07) to the M_sync_kother stop word, which
++ * branches here (x0 = context, x1 = ESR, x2 = FAR, x3 = lockdown flag,
++ * x30 = return into fleh_synchronous, sp = fleh frame, DAIF masked). Access
++ * flag faults (DFSC 0x08-0x0b) and permission faults (DFSC 0x0c-0x0f) on
++ * kernel VAs are normal pmap reference/modify faults once pageout clears
++ * ARM_PTE_AF or write access on pageable kernel memory (arm_force_fast_fault
++ * for kernel_pmap, e.g. the execargs/ip_vdata buffer in bsd_pageable_map):
++ * stock sleh_synchronous -> handle_kernel_abort -> arm_fast_fault/vm_fault
++ * resolves them or panics. Those (EC 0x25, FAR bit63 set) continue into
++ * sleh_synchronous exactly as the filter's own pass path does: the displaced
++ * first instruction 'sub sp, sp, #0xf0', then sleh_synchronous + 4. All other
++ * kother entries go to the unchanged capture. Clobbers only x9, x10, x16
++ * (caller-saved at the fleh 'bl sleh_synchronous' call site).
++ */
++__asm__ (
++	"	.text\n"
++	"	.p2align 2\n"
++	"	.globl _n10_sync_kother_entry\n"
++	"_n10_sync_kother_entry:\n"
++	"	ubfx x9, x1, #26, #6\n"
++	"	cmp x9, #0x25\n"
++	"	b.ne 1f\n"
++	"	tbz x2, #63, 1f\n"
++	"	and x9, x1, #0x3c\n"
++	"	cmp x9, #0x8\n"
++	"	b.eq 2f\n"
++	"	cmp x9, #0xc\n"
++	"	b.ne 1f\n"
++	"2:	adrp x9, _n10_sync_kfast@PAGE\n"
++	"	ldr w10, [x9, _n10_sync_kfast@PAGEOFF]\n"
++	"	add w10, w10, #1\n"
++	"	str w10, [x9, _n10_sync_kfast@PAGEOFF]\n"
++	"	adrp x16, _sleh_synchronous@PAGE\n"
++	"	add x16, x16, _sleh_synchronous@PAGEOFF\n"
++	"	add x16, x16, #4\n"
++	"	sub sp, sp, #0xf0\n"
++	"	br x16\n"
++	"1:	b _n10_sync_kother_capture\n");
++
+ static inline uint64_t
+ n10_dss_irq_off(void)
+ {
+@@ -469,7 +511,7 @@ n10_sync_class_entry(arm_saved_state_t *ss, uint64_t esr, uint64_t far)
+ }
+ 
+ __attribute__((used, noreturn, noinline)) void
+-n10_sync_kother_entry(arm_saved_state_t *ss, uint64_t esr, uint64_t far)
++n10_sync_kother_capture(arm_saved_state_t *ss, uint64_t esr, uint64_t far)
+ {
+ 	n10_sync_capture(1, ss, esr, far);
+ }
+diff --git a/osfmk/arm64/note10/n10_wdt.c b/osfmk/arm64/note10/n10_wdt.c
+index bd9d1af..b44387d 100644
+--- a/osfmk/arm64/note10/n10_wdt.c
++++ b/osfmk/arm64/note10/n10_wdt.c
+@@ -75,6 +75,8 @@ static uint64_t n10_wdt_start_abs;
+ extern void n10_dsslog_write(const char *s, int n);
+ extern unsigned int vm_page_free_count;
+ extern unsigned int vm_page_free_wanted;
++extern uint32_t n10_sync_kfast;          /* v377: n10_dsslog.c kother forwarding count */
++static uint32_t n10_wdt_kfast_seen;
+ 
+ static void
+ n10_wdt_note(uint64_t now, const char *stop)
+@@ -101,6 +103,15 @@ n10_wdt_note(uint64_t now, const char *stop)
+ 	if (n > 0) {
+ 		n10_dsslog_write(line, n < (int)sizeof(line) ? n : (int)sizeof(line) - 1);
+ 	}
++	/* v377: one N377F line per heartbeat when kernel AF/permission faults were forwarded since the last one. */
++	uint32_t kfast = n10_sync_kfast;
++	if (stop == NULL && kfast != n10_wdt_kfast_seen) {
++		n10_wdt_kfast_seen = kfast;
++		n = snprintf(line, sizeof(line), "N377F kfast=%u\n", kfast);
++		if (n > 0) {
++			n10_dsslog_write(line, n < (int)sizeof(line) ? n : (int)sizeof(line) - 1);
++		}
++	}
+ }
+ 
+ static inline uint32_t
