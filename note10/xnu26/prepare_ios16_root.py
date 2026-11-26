@@ -43,6 +43,8 @@ OVERLAY = (
      ('bsd/kern/kern_cs.c', 'iokit/bsddev/IOKitBSDInit.cpp')),
     ('0033-exynos9825-n10-ephemeral-storage.patch', 'c21abc250152fbb13320bd55aee52c2ef44a5cb2b49f8ef79f96e3312331890f',
      ('bsd/kern/kern_mib.c',)),
+    ('0034-exynos9825-n10-ufs-ram-write-overlay.patch', '9584e547d4c68e395925957d50a4f32ecb4b5a70adfb78b965913b145afe10dd',
+     ('bsd/dev/n10_ufs.c', 'bsd/vfs/vfs_subr.c', 'bsd/vfs/vfs_syscalls.c')),
 )
 STAGED_DIRS = ('bsd/n10_hfs/core', 'bsd/n10_hfs/hfs_encodings')
 

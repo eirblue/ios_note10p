@@ -1,0 +1,239 @@
+diff --git a/bsd/dev/n10_ufs.c b/bsd/dev/n10_ufs.c
+index 0085f5c..b48388b 100644
+--- a/bsd/dev/n10_ufs.c
++++ b/bsd/dev/n10_ufs.c
+@@ -26,7 +26,13 @@
+  * is clamped to the GPT header/entries while probing and to the one
+  * partition "userdata" afterwards; the driver refuses if that partition
+  * does not match partition-lba or overlaps boot, recovery, dtb, dtbo or
+- * vbmeta; write opens and writes return EROFS.
++ * vbmeta; raw (character) writes return EROFS.
++ *
++ * v368 RAM write overlay: block-device writes never reach the UFS. Each
++ * written 4 KiB partition block is kept in a kernel RAM page (at most
++ * N10_UFS_RAM_BLOCKS, then ENOSPC) and reads return the RAM copy over the
++ * READ(10) data, so the root HFS can be mounted read-write for the boot
++ * while userdata stays unchanged. Everything written is lost at reset.
+  *
+  * Register accesses: read HCS, IS, UTRLDBR, UTRLBA, UTRLBAU, UTRLRSR, the
+  * nexus register and (v346, read-only, same vs-hci page as the nexus
+@@ -167,6 +173,15 @@ static struct {
+ 	bool ready;
+ } nu;
+ 
++/* v368 RAM write overlay: open-addressed table, key = partition block + 1 (0 = empty). */
++#define N10_UFS_RAM_BLOCKS      32768u          /* 128 MiB of written blocks at most */
++#define N10_UFS_RAM_SLOTS       (2 * N10_UFS_RAM_BLOCKS)
++static struct {
++	uint32_t key;
++	void *page;
++} *n10_ufs_ram;
++static uint32_t n10_ufs_ram_used;
++
+ static LCK_GRP_DECLARE(n10_ufs_grp, "n10_ufs");
+ static LCK_MTX_DECLARE(n10_ufs_lock, &n10_ufs_grp);
+ 
+@@ -363,6 +378,41 @@ n10_ufs_read(uint64_t lba, uint32_t count)
+ 	n10_ufs_stop(13, 0x80u | (((const uint8_t *)(nu.dma + DMA_UCD + UCD_RESP))[36] & 0x0fu));
+ }
+ 
++/*
++ * v368: RAM page of partition block blk, or NULL. With create, a missing page
++ * is allocated and filled from the UFS (READ(10)); NULL when the overlay is full.
++ * Caller holds n10_ufs_lock.
++ */
++static void *
++n10_ufs_ram_page(uint64_t blk, bool create)
++{
++	uint32_t key = (uint32_t)blk + 1;
++	uint32_t i = (key * 2654435761u) & (N10_UFS_RAM_SLOTS - 1);
++
++	while (n10_ufs_ram[i].key) {
++		if (n10_ufs_ram[i].key == key) {
++			return n10_ufs_ram[i].page;
++		}
++		i = (i + 1) & (N10_UFS_RAM_SLOTS - 1);
++	}
++	if (!create) {
++		return NULL;
++	}
++	if (n10_ufs_ram_used >= N10_UFS_RAM_BLOCKS) {
++		return NULL;
++	}
++	void *page = kalloc_data(UFS_BLOCK, Z_WAITOK | Z_NOFAIL);
++	n10_ufs_read(nu.first_block + blk, 1);
++	memcpy(page, (const void *)(nu.dma + DMA_BOUNCE), UFS_BLOCK);
++	n10_ufs_ram[i].key = key;
++	n10_ufs_ram[i].page = page;
++	if (n10_ufs_ram_used++ % 8192 == 0) {
++		printf("Note10 UFS: RAM overlay %u/%u blocks (block 0x%llx)\n",
++		    n10_ufs_ram_used, N10_UFS_RAM_BLOCKS, blk);
++	}
++	return page;
++}
++
+ static bool
+ n10_ufs_overlap(uint64_t a0, uint64_t a1, uint64_t b0, uint64_t b1)
+ {
+@@ -476,12 +526,12 @@ n10_ufs_take_over_host(void)
+ }
+ 
+ static int
+-n10_ufs_open(__unused dev_t dev, int flags, __unused int devtype, __unused struct proc *p)
++n10_ufs_open(__unused dev_t dev, __unused int flags, __unused int devtype, __unused struct proc *p)
+ {
+ 	if (!nu.ready) {
+ 		return ENXIO;
+ 	}
+-	return (flags & FWRITE) ? EROFS : 0;
++	return 0;
+ }
+ 
+ static int
+@@ -500,10 +550,6 @@ n10_ufs_strategy(buf_t bp)
+ 	uint64_t part_bytes = nu.nblocks * UFS_BLOCK;
+ 
+ 	buf_setresid(bp, count);
+-	if (!(buf_flags(bp) & B_READ)) {
+-		error = EROFS;
+-		goto done;
+-	}
+ 	if (off > part_bytes || count > part_bytes - off) {
+ 		error = EINVAL;
+ 		goto done;
+@@ -517,6 +563,25 @@ n10_ufs_strategy(buf_t bp)
+ 	}
+ 
+ 	lck_mtx_lock(&n10_ufs_lock);
++	if (!(buf_flags(bp) & B_READ)) {
++		/* v368: writes go to the RAM overlay only, never to the UFS. */
++		for (uint32_t done = 0; done < count;) {
++			uint64_t pos = off + done;
++			uint32_t skip = (uint32_t)(pos % UFS_BLOCK);
++			uint32_t want = MIN(count - done, UFS_BLOCK - skip);
++			uint8_t *page = n10_ufs_ram_page(pos / UFS_BLOCK, true);
++			if (!page) {
++				error = ENOSPC;
++				break;
++			}
++			memcpy(page + skip, vaddr + done, want);
++			done += want;
++			buf_setresid(bp, count - done);
++		}
++		lck_mtx_unlock(&n10_ufs_lock);
++		buf_unmap(bp);
++		goto done;
++	}
+ 	for (uint32_t done = 0; done < count;) {
+ 		uint64_t pos = off + done;
+ 		uint64_t lba = pos / UFS_BLOCK;
+@@ -524,6 +589,12 @@ n10_ufs_strategy(buf_t bp)
+ 		uint32_t want = MIN(count - done, BOUNCE_SIZE - skip);
+ 		uint32_t blocks = (skip + want + UFS_BLOCK - 1) / UFS_BLOCK;
+ 		n10_ufs_read(nu.first_block + lba, blocks);
++		for (uint32_t b = 0; b < blocks; b++) {
++			const void *page = n10_ufs_ram_page(lba + b, false);
++			if (page) {
++				memcpy((void *)(nu.dma + DMA_BOUNCE + b * UFS_BLOCK), page, UFS_BLOCK);
++			}
++		}
+ 		memcpy(vaddr + done, (const void *)(nu.dma + DMA_BOUNCE + skip), want);
+ 		done += want;
+ 		buf_setresid(bp, count - done);
+@@ -565,14 +636,15 @@ n10_ufs_ioctl(__unused dev_t dev, u_long cmd, caddr_t data, __unused int flag,
+ 		*o = nu.nblocks * UFS_BLOCK / nu.secsize;
+ 		return 0;
+ 	case DKIOCISWRITABLE:
+-		*f = 0;
++		*f = 1;                 /* v368: block writes land in the RAM overlay */
+ 		return 0;
+ 	case DKIOCGETMAXBLOCKCOUNTREAD:
+-		*o = BOUNCE_SIZE / nu.secsize;
+-		return 0;
+ 	case DKIOCGETMAXBLOCKCOUNTWRITE:
+-		*o = 0;
++		*o = BOUNCE_SIZE / nu.secsize;
+ 		return 0;
++	case DKIOCSYNCHRONIZE:
++	case DKIOCSYNCHRONIZECACHE:
++		return 0;               /* RAM overlay: nothing to flush */
+ 	case DKIOCGETMAXSEGMENTCOUNTREAD:
+ 	case DKIOCGETMAXSEGMENTCOUNTWRITE:
+ 		*o = 1;
+@@ -703,6 +775,13 @@ n10_ufs_init(void)
+ 	}
+ 	nu.dma_pa = ptoa_64(pn);
+ 	nu.secsize = DEV_BSIZE;
++	vm_offset_t ram = 0;
++	kr = kmem_alloc(kernel_map, &ram, N10_UFS_RAM_SLOTS * sizeof(*n10_ufs_ram),
++	    KMA_ZERO | KMA_PERMANENT, VM_KERN_MEMORY_FILE);
++	if (kr != KERN_SUCCESS) {
++		n10_ufs_stop(5, n10_ufs_ticks() | 8);
++	}
++	n10_ufs_ram = (void *)ram;
+ 
+ 	lck_mtx_lock(&n10_ufs_lock);
+ 	n10_ufs_take_over_host();
+@@ -721,8 +800,17 @@ n10_ufs_init(void)
+ 	devfs_make_node(nu.bdev, DEVFS_BLOCK, UID_ROOT, GID_OPERATOR, 0640, "n10ufs0");
+ 	devfs_make_node(makedev(nu.cmajor, 0), DEVFS_CHAR, UID_ROOT, GID_OPERATOR, 0640, "rn10ufs0");
+ 	nu.ready = true;
+-	printf("Note10 UFS: \"%s\" on LUN 0: first block 0x%llx, %llu MiB, read-only\n",
+-	    n10_ufs_part, nu.first_block, nu.nblocks * UFS_BLOCK >> 20);
++	printf("Note10 UFS: \"%s\" on LUN 0: first block 0x%llx, %llu MiB, read-only, RAM write overlay %u MiB\n",
++	    n10_ufs_part, nu.first_block, nu.nblocks * UFS_BLOCK >> 20, N10_UFS_RAM_BLOCKS * UFS_BLOCK >> 20);
++}
++
++/* v368: the root on this device may be mounted read-write (writes stay in RAM). */
++bool n10_ufs_ram_overlay_dev(dev_t dev);
++
++bool
++n10_ufs_ram_overlay_dev(dev_t dev)
++{
++	return nu.ready && dev == nu.bdev;
+ }
+ 
+ /* Root device for rd=n10ufs0 (IOFindBSDRoot). v344: failures stop on the ladder; 0 is the only return. */
+diff --git a/bsd/vfs/vfs_subr.c b/bsd/vfs/vfs_subr.c
+index 5b038ca..53f2c0e 100644
+--- a/bsd/vfs/vfs_subr.c
++++ b/bsd/vfs/vfs_subr.c
+@@ -1250,6 +1250,16 @@ vfs_mountroot(void)
+ 
+ 		mp = vfs_rootmountalloc_internal(vfsp, "root_device");
+ 		mp->mnt_devvp = rootvp;
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++		/*
++		 * Note10: writes to n10ufs0 stay in its RAM overlay (bsd/dev/n10_ufs.c),
++		 * so mount that root read-write; userdata itself is never written.
++		 */
++		extern bool n10_ufs_ram_overlay_dev(dev_t dev);
++		if (n10_ufs_ram_overlay_dev(rootdev)) {
++			mp->mnt_flag &= ~MNT_RDONLY;
++		}
++#endif
+ 
+ 		if (vfsp->vfc_mountroot) {
+ 			error = (*vfsp->vfc_mountroot)(mp, rootvp, ctx);
+diff --git a/bsd/vfs/vfs_syscalls.c b/bsd/vfs/vfs_syscalls.c
+index 942dc24..b22eebf 100644
+--- a/bsd/vfs/vfs_syscalls.c
++++ b/bsd/vfs/vfs_syscalls.c
+@@ -1284,6 +1284,17 @@ mount_common(const char *fstypename, vnode_t pvp, vnode_t vp,
+ 			goto out1;
+ 		}
+ 
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++		/*
++		 * Note10: a read-write root is the n10ufs0 RAM overlay (vfs_mountroot);
++		 * keep it read-write when fstab ("/ hfs ro") asks for a downgrade.
++		 */
++		if ((mp->mnt_flag & MNT_ROOTFS) && !vfs_isrdonly(mp) && (flags & MNT_RDONLY)) {
++			printf("Note10: keeping the RAM-overlay root read-write\n");
++			flags &= ~MNT_RDONLY;
++		}
++#endif
++
+ 		/*
+ 		 * Only root, or the user that did the original mount is
+ 		 * permitted to update it.
