@@ -1,29 +1,30 @@
 diff --git a/osfmk/arm64/note10/n10_dsslog.c b/osfmk/arm64/note10/n10_dsslog.c
-index 5473798..cfa7a11 100644
+index 5473798..a4ba216 100644
 --- a/osfmk/arm64/note10/n10_dsslog.c
 +++ b/osfmk/arm64/note10/n10_dsslog.c
-@@ -515,4 +515,24 @@ n10_sync_kother_capture(arm_saved_state_t *ss, uint64_t esr, uint64_t far)
+@@ -515,4 +515,25 @@ n10_sync_kother_capture(arm_saved_state_t *ss, uint64_t esr, uint64_t far)
  {
  	n10_sync_capture(1, ss, esr, far);
  }
 +
 +/*
-+ * v384: text padding. The binary chain places its caves (v315 cave, v324/v325/
-+ * v334 stubs, pthread trap sled) in the zero tail between the end of
-+ * __TEXT_EXEC,__text and the 16 KiB end of the __TEXT_EXEC segment and needs
-+ * >= 0x1168 bytes there. 0051 moved the __text end to image offset 0xc17e98,
-+ * leaving 0x48 bytes before the segment end 0xc18000. These 0x800 bytes of
-+ * "brk #0" grow __text so its end crosses into the next 16 KiB page (expected
-+ * end 0xc18698, segment end 0xc1c000, tail 0x3968). Never referenced or
-+ * executed; .no_dead_strip keeps it under -dead_strip. Resize when later
-+ * patches move the __text end (keep segment end - __text end >= 0x1168).
++ * v385: cave space for the binary chain. The chain used to place its caves
++ * (v315 cave, v324/v325/v334 stubs, run-order text tail incl. the pthread trap
++ * sled; about 0x1200 bytes from the v315 cave start) in the zero tail between
++ * the __text end and the 16 KiB end of __TEXT_EXEC, which 0051 shrank to
++ * 0x48 bytes; padding elsewhere in __text cannot move that end (later objects
++ * are 16 KiB aligned). From v385 the chain anchors its text caves on
++ * _n10_text_tail_pad instead: 0x2000 zero bytes (udf #0 if ever executed),
++ * 256-byte aligned, inside executable __TEXT_EXEC,__text, with no symbol,
++ * relocation or reference inside. Only chain-written cave code inside it runs.
++ * .no_dead_strip keeps it under -dead_strip.
 + */
 +__asm__(
 +	"	.section __TEXT,__text,regular,pure_instructions\n"
-+	"	.p2align 2\n"
++	"	.p2align 8\n"
 +	"	.globl _n10_text_tail_pad\n"
 +	"	.no_dead_strip _n10_text_tail_pad\n"
 +	"_n10_text_tail_pad:\n"
-+	"	.fill 512, 4, 0xd4200000\n"
++	"	.space 0x2000, 0\n"
 +	"	.text\n");
  #endif /* ARM64_BOARD_CONFIG_EXYNOS9825 */
