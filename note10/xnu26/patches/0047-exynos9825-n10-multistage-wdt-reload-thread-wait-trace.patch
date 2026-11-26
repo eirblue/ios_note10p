@@ -1,0 +1,401 @@
+diff --git a/bsd/dev/arm/systemcalls.c b/bsd/dev/arm/systemcalls.c
+index fcd2772..2f1cf57 100644
+--- a/bsd/dev/arm/systemcalls.c
++++ b/bsd/dev/arm/systemcalls.c
+@@ -80,46 +80,82 @@ n10_xpc_note(int trap, int num, int err)
+ }
+ 
+ /*
+- * Note10 (v379): where do the xpcproxy processes wait? One slot per xpcproxy
+- * pid (first N10_XQ_SLOTS pids) holds the BSD syscall (>0) or Mach trap (<0)
+- * it last entered and whether that call has not returned through the
+- * syscall/trap exit path yet. n10_wdt prints the slots once per heartbeat
+- * (N379Q, at most N10_XQ_LINES lines per boot so the shared dss trace budget
+- * keeps room for N376E/N376X). A Mach trap that returns through a continuation
+- * keeps in=1 until the next call. CPU0 only; the timer reader tolerates a torn
+- * slot. Observation only: no return value or state of the call is changed.
++ * Note10 (v379/v380): where do xpcproxy and launchd wait? v379 (N379Q, one slot
++ * per xpcproxy pid) showed xpcproxy idle between calls while the CPU idled.
++ * v380 keys the slots on the thread (tid): N10_XQ_XPC slots for threads of
++ * processes named "xpcproxy", N10_XQ_LD for launchd (pid 1). Each holds the
++ * BSD syscall (>0) or Mach trap (<0) it last entered, in=1 until that call
++ * leaves through the syscall/trap exit path (a trap returning through a
++ * continuation keeps in=1 until the next call), the boot time in ms of the
++ * entry and, for mach_msg2 (-47), the options, remote port name and msgh_id.
++ * At each heartbeat n10_wdt calls n10_xpc_dump: one N380T line per slot whose
++ * text changed, with the thread's state, block hint, wait event, sched pri,
++ * suspend counts and user pc (n10_thread_peek in n10_wdt.c reads the thread
++ * with ml_nofault_copy and checks its thread_id), and one N380W line with
++ * launchd's workqueue counters when they changed. One N380O line gives the
++ * uthread offset of the throttle_lowpri_io sleep event. Own line cap
++ * N10_XQ_LINES written with n10_dsslog_write, outside the shared trace budget.
++ * CPU0 only; the timer reader tolerates a torn slot (tid is set last).
++ * Observation only: no return value or state of any call is changed.
+  */
+-#define N10_XQ_SLOTS            8
+-#define N10_XQ_LINES            192u
+-void n10_xpc_enter(int num);
++#include <pthread/workqueue_internal.h>
++#define N10_XQ_XPC              8
++#define N10_XQ_LD               6
++#define N10_XQ_SLOTS            (N10_XQ_XPC + N10_XQ_LD)
++#define N10_XQ_LINES            448u
++#define N10_XQ_MSG2             (-47)           /* mach_msg2_trap */
++extern void n10_dsslog_write(const char *s, int n);
++extern int n10_thread_peek(const void *th, uint64_t tid, char *buf, int len);
++void n10_xpc_enter(int num, uint64_t opt, uint64_t rem_loc, uint64_t vou_id);
+ void n10_xpc_leave(void);
+ void n10_xpc_dump(void);
+ static struct {
++	uint64_t tid;
++	const void *th;
+ 	int pid;
+ 	int num;
+ 	uint32_t in;
++	uint32_t ms;
++	uint32_t opt;
++	uint32_t rem;
++	uint32_t id;
++	uint32_t sum;           /* FNV-1a of the last printed N380T text */
+ } n10_xq[N10_XQ_SLOTS];
+-static uint32_t n10_xq_lines;
++static uint32_t n10_xq_lines, n10_xq_wsum, n10_xq_olog;
+ 
+ static int
+ n10_xpc_slot(int alloc)
+ {
+ 	proc_t p = current_proc();
+-	int pid, i;
++	thread_t th = current_thread();
++	uint64_t tid;
++	int pid, lo, hi, i;
+ 
+-	if (p == PROC_NULL || strncmp(p->p_comm, "xpcproxy", 8) != 0) {
++	if (p == PROC_NULL) {
+ 		return -1;
+ 	}
+ 	pid = proc_getpid(p);
+-	for (i = 0; i < N10_XQ_SLOTS; i++) {
+-		if (n10_xq[i].pid == pid) {
++	if (pid == 1) {
++		lo = N10_XQ_XPC;
++		hi = N10_XQ_SLOTS;
++	} else if (strncmp(p->p_comm, "xpcproxy", 8) == 0) {
++		lo = 0;
++		hi = N10_XQ_XPC;
++	} else {
++		return -1;
++	}
++	tid = thread_tid(th);
++	for (i = lo; i < hi; i++) {
++		if (n10_xq[i].tid == tid) {
+ 			return i;
+ 		}
+-		if (n10_xq[i].pid == 0) {
++		if (n10_xq[i].tid == 0) {
+ 			if (!alloc) {
+ 				return -1;
+ 			}
+ 			n10_xq[i].pid = pid;
++			n10_xq[i].th = th;
++			n10_xq[i].tid = tid;
+ 			return i;
+ 		}
+ 	}
+@@ -127,14 +163,21 @@ n10_xpc_slot(int alloc)
+ }
+ 
+ void
+-n10_xpc_enter(int num)
++n10_xpc_enter(int num, uint64_t opt, uint64_t rem_loc, uint64_t vou_id)
+ {
+ 	int i = n10_xpc_slot(1);
++	uint64_t ns = 0;
+ 
+-	if (i >= 0) {
+-		n10_xq[i].num = num;
+-		n10_xq[i].in = 1;
++	if (i < 0) {
++		return;
+ 	}
++	absolutetime_to_nanoseconds(mach_absolute_time(), &ns);
++	n10_xq[i].num = num;
++	n10_xq[i].ms = (uint32_t)(ns / NSEC_PER_MSEC);
++	n10_xq[i].opt = (uint32_t)opt;
++	n10_xq[i].rem = (uint32_t)rem_loc;
++	n10_xq[i].id = (uint32_t)(vou_id >> 32);
++	n10_xq[i].in = 1;
+ }
+ 
+ void
+@@ -147,14 +190,69 @@ n10_xpc_leave(void)
+ 	}
+ }
+ 
++/* Append one bounded line (text without newline, n chars) if it changed since this key's last line. */
++static void
++n10_xq_emit(char *line, int n, int cap, uint32_t *last)
++{
++	uint32_t sum = 2166136261u;
++
++	if (n < 0) {
++		return;
++	}
++	if (n > cap - 2) {
++		n = cap - 2;
++	}
++	for (int k = 0; k < n; k++) {
++		sum = (sum ^ (uint8_t)line[k]) * 16777619u;
++	}
++	if (sum == *last || __atomic_fetch_add(&n10_xq_lines, 1u, __ATOMIC_RELAXED) >= N10_XQ_LINES) {
++		return;
++	}
++	*last = sum;
++	line[n++] = '\n';
++	n10_dsslog_write(line, n);
++}
++
+ void
+ n10_xpc_dump(void)
+ {
+-	for (int i = 0; i < N10_XQ_SLOTS && n10_xq[i].pid != 0; i++) {
+-		if (__atomic_fetch_add(&n10_xq_lines, 1u, __ATOMIC_RELAXED) >= N10_XQ_LINES) {
+-			return;
++	char line[200];
++	int n, m;
++
++	if (n10_xq_olog == 0) {
++		n = snprintf(line, sizeof(line), "N380O thr=u+0x%lx", (unsigned long)__builtin_offsetof(struct uthread, uu_on_throttlelist));
++		n10_xq_emit(line, n, (int)sizeof(line), &n10_xq_olog);
++	}
++	for (int i = 0; i < N10_XQ_SLOTS; i++) {
++		uint64_t tid = n10_xq[i].tid;
++		if (tid == 0) {
++			continue;
++		}
++		n = snprintf(line, sizeof(line), "N380T p=%d t=%llx c=%d in=%u ms=%u",
++		    n10_xq[i].pid, tid, n10_xq[i].num, n10_xq[i].in, n10_xq[i].ms);
++		if (n > 0 && n < (int)sizeof(line) && n10_xq[i].num == N10_XQ_MSG2) {
++			m = snprintf(line + n, sizeof(line) - (size_t)n, " o=%x r=%x id=%x",
++			    n10_xq[i].opt, n10_xq[i].rem, n10_xq[i].id);
++			n += m > 0 ? m : 0;
+ 		}
+-		n10_dsslog_trace("N379Q pid=%d c=%d in=%u", n10_xq[i].pid, n10_xq[i].num, n10_xq[i].in);
++		if (n > 0 && n < (int)sizeof(line) - 1) {
++			m = n10_thread_peek(n10_xq[i].th, tid, line + n, (int)sizeof(line) - n);
++			if (m > 0) {
++				n += m;
++			} else {
++				m = snprintf(line + n, sizeof(line) - (size_t)n, " gone");
++				n += m > 0 ? m : 0;
++			}
++		}
++		n10_xq_emit(line, n, (int)sizeof(line), &n10_xq[i].sum);
++	}
++	proc_t ip = initproc;
++	struct workqueue *wq = ip != PROC_NULL ? ip->p_wqptr : NULL;
++	if (wq != NULL && wq != (struct workqueue *)~(uintptr_t)0) {
++		n = snprintf(line, sizeof(line), "N380W ld nth=%u idle=%u dying=%u req=%u cre=%u con=%u",
++		    (unsigned)wq->wq_nthreads, (unsigned)wq->wq_thidlecount, (unsigned)wq->wq_thdying_count,
++		    wq->wq_reqcount, wq->wq_creations, (unsigned)wq->wq_constrained_threads_scheduled);
++		n10_xq_emit(line, n, (int)sizeof(line), &n10_xq_wsum);
+ 	}
+ }
+ #endif /* ARM64_BOARD_CONFIG_EXYNOS9825 */
+@@ -286,7 +384,7 @@ unix_syscall(
+ 
+ 	AUDIT_SYSCALL_ENTER(code, proc, uthread);
+ #if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
+-	n10_xpc_enter(code);
++	n10_xpc_enter(code, 0, 0, 0);
+ #endif
+ 	error = (*(callp->sy_call))(proc, &uthread->uu_arg[0], &(uthread->uu_rval[0]));
+ 	AUDIT_SYSCALL_EXIT(code, proc, uthread, error);
+diff --git a/osfmk/arm64/bsd_arm64.c b/osfmk/arm64/bsd_arm64.c
+index 9130f9c..648a866 100644
+--- a/osfmk/arm64/bsd_arm64.c
++++ b/osfmk/arm64/bsd_arm64.c
+@@ -60,7 +60,7 @@
+ #if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
+ /* Note10 (v378): bsd/dev/arm/systemcalls.c, xpcproxy failing-call trace. */
+ extern void n10_xpc_note(int trap, int num, int err);
+-extern void n10_xpc_enter(int num);
++extern void n10_xpc_enter(int num, uint64_t opt, uint64_t rem_loc, uint64_t vou_id);
+ extern void n10_xpc_leave(void);
+ #endif
+ 
+@@ -303,7 +303,8 @@ mach_syscall(struct arm_saved_state *state)
+ 
+ 
+ #if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
+-	n10_xpc_enter(-(int)call_number);     /* v379: Mach trap entered (N379Q) */
++	/* v379/v380: Mach trap entered; mach_msg2 options, remote|local port names, voucher|msgh_id (N380T). */
++	n10_xpc_enter(-(int)call_number, args.arg2, args.arg4, args.arg5);
+ #endif
+ 	retval = mach_call(&args);
+ 
+diff --git a/osfmk/arm64/note10/n10_wdt.c b/osfmk/arm64/note10/n10_wdt.c
+index 05ce53f..f5c904b 100644
+--- a/osfmk/arm64/note10/n10_wdt.c
++++ b/osfmk/arm64/note10/n10_wdt.c
+@@ -29,6 +29,20 @@
+  * same guards between commands; it never re-arms the timer. n10_wdt_ticks
+  * counts timer-path pets only, so a caller can report whether timer
+  * interrupts ever delivered one.
++ *
++ * v380: the loader Linux s3c2410_wdt keepalive also reloads the cl2
++ * multistage WDT (10060000.watchdog_cl2, WTDAT = 70% of the cl0 count,
++ * ENABLE|INTEN, RSTEN clear), which the actor's arming starts together
++ * with cl0. XNU never reloaded it, and every v372..v379 boot that kept
++ * petting cl0 ended ~12-17 s after the arming in a PIN_RESET / PMIC WTSR
++ * (S2MPS20 INT1 WRSTB) with no XNU panic. When the cl0 window is the
++ * expected 0x10050000 and the live cl2 registers show exactly that
++ * multistage arming, every guarded pet also writes the cl2 WTDAT value to
++ * the cl2 WTCNT (the same single register write the Linux keepalive does;
++ * no WTCON/WTDAT/WTCLRINT/PMU write). It stops with cl0 (deadline, arming
++ * change, hang or panic); cl0 (10 s, RSTEN) then expires before the
++ * un-reloaded cl2 (2 x 7 s), as in v373/v374. A changed cl2 arming only
++ * stops the cl2 reload.
+  */
+ #if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
+ #include <stdint.h>
+@@ -43,6 +57,8 @@
+ #include <arm/cpu_data_internal.h>
+ #include <arm64/proc_reg.h>
+ #include <kern/misc_protos.h>
++#include <kern/thread.h>
++#include <kern/task.h>
+ 
+ #define N10_WTCON               0x0
+ #define N10_WTDAT               0x4
+@@ -53,6 +69,9 @@
+ #define N10_WDT_PERIOD_NS       (2ull * NSEC_PER_SEC)
+ #define N10_WDT_DEADLINE_S      300u
+ #define N10_WDT_DEADLINE_MAX_S  900u
++#define N10_WDT_CL0_PA          0x10050000ull   /* 10050000.watchdog_cl0 */
++#define N10_WDT_CL2_PA          0x10060000ull   /* 10060000.watchdog_cl2 (multistage) */
++#define N10_WDT_MULTI_RATIO     70u             /* s3c2410_wdt.c MULTISTAGE_WDT_RATIO */
+ 
+ static timer_call_data_t n10_wdt_call;
+ static vm_offset_t n10_wdt_regs;
+@@ -62,6 +81,8 @@ static bool n10_wdt_stopped, n10_wdt_running;
+ uint32_t n10_wdt_ticks;         /* timer-path pets (exported for n10_ufs) */
+ void n10_wdt_kick(void);
+ static uint64_t n10_wdt_start_abs;
++static vm_offset_t n10_wdt2_regs;       /* v380: cl2 multistage WDT, 0 = not reloaded */
++static uint32_t n10_wdt2_reload;
+ 
+ /*
+  * v376: one "N376H" line per timer-path pet into the dss ring
+@@ -79,7 +100,7 @@ extern uint32_t n10_sync_kfast;          /* v377: n10_dsslog.c kother forwarding
+ extern uint32_t memorystatus_available_pages;   /* v378: bsd/kern/kern_memorystatus.c */
+ extern uint32_t c_segment_pages_compressed;     /* v378: osfmk/vm/vm_compressor.c */
+ extern int proc_selfpid(void);
+-extern void n10_xpc_dump(void);               /* v379: bsd/dev/arm/systemcalls.c N379Q */
++extern void n10_xpc_dump(void);               /* v379/v380: bsd/dev/arm/systemcalls.c N380T/N380W */
+ static uint32_t n10_wdt_kfast_seen;
+ 
+ static void
+@@ -158,6 +179,16 @@ n10_wdt_pet(uint64_t now)
+ 		return false;
+ 	}
+ 	*(volatile uint32_t *)(n10_wdt_regs + N10_WTCNT) = n10_wdt_reload;
++	if (n10_wdt2_regs != 0) {
++		/* v380: cl2 multistage reload, only while its live arming is unchanged. */
++		volatile uint32_t *w2 = (volatile uint32_t *)n10_wdt2_regs;
++		if ((w2[N10_WTCON / 4] & (N10_WTCON_ENABLE | N10_WTCON_RSTEN | N10_WTCON_INTEN)) ==
++		    (N10_WTCON_ENABLE | N10_WTCON_INTEN) && w2[N10_WTDAT / 4] == n10_wdt2_reload) {
++			w2[N10_WTCNT / 4] = n10_wdt2_reload;
++		} else {
++			n10_wdt2_regs = 0;
++		}
++	}
+ 	return true;
+ }
+ 
+@@ -230,6 +261,23 @@ n10_wdt_start(void)
+ 		printf("Note10 WDT: live arming differs from the handoff; not petting\n");
+ 		return;
+ 	}
++	if (base == N10_WDT_CL0_PA) {
++		/* v380: reload the cl2 multistage WDT with cl0 when Linux left exactly its multistage arming. */
++		vm_offset_t page2 = ml_io_map((vm_offset_t)N10_WDT_CL2_PA, PAGE_SIZE);
++		if (page2) {
++			volatile uint32_t *w2 = (volatile uint32_t *)page2;
++			uint32_t con2 = w2[N10_WTCON / 4], dat2 = w2[N10_WTDAT / 4], cnt2 = w2[N10_WTCNT / 4];
++			uint32_t want2 = (uint32_t)(((uint64_t)n10_wdt_reload * N10_WDT_MULTI_RATIO) / 100u);
++			bool ok2 = (con2 & (N10_WTCON_ENABLE | N10_WTCON_RSTEN | N10_WTCON_INTEN)) ==
++			    (N10_WTCON_ENABLE | N10_WTCON_INTEN) && dat2 != 0 && dat2 == want2;
++			if (ok2) {
++				n10_wdt2_reload = dat2;
++				n10_wdt2_regs = page2;
++			}
++			printf("Note10 WDT: cl2 con=0x%x dat=0x%x cnt=0x%x want=0x%x %s\n",
++			    con2, dat2, cnt2, want2, ok2 ? "reloading" : "not reloading");
++		}
++	}
+ 	PE_parse_boot_argn("n10wdt_deadline", &deadline_s, sizeof(deadline_s));
+ 	if (deadline_s > N10_WDT_DEADLINE_MAX_S) {
+ 		deadline_s = N10_WDT_DEADLINE_MAX_S;
+@@ -252,4 +300,61 @@ n10_wdt_start(void)
+ }
+ 
+ STARTUP(EARLY_BOOT, STARTUP_RANK_FIRST, n10_wdt_start);
++
++/*
++ * v380: one-line snapshot of a thread recorded by the bsd/dev/arm/systemcalls.c
++ * N380T slots, called from the heartbeat (timer interrupt, CPU0). Every field
++ * is copied with ml_nofault_copy, so a freed or unmapped thread cannot fault;
++ * a thread_id mismatch (freed, maybe reused) returns 0. Appends
++ * " st=<state> bh=<block_hint> we=<wait_event or u+off into its uthread>
++ * pri=<sched_pri> sc=<thread>/<task suspend count> pc=<user pc>" to buf.
++ */
++int n10_thread_peek(const void *thp, uint64_t tid, char *buf, int len);
++
++#define N10_PEEK(src, dst) \
++	(ml_nofault_copy((vm_offset_t)&(src), (vm_offset_t)&(dst), sizeof(dst)) == sizeof(dst))
++
++int
++n10_thread_peek(const void *thp, uint64_t tid, char *buf, int len)
++{
++	struct thread *th = (struct thread *)(uintptr_t)thp;
++	__typeof__(th->thread_id) id = 0;
++	__typeof__(th->state) st = 0;
++	__typeof__(th->wait_event) we = 0;
++	__typeof__(th->block_hint) bh = kThreadWaitNone;
++	__typeof__(th->suspend_count) tsc = 0;
++	__typeof__(th->sched_pri) pri = 0;
++	__typeof__(th->t_tro) tro = NULL;
++	__typeof__(th->machine.upcb) upcb = NULL;
++	struct task *task = NULL;
++	int ksc = -1, n;
++	arm_saved_state_t ss;
++	uint64_t pc = 0, ut = (uint64_t)(uintptr_t)th + sizeof(struct thread), wev;
++
++	if (th == NULL || buf == NULL || len <= 0 ||
++	    !N10_PEEK(th->thread_id, id) || id != tid ||
++	    !N10_PEEK(th->state, st) || !N10_PEEK(th->wait_event, we) ||
++	    !N10_PEEK(th->block_hint, bh) || !N10_PEEK(th->suspend_count, tsc) ||
++	    !N10_PEEK(th->sched_pri, pri)) {
++		return 0;
++	}
++	if (N10_PEEK(th->t_tro, tro) && tro != NULL && N10_PEEK(tro->tro_task, task) && task != NULL) {
++		(void)N10_PEEK(task->suspend_count, ksc);
++	}
++	if (N10_PEEK(th->machine.upcb, upcb) && upcb != NULL && N10_PEEK(*upcb, ss)) {
++		pc = (uint64_t)get_saved_state_pc(&ss);
++	}
++	wev = (uint64_t)we;
++	if (wev >= ut && wev - ut < 0x1000) {
++		n = snprintf(buf, (size_t)len, " st=%x bh=%x we=u+0x%llx pri=%d sc=%d/%d pc=0x%llx",
++		    (unsigned)st, (unsigned)bh, wev - ut, (int)pri, (int)tsc, ksc, pc);
++	} else {
++		n = snprintf(buf, (size_t)len, " st=%x bh=%x we=0x%llx pri=%d sc=%d/%d pc=0x%llx",
++		    (unsigned)st, (unsigned)bh, wev, (int)pri, (int)tsc, ksc, pc);
++	}
++	if (n < 0) {
++		return 0;
++	}
++	return n < len ? n : len - 1;
++}
+ #endif /* ARM64_BOARD_CONFIG_EXYNOS9825 */

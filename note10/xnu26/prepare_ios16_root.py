@@ -80,6 +80,9 @@ OVERLAY = (
     ('0046-exynos9825-n10-xpcproxy-wait-macpolicy-trace.patch',
      '3e198ff59cd9277bfd2e207ba20d241f3700fad0291e2d6382bc1bc3ec3b5a1c',
      ('bsd/dev/arm/systemcalls.c', 'osfmk/arm64/bsd_arm64.c', 'osfmk/arm64/note10/n10_wdt.c', 'security/mac_base.c')),
+    ('0047-exynos9825-n10-multistage-wdt-reload-thread-wait-trace.patch',
+     'f3b41f4d98631d326c545031787e009fa565640a2ed0599e059894dab80f0ded',
+     ('bsd/dev/arm/systemcalls.c', 'osfmk/arm64/bsd_arm64.c', 'osfmk/arm64/note10/n10_wdt.c')),
 )
 STAGED_DIRS = ('bsd/n10_hfs/core', 'bsd/n10_hfs/hfs_encodings')
 
