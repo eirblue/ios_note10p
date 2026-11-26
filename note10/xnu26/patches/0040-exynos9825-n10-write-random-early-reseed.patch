@@ -1,0 +1,28 @@
+diff --git a/osfmk/prng/prng_random.c b/osfmk/prng/prng_random.c
+index 504b3fa..b7bb02c 100644
+--- a/osfmk/prng/prng_random.c
++++ b/osfmk/prng/prng_random.c
+@@ -428,7 +428,22 @@ write_random(void * buffer, u_int numbytes)
+ 		memcpy(seed, buffer, numbytes);
+ 	}
+ 
+-	prng_funcs.reseed(prng_ctx, sizeof(seed), seed);
++	if (__probable(prng_ready)) {
++		prng_funcs.reseed(prng_ctx, sizeof(seed), seed);
++	} else {
++		/*
++		 * Note10 (EXYNOS9825): no corecrypto kext runs
++		 * register_and_init_prng(), so prng_funcs.reseed is NULL and
++		 * read_erandom() keeps serving all kernel randomness from the
++		 * early DRBG. Mix the user-supplied entropy (iOS 16 userland
++		 * writes /dev/random right after launchd "logging initialized")
++		 * into that DRBG instead of branching to address 0.
++		 */
++		int rc = ccdrbg_reseed(&erandom.drbg_info, (struct ccdrbg_state *)erandom.drbg_state, sizeof(seed), seed, 0, NULL);
++		if (rc != CCDRBG_STATUS_OK) {
++			panic("write_random early ccdrbg_reseed error %d", rc);
++		}
++	}
+ 	cc_clear(sizeof(seed), seed);
+ 
+ 	return 0;

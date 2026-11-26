@@ -58,6 +58,9 @@ OVERLAY = (
     ('0039-exynos9825-n10-legacy-mach-ports-lookup.patch',
      'adec78e1c54762e64a1d3e6edfcb4958747b0a1fb2bbcb78001c3fce6638eba9',
      ('osfmk/kern/ipc_tt.c', 'osfmk/mach/task.defs')),
+    ('0040-exynos9825-n10-write-random-early-reseed.patch',
+     '593f60378400994dbfc6f67b8d29a87e4e596d65f1c553f08ad12747f16dcdad',
+     ('osfmk/prng/prng_random.c',)),
 )
 STAGED_DIRS = ('bsd/n10_hfs/core', 'bsd/n10_hfs/hfs_encodings')
 
