@@ -1,0 +1,72 @@
+diff --git a/osfmk/kern/ipc_tt.c b/osfmk/kern/ipc_tt.c
+index a555ffa..34ce6c0 100644
+--- a/osfmk/kern/ipc_tt.c
++++ b/osfmk/kern/ipc_tt.c
+@@ -2247,29 +2247,45 @@ _kernelrpc_mach_ports_register3(
+  *		KERN_RESOURCE_SHORTAGE	Couldn't allocate memory.
+  */
+ 
++/*
++ * Note10 (EXYNOS9825): the iOS 16 userland calls MIG 3404 with the legacy
++ * mach_ports_lookup() reply layout (one OOL port array descriptor + count).
++ * The three-port _kernelrpc_mach_ports_lookup3 reply is 8 bytes larger than
++ * the legacy client receive buffer (MACH_RCV_TOO_LARGE 0x10004004), so the
++ * kernel server keeps the legacy routine for this slot.
++ */
+ kern_return_t
+-_kernelrpc_mach_ports_lookup3(
++mach_ports_lookup(
+ 	task_t                  task,
+-	ipc_port_t             *port1,
+-	ipc_port_t             *port2,
+-	ipc_port_t             *port3)
++	mach_port_array_t      *portsp,
++	mach_msg_type_number_t *portsCnt)
+ {
++	mach_port_array_t      ports;
++
+ 	if (task == TASK_NULL) {
+ 		return KERN_INVALID_ARGUMENT;
+ 	}
+ 
++	ports = mach_port_array_alloc(TASK_PORT_REGISTER_MAX, Z_WAITOK | Z_ZERO);
++	if (ports == NULL) {
++		return KERN_RESOURCE_SHORTAGE;
++	}
++
+ 	itk_lock(task);
+ 	if (!task->ipc_active) {
+ 		itk_unlock(task);
++		mach_port_array_free(ports, TASK_PORT_REGISTER_MAX);
+ 		return KERN_INVALID_ARGUMENT;
+ 	}
+ 
+-	*port1 = ipc_port_copy_send_any(task->itk_registered[0]);
+-	*port2 = ipc_port_copy_send_any(task->itk_registered[1]);
+-	*port3 = ipc_port_copy_send_any(task->itk_registered[2]);
++	for (int i = 0; i < TASK_PORT_REGISTER_MAX; i++) {
++		ports[i].port = ipc_port_copy_send_any(task->itk_registered[i]);
++	}
+ 
+ 	itk_unlock(task);
+ 
++	*portsp = ports;
++	*portsCnt = TASK_PORT_REGISTER_MAX;
+ 	return KERN_SUCCESS;
+ }
+ 
+diff --git a/osfmk/mach/task.defs b/osfmk/mach/task.defs
+index f344980..2fa6487 100644
+--- a/osfmk/mach/task.defs
++++ b/osfmk/mach/task.defs
+@@ -147,8 +147,9 @@ routine	_kernelrpc_mach_ports_register3(
+ 
+ /*
+  *	Retrieve the stashed ports for the target task.
++ *	Note10: the kernel server keeps the legacy reply (iOS 16 userland).
+  */
+-#if LIBSYSCALL_INTERFACE
++#if LIBSYSCALL_INTERFACE || KERNEL_SERVER
+ routine	mach_ports_lookup(
+ 		target_task	: task_t;
+ 	out	init_port_set	: mach_port_array_t =

@@ -55,6 +55,9 @@ OVERLAY = (
     ('0038-exynos9825-n10-ufs-readonly-root-data-volume.patch',
      '8e23342676a356d4bca0daa9caf91fcc9cb3e37c0572fded455e875d0ad40d78',
      ('bsd/dev/n10_ufs.c', 'bsd/vfs/vfs_subr.c', 'bsd/vfs/vfs_syscalls.c')),
+    ('0039-exynos9825-n10-legacy-mach-ports-lookup.patch',
+     'adec78e1c54762e64a1d3e6edfcb4958747b0a1fb2bbcb78001c3fce6638eba9',
+     ('osfmk/kern/ipc_tt.c', 'osfmk/mach/task.defs')),
 )
 STAGED_DIRS = ('bsd/n10_hfs/core', 'bsd/n10_hfs/hfs_encodings')
 
