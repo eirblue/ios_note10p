@@ -61,6 +61,9 @@ OVERLAY = (
     ('0040-exynos9825-n10-write-random-early-reseed.patch',
      '593f60378400994dbfc6f67b8d29a87e4e596d65f1c553f08ad12747f16dcdad',
      ('osfmk/prng/prng_random.c',)),
+    ('0041-exynos9825-n10-preemption-disable-threshold.patch',
+     '9662b2cd737c061f8d93a53520b9dfb70e195dbc011114c2ce755672eaf2f330',
+     ('osfmk/arm/preemption_disable.c',)),
 )
 STAGED_DIRS = ('bsd/n10_hfs/core', 'bsd/n10_hfs/hfs_encodings')
 

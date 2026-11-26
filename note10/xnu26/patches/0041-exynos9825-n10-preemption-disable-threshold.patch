@@ -1,0 +1,23 @@
+diff --git a/osfmk/arm/preemption_disable.c b/osfmk/arm/preemption_disable.c
+index 93fe829..f2daeaf 100644
+--- a/osfmk/arm/preemption_disable.c
++++ b/osfmk/arm/preemption_disable.c
+@@ -233,7 +233,17 @@ get_preemption_level(void)
+ 
+ uint64_t _Atomic PERCPU_DATA_HACK_78750602(preemption_disable_max_mt);
+ 
+-#if XNU_PLATFORM_iPhoneOS
++#if XNU_PLATFORM_iPhoneOS && defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++/*
++ * Note10 (EXYNOS9825): 120000 ticks is 5 ms only on the 24 MHz Apple
++ * timebase (4.615 ms on this 26 MHz timebase) and is an Apple-silicon
++ * budget; this single-CPU DEVELOPMENT kernel crossed it in an iOS 16 boot
++ * task (net 9.916 ms). Keep the panic for a stuck preemption-disabled
++ * section, at 100 ms of the 26 MHz timebase.
++ */
++#define DEFAULT_PREEMPTION_TIMEOUT 2600000 /* 100ms at 26 MHz */
++#define DEFAULT_PREEMPTION_MODE SCHED_HYGIENE_MODE_PANIC
++#elif XNU_PLATFORM_iPhoneOS
+ #define DEFAULT_PREEMPTION_TIMEOUT 120000 /* 5ms */
+ #define DEFAULT_PREEMPTION_MODE SCHED_HYGIENE_MODE_PANIC
+ #elif XNU_PLATFORM_XROS
