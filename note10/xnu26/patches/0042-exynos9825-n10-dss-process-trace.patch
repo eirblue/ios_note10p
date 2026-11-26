@@ -1,0 +1,260 @@
+diff --git a/bsd/kern/kern_exec.c b/bsd/kern/kern_exec.c
+index 1645105..cbea3e8 100644
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -474,6 +474,11 @@ exec_add_user_string(struct image_params *imgp, user_addr_t str, int seg, boolea
+  */
+ #define EXECUTABLE_KEY "executable_path="
+ 
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++/* osfmk/arm64/note10/n10_dsslog.c (v376): one bounded line into the dss log ring. */
++extern void n10_dsslog_trace(const char *fmt, ...) __printflike(1, 2);
++#endif
++
+ /*
+  * exec_save_path
+  *
+@@ -2820,6 +2825,11 @@ cleanup_rosetta_fp:
+ 		}
+ 	}
+ 
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	/* Note10 (v376): every successful exec/spawn image, pid and path. */
++	n10_dsslog_trace("N376E pid=%d ppid=%d %.96s", proc_getpid(p), p->p_ppid,
++	    imgp->ip_strings ? imgp->ip_strings + strlen(EXECUTABLE_KEY) : "?");
++#endif
+ 	/*
+ 	 * mark as execed
+ 	 */
+@@ -5064,6 +5074,12 @@ do_fork1:
+ 	 * as 0 and pretends the call succeeded.
+ 	 */
+ 	error = exec_activate_image(imgp);
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	if (error) {
++		n10_dsslog_trace("N376A spawn activate error=%d by pid=%d %.96s", error, proc_getpid(ap),
++		    imgp->ip_strings ? imgp->ip_strings + strlen(EXECUTABLE_KEY) : "?");
++	}
++#endif
+ #if defined(HAS_APPLE_PAC)
+ 	const uint8_t disable_user_jop = imgp->ip_flags & IMGPF_NOJOP ? TRUE : FALSE;
+ 	ml_task_set_jop_pid_from_shared_region(new_task, disable_user_jop);
+@@ -5765,6 +5781,11 @@ bad:
+ #endif
+ 
+ 	assert(spawn_no_exec || exec_failure_reason == NULL);
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	if (error) {
++		n10_dsslog_trace("N376S spawn error=%d by pid=%d %s", error, proc_getpid(ap), ap->p_comm);
++	}
++#endif
+ 	return error;
+ }
+ 
+diff --git a/bsd/kern/kern_exit.c b/bsd/kern/kern_exit.c
+index b5633e4..941ef5f 100644
+--- a/bsd/kern/kern_exit.c
++++ b/bsd/kern/kern_exit.c
+@@ -174,6 +174,10 @@ task_add_conclave_crash_info(task_t task, void *crash_info_ptr);
+ static void proc_memorystatus_remove(proc_t p);
+ #endif /* CONFIG_MEMORYSTATUS */
+ void proc_prepareexit(proc_t p, int rv, boolean_t perf_notify);
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++/* osfmk/arm64/note10/n10_dsslog.c (v376): one bounded line into the dss log ring. */
++extern void n10_dsslog_trace(const char *fmt, ...) __printflike(1, 2);
++#endif
+ void gather_populate_corpse_crashinfo(proc_t p, task_t corpse_task,
+     mach_exception_data_type_t code, mach_exception_data_type_t subcode,
+     uint64_t *udata_buffer, int num_udata, void *reason, exception_type_t etype);
+@@ -2040,6 +2044,17 @@ proc_prepareexit(proc_t p, int rv, boolean_t perf_notify)
+ 	if (p->p_crash_behavior != 0 || p == initproc) {
+ 		proc_handle_critical_exit(p, rv);
+ 	}
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	{
++		/* Note10 (v376): every process exit with its signal/status and exit reason. */
++		char *n10_desc = exit_reason_get_string_desc(p->p_exit_reason);
++		n10_dsslog_trace("N376X pid=%d %s sig=%d st=%d ns=%u code=0x%llx %.48s",
++		    proc_getpid(p), p->p_comm, WIFSIGNALED(rv) ? WTERMSIG(rv) : 0, WEXITSTATUS(rv),
++		    PROC_HAS_EXITREASON(p) ? p->p_exit_reason->osr_namespace : 0u,
++		    PROC_HAS_EXITREASON(p) ? (unsigned long long)p->p_exit_reason->osr_code : 0ull,
++		    n10_desc ? n10_desc : "");
++	}
++#endif
+ 
+ 	if (task) {
+ 		corpse_source = vm_map_is_corpse_source(get_task_map(task));
+diff --git a/bsd/kern/kern_shutdown.c b/bsd/kern/kern_shutdown.c
+index 433e88a..bc8ffcf 100644
+--- a/bsd/kern/kern_shutdown.c
++++ b/bsd/kern/kern_shutdown.c
+@@ -71,6 +71,11 @@
+ 
+ #include <sys/kdebug.h>
+ 
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++/* osfmk/arm64/note10/n10_dsslog.c (v376): one bounded line into the dss log ring. */
++extern void n10_dsslog_trace(const char *fmt, ...) __printflike(1, 2);
++#endif
++
+ uint32_t system_inshutdown = 0;
+ uint32_t final_shutdown_stage = 0;
+ 
+@@ -188,6 +193,12 @@ reboot_kernel(int howto, char *message)
+ 	int hostboot_option = 0;
+ 	uint64_t startTime;
+ 
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	/* Note10 (v376): who asked for reboot/halt/panic, before anything else. */
++	n10_dsslog_trace("N376R reboot howto=0x%x by pid=%d %s %.64s", howto, proc_getpid(current_proc()),
++	    current_proc()->p_comm, message ? message : "");
++#endif
++
+ 	if ((howto & (RB_PANIC | RB_QUICK)) == (RB_PANIC | RB_QUICK)) {
+ 		panic_kernel(howto, message);
+ 	}
+diff --git a/osfmk/arm64/note10/n10_dsslog.c b/osfmk/arm64/note10/n10_dsslog.c
+index 9598d73..0eaa19c 100644
+--- a/osfmk/arm64/note10/n10_dsslog.c
++++ b/osfmk/arm64/note10/n10_dsslog.c
+@@ -52,6 +52,9 @@
+  * No printf, panic, lock, allocation or system-register write on that path.
+  */
+ #if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++#include <sys/cdefs.h>
++#include <stdarg.h>
++#include <stddef.h>
+ #include <stdint.h>
+ #include <mach/vm_types.h>
+ #include <mach/vm_param.h>
+@@ -207,6 +210,43 @@ n10_dsslog_putc(char c)
+ 	n10_dsslog_write(&c, 1);
+ }
+ 
++/*
++ * v376: one bounded diagnostic line (exec/exit/spawn/reboot) formatted into a
++ * stack buffer and appended with a single n10_dsslog_write call, so it is not
++ * split by other console text. No allocation, no lock; vsnprintf only formats.
++ * At most N10_TRACE_MAX lines per boot (~120 KiB), so the ring keeps room for
++ * later console and panic text.
++ */
++#define N10_TRACE_MAX           768u
++#define N10_TRACE_TEXT          160u
++extern int vsnprintf(char *, size_t, const char *, va_list) __printflike(3, 0);
++void n10_dsslog_trace(const char *fmt, ...) __printflike(1, 2);
++static uint32_t n10_trace_lines;
++
++void
++n10_dsslog_trace(const char *fmt, ...)
++{
++	char text[N10_TRACE_TEXT];
++	va_list args;
++	int n;
++
++	if (n10_dss_state == N10_DSS_OFF ||
++	    __atomic_fetch_add(&n10_trace_lines, 1u, __ATOMIC_RELAXED) >= N10_TRACE_MAX) {
++		return;
++	}
++	va_start(args, fmt);
++	n = vsnprintf(text, sizeof(text) - 1, fmt, args);
++	va_end(args);
++	if (n < 0) {
++		return;
++	}
++	if (n > (int)sizeof(text) - 2) {
++		n = (int)sizeof(text) - 2;
++	}
++	text[n++] = '\n';
++	n10_dsslog_write(text, n);
++}
++
+ static uint32_t
+ n10_hex(char *out, uint32_t at, uint64_t value, uint32_t digits)
+ {
+diff --git a/osfmk/arm64/note10/n10_wdt.c b/osfmk/arm64/note10/n10_wdt.c
+index b9cfcb6..bd9d1af 100644
+--- a/osfmk/arm64/note10/n10_wdt.c
++++ b/osfmk/arm64/note10/n10_wdt.c
+@@ -39,6 +39,10 @@
+ #include <kern/timer_call.h>
+ #include <pexpert/pexpert.h>
+ #include <pexpert/device_tree.h>
++#include <arm/cpu_data.h>
++#include <arm/cpu_data_internal.h>
++#include <arm64/proc_reg.h>
++#include <kern/misc_protos.h>
+ 
+ #define N10_WTCON               0x0
+ #define N10_WTDAT               0x4
+@@ -57,6 +61,47 @@ static uint64_t n10_wdt_period_abs, n10_wdt_deadline_abs;
+ static bool n10_wdt_stopped, n10_wdt_running;
+ uint32_t n10_wdt_ticks;         /* timer-path pets (exported for n10_ufs) */
+ void n10_wdt_kick(void);
++static uint64_t n10_wdt_start_abs;
++
++/*
++ * v376: one "N376H" line per timer-path pet into the dss ring
++ * (osfmk/arm64/note10/n10_dsslog.c), so the last line before a reset shows
++ * when XNU last ran its timer interrupt, the free page count, the number of
++ * threads waiting for a free page and the interrupted PC (el0=1: user).
++ * One "N376W" line when petting stops. At most one H line per 2 s, bounded
++ * by the deadline (<= 450). No lock, no allocation: snprintf only formats
++ * into the stack buffer and n10_dsslog_write masks DAIF itself.
++ */
++extern void n10_dsslog_write(const char *s, int n);
++extern unsigned int vm_page_free_count;
++extern unsigned int vm_page_free_wanted;
++
++static void
++n10_wdt_note(uint64_t now, const char *stop)
++{
++	char line[128];
++	uint64_t ns = 0, pc = 0;
++	unsigned int el0 = 0;
++	int n;
++
++	absolutetime_to_nanoseconds(now - n10_wdt_start_abs, &ns);
++	if (stop != NULL) {
++		n = snprintf(line, sizeof(line), "N376W stop t=%llu.%03llu %s\n",
++		    ns / NSEC_PER_SEC, (ns % NSEC_PER_SEC) / NSEC_PER_MSEC, stop);
++	} else {
++		arm_saved_state_t *ss = (arm_saved_state_t *)getCpuDatap()->cpu_int_state;
++		if (ss != NULL) {
++			pc = get_saved_state_pc(ss);
++			el0 = PSR64_IS_USER(get_saved_state_cpsr(ss)) ? 1u : 0u;
++		}
++		n = snprintf(line, sizeof(line), "N376H t=%llu.%03llu free=%u want=%u el0=%u pc=0x%llx\n",
++		    ns / NSEC_PER_SEC, (ns % NSEC_PER_SEC) / NSEC_PER_MSEC,
++		    vm_page_free_count, vm_page_free_wanted, el0, pc);
++	}
++	if (n > 0) {
++		n10_dsslog_write(line, n < (int)sizeof(line) ? n : (int)sizeof(line) - 1);
++	}
++}
+ 
+ static inline uint32_t
+ n10_wdt_rd(uint32_t off)
+@@ -82,6 +127,7 @@ n10_wdt_pet(uint64_t now)
+ 	}
+ 	if (now >= n10_wdt_deadline_abs || !n10_wdt_armed()) {
+ 		n10_wdt_stopped = true;         /* one way: nothing re-arms the timer */
++		n10_wdt_note(now, now >= n10_wdt_deadline_abs ? "deadline" : "arming");
+ 		return false;
+ 	}
+ 	*(volatile uint32_t *)(n10_wdt_regs + N10_WTCNT) = n10_wdt_reload;
+@@ -97,6 +143,7 @@ n10_wdt_tick(__unused timer_call_param_t p0, __unused timer_call_param_t p1)
+ 		return;
+ 	}
+ 	n10_wdt_ticks++;
++	n10_wdt_note(now, NULL);
+ 	timer_call_enter(&n10_wdt_call, now + n10_wdt_period_abs, TIMER_CALL_SYS_CRITICAL);
+ }
+ 
+@@ -168,6 +215,7 @@ n10_wdt_start(void)
+ 	nanoseconds_to_absolutetime(N10_WDT_PERIOD_NS, &n10_wdt_period_abs);
+ 	nanoseconds_to_absolutetime((uint64_t)deadline_s * NSEC_PER_SEC, &deadline_abs);
+ 	n10_wdt_deadline_abs = start + deadline_abs;
++	n10_wdt_start_abs = start;
+ 	n10_wdt_running = true;
+ 	n10_wdt_kick();                 /* synchronous first pet at EARLY_BOOT */
+ 	timer_call_setup(&n10_wdt_call, n10_wdt_tick, NULL);

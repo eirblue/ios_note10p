@@ -64,6 +64,10 @@ OVERLAY = (
     ('0041-exynos9825-n10-preemption-disable-threshold.patch',
      '9662b2cd737c061f8d93a53520b9dfb70e195dbc011114c2ce755672eaf2f330',
      ('osfmk/arm/preemption_disable.c',)),
+    ('0042-exynos9825-n10-dss-process-trace.patch',
+     '9541dc2fc7055bd3d9510e1b8422266746e5ec98b2cd60217b1233a81899b740',
+     ('bsd/kern/kern_exec.c', 'bsd/kern/kern_exit.c', 'bsd/kern/kern_shutdown.c',
+      'osfmk/arm64/note10/n10_dsslog.c', 'osfmk/arm64/note10/n10_wdt.c')),
 )
 STAGED_DIRS = ('bsd/n10_hfs/core', 'bsd/n10_hfs/hfs_encodings')
 
