@@ -1,0 +1,428 @@
+diff --git a/bsd/dev/n10_ufs.c b/bsd/dev/n10_ufs.c
+index 4dbcddb..c48ff8c 100644
+--- a/bsd/dev/n10_ufs.c
++++ b/bsd/dev/n10_ufs.c
+@@ -1,11 +1,11 @@
+ /*
+- * Note10 (EXYNOS9825) internal UFS root device, read-only and polled.
++ * Note10 (EXYNOS9825) internal UFS root device, polled (v370: userdata writes).
+  *
+  * The Linux stage leaves the Exynos UFS host enabled with the link up. This
+  * driver reuses that state and never initializes PHY, UniPro, clocks or the
+  * host itself. It points the transfer request list at its own memory
+  * (verifying the host took it before ringing any doorbell) and issues one
+- * SCSI READ(10) at a time to LUN 0, slot 0, polling for completion.
++ * SCSI command at a time to LUN 0, slot 0, polling for completion.
+  *
+  * The controller facts are reviewed constants from the pinned Samsung
+  * sources (lineage-19.1 exynos9820 kernel 85599d66: exynos9820.dts ufs node,
+@@ -22,17 +22,20 @@
+  * and the one device value:
+  *   partition-lba    u64 first, u64 last: the userdata range recorded in TWRP
+  *
+- * Read-only by construction: the only SCSI opcode is READ(10); every read
+- * is clamped to the GPT header/entries while probing and to the one
+- * partition "userdata" afterwards; the driver refuses if that partition
++ * Every read is clamped to the GPT header/entries while probing and to the
++ * one partition "userdata" afterwards; the driver refuses if that partition
+  * does not match partition-lba or overlaps boot, recovery, dtb, dtbo or
+  * vbmeta; raw (character) writes return EROFS.
+  *
+- * v368 RAM write overlay: block-device writes never reach the UFS. Each
+- * written 4 KiB partition block is kept in a kernel RAM page (at most
+- * N10_UFS_RAM_BLOCKS, then ENOSPC) and reads return the RAM copy over the
+- * READ(10) data, so the root HFS can be mounted read-write for the boot
+- * while userdata stays unchanged. Everything written is lost at reset.
++ * v370 userdata writes: block-device writes go to the UFS with SCSI
++ * WRITE(10), and DKIOCSYNCHRONIZE / B_FUA issue SYNCHRONIZE CACHE(10). A
++ * WRITE(10) is built only for device blocks strictly inside the resolved
++ * userdata partition (first block N10_UFS_USERDATA_FIRST, == partition-lba,
++ * window == the partition); anything else is refused with a log line and
++ * never issued (n10_ufs_write_blocks), and n10_ufs_cmd_once stops before
++ * the doorbell if such a WRITE(10) ever reaches it. The only opcodes are
++ * READ(10), WRITE(10) and SYNCHRONIZE CACHE(10): no unmap, erase, format,
++ * WRITE SAME, firmware or provisioning command exists here.
+  *
+  * Register accesses: read HCS, IS, UTRLDBR, UTRLBA, UTRLBAU, UTRLRSR, the
+  * nexus register and (v346, read-only, same vs-hci page as the nexus
+@@ -108,7 +111,11 @@ extern uint32_t n10_wdt_ticks;
+ #define HCS_UTRLRDY     (1u << 1)
+ 
+ #define SCSI_READ10     0x28
++#define SCSI_WRITE10    0x2a
++#define SCSI_SYNC10     0x35            /* SYNCHRONIZE CACHE(10) */
+ #define SCSI_CHECK_COND 0x02
++/* v370: the userdata first device block recorded in TWRP; writes require the resolved partition to start here. */
++#define N10_UFS_USERDATA_FIRST  0x222200ull
+ 
+ #define UFS_BLOCK       4096u
+ #define BOUNCE_SIZE     (256u << 10)
+@@ -173,23 +180,9 @@ static struct {
+ 	bool ready;
+ } nu;
+ 
+-/*
+- * v368 RAM write overlay: open-addressed table, key = partition block + 1 (0 = empty).
+- * v369: XNU has only 48 MiB here, so data pages are capped at N10_UFS_RAM_PAGES and
+- * never allocated with Z_NOFAIL; an all-zero 4 KiB block write (HFS ClearBTNodes of a
+- * new or grown B-tree, 84 MiB for the attributes B-tree) shares n10_ufs_zero.
+- */
+-#define N10_UFS_RAM_SLOTS       65536u          /* 1 MiB table */
+-#define N10_UFS_RAM_BLOCKS      49152u          /* written blocks (zero or data), load <= 75% */
+-#define N10_UFS_RAM_PAGES       1024u           /* 4 MiB of non-zero written blocks */
+-static struct {
+-	uint32_t key;
+-	void *page;
+-} *n10_ufs_ram;
+-static uint32_t n10_ufs_ram_used;
+-static uint32_t n10_ufs_ram_pages;
+-static bool n10_ufs_ram_full;
+-static const uint8_t n10_ufs_zero[UFS_BLOCK];
++/* v370 write/sync counters (logged at powers of two). */
++static uint32_t n10_ufs_writes, n10_ufs_syncs;
++static uint64_t n10_ufs_written;
+ 
+ static LCK_GRP_DECLARE(n10_ufs_grp, "n10_ufs");
+ static LCK_MTX_DECLARE(n10_ufs_lock, &n10_ufs_grp);
+@@ -254,21 +247,47 @@ le(const uint8_t *p, unsigned bytes)
+ 	return v;
+ }
+ 
+-/* One READ(10) of count device blocks at lba into the bounce buffer: 0, EAGAIN on CHECK CONDITION, else stops. */
++/*
++ * v370: true only when device blocks [lba, lba + count) lie strictly inside userdata as resolved by
++ * n10_ufs_find_partition: it starts at N10_UFS_USERDATA_FIRST, equals the handoff partition-lba and the
++ * current window [lo, hi] is that partition (so the probe windows over the GPT never qualify).
++ */
++static bool
++n10_ufs_write_inside(uint64_t lba, uint32_t count)
++{
++	uint64_t last = nu.first_block + nu.nblocks - 1;
++
++	return nu.nblocks != 0 && nu.first_block == N10_UFS_USERDATA_FIRST &&
++	       nu.first_block == nu.want_first && last == nu.want_last &&
++	       nu.lo == nu.first_block && nu.hi == last && last <= UINT32_MAX &&
++	       count != 0 && count <= PRDT_MAX && lba >= nu.first_block && lba <= last && count - 1 <= last - lba;
++}
++
++/*
++ * One SCSI command of count device blocks at lba through the bounce buffer: READ(10) (device to host),
++ * WRITE(10) (host to device, data already in the bounce buffer) or SYNCHRONIZE CACHE(10) (count 0, no
++ * data). 0, EAGAIN on CHECK CONDITION, else stops.
++ */
+ static int
+-n10_ufs_read_once(uint64_t lba, uint32_t count, uint32_t attempt)
++n10_ufs_cmd_once(uint8_t op, uint64_t lba, uint32_t count, uint32_t attempt)
+ {
+ 	struct utrd *utrd = (struct utrd *)(nu.dma + DMA_UTRL);
+ 	uint8_t *ucd = (uint8_t *)(nu.dma + DMA_UCD);
+ 	uint64_t ucd_pa = nu.dma_pa + DMA_UCD, bounce_pa = nu.dma_pa + DMA_BOUNCE;
+-	uint32_t len = count * UFS_BLOCK;
++	bool wr = op == SCSI_WRITE10, sync = op == SCSI_SYNC10;
++	uint32_t len = sync ? 0 : count * UFS_BLOCK;
+ 
+ 	/* Strides and length are reviewed constants; re-check before any DMA. */
+-	if (count == 0 || count > PRDT_MAX || UCD_PRDT + count * PRDT_ENTRY_SIZE > DMA_BOUNCE - DMA_UCD) {
++	if ((op != SCSI_READ10 && !wr && !sync) || (sync ? count != 0 : count == 0 || count > PRDT_MAX) ||
++	    UCD_PRDT + count * PRDT_ENTRY_SIZE > DMA_BOUNCE - DMA_UCD) {
+ 		n10_ufs_stop(6, n10_ufs_ticks() | 5);
+ 	}
++	/* v370: a WRITE(10) outside userdata is never issued (n10_ufs_write_blocks refuses first). */
++	if (wr && !n10_ufs_write_inside(lba, count)) {
++		n10_ufs_stop(6, n10_ufs_ticks() | 6);
++	}
+ 	uint8_t cdb[10] = {
+-		SCSI_READ10, 0,
++		op, 0,
+ 		(uint8_t)(lba >> 24), (uint8_t)(lba >> 16), (uint8_t)(lba >> 8), (uint8_t)lba,
+ 		0, (uint8_t)(count >> 8), (uint8_t)count, 0
+ 	};
+@@ -277,7 +296,7 @@ n10_ufs_read_once(uint64_t lba, uint32_t count, uint32_t attempt)
+ 	bzero(ucd, UCD_PRDT + PRDT_MAX * PRDT_ENTRY_SIZE);
+ 
+ 	ucd[0] = 0x01;                          /* COMMAND UPIU */
+-	ucd[1] = 0x40;                          /* R: data in */
++	ucd[1] = wr ? 0x20 : sync ? 0 : 0x40;   /* W: data out, none, R: data in */
+ 	ucd[2] = 0;                             /* LUN 0 */
+ 	ucd[3] = 0;                             /* task tag = slot 0 */
+ 	ucd[12] = (uint8_t)(len >> 24);
+@@ -295,16 +314,19 @@ n10_ufs_read_once(uint64_t lba, uint32_t count, uint32_t attempt)
+ 		e[3] = UFS_BLOCK - 1;           /* data byte count, zero based */
+ 	}
+ 
+-	utrd->dw0 = (1u << 28) | (2u << 25);    /* UFS storage command, device to host */
++	/* UFS storage command; data direction 1 host to device, 2 device to host, 0 none. */
++	utrd->dw0 = (1u << 28) | ((wr ? 1u : sync ? 0u : 2u) << 25);
+ 	utrd->dw2 = 0x0f;                       /* OCS invalid until updated */
+ 	utrd->ucdba = (uint32_t)ucd_pa;
+ 	utrd->ucdbau = (uint32_t)(ucd_pa >> 32);
+ 	utrd->resp = (UCD_RESP << 16) | UCD_RESP;
+-	utrd->prdt = (UCD_PRDT << 16) | (count * PRDT_ENTRY_SIZE + PRDT_LENGTH_BIAS);
++	utrd->prdt = (UCD_PRDT << 16) | (count ? count * PRDT_ENTRY_SIZE + PRDT_LENGTH_BIAS : 0);
+ 
+ 	dma_sync(DMA_UTRL, sizeof(*utrd));
+ 	dma_sync(DMA_UCD, UCD_PRDT + PRDT_MAX * PRDT_ENTRY_SIZE);
+-	dma_sync(DMA_BOUNCE, len);
++	if (len) {
++		dma_sync(DMA_BOUNCE, len);      /* WRITE(10): the data reaches memory before the doorbell */
++	}
+ 	__builtin_arm_dsb(0xf);
+ 
+ 	uint32_t nexus = rd32(nu.nexus, 0);
+@@ -341,12 +363,15 @@ n10_ufs_read_once(uint64_t lba, uint32_t count, uint32_t attempt)
+ 
+ 	dma_sync(DMA_UTRL, sizeof(*utrd));
+ 	dma_sync(DMA_UCD, UCD_PRDT);
+-	dma_sync(DMA_BOUNCE, len);
++	if (len) {
++		dma_sync(DMA_BOUNCE, len);
++	}
+ 
+ 	uint32_t ocs = utrd->dw2 & 0x0f;
+ 	uint8_t const *resp = ucd + UCD_RESP;
+ 	if (ocs) {
+-		n10_ufs_stop(11, attempt << 4 | ocs);
++		/* v370: 0x40 marks WRITE(10)/SYNCHRONIZE CACHE(10). */
++		n10_ufs_stop(11, (op != SCSI_READ10 ? 0x40u : 0) | attempt << 4 | ocs);
+ 	}
+ 	if (resp[0] != 0x21 || resp[6]) {
+ 		n10_ufs_stop(12, resp[0] != 0x21 ? resp[0] & 0x7fu : 0x80u | (resp[6] & 0x7fu));
+@@ -360,14 +385,10 @@ n10_ufs_read_once(uint64_t lba, uint32_t count, uint32_t attempt)
+ 	return 0;
+ }
+ 
+-/* Clamped read: only blocks inside the current window [lo, hi]. Returns only on success. */
++/* DMA guards, then the command with up to three attempts. Returns only on success. */
+ static void
+-n10_ufs_read(uint64_t lba, uint32_t count)
++n10_ufs_command(uint8_t op, uint64_t lba, uint32_t count)
+ {
+-	if (count == 0 || count > PRDT_MAX || lba > UINT32_MAX - count ||
+-	    lba < nu.lo || lba + count - 1 > nu.hi) {
+-		n10_ufs_stop(6, n10_ufs_ticks() | 5);
+-	}
+ 	if (nu.dma_pa < gPhysBase) {
+ 		n10_ufs_stop(6, n10_ufs_ticks() | 2);
+ 	}
+@@ -379,92 +400,55 @@ n10_ufs_read(uint64_t lba, uint32_t count)
+ 	}
+ 	/* A command after the Linux stage may first report a unit attention. */
+ 	for (uint32_t i = 0; i < 3; i++) {
+-		if (n10_ufs_read_once(lba, count, i) == 0) {
++		if (n10_ufs_cmd_once(op, lba, count, i) == 0) {
+ 			return;
+ 		}
+ 	}
+ 	/* CHECK CONDITION every time: sense key = fixed-format sense byte 2 (sense data at response UPIU byte 34). */
+-	n10_ufs_stop(13, 0x80u | (((const uint8_t *)(nu.dma + DMA_UCD + UCD_RESP))[36] & 0x0fu));
++	n10_ufs_stop(13, 0x80u | (op != SCSI_READ10 ? 0x40u : 0) |
++	    (((const uint8_t *)(nu.dma + DMA_UCD + UCD_RESP))[36] & 0x0fu));
+ }
+ 
+-/* v368: table slot of partition block blk (holding it, or the empty slot for it). Caller holds n10_ufs_lock. */
+-static uint32_t
+-n10_ufs_ram_slot(uint64_t blk)
++/* Clamped read: only blocks inside the current window [lo, hi]. Returns only on success. */
++static void
++n10_ufs_read(uint64_t lba, uint32_t count)
+ {
+-	uint32_t key = (uint32_t)blk + 1;
+-	uint32_t i = (key * 2654435761u) & (N10_UFS_RAM_SLOTS - 1);
+-
+-	while (n10_ufs_ram[i].key && n10_ufs_ram[i].key != key) {
+-		i = (i + 1) & (N10_UFS_RAM_SLOTS - 1);
++	if (count == 0 || count > PRDT_MAX || lba > UINT32_MAX - count ||
++	    lba < nu.lo || lba + count - 1 > nu.hi) {
++		n10_ufs_stop(6, n10_ufs_ticks() | 5);
+ 	}
+-	return i;
+-}
+-
+-/* RAM copy of partition block blk (n10_ufs_zero for a zeroed block), or NULL. */
+-static const void *
+-n10_ufs_ram_page(uint64_t blk)
+-{
+-	uint32_t i = n10_ufs_ram_slot(blk);
+-
+-	return n10_ufs_ram[i].key ? n10_ufs_ram[i].page : NULL;
++	n10_ufs_command(SCSI_READ10, lba, count);
+ }
+ 
+ /*
+- * v369: write len bytes at skip into the RAM copy of partition block blk.
+- * A whole all-zero block takes no page. A new data page is filled from the
+- * zero block or the UFS (READ(10)). ENOSPC when the table or page cap is
+- * reached or no page is free (never waits for memory). Caller holds n10_ufs_lock.
++ * v370: WRITE(10) of count device blocks at lba from the bounce buffer, only strictly inside userdata;
++ * otherwise logged and refused (EIO) without any command. Caller holds n10_ufs_lock.
+  */
+ static int
+-n10_ufs_ram_write(uint64_t blk, uint32_t skip, const uint8_t *src, uint32_t len)
++n10_ufs_write_blocks(uint64_t lba, uint32_t count)
+ {
+-	uint32_t i = n10_ufs_ram_slot(blk);
+-	bool fresh = !n10_ufs_ram[i].key;
+-	void *page = fresh ? NULL : n10_ufs_ram[i].page;
+-	bool zero = len == UFS_BLOCK;
+-
+-	for (uint32_t j = 0; zero && j < UFS_BLOCK; j++) {
+-		zero = !src[j];
+-	}
+-	if (fresh && n10_ufs_ram_used >= N10_UFS_RAM_BLOCKS) {
+-		goto full;
+-	}
+-	if (zero && (fresh || page == (const void *)n10_ufs_zero)) {
+-		page = (void *)(uintptr_t)n10_ufs_zero;
+-	} else {
+-		if (fresh || page == (const void *)n10_ufs_zero) {
+-			void *copy = n10_ufs_ram_pages < N10_UFS_RAM_PAGES ? kalloc_data(UFS_BLOCK, Z_NOWAIT) : NULL;
+-			if (!copy) {
+-				goto full;
+-			}
+-			if (fresh) {
+-				n10_ufs_read(nu.first_block + blk, 1);
+-				memcpy(copy, (const void *)(nu.dma + DMA_BOUNCE), UFS_BLOCK);
+-			} else {
+-				bzero(copy, UFS_BLOCK);
+-			}
+-			page = copy;
+-			n10_ufs_ram_pages++;
+-		}
+-		memcpy((uint8_t *)page + skip, src, len);
+-	}
+-	n10_ufs_ram[i].page = page;
+-	if (fresh) {
+-		n10_ufs_ram[i].key = (uint32_t)blk + 1;
+-		n10_ufs_ram_used++;
+-		if (!(n10_ufs_ram_used & (n10_ufs_ram_used - 1))) {
+-			printf("Note10 UFS: RAM overlay %u blocks, %u pages (block 0x%llx)\n",
+-			    n10_ufs_ram_used, n10_ufs_ram_pages, blk);
+-		}
++	if (!n10_ufs_write_inside(lba, count)) {
++		printf("Note10 UFS: write refused: device block 0x%llx count %u outside userdata 0x%llx..0x%llx\n",
++		    lba, count, nu.first_block, nu.first_block + nu.nblocks - 1);
++		return EIO;
++	}
++	n10_ufs_command(SCSI_WRITE10, lba, count);
++	n10_ufs_written += count;
++	if (!(++n10_ufs_writes & (n10_ufs_writes - 1))) {
++		printf("Note10 UFS: WRITE(10) %u commands, %llu blocks (device block 0x%llx count %u)\n",
++		    n10_ufs_writes, n10_ufs_written, lba, count);
+ 	}
+ 	return 0;
+-full:
+-	if (!n10_ufs_ram_full) {
+-		n10_ufs_ram_full = true;
+-		printf("Note10 UFS: RAM overlay full: %u blocks, %u pages (block 0x%llx)\n",
+-		    n10_ufs_ram_used, n10_ufs_ram_pages, blk);
++}
++
++/* v370: SYNCHRONIZE CACHE(10) from the userdata first block to the end (no data). Caller holds n10_ufs_lock. */
++static void
++n10_ufs_sync(void)
++{
++	n10_ufs_command(SCSI_SYNC10, nu.first_block, 0);
++	if (!(++n10_ufs_syncs & (n10_ufs_syncs - 1))) {
++		printf("Note10 UFS: SYNCHRONIZE CACHE(10) %u commands\n", n10_ufs_syncs);
+ 	}
+-	return ENOSPC;
+ }
+ 
+ static bool
+@@ -618,18 +602,30 @@ n10_ufs_strategy(buf_t bp)
+ 
+ 	lck_mtx_lock(&n10_ufs_lock);
+ 	if (!(buf_flags(bp) & B_READ)) {
+-		/* v368: writes go to the RAM overlay only, never to the UFS. */
++		/* v370: writes go to userdata on the UFS (n10_ufs_write_blocks bounds every command). */
+ 		for (uint32_t done = 0; done < count;) {
+ 			uint64_t pos = off + done;
++			uint64_t lba = pos / UFS_BLOCK;
+ 			uint32_t skip = (uint32_t)(pos % UFS_BLOCK);
+-			uint32_t want = MIN(count - done, UFS_BLOCK - skip);
+-			error = n10_ufs_ram_write(pos / UFS_BLOCK, skip, (const uint8_t *)vaddr + done, want);
++			uint32_t want = MIN(count - done, BOUNCE_SIZE - skip);
++			if (skip || want < UFS_BLOCK) {
++				/* Part of one block: read-modify-write of that block. */
++				want = MIN(want, UFS_BLOCK - skip);
++				n10_ufs_read(nu.first_block + lba, 1);
++			} else {
++				want &= ~(UFS_BLOCK - 1);       /* whole blocks */
++			}
++			memcpy((void *)(nu.dma + DMA_BOUNCE + skip), (const uint8_t *)vaddr + done, want);
++			error = n10_ufs_write_blocks(nu.first_block + lba, (skip + want + UFS_BLOCK - 1) / UFS_BLOCK);
+ 			if (error) {
+ 				break;
+ 			}
+ 			done += want;
+ 			buf_setresid(bp, count - done);
+ 		}
++		if (!error && (buf_flags(bp) & B_FUA)) {
++			n10_ufs_sync();
++		}
+ 		lck_mtx_unlock(&n10_ufs_lock);
+ 		buf_unmap(bp);
+ 		goto done;
+@@ -641,12 +637,6 @@ n10_ufs_strategy(buf_t bp)
+ 		uint32_t want = MIN(count - done, BOUNCE_SIZE - skip);
+ 		uint32_t blocks = (skip + want + UFS_BLOCK - 1) / UFS_BLOCK;
+ 		n10_ufs_read(nu.first_block + lba, blocks);
+-		for (uint32_t b = 0; b < blocks; b++) {
+-			const void *page = n10_ufs_ram_page(lba + b);
+-			if (page) {
+-				memcpy((void *)(nu.dma + DMA_BOUNCE + b * UFS_BLOCK), page, UFS_BLOCK);
+-			}
+-		}
+ 		memcpy(vaddr + done, (const void *)(nu.dma + DMA_BOUNCE + skip), want);
+ 		done += want;
+ 		buf_setresid(bp, count - done);
+@@ -688,7 +678,7 @@ n10_ufs_ioctl(__unused dev_t dev, u_long cmd, caddr_t data, __unused int flag,
+ 		*o = nu.nblocks * UFS_BLOCK / nu.secsize;
+ 		return 0;
+ 	case DKIOCISWRITABLE:
+-		*f = 1;                 /* v368: block writes land in the RAM overlay */
++		*f = 1;                 /* v370: block writes go to userdata */
+ 		return 0;
+ 	case DKIOCGETMAXBLOCKCOUNTREAD:
+ 	case DKIOCGETMAXBLOCKCOUNTWRITE:
+@@ -696,7 +686,10 @@ n10_ufs_ioctl(__unused dev_t dev, u_long cmd, caddr_t data, __unused int flag,
+ 		return 0;
+ 	case DKIOCSYNCHRONIZE:
+ 	case DKIOCSYNCHRONIZECACHE:
+-		return 0;               /* RAM overlay: nothing to flush */
++		lck_mtx_lock(&n10_ufs_lock);
++		n10_ufs_sync();
++		lck_mtx_unlock(&n10_ufs_lock);
++		return 0;
+ 	case DKIOCGETMAXSEGMENTCOUNTREAD:
+ 	case DKIOCGETMAXSEGMENTCOUNTWRITE:
+ 		*o = 1;
+@@ -827,13 +820,6 @@ n10_ufs_init(void)
+ 	}
+ 	nu.dma_pa = ptoa_64(pn);
+ 	nu.secsize = DEV_BSIZE;
+-	vm_offset_t ram = 0;
+-	kr = kmem_alloc(kernel_map, &ram, N10_UFS_RAM_SLOTS * sizeof(*n10_ufs_ram),
+-	    KMA_ZERO | KMA_PERMANENT, VM_KERN_MEMORY_FILE);
+-	if (kr != KERN_SUCCESS) {
+-		n10_ufs_stop(5, n10_ufs_ticks() | 8);
+-	}
+-	n10_ufs_ram = (void *)ram;
+ 
+ 	lck_mtx_lock(&n10_ufs_lock);
+ 	n10_ufs_take_over_host();
+@@ -852,11 +838,11 @@ n10_ufs_init(void)
+ 	devfs_make_node(nu.bdev, DEVFS_BLOCK, UID_ROOT, GID_OPERATOR, 0640, "n10ufs0");
+ 	devfs_make_node(makedev(nu.cmajor, 0), DEVFS_CHAR, UID_ROOT, GID_OPERATOR, 0640, "rn10ufs0");
+ 	nu.ready = true;
+-	printf("Note10 UFS: \"%s\" on LUN 0: first block 0x%llx, %llu MiB, read-only, RAM write overlay %u MiB data + zero blocks, %u blocks\n",
+-	    n10_ufs_part, nu.first_block, nu.nblocks * UFS_BLOCK >> 20, N10_UFS_RAM_PAGES * UFS_BLOCK >> 20, N10_UFS_RAM_BLOCKS);
++	printf("Note10 UFS: \"%s\" on LUN 0: first block 0x%llx, %llu MiB, read-write: WRITE(10)/SYNCHRONIZE CACHE(10) only inside 0x%llx..0x%llx\n",
++	    n10_ufs_part, nu.first_block, nu.nblocks * UFS_BLOCK >> 20, nu.first_block, nu.first_block + nu.nblocks - 1);
+ }
+ 
+-/* v368: the root on this device may be mounted read-write (writes stay in RAM). */
++/* v368: the root on this device may be mounted read-write (v370: writes go to userdata). */
+ bool n10_ufs_ram_overlay_dev(dev_t dev);
+ 
+ bool
