@@ -1,0 +1,20 @@
+diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
+index 2dab201..d5f0ca0 100644
+--- a/osfmk/arm64/start.s
++++ b/osfmk/arm64/start.s
+@@ -903,6 +903,15 @@ arm_init_tramp:
+ //#include	"globals_asm.h"
+ 
+ #if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++/*
++ * Note10 (v378): the loader passes boot_args memSize 0x4000000 (the whole
++ * 64 MiB window), so the bootstrap map covers memSize - 0x1004000 = 0x2FFC000
++ * bytes from the image. Raise the mapper's size bound from 32 MiB to 48 MiB
++ * for the mapper body only (one movz; the pinned exynos_leaf_mapper.h/.S are
++ * unchanged). Table preflight: 1 + 2 + 1 + 2 + 2 roots = 8 <= 10 pool pages.
++ */
++#undef N10_MAP_MAX_BYTES
++#define N10_MAP_MAX_BYTES 50331648
+ #include "note10/exynos_leaf_mapper.S"
+ #endif
+ 

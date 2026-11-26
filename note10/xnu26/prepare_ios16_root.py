@@ -71,6 +71,12 @@ OVERLAY = (
     ('0043-exynos9825-n10-kernel-fast-fault-forward.patch',
      'dd496ab539bc9263a8f00b517e26d1bacfe3f4d9e445a0d940f5d75f1c09acf5',
      ('osfmk/arm64/note10/n10_dsslog.c', 'osfmk/arm64/note10/n10_wdt.c')),
+    ('0044-exynos9825-n10-xpcproxy-call-trace.patch',
+     'ead7cf0ce09403fa0b68bdc3f7888c4c578589b44b5a18bdec57e4ae2b67952e',
+     ('bsd/dev/arm/systemcalls.c', 'osfmk/arm64/bsd_arm64.c', 'osfmk/arm64/note10/n10_wdt.c')),
+    ('0045-exynos9825-n10-bootstrap-map-48mib.patch',
+     '6211394464971976cde97924a3bf7770f3a1e6f4b3cfd0d33a5593f412ec4687',
+     ('osfmk/arm64/start.s',)),
 )
 STAGED_DIRS = ('bsd/n10_hfs/core', 'bsd/n10_hfs/hfs_encodings')
 

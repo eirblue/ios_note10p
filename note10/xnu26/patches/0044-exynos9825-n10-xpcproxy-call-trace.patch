@@ -1,0 +1,124 @@
+diff --git a/bsd/dev/arm/systemcalls.c b/bsd/dev/arm/systemcalls.c
+index 0906700..5a76f9e 100644
+--- a/bsd/dev/arm/systemcalls.c
++++ b/bsd/dev/arm/systemcalls.c
+@@ -51,6 +51,34 @@ static void     arm_prepare_syscall_return(const struct sysent *, struct arm_sav
+ static unsigned short arm_get_syscall_number(struct arm_saved_state *);
+ static void     arm_trace_unix_syscall(int, struct arm_saved_state *);
+ static void     arm_clear_syscall_error(struct arm_saved_state *);
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++/*
++ * Note10 (v378): xpcproxy never reached its exec in v377. Record the first
++ * N10_XPC_MAX failing BSD syscalls (N378Y) and Mach traps (N378T, from
++ * osfmk/arm64/bsd_arm64.c) of processes named "xpcproxy" into the dss ring.
++ * Observation only: no return value or state is changed.
++ */
++#define N10_XPC_MAX             160u
++extern void n10_dsslog_trace(const char *fmt, ...) __printflike(1, 2);
++void n10_xpc_note(int trap, int num, int err);
++static uint32_t n10_xpc_lines;
++
++void
++n10_xpc_note(int trap, int num, int err)
++{
++	proc_t p = current_proc();
++
++	if (p == PROC_NULL || strncmp(p->p_comm, "xpcproxy", 8) != 0 ||
++	    __atomic_fetch_add(&n10_xpc_lines, 1u, __ATOMIC_RELAXED) >= N10_XPC_MAX) {
++		return;
++	}
++	if (trap) {
++		n10_dsslog_trace("N378T pid=%d trap=%d kr=0x%x", proc_getpid(p), num, err);
++	} else {
++		n10_dsslog_trace("N378Y pid=%d sys=%d err=%d", proc_getpid(p), num, err);
++	}
++}
++#endif /* ARM64_BOARD_CONFIG_EXYNOS9825 */
+ #define save_r0         r[0]
+ #define save_r1         r[1]
+ #define save_r2         r[2]
+@@ -180,6 +208,11 @@ unix_syscall(
+ 	AUDIT_SYSCALL_ENTER(code, proc, uthread);
+ 	error = (*(callp->sy_call))(proc, &uthread->uu_arg[0], &(uthread->uu_rval[0]));
+ 	AUDIT_SYSCALL_EXIT(code, proc, uthread, error);
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	if (__improbable(error != 0 && error != ERESTART && error != EJUSTRETURN)) {
++		n10_xpc_note(0, code, error);
++	}
++#endif
+ 
+ #if CONFIG_MACF
+ skip_syscall:
+@@ -260,6 +293,11 @@ unix_syscall_return(int error)
+ #endif /* DEBUG || DEVELOPMENT */
+ 
+ 	AUDIT_SYSCALL_EXIT(code, proc, uthread, error);
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	if (__improbable(error != 0 && error != ERESTART && error != EJUSTRETURN)) {
++		n10_xpc_note(0, code, error);
++	}
++#endif
+ 
+ 	/*
+ 	 * Get index into sysent table
+diff --git a/osfmk/arm64/bsd_arm64.c b/osfmk/arm64/bsd_arm64.c
+index 181b47f..f5d2a2e 100644
+--- a/osfmk/arm64/bsd_arm64.c
++++ b/osfmk/arm64/bsd_arm64.c
+@@ -57,6 +57,11 @@
+ #include <security/mac_mach_internal.h>
+ #endif
+ 
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++/* Note10 (v378): bsd/dev/arm/systemcalls.c, xpcproxy failing-call trace. */
++extern void n10_xpc_note(int trap, int num, int err);
++#endif
++
+ extern void throttle_lowpri_io(int);
+ void mach_syscall(struct arm_saved_state*);
+ typedef kern_return_t (*mach_call_t)(void *);
+@@ -298,6 +303,12 @@ mach_syscall(struct arm_saved_state *state)
+ 	retval = mach_call(&args);
+ 
+ skip_machcall:
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	/* Note10 (v378): failing Mach traps of xpcproxy (bsd/dev/arm/systemcalls.c n10_xpc_note). */
++	if (__improbable(retval != KERN_SUCCESS) && !mach_trap_table[call_number].mach_trap_returns_port) {
++		n10_xpc_note(1, call_number, retval);
++	}
++#endif
+ 
+ 	DEBUG_KPRINT_SYSCALL_MACH("mach_syscall: retval=0x%x (pid %d, tid %lld)\n", retval,
+ 	    proc_pid(current_proc()), thread_tid(current_thread()));
+diff --git a/osfmk/arm64/note10/n10_wdt.c b/osfmk/arm64/note10/n10_wdt.c
+index b44387d..2759c09 100644
+--- a/osfmk/arm64/note10/n10_wdt.c
++++ b/osfmk/arm64/note10/n10_wdt.c
+@@ -76,6 +76,9 @@ extern void n10_dsslog_write(const char *s, int n);
+ extern unsigned int vm_page_free_count;
+ extern unsigned int vm_page_free_wanted;
+ extern uint32_t n10_sync_kfast;          /* v377: n10_dsslog.c kother forwarding count */
++extern uint32_t memorystatus_available_pages;   /* v378: bsd/kern/kern_memorystatus.c */
++extern uint32_t c_segment_pages_compressed;     /* v378: osfmk/vm/vm_compressor.c */
++extern int proc_selfpid(void);
+ static uint32_t n10_wdt_kfast_seen;
+ 
+ static void
+@@ -103,6 +106,17 @@ n10_wdt_note(uint64_t now, const char *stop)
+ 	if (n > 0) {
+ 		n10_dsslog_write(line, n < (int)sizeof(line) ? n : (int)sizeof(line) - 1);
+ 	}
++	/*
++	 * v378: one N378M line per heartbeat: memorystatus available pages, pages held
++	 * by the compressor and the pid of the interrupted thread's process (0 = kernel).
++	 */
++	if (stop == NULL) {
++		n = snprintf(line, sizeof(line), "N378M avail=%u cmp=%u cur=%d\n",
++		    memorystatus_available_pages, c_segment_pages_compressed, proc_selfpid());
++		if (n > 0) {
++			n10_dsslog_write(line, n < (int)sizeof(line) ? n : (int)sizeof(line) - 1);
++		}
++	}
+ 	/* v377: one N377F line per heartbeat when kernel AF/permission faults were forwarded since the last one. */
+ 	uint32_t kfast = n10_sync_kfast;
+ 	if (stop == NULL && kfast != n10_wdt_kfast_seen) {
