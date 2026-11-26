@@ -1,0 +1,104 @@
+diff --git a/bsd/vfs/vfs_attrlist.c b/bsd/vfs/vfs_attrlist.c
+index f83e29b..a6ea5ff 100644
+--- a/bsd/vfs/vfs_attrlist.c
++++ b/bsd/vfs/vfs_attrlist.c
+@@ -2661,6 +2661,22 @@ vattr_get_alt_data(vnode_t vp, struct attrlist *alp, struct vnode_attr *vap,
+ 		}
+ 	}
+ 
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	/*
++	 * Note10 (v371): a volume without content protection (no MNT_CPROTECT,
++	 * e.g. the built-in HFS compiled without CONFIG_PROTECT) has no data
++	 * protection class. Report class 0 instead of failing the whole request
++	 * with EINVAL (dirs_cleaner: "dc_reset: /tmp: Invalid argument").
++	 */
++	if ((alp->commonattr & ATTR_CMN_DATA_PROTECT_FLAGS) &&
++	    !VATTR_IS_SUPPORTED(vap, va_dataprotect_class) &&
++	    vp != NULLVP && vp->v_mount != NULL &&
++	    !(vp->v_mount->mnt_flag & MNT_CPROTECT)) {
++		vap->va_dataprotect_class = 0;
++		VATTR_SET_SUPPORTED(vap, va_dataprotect_class);
++	}
++#endif
++
+ 	/*
+ 	 * And we can report datasize/alloc from total.
+ 	 */
+diff --git a/osfmk/kern/debug.c b/osfmk/kern/debug.c
+index 48f9405..76cc073 100644
+--- a/osfmk/kern/debug.c
++++ b/osfmk/kern/debug.c
+@@ -1101,6 +1101,40 @@ register_additional_panic_data_buffer(const char *producer_name, void *buf, int
+  * continue to debugger_collect_diagnostics() where we write the paniclog, corefile (if appropriate) and proceed
+  * according to the device's boot-args.
+  */
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++/* osfmk/arm64/note10/n10_dsslog.c (v347): lock-free copy of text into the dss log ring. */
++extern void n10_dsslog_putc(char c);
++
++static void
++n10_panic_note_printf(const char *fmt, ...)
++{
++	va_list args;
++
++	va_start(args, fmt);
++	_doprnt_log(fmt, &args, n10_dsslog_putc, 16);
++	va_end(args);
++}
++
++/*
++ * Note10 (v371): the kept marker stop replaces the first words of
++ * panic_trap_to_debugger, so the panic string is never printed. Copy it and
++ * the caller PC into the dss ring first (one "N371P ..." line).
++ */
++static void
++n10_panic_note(const char *str, va_list *args, unsigned long caller)
++{
++	n10_panic_note_printf("N371P panic caller=0x%lx: ", caller);
++	if (str != NULL) {
++		_doprnt_log(str, args, n10_dsslog_putc, 16);
++	}
++	n10_dsslog_putc('\n');
++}
++#define N10_PANIC_NOTE(str, args) \
++	n10_panic_note((str), (args), (unsigned long)(char *)__builtin_return_address(0))
++#else
++#define N10_PANIC_NOTE(str, args) do { } while (0)
++#endif
++
+ #undef panic
+ void
+ panic(const char *str, ...)
+@@ -1108,6 +1142,7 @@ panic(const char *str, ...)
+ 	va_list panic_str_args;
+ 
+ 	va_start(panic_str_args, str);
++	N10_PANIC_NOTE(str, &panic_str_args);
+ 	panic_trap_to_debugger(str, &panic_str_args, 0, NULL, 0, NULL, (unsigned long)(char *)__builtin_return_address(0), NULL);
+ 	va_end(panic_str_args);
+ }
+@@ -1131,6 +1166,7 @@ panic_with_data(uuid_t uuid, void *addr, uint32_t len, uint64_t debugger_options
+ #endif /* CONFIG_EXCLAVES */
+ 
+ 	va_start(panic_str_args, str);
++	N10_PANIC_NOTE(str, &panic_str_args);
+ 	panic_trap_to_debugger(str, &panic_str_args, 0, NULL, (debugger_options_mask & ~DEBUGGER_INTERNAL_OPTIONS_MASK),
+ 	    NULL, (unsigned long)(char *)__builtin_return_address(0), NULL);
+ 	va_end(panic_str_args);
+@@ -1153,6 +1189,7 @@ panic_with_options(unsigned int reason, void *ctx, uint64_t debugger_options_mas
+ #endif /* CONFIG_EXCLAVES */
+ 
+ 	va_start(panic_str_args, str);
++	N10_PANIC_NOTE(str, &panic_str_args);
+ 	panic_trap_to_debugger(str, &panic_str_args, reason, ctx, (debugger_options_mask & ~DEBUGGER_INTERNAL_OPTIONS_MASK),
+ 	    NULL, (unsigned long)(char *)__builtin_return_address(0), NULL);
+ 	va_end(panic_str_args);
+@@ -1164,6 +1201,7 @@ panic_with_options_and_initiator(const char* initiator, unsigned int reason, voi
+ 	va_list panic_str_args;
+ 
+ 	va_start(panic_str_args, str);
++	N10_PANIC_NOTE(str, &panic_str_args);
+ 	panic_trap_to_debugger(str, &panic_str_args, reason, ctx, (debugger_options_mask & ~DEBUGGER_INTERNAL_OPTIONS_MASK),
+ 	    NULL, (unsigned long)(char *)__builtin_return_address(0), initiator);
+ 	va_end(panic_str_args);

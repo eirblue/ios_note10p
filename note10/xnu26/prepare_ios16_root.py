@@ -49,6 +49,9 @@ OVERLAY = (
      ('bsd/dev/n10_ufs.c',)),
     ('0036-exynos9825-n10-ufs-userdata-write.patch', '2f7c2926198151903a4eb83d74a308a0752d89153606378ac1608ffffbbf83e0',
      ('bsd/dev/n10_ufs.c',)),
+    ('0037-exynos9825-n10-dataprotect-class0-panic-note.patch',
+     '76c84c46dbf531e411eb23f81847ca96f0e861ba3e7345044785cdd7faabca10',
+     ('bsd/vfs/vfs_attrlist.c', 'osfmk/kern/debug.c')),
 )
 STAGED_DIRS = ('bsd/n10_hfs/core', 'bsd/n10_hfs/hfs_encodings')
 

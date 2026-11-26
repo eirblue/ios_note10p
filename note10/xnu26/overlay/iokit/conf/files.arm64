@@ -7,3 +7,4 @@ iokit/Kernel/IOPMrootDomain.cpp    					optional iokitcpp
 iokit/Kernel/arm/AppleARMSMP.cpp    					optional iokitcpp
 
 iokit/Kernel/arm/NoteKeyStore.cpp    					optional iokitcpp
+iokit/Kernel/arm/NoteAMFI.cpp    					optional iokitcpp
