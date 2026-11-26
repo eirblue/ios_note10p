@@ -1,0 +1,65 @@
+diff --git a/bsd/dev/n10_ufs.c b/bsd/dev/n10_ufs.c
+index 03c7ba1..1d88524 100644
+--- a/bsd/dev/n10_ufs.c
++++ b/bsd/dev/n10_ufs.c
+@@ -66,6 +66,10 @@
+  * the high nibble. n10_wdt_kick() pets the watchdog at entry and before each
+  * doorbell.
+  *
++ * v382: n10_ufs_stop first appends one "N382U stop site= detail= lr= op= lba=
++ * count= attempt= ticks=" line to the dss ring (n10_dsslog_write), because
++ * the v379+ PMIC WTSR resets report no core PC for the ladder index.
++ *
+  * v346: the task tag equals the slot (0), as Linux uses task_tag == tag.
+  * Site 10 detail is eight flags: bit0 IS.UTRCS; bit1 IS UE|UHXS|UHES|ULLS|ULSS
+  * (link/UIC event); bit2 IS DFES|UTPES; bit3 IS HCFES|SBFES; bit4 UTRLRSR bit0
+@@ -105,6 +109,8 @@ extern unsigned long gPhysBase, gPhysSize;
+ /* osfmk/arm64/note10/n10_wdt.c (v344) */
+ extern void n10_wdt_kick(void);
+ extern uint32_t n10_wdt_ticks;
++/* osfmk/arm64/note10/n10_dsslog.c (v347): lock-free dss append, masks DAIF itself */
++extern void n10_dsslog_write(const char *s, int n);
+ 
+ #define REG_IS          0x20
+ #define REG_IE          0x24
+@@ -226,10 +232,28 @@ __asm__ (
+ 	"	b .\n"
+ 	"	.endr\n");
+ 
++/* v382: the command n10_ufs_cmd_once last built (for the N382U stop line). */
++static uint8_t n10_ufs_cur_op;
++static uint64_t n10_ufs_cur_lba;
++static uint32_t n10_ufs_cur_count, n10_ufs_cur_attempt;
++
+ static void __attribute__((noreturn, noinline))
+ n10_ufs_stop(uint32_t site, uint32_t detail)
+ {
+ 	uint64_t code = (uint64_t)(site & 0xf) << 8 | (detail & 0xff);
++	/*
++	 * v382: since v379 the reset is a PMIC WTSR that reports no core PC, so
++	 * the ladder index alone is lost. One "N382U" dss line first: site,
++	 * detail, the caller and the last command built. No lock, no allocation.
++	 */
++	char line[160];
++	int n = snprintf(line, sizeof(line),
++	    "N382U stop site=%u detail=0x%02x lr=0x%llx op=0x%02x lba=0x%llx count=%u attempt=%u ticks=%u\n",
++	    site & 0xf, detail & 0xff, (unsigned long long)(uintptr_t)__builtin_return_address(0),
++	    n10_ufs_cur_op, n10_ufs_cur_lba, n10_ufs_cur_count, n10_ufs_cur_attempt, n10_wdt_ticks);
++	if (n > 0) {
++		n10_dsslog_write(line, n < (int)sizeof(line) ? n : (int)sizeof(line) - 1);
++	}
+ 
+ 	__asm__ volatile (
+ 		"msr daifset, #0xf\n"
+@@ -315,6 +339,11 @@ n10_ufs_cmd_once(uint8_t op, uint64_t lba, uint32_t count, uint32_t attempt)
+ 	bool wr = op == SCSI_WRITE10, sync = op == SCSI_SYNC10;
+ 	uint32_t len = sync ? 0 : count * UFS_BLOCK;
+ 
++	n10_ufs_cur_op = op;                    /* v382: N382U context */
++	n10_ufs_cur_lba = lba;
++	n10_ufs_cur_count = count;
++	n10_ufs_cur_attempt = attempt;
++
+ 	/* Strides and length are reviewed constants; re-check before any DMA. */
+ 	if ((op != SCSI_READ10 && !wr && !sync) || (sync ? count != 0 : count == 0 || count > PRDT_MAX) ||
+ 	    UCD_PRDT + count * PRDT_ENTRY_SIZE > DMA_BOUNCE - DMA_UCD) {

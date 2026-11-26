@@ -1,0 +1,147 @@
+diff --git a/bsd/dev/n10_ufs.c b/bsd/dev/n10_ufs.c
+index 6659a56..a73fc0a 100644
+--- a/bsd/dev/n10_ufs.c
++++ b/bsd/dev/n10_ufs.c
+@@ -99,6 +99,7 @@
+ extern ppnum_t pmap_find_phys(pmap_t pmap, addr64_t va);
+ /* osfmk/arm, not exported to the BSD layer */
+ extern vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
++extern vm_offset_t ml_io_map_wcomb(vm_offset_t phys_addr, vm_size_t size);
+ extern void flush_dcache64(addr64_t addr, unsigned count, int phys);
+ extern unsigned long gPhysBase, gPhysSize;
+ /* osfmk/arm64/note10/n10_wdt.c (v344) */
+@@ -167,6 +168,10 @@ _Static_assert(((N10_UFS_HCI_BASE + N10_UFS_NEXUS_OFF) & ~0xfffull) ==
+ #define DMA_BOUNCE      0x8000
+ #define DMA_SIZE        (DMA_BOUNCE + BOUNCE_SIZE)
+ _Static_assert(DMA_UCD + UCD_PRDT + PRDT_MAX * PRDT_ENTRY_SIZE <= DMA_BOUNCE, "UCD overlaps the bounce buffer");
++/* v382: fixed 1 MiB DMA block below 4 GiB, reserved by Linux (N382DMA) outside the XNU window. */
++#define N10_UFS_DMA_PA          0xE2000000ull
++#define N10_UFS_DMA_BYTES       0x100000u
++_Static_assert(DMA_SIZE <= N10_UFS_DMA_BYTES, "DMA layout exceeds the reserved block");
+ 
+ struct utrd {
+ 	uint32_t dw0, dw1, dw2, dw3;
+@@ -243,10 +248,15 @@ n10_ufs_ticks(void)
+ 	return MIN(n10_wdt_ticks, 15u) << 4;
+ }
+ 
++/*
++ * v382: by kernel VA of the wcomb mapping (phys FALSE). The block lies below
++ * gPhysBase, so a physical flush would panic in phystokv_range. DC CIVAC by VA
++ * also removes stale lines of other aliases; flush_dcache ends with dsb sy.
++ */
+ static void
+ dma_sync(uint32_t off, uint32_t len)
+ {
+-	flush_dcache64((addr64_t)(nu.dma_pa + off), len, TRUE);
++	flush_dcache64((addr64_t)(nu.dma + off), len, FALSE);
+ }
+ 
+ static uint64_t
+@@ -422,10 +432,10 @@ n10_ufs_cmd_once(uint8_t op, uint64_t lba, uint32_t count, uint32_t attempt)
+ static void
+ n10_ufs_command(uint8_t op, uint64_t lba, uint32_t count)
+ {
+-	if (nu.dma_pa < gPhysBase) {
++	if (nu.dma_pa != N10_UFS_DMA_PA) {
+ 		n10_ufs_stop(6, n10_ufs_ticks() | 2);
+ 	}
+-	if (nu.dma_pa + DMA_SIZE > (uint64_t)gPhysBase + gPhysSize) {
++	if (nu.dma_pa + N10_UFS_DMA_BYTES > gPhysBase && nu.dma_pa < (uint64_t)gPhysBase + gPhysSize) {
+ 		n10_ufs_stop(6, n10_ufs_ticks() | 3);
+ 	}
+ 	if (nu.dma_pa + DMA_SIZE > (1ull << 32)) {
+@@ -865,17 +875,14 @@ static void
+ n10_ufs_init(void)
+ {
+ 	n10_ufs_handoff();
+-	kern_return_t kr = kmem_alloc_contig(kernel_map, &nu.dma, DMA_SIZE, PAGE_MASK,
+-	    (ppnum_t)(((1ull << 32) >> PAGE_SHIFT) - 1), 0,
+-	    KMA_DATA | KMA_ZERO | KMA_PERMANENT, VM_KERN_MEMORY_IOKIT);
+-	if (kr != KERN_SUCCESS) {
+-		n10_ufs_stop(5, n10_ufs_ticks() | ((uint32_t)kr & 0xf));
+-	}
+-	ppnum_t pn = pmap_find_phys(kernel_pmap, (addr64_t)nu.dma);
+-	if (!pn) {
+-		n10_ufs_stop(6, n10_ufs_ticks() | 1);
+-	}
+-	nu.dma_pa = ptoa_64(pn);
++	/* v382: Normal non-cacheable mapping of the Linux-reserved block (XNU RAM is above 4 GiB). */
++	nu.dma = ml_io_map_wcomb((vm_offset_t)N10_UFS_DMA_PA, (vm_size_t)N10_UFS_DMA_BYTES);
++	if (!nu.dma) {
++		n10_ufs_stop(5, n10_ufs_ticks() | 1);
++	}
++	nu.dma_pa = N10_UFS_DMA_PA;
++	flush_dcache64((addr64_t)nu.dma, DMA_SIZE, FALSE);   /* stale Linux lines first, then the zeros */
++	bzero((void *)nu.dma, DMA_SIZE);
+ 	nu.secsize = DEV_BSIZE;
+ 
+ 	lck_mtx_lock(&n10_ufs_lock);
+diff --git a/osfmk/arm64/arm_vm_init.c b/osfmk/arm64/arm_vm_init.c
+index c0dfb2b..c89116b 100644
+--- a/osfmk/arm64/arm_vm_init.c
++++ b/osfmk/arm64/arm_vm_init.c
+@@ -85,6 +85,11 @@ extern vm_offset_t physmap_vtop;
+  */
+ #if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
+ #include "note10/exynos_leaf_mapper.h"
++/* Note10 (v382): 36-page bootstrap pool for the 512 MiB window (start.s uses the same value). */
++#undef N10_MAP_POOL_PAGES
++#define N10_MAP_POOL_PAGES 36
++#undef BOOTSTRAP_TABLE_SIZE
++#define BOOTSTRAP_TABLE_SIZE (ARM_PGBYTES * 36)
+ uint8_t bootstrap_pagetables[BOOTSTRAP_TABLE_SIZE]
+     __attribute__((section("__DATA,__n10bt,zerofill"),aligned(ARM_PGBYTES),used));
+ _Static_assert(BOOTSTRAP_TABLE_SIZE == N10_MAP_POOL_BYTES, "exact Exynos bootstrap BSS capacity");
+diff --git a/osfmk/arm64/note10/n10_dsslog.c b/osfmk/arm64/note10/n10_dsslog.c
+index 55e007d..5473798 100644
+--- a/osfmk/arm64/note10/n10_dsslog.c
++++ b/osfmk/arm64/note10/n10_dsslog.c
+@@ -66,7 +66,7 @@
+ 
+ #define N10_DSS_RAM_LO          0x80000000ull
+ #define N10_DSS_RAM_HI          0x100000000ull
+-#define N10_DSS_WINDOW          0x4000000ull    /* XNU window (Linux N311_WINDOW_BYTES) */
++#define N10_DSS_WINDOW          0x20000000ull   /* XNU window (Linux N311_WINDOW_BYTES, v382) */
+ #define N10_DSS_LOG_MAX         0x400000ull
+ #define N10_DSS_CAPTURE_MIN     512u            /* Linux N347_CAPTURE_BYTES */
+ #define N10_DSS_AREA_MAX        0x40000u        /* 256 KiB of log text at most */
+diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
+index d5f0ca0..d2de176 100644
+--- a/osfmk/arm64/start.s
++++ b/osfmk/arm64/start.s
+@@ -31,6 +31,13 @@
+ #include <arm64/machine_machdep.h>
+ #if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
+ #include "note10/exynos_leaf_mapper.h"
++/*
++ * Note10 (v382): 512 MiB XNU window above 4 GiB. The bootstrap map covers
++ * memSize - 0x1004000 = 0x1EFFC000 bytes; exact table preflight
++ * 1 + 16 + 1 + 16 + 2 roots = 36 pages. The pinned header stays unchanged.
++ */
++#undef N10_MAP_POOL_PAGES
++#define N10_MAP_POOL_PAGES 36
+ #endif
+ #include <arm64/proc_reg.h>
+ #include <pexpert/arm64/board_config.h>
+@@ -904,14 +911,14 @@ arm_init_tramp:
+ 
+ #if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
+ /*
+- * Note10 (v378): the loader passes boot_args memSize 0x4000000 (the whole
+- * 64 MiB window), so the bootstrap map covers memSize - 0x1004000 = 0x2FFC000
+- * bytes from the image. Raise the mapper's size bound from 32 MiB to 48 MiB
+- * for the mapper body only (one movz; the pinned exynos_leaf_mapper.h/.S are
+- * unchanged). Table preflight: 1 + 2 + 1 + 2 + 2 roots = 8 <= 10 pool pages.
++ * Note10 (v382): the loader passes boot_args memSize 0x20000000 (the whole
++ * 512 MiB window above 4 GiB), so the bootstrap map covers memSize - 0x1004000
++ * = 0x1EFFC000 bytes from the image. Mapper size bound 0x1F000000 (one movz;
++ * the pinned exynos_leaf_mapper.h/.S are unchanged). Table preflight:
++ * 1 + 16 + 1 + 16 + 2 roots = 36 = N10_MAP_POOL_PAGES (set above).
+  */
+ #undef N10_MAP_MAX_BYTES
+-#define N10_MAP_MAX_BYTES 50331648
++#define N10_MAP_MAX_BYTES 520093696
+ #include "note10/exynos_leaf_mapper.S"
+ #endif
+ 

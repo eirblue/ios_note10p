@@ -86,6 +86,12 @@ OVERLAY = (
     ('0048-exynos9825-n10-wdt-250ms-tick-trace.patch',
      '054def6ebbb5fe6fdf7e3197fdf042d5f4c4fe87e866377b25a35335618c33d1',
      ('osfmk/arm64/note10/n10_wdt.c',)),
+    ('0049-exynos9825-n10-ram-512mib-high-window.patch',
+     '1a8224f586135b0458de4b597b4a56fbe4b14119b52356917cfc8c67a33efac0',
+     ('bsd/dev/n10_ufs.c', 'osfmk/arm64/arm_vm_init.c', 'osfmk/arm64/note10/n10_dsslog.c', 'osfmk/arm64/start.s')),
+    ('0050-exynos9825-n10-ufs-stop-dss-line.patch',
+     '4f6f5e9b919f324327dace9991f6d8e3c8c2892853ed560c9d2d8fbcd83a777c',
+     ('bsd/dev/n10_ufs.c',)),
 )
 STAGED_DIRS = ('bsd/n10_hfs/core', 'bsd/n10_hfs/hfs_encodings')
 
