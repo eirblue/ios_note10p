@@ -77,6 +77,9 @@ OVERLAY = (
     ('0045-exynos9825-n10-bootstrap-map-48mib.patch',
      '6211394464971976cde97924a3bf7770f3a1e6f4b3cfd0d33a5593f412ec4687',
      ('osfmk/arm64/start.s',)),
+    ('0046-exynos9825-n10-xpcproxy-wait-macpolicy-trace.patch',
+     '3e198ff59cd9277bfd2e207ba20d241f3700fad0291e2d6382bc1bc3ec3b5a1c',
+     ('bsd/dev/arm/systemcalls.c', 'osfmk/arm64/bsd_arm64.c', 'osfmk/arm64/note10/n10_wdt.c', 'security/mac_base.c')),
 )
 STAGED_DIRS = ('bsd/n10_hfs/core', 'bsd/n10_hfs/hfs_encodings')
 

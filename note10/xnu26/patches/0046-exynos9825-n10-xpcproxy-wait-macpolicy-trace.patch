@@ -1,0 +1,195 @@
+diff --git a/bsd/dev/arm/systemcalls.c b/bsd/dev/arm/systemcalls.c
+index 5a76f9e..fcd2772 100644
+--- a/bsd/dev/arm/systemcalls.c
++++ b/bsd/dev/arm/systemcalls.c
+@@ -78,6 +78,85 @@ n10_xpc_note(int trap, int num, int err)
+ 		n10_dsslog_trace("N378Y pid=%d sys=%d err=%d", proc_getpid(p), num, err);
+ 	}
+ }
++
++/*
++ * Note10 (v379): where do the xpcproxy processes wait? One slot per xpcproxy
++ * pid (first N10_XQ_SLOTS pids) holds the BSD syscall (>0) or Mach trap (<0)
++ * it last entered and whether that call has not returned through the
++ * syscall/trap exit path yet. n10_wdt prints the slots once per heartbeat
++ * (N379Q, at most N10_XQ_LINES lines per boot so the shared dss trace budget
++ * keeps room for N376E/N376X). A Mach trap that returns through a continuation
++ * keeps in=1 until the next call. CPU0 only; the timer reader tolerates a torn
++ * slot. Observation only: no return value or state of the call is changed.
++ */
++#define N10_XQ_SLOTS            8
++#define N10_XQ_LINES            192u
++void n10_xpc_enter(int num);
++void n10_xpc_leave(void);
++void n10_xpc_dump(void);
++static struct {
++	int pid;
++	int num;
++	uint32_t in;
++} n10_xq[N10_XQ_SLOTS];
++static uint32_t n10_xq_lines;
++
++static int
++n10_xpc_slot(int alloc)
++{
++	proc_t p = current_proc();
++	int pid, i;
++
++	if (p == PROC_NULL || strncmp(p->p_comm, "xpcproxy", 8) != 0) {
++		return -1;
++	}
++	pid = proc_getpid(p);
++	for (i = 0; i < N10_XQ_SLOTS; i++) {
++		if (n10_xq[i].pid == pid) {
++			return i;
++		}
++		if (n10_xq[i].pid == 0) {
++			if (!alloc) {
++				return -1;
++			}
++			n10_xq[i].pid = pid;
++			return i;
++		}
++	}
++	return -1;
++}
++
++void
++n10_xpc_enter(int num)
++{
++	int i = n10_xpc_slot(1);
++
++	if (i >= 0) {
++		n10_xq[i].num = num;
++		n10_xq[i].in = 1;
++	}
++}
++
++void
++n10_xpc_leave(void)
++{
++	int i = n10_xpc_slot(0);
++
++	if (i >= 0) {
++		n10_xq[i].in = 0;
++	}
++}
++
++void
++n10_xpc_dump(void)
++{
++	for (int i = 0; i < N10_XQ_SLOTS && n10_xq[i].pid != 0; i++) {
++		if (__atomic_fetch_add(&n10_xq_lines, 1u, __ATOMIC_RELAXED) >= N10_XQ_LINES) {
++			return;
++		}
++		n10_dsslog_trace("N379Q pid=%d c=%d in=%u", n10_xq[i].pid, n10_xq[i].num, n10_xq[i].in);
++	}
++}
+ #endif /* ARM64_BOARD_CONFIG_EXYNOS9825 */
+ #define save_r0         r[0]
+ #define save_r1         r[1]
+@@ -206,9 +285,13 @@ unix_syscall(
+ #endif /* CONFIG_DEBUG_SYSCALL_REJECTION */
+ 
+ 	AUDIT_SYSCALL_ENTER(code, proc, uthread);
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	n10_xpc_enter(code);
++#endif
+ 	error = (*(callp->sy_call))(proc, &uthread->uu_arg[0], &(uthread->uu_rval[0]));
+ 	AUDIT_SYSCALL_EXIT(code, proc, uthread, error);
+ #if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	n10_xpc_leave();
+ 	if (__improbable(error != 0 && error != ERESTART && error != EJUSTRETURN)) {
+ 		n10_xpc_note(0, code, error);
+ 	}
+@@ -294,6 +377,7 @@ unix_syscall_return(int error)
+ 
+ 	AUDIT_SYSCALL_EXIT(code, proc, uthread, error);
+ #if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	n10_xpc_leave();
+ 	if (__improbable(error != 0 && error != ERESTART && error != EJUSTRETURN)) {
+ 		n10_xpc_note(0, code, error);
+ 	}
+diff --git a/osfmk/arm64/bsd_arm64.c b/osfmk/arm64/bsd_arm64.c
+index f5d2a2e..9130f9c 100644
+--- a/osfmk/arm64/bsd_arm64.c
++++ b/osfmk/arm64/bsd_arm64.c
+@@ -60,6 +60,8 @@
+ #if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
+ /* Note10 (v378): bsd/dev/arm/systemcalls.c, xpcproxy failing-call trace. */
+ extern void n10_xpc_note(int trap, int num, int err);
++extern void n10_xpc_enter(int num);
++extern void n10_xpc_leave(void);
+ #endif
+ 
+ extern void throttle_lowpri_io(int);
+@@ -300,10 +302,14 @@ mach_syscall(struct arm_saved_state *state)
+ #endif /* CONFIG_DEBUG_SYSCALL_REJECTION */
+ 
+ 
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	n10_xpc_enter(-(int)call_number);     /* v379: Mach trap entered (N379Q) */
++#endif
+ 	retval = mach_call(&args);
+ 
+ skip_machcall:
+ #if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	n10_xpc_leave();
+ 	/* Note10 (v378): failing Mach traps of xpcproxy (bsd/dev/arm/systemcalls.c n10_xpc_note). */
+ 	if (__improbable(retval != KERN_SUCCESS) && !mach_trap_table[call_number].mach_trap_returns_port) {
+ 		n10_xpc_note(1, call_number, retval);
+diff --git a/osfmk/arm64/note10/n10_wdt.c b/osfmk/arm64/note10/n10_wdt.c
+index 2759c09..05ce53f 100644
+--- a/osfmk/arm64/note10/n10_wdt.c
++++ b/osfmk/arm64/note10/n10_wdt.c
+@@ -79,6 +79,7 @@ extern uint32_t n10_sync_kfast;          /* v377: n10_dsslog.c kother forwarding
+ extern uint32_t memorystatus_available_pages;   /* v378: bsd/kern/kern_memorystatus.c */
+ extern uint32_t c_segment_pages_compressed;     /* v378: osfmk/vm/vm_compressor.c */
+ extern int proc_selfpid(void);
++extern void n10_xpc_dump(void);               /* v379: bsd/dev/arm/systemcalls.c N379Q */
+ static uint32_t n10_wdt_kfast_seen;
+ 
+ static void
+@@ -116,6 +117,7 @@ n10_wdt_note(uint64_t now, const char *stop)
+ 		if (n > 0) {
+ 			n10_dsslog_write(line, n < (int)sizeof(line) ? n : (int)sizeof(line) - 1);
+ 		}
++		n10_xpc_dump();
+ 	}
+ 	/* v377: one N377F line per heartbeat when kernel AF/permission faults were forwarded since the last one. */
+ 	uint32_t kfast = n10_sync_kfast;
+diff --git a/security/mac_base.c b/security/mac_base.c
+index 9f90247..3f45c3f 100644
+--- a/security/mac_base.c
++++ b/security/mac_base.c
+@@ -1560,6 +1560,12 @@ mac_proc_check_mac_syscall(proc_t p, const char *target, int callnum)
+  *                !0                      Not success
+  *
+  */
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++#define N10_MACP_MAX            48u
++extern void n10_dsslog_trace(const char *fmt, ...) __printflike(1, 2);
++static uint32_t n10_macp_lines;
++#endif
++
+ int
+ __mac_syscall(proc_t p, struct __mac_syscall_args *uap, int *retv __unused)
+ {
+@@ -1614,6 +1620,17 @@ __mac_syscall(proc_t p, struct __mac_syscall_args *uap, int *retv __unused)
+ 	}
+ 
+ done:
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	/*
++	 * Note10 (v379): which policy/call returns ENOPOLICY (no MAC policy is
++	 * registered in this kernel). First N10_MACP_MAX lines into the dss ring
++	 * (N379P). Observation only: the error is returned unchanged.
++	 */
++	if (error == ENOPOLICY &&
++	    __atomic_fetch_add(&n10_macp_lines, 1u, __ATOMIC_RELAXED) < N10_MACP_MAX) {
++		n10_dsslog_trace("N379P pid=%d %.16s policy=%.16s call=%d", proc_getpid(p), p->p_comm, target, uap->call);
++	}
++#endif
+ 	return error;
+ }
+ 
