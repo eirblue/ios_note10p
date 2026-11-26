@@ -1,0 +1,127 @@
+diff --git a/osfmk/arm64/note10/n10_wdt.c b/osfmk/arm64/note10/n10_wdt.c
+index f5c904b..ad404cc 100644
+--- a/osfmk/arm64/note10/n10_wdt.c
++++ b/osfmk/arm64/note10/n10_wdt.c
+@@ -15,7 +15,7 @@
+  * Register accesses: read WTCON, read WTDAT, write WTCNT. Nothing else
+  * (no WTCON/WTDAT/WTCLRINT writes, no prescaler, PMU or multistage WDT).
+  *
+- * A timer_call pets every 2 s by writing the read WTDAT value to WTCNT.
++ * A timer_call pets every 2 s (v381: 250 ms) by writing the read WTDAT value to WTCNT.
+  * It runs from the timer interrupt, so a panic, a debugger stop or a hang
+  * with interrupts masked stops petting and the reset follows within 10 s.
+  * After n10wdt_deadline seconds (boot-arg, default 300, clamped to 900,
+@@ -43,6 +43,18 @@
+  * change, hang or panic); cl0 (10 s, RSTEN) then expires before the
+  * un-reloaded cl2 (2 x 7 s), as in v373/v374. A changed cl2 arming only
+  * stops the cl2 reload.
++ *
++ * v381: v380 kept cl2 reloading and still ended in the same PIN_RESET /
++ * PMIC WTSR a few seconds after its last 2 s heartbeat, with the next
++ * heartbeat missing. The timer now runs every 250 ms: each tick does the
++ * same guarded pet and writes one "N381K" line (time, interrupted PC and
++ * EL, pid, and the cl0 and cl2 WTCNT read before the pet), at most
++ * N10_WDT_TICK_LINES lines per boot. The N376H/N378M/N380T heartbeat output
++ * stays on every 8th tick (2 s). The last N381K line bounds when XNU's timer
++ * interrupt last ran to 250 ms and shows where CPU0 was and how far both
++ * counters were from expiry; the user PCs are a per-tick sample of what user
++ * threads run. Register accesses are unchanged (cl0/cl2 WTCNT read, WTCNT
++ * write).
+  */
+ #if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
+ #include <stdint.h>
+@@ -66,7 +78,9 @@
+ #define N10_WTCON_RSTEN         (1u << 0)
+ #define N10_WTCON_INTEN         (1u << 2)
+ #define N10_WTCON_ENABLE        (1u << 5)
+-#define N10_WDT_PERIOD_NS       (2ull * NSEC_PER_SEC)
++#define N10_WDT_PERIOD_NS       (250ull * NSEC_PER_MSEC)   /* v381: was 2 s */
++#define N10_WDT_NOTE_EVERY      8u                          /* v381: heartbeat output every 2 s */
++#define N10_WDT_TICK_LINES      600u                        /* v381: N381K cap (120 s x 4 = 480) */
+ #define N10_WDT_DEADLINE_S      300u
+ #define N10_WDT_DEADLINE_MAX_S  900u
+ #define N10_WDT_CL0_PA          0x10050000ull   /* 10050000.watchdog_cl0 */
+@@ -83,13 +97,16 @@ void n10_wdt_kick(void);
+ static uint64_t n10_wdt_start_abs;
+ static vm_offset_t n10_wdt2_regs;       /* v380: cl2 multistage WDT, 0 = not reloaded */
+ static uint32_t n10_wdt2_reload;
++static vm_offset_t n10_wdt2_page;       /* v381: cl2 mapping for the N381K WTCNT read */
++static uint32_t n10_wdt_tick_lines;
+ 
+ /*
+  * v376: one "N376H" line per timer-path pet into the dss ring
+  * (osfmk/arm64/note10/n10_dsslog.c), so the last line before a reset shows
+  * when XNU last ran its timer interrupt, the free page count, the number of
+  * threads waiting for a free page and the interrupted PC (el0=1: user).
+- * One "N376W" line when petting stops. At most one H line per 2 s, bounded
++ * One "N376W" line when petting stops. At most one H line per 2 s (v381: every
++ * 8th tick), bounded
+  * by the deadline (<= 450). No lock, no allocation: snprintf only formats
+  * into the stack buffer and n10_dsslog_write masks DAIF itself.
+  */
+@@ -192,16 +209,46 @@ n10_wdt_pet(uint64_t now)
+ 	return true;
+ }
+ 
++/* v381: one N381K line per tick; c0/c2 are the cl0/cl2 WTCNT read before the pet. */
++static void
++n10_wdt_tickline(uint64_t now, uint32_t c0, uint32_t c2)
++{
++	char line[128];
++	uint64_t ns = 0, pc = 0;
++	unsigned int el0 = 0;
++	int n;
++
++	if (n10_wdt_tick_lines >= N10_WDT_TICK_LINES) {
++		return;
++	}
++	n10_wdt_tick_lines++;
++	arm_saved_state_t *ss = (arm_saved_state_t *)getCpuDatap()->cpu_int_state;
++	if (ss != NULL) {
++		pc = get_saved_state_pc(ss);
++		el0 = PSR64_IS_USER(get_saved_state_cpsr(ss)) ? 1u : 0u;
++	}
++	absolutetime_to_nanoseconds(now - n10_wdt_start_abs, &ns);
++	n = snprintf(line, sizeof(line), "N381K t=%llu.%03llu e=%u p=%d pc=0x%llx c0=%x c2=%x\n",
++	    ns / NSEC_PER_SEC, (ns % NSEC_PER_SEC) / NSEC_PER_MSEC, el0, proc_selfpid(), pc, c0, c2);
++	if (n > 0) {
++		n10_dsslog_write(line, n < (int)sizeof(line) ? n : (int)sizeof(line) - 1);
++	}
++}
++
+ static void
+ n10_wdt_tick(__unused timer_call_param_t p0, __unused timer_call_param_t p1)
+ {
+ 	uint64_t now = mach_absolute_time();
++	uint32_t c0 = n10_wdt_rd(N10_WTCNT);
++	uint32_t c2 = n10_wdt2_page ? ((volatile uint32_t *)n10_wdt2_page)[N10_WTCNT / 4] : 0xffffffffu;
+ 
+ 	if (!n10_wdt_pet(now)) {
+ 		return;
+ 	}
+-	n10_wdt_ticks++;
+-	n10_wdt_note(now, NULL);
++	n10_wdt_tickline(now, c0, c2);
++	if (n10_wdt_ticks++ % N10_WDT_NOTE_EVERY == 0) {
++		n10_wdt_note(now, NULL);
++	}
+ 	timer_call_enter(&n10_wdt_call, now + n10_wdt_period_abs, TIMER_CALL_SYS_CRITICAL);
+ }
+ 
+@@ -270,6 +317,7 @@ n10_wdt_start(void)
+ 			uint32_t want2 = (uint32_t)(((uint64_t)n10_wdt_reload * N10_WDT_MULTI_RATIO) / 100u);
+ 			bool ok2 = (con2 & (N10_WTCON_ENABLE | N10_WTCON_RSTEN | N10_WTCON_INTEN)) ==
+ 			    (N10_WTCON_ENABLE | N10_WTCON_INTEN) && dat2 != 0 && dat2 == want2;
++			n10_wdt2_page = page2;
+ 			if (ok2) {
+ 				n10_wdt2_reload = dat2;
+ 				n10_wdt2_regs = page2;
+@@ -296,7 +344,7 @@ n10_wdt_start(void)
+ 	timer_call_setup(&n10_wdt_call, n10_wdt_tick, NULL);
+ 	/* First timer-path pet as soon as timer interrupts are delivered. */
+ 	timer_call_enter(&n10_wdt_call, start, TIMER_CALL_SYS_CRITICAL);
+-	printf("Note10 WDT: petting every 2 s until %u s\n", deadline_s);
++	printf("Note10 WDT: petting every 250 ms until %u s\n", deadline_s);
+ }
+ 
+ STARTUP(EARLY_BOOT, STARTUP_RANK_FIRST, n10_wdt_start);

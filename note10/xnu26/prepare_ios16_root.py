@@ -83,6 +83,9 @@ OVERLAY = (
     ('0047-exynos9825-n10-multistage-wdt-reload-thread-wait-trace.patch',
      'f3b41f4d98631d326c545031787e009fa565640a2ed0599e059894dab80f0ded',
      ('bsd/dev/arm/systemcalls.c', 'osfmk/arm64/bsd_arm64.c', 'osfmk/arm64/note10/n10_wdt.c')),
+    ('0048-exynos9825-n10-wdt-250ms-tick-trace.patch',
+     '054def6ebbb5fe6fdf7e3197fdf042d5f4c4fe87e866377b25a35335618c33d1',
+     ('osfmk/arm64/note10/n10_wdt.c',)),
 )
 STAGED_DIRS = ('bsd/n10_hfs/core', 'bsd/n10_hfs/hfs_encodings')
 
