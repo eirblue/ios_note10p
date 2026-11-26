@@ -146,7 +146,7 @@ def aliases_for_current(source, rows, output, *, memdev_current=None, memdev_obs
                         generated_aliases_sha256=native.file_sha(result))
 
 
-def intrinsic_kernel_result(path, symbols_text, undefined, *, leaf=False):
+def intrinsic_kernel_result(path, symbols_text, undefined, *, leaf=False, pool_bytes=163840):
     """Collect this producer's new link output once, not a standalone reader."""
     raw = path.read_bytes()
     if len(raw) < 32:
@@ -208,7 +208,7 @@ def intrinsic_kernel_result(path, symbols_text, undefined, *, leaf=False):
         base=min(s['virtual_address'] for s in selected);limit=max(s['virtual_address']+s['virtual_size'] for s in selected)
         mapper=symbols.get('_n10_exynos_bootstrap_map')
         span=(limit-base+16383)&~16383
-        if (not 0<span<=33554432 or base%16384 or pool['segment']!='__DATA' or pool['bytes']!=163840 or start%16384 or pool['alignment_log2']<14 or
+        if (not 0<span<=33554432 or base%16384 or pool['segment']!='__DATA' or pool['bytes']!=pool_bytes or start%16384 or pool['alignment_log2']<14 or
             pool['flags']&255!=1 or pool['segment_protection']!=3 or
             pool['segment_maximum_protection']&pool['segment_protection'] != pool['segment_protection'] or
             not pool['segment_start']<=start<end<=pool['segment_end'] or
@@ -526,7 +526,8 @@ def build(work, output, *, leaf=False, checked=False, storage=False, memdev=Fals
         kernel = output / 'current-native.macho'
         undefined = bootstrap.run(['xcrun', 'nm', '-u', kernel], ROOT, output / 'kernel-undefined.log').decode()
         symbols = bootstrap.run(['xcrun', 'nm', kernel], ROOT, output / 'kernel-symbols.log').decode()
-        state.update(intrinsic_kernel_result(kernel, symbols, undefined,leaf=leaf))
+        # v382: OVERLAY 0049 sets the Exynos bootstrap pool to 36 pages (512 MiB window); other scopes keep 10.
+        state.update(intrinsic_kernel_result(kernel, symbols, undefined,leaf=leaf,pool_bytes=589824 if ios16_root else 163840))
         if storage:
             if memdev:
                 state['memdev'].update(stage='storage-final-symbols', failure_code='storage_final_symbols_failed')
