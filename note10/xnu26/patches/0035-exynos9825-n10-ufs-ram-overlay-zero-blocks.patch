@@ -1,0 +1,175 @@
+diff --git a/bsd/dev/n10_ufs.c b/bsd/dev/n10_ufs.c
+index b48388b..4dbcddb 100644
+--- a/bsd/dev/n10_ufs.c
++++ b/bsd/dev/n10_ufs.c
+@@ -173,14 +173,23 @@ static struct {
+ 	bool ready;
+ } nu;
+ 
+-/* v368 RAM write overlay: open-addressed table, key = partition block + 1 (0 = empty). */
+-#define N10_UFS_RAM_BLOCKS      32768u          /* 128 MiB of written blocks at most */
+-#define N10_UFS_RAM_SLOTS       (2 * N10_UFS_RAM_BLOCKS)
++/*
++ * v368 RAM write overlay: open-addressed table, key = partition block + 1 (0 = empty).
++ * v369: XNU has only 48 MiB here, so data pages are capped at N10_UFS_RAM_PAGES and
++ * never allocated with Z_NOFAIL; an all-zero 4 KiB block write (HFS ClearBTNodes of a
++ * new or grown B-tree, 84 MiB for the attributes B-tree) shares n10_ufs_zero.
++ */
++#define N10_UFS_RAM_SLOTS       65536u          /* 1 MiB table */
++#define N10_UFS_RAM_BLOCKS      49152u          /* written blocks (zero or data), load <= 75% */
++#define N10_UFS_RAM_PAGES       1024u           /* 4 MiB of non-zero written blocks */
+ static struct {
+ 	uint32_t key;
+ 	void *page;
+ } *n10_ufs_ram;
+ static uint32_t n10_ufs_ram_used;
++static uint32_t n10_ufs_ram_pages;
++static bool n10_ufs_ram_full;
++static const uint8_t n10_ufs_zero[UFS_BLOCK];
+ 
+ static LCK_GRP_DECLARE(n10_ufs_grp, "n10_ufs");
+ static LCK_MTX_DECLARE(n10_ufs_lock, &n10_ufs_grp);
+@@ -378,39 +387,84 @@ n10_ufs_read(uint64_t lba, uint32_t count)
+ 	n10_ufs_stop(13, 0x80u | (((const uint8_t *)(nu.dma + DMA_UCD + UCD_RESP))[36] & 0x0fu));
+ }
+ 
+-/*
+- * v368: RAM page of partition block blk, or NULL. With create, a missing page
+- * is allocated and filled from the UFS (READ(10)); NULL when the overlay is full.
+- * Caller holds n10_ufs_lock.
+- */
+-static void *
+-n10_ufs_ram_page(uint64_t blk, bool create)
++/* v368: table slot of partition block blk (holding it, or the empty slot for it). Caller holds n10_ufs_lock. */
++static uint32_t
++n10_ufs_ram_slot(uint64_t blk)
+ {
+ 	uint32_t key = (uint32_t)blk + 1;
+ 	uint32_t i = (key * 2654435761u) & (N10_UFS_RAM_SLOTS - 1);
+ 
+-	while (n10_ufs_ram[i].key) {
+-		if (n10_ufs_ram[i].key == key) {
+-			return n10_ufs_ram[i].page;
+-		}
++	while (n10_ufs_ram[i].key && n10_ufs_ram[i].key != key) {
+ 		i = (i + 1) & (N10_UFS_RAM_SLOTS - 1);
+ 	}
+-	if (!create) {
+-		return NULL;
+-	}
+-	if (n10_ufs_ram_used >= N10_UFS_RAM_BLOCKS) {
+-		return NULL;
++	return i;
++}
++
++/* RAM copy of partition block blk (n10_ufs_zero for a zeroed block), or NULL. */
++static const void *
++n10_ufs_ram_page(uint64_t blk)
++{
++	uint32_t i = n10_ufs_ram_slot(blk);
++
++	return n10_ufs_ram[i].key ? n10_ufs_ram[i].page : NULL;
++}
++
++/*
++ * v369: write len bytes at skip into the RAM copy of partition block blk.
++ * A whole all-zero block takes no page. A new data page is filled from the
++ * zero block or the UFS (READ(10)). ENOSPC when the table or page cap is
++ * reached or no page is free (never waits for memory). Caller holds n10_ufs_lock.
++ */
++static int
++n10_ufs_ram_write(uint64_t blk, uint32_t skip, const uint8_t *src, uint32_t len)
++{
++	uint32_t i = n10_ufs_ram_slot(blk);
++	bool fresh = !n10_ufs_ram[i].key;
++	void *page = fresh ? NULL : n10_ufs_ram[i].page;
++	bool zero = len == UFS_BLOCK;
++
++	for (uint32_t j = 0; zero && j < UFS_BLOCK; j++) {
++		zero = !src[j];
++	}
++	if (fresh && n10_ufs_ram_used >= N10_UFS_RAM_BLOCKS) {
++		goto full;
++	}
++	if (zero && (fresh || page == (const void *)n10_ufs_zero)) {
++		page = (void *)(uintptr_t)n10_ufs_zero;
++	} else {
++		if (fresh || page == (const void *)n10_ufs_zero) {
++			void *copy = n10_ufs_ram_pages < N10_UFS_RAM_PAGES ? kalloc_data(UFS_BLOCK, Z_NOWAIT) : NULL;
++			if (!copy) {
++				goto full;
++			}
++			if (fresh) {
++				n10_ufs_read(nu.first_block + blk, 1);
++				memcpy(copy, (const void *)(nu.dma + DMA_BOUNCE), UFS_BLOCK);
++			} else {
++				bzero(copy, UFS_BLOCK);
++			}
++			page = copy;
++			n10_ufs_ram_pages++;
++		}
++		memcpy((uint8_t *)page + skip, src, len);
+ 	}
+-	void *page = kalloc_data(UFS_BLOCK, Z_WAITOK | Z_NOFAIL);
+-	n10_ufs_read(nu.first_block + blk, 1);
+-	memcpy(page, (const void *)(nu.dma + DMA_BOUNCE), UFS_BLOCK);
+-	n10_ufs_ram[i].key = key;
+ 	n10_ufs_ram[i].page = page;
+-	if (n10_ufs_ram_used++ % 8192 == 0) {
+-		printf("Note10 UFS: RAM overlay %u/%u blocks (block 0x%llx)\n",
+-		    n10_ufs_ram_used, N10_UFS_RAM_BLOCKS, blk);
++	if (fresh) {
++		n10_ufs_ram[i].key = (uint32_t)blk + 1;
++		n10_ufs_ram_used++;
++		if (!(n10_ufs_ram_used & (n10_ufs_ram_used - 1))) {
++			printf("Note10 UFS: RAM overlay %u blocks, %u pages (block 0x%llx)\n",
++			    n10_ufs_ram_used, n10_ufs_ram_pages, blk);
++		}
++	}
++	return 0;
++full:
++	if (!n10_ufs_ram_full) {
++		n10_ufs_ram_full = true;
++		printf("Note10 UFS: RAM overlay full: %u blocks, %u pages (block 0x%llx)\n",
++		    n10_ufs_ram_used, n10_ufs_ram_pages, blk);
+ 	}
+-	return page;
++	return ENOSPC;
+ }
+ 
+ static bool
+@@ -569,12 +623,10 @@ n10_ufs_strategy(buf_t bp)
+ 			uint64_t pos = off + done;
+ 			uint32_t skip = (uint32_t)(pos % UFS_BLOCK);
+ 			uint32_t want = MIN(count - done, UFS_BLOCK - skip);
+-			uint8_t *page = n10_ufs_ram_page(pos / UFS_BLOCK, true);
+-			if (!page) {
+-				error = ENOSPC;
++			error = n10_ufs_ram_write(pos / UFS_BLOCK, skip, (const uint8_t *)vaddr + done, want);
++			if (error) {
+ 				break;
+ 			}
+-			memcpy(page + skip, vaddr + done, want);
+ 			done += want;
+ 			buf_setresid(bp, count - done);
+ 		}
+@@ -590,7 +642,7 @@ n10_ufs_strategy(buf_t bp)
+ 		uint32_t blocks = (skip + want + UFS_BLOCK - 1) / UFS_BLOCK;
+ 		n10_ufs_read(nu.first_block + lba, blocks);
+ 		for (uint32_t b = 0; b < blocks; b++) {
+-			const void *page = n10_ufs_ram_page(lba + b, false);
++			const void *page = n10_ufs_ram_page(lba + b);
+ 			if (page) {
+ 				memcpy((void *)(nu.dma + DMA_BOUNCE + b * UFS_BLOCK), page, UFS_BLOCK);
+ 			}
+@@ -800,8 +852,8 @@ n10_ufs_init(void)
+ 	devfs_make_node(nu.bdev, DEVFS_BLOCK, UID_ROOT, GID_OPERATOR, 0640, "n10ufs0");
+ 	devfs_make_node(makedev(nu.cmajor, 0), DEVFS_CHAR, UID_ROOT, GID_OPERATOR, 0640, "rn10ufs0");
+ 	nu.ready = true;
+-	printf("Note10 UFS: \"%s\" on LUN 0: first block 0x%llx, %llu MiB, read-only, RAM write overlay %u MiB\n",
+-	    n10_ufs_part, nu.first_block, nu.nblocks * UFS_BLOCK >> 20, N10_UFS_RAM_BLOCKS * UFS_BLOCK >> 20);
++	printf("Note10 UFS: \"%s\" on LUN 0: first block 0x%llx, %llu MiB, read-only, RAM write overlay %u MiB data + zero blocks, %u blocks\n",
++	    n10_ufs_part, nu.first_block, nu.nblocks * UFS_BLOCK >> 20, N10_UFS_RAM_PAGES * UFS_BLOCK >> 20, N10_UFS_RAM_BLOCKS);
+ }
+ 
+ /* v368: the root on this device may be mounted read-write (writes stay in RAM). */

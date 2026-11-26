@@ -45,6 +45,8 @@ OVERLAY = (
      ('bsd/kern/kern_mib.c',)),
     ('0034-exynos9825-n10-ufs-ram-write-overlay.patch', '9584e547d4c68e395925957d50a4f32ecb4b5a70adfb78b965913b145afe10dd',
      ('bsd/dev/n10_ufs.c', 'bsd/vfs/vfs_subr.c', 'bsd/vfs/vfs_syscalls.c')),
+    ('0035-exynos9825-n10-ufs-ram-overlay-zero-blocks.patch', '2f2b1ce1259f3a064b471a6634ab81e78cdfd168048d015c529f007cd59bcd13',
+     ('bsd/dev/n10_ufs.c',)),
 )
 STAGED_DIRS = ('bsd/n10_hfs/core', 'bsd/n10_hfs/hfs_encodings')
 
