@@ -106,6 +106,9 @@ OVERLAY = (
     ('0054-exynos9825-n10-ufs-fua-panic-backtrace.patch',
      'da83122175cd24d475997d93e6e3a2cbf289ed5d7ab72eded71d07e483a4ae4e',
      ('bsd/dev/n10_ufs.c', 'osfmk/kern/debug.c')),
+    ('0055-exynos9825-n10-abort-reason-iokit-miss-no-crash-reporter.patch',
+     '23b008a29aea28555e3193927c6310c3a11cab968b1d7bf2375292f5bed81a69',
+     ('bsd/kern/kern_exit.c', 'iokit/Kernel/IOUserClient.cpp')),
 )
 STAGED_DIRS = ('bsd/n10_hfs/core', 'bsd/n10_hfs/hfs_encodings')
 

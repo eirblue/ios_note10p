@@ -1,0 +1,312 @@
+diff --git a/bsd/kern/kern_exit.c b/bsd/kern/kern_exit.c
+index 3455d42..96d54e4 100644
+--- a/bsd/kern/kern_exit.c
++++ b/bsd/kern/kern_exit.c
+@@ -183,6 +183,119 @@ extern kern_return_t vm_shared_region_start_address(struct vm_shared_region *sha
+     mach_vm_offset_t *start_address);
+ extern void vm_shared_region_deallocate(struct vm_shared_region *shared_region);
+ 
++/*
++ * Note10 (v389): the abort reason. backboardd/SpringBoard die in
++ * std::terminate -> abort (uncaught exception); the reason is not in the
++ * frames, only in the crash-reporter annotations (crashreporter_annotations_t
++ * in __DATA,__crash_info: version, message, signature_string, backtrace,
++ * message2, ...) that CRSetCrashLogMessage() fills, e.g. CoreFoundation's
++ * "*** Terminating app due to uncaught exception ...". These are the 85
++ * iOS 16.7.16 shared-cache images that have that section, as offsets from
++ * the unslid cache base 0x180000000 (cache uuid 8f970452c9e33e88b114feb1864bc9e0,
++ * printed once as N389U so the host can confirm the match). The exiting
++ * thread is still in its own address space (as for backtrace_user above).
++ * Only the first such exit per process name is read, at most 8 lines
++ * each, so the shared trace budget is kept.
++ */
++#define N10_ABORT_NAMES         24u
++#define N10_ABORT_PER_NAME      1u
++#define N10_ABORT_LINES         8u
++static const uint32_t n10_crash_info_off[] = {
++	0x5cd315e8, 0x5cd6a3a8, 0x5cdd68a8, 0x5cde22f8, 0x5cde8d70, 0x5cdfb0b8,
++	0x5ce69e18, 0x5cff9980, 0x5cff9a68, 0x5d003a38, 0x5d0dc150, 0x5d135df8,
++	0x5d272178, 0x5d274f70, 0x5d28c000, 0x5d29ad08, 0x5d2b89e0, 0x5d2ee878,
++	0x5d3b0da8, 0x5d4432e8, 0x5d444810, 0x5d452b08, 0x5d5092e0, 0x5d5100c8,
++	0x5d5ef9c0, 0x5d600ec0, 0x5d6a6d50, 0x5d6c7e88, 0x5d709578, 0x5d752e60,
++	0x5d8ab950, 0x5d9a8450, 0x5da100f0, 0x5da10bb0, 0x5da78458, 0x5db30d28,
++	0x5dca3ea0, 0x5dcc47f8, 0x5dd8bbe0, 0x5e21cff8, 0x5e4fa978, 0x5e4fb278,
++	0x5e634148, 0x5e6c47b0, 0x5e6df250, 0x5e71bb60, 0x5e892a98, 0x5e893158,
++	0x5e8babd0, 0x5ec9b960, 0x5edec460, 0x5ee715f8, 0x5ee72e20, 0x5ee739e0,
++	0x5ee7b930, 0x5ee7c598, 0x5eef1568, 0x61d720c0, 0x61ddb158, 0x61e03f30,
++	0x62106c58, 0x62187cf0, 0x627dc600, 0x91857ac0, 0x9187c960, 0x91898520,
++	0x918b5730, 0x918c27b0, 0x91bd7120, 0x91bedf70, 0x91bf1e10, 0x91bfbee8,
++	0x91d38758, 0x91e05500, 0x91e33028, 0x91e48ff8, 0x91f22b30, 0x91f23140,
++	0x92433158, 0x9259bbd0, 0x9259d4a0, 0x9288e1d0, 0x92cc4988, 0x9384e398,
++	0x94c04178,
++};
++static char n10_abort_name[N10_ABORT_NAMES][MAXCOMLEN + 1];
++static uint8_t n10_abort_count[N10_ABORT_NAMES];
++static uint32_t n10_abort_uuid_done;
++
++static bool
++n10_abort_note_ok(const char *comm)
++{
++	for (uint32_t i = 0; i < N10_ABORT_NAMES; i++) {
++		if (n10_abort_name[i][0] == '\0') {
++			strlcpy(n10_abort_name[i], comm, sizeof(n10_abort_name[i]));
++			n10_abort_count[i] = 1;
++			return true;
++		}
++		if (strncmp(n10_abort_name[i], comm, MAXCOMLEN) == 0) {
++			if (n10_abort_count[i] >= N10_ABORT_PER_NAME) {
++				return false;
++			}
++			n10_abort_count[i]++;
++			return true;
++		}
++	}
++	return false;
++}
++
++static void
++n10_crash_messages(proc_t p, mach_vm_offset_t sc)
++{
++	static const char kinds[3] = { 'm', 's', '2' };
++	uint32_t lines = 0;
++
++	if (__atomic_exchange_n(&n10_abort_uuid_done, 1u, __ATOMIC_RELAXED) == 0) {
++		uint8_t u[16];
++		if (copyin((user_addr_t)(sc + 0x58), u, sizeof(u)) == 0) {
++			n10_dsslog_trace("N389U sc=%llx uuid=%02x%02x%02x%02x%02x%02x%02x%02x"
++			    "%02x%02x%02x%02x%02x%02x%02x%02x", (unsigned long long)sc,
++			    u[0], u[1], u[2], u[3], u[4], u[5], u[6], u[7],
++			    u[8], u[9], u[10], u[11], u[12], u[13], u[14], u[15]);
++		}
++	}
++	if (!n10_abort_note_ok(p->p_comm)) {
++		return;
++	}
++	for (uint32_t i = 0; i < sizeof(n10_crash_info_off) / sizeof(n10_crash_info_off[0]); i++) {
++		uint64_t ann[5];
++		if (copyin((user_addr_t)(sc + n10_crash_info_off[i]), ann, sizeof(ann)) != 0 ||
++		    ann[0] == 0 || ann[0] > 7) {
++			continue;
++		}
++		/* message, signature_string, message2 */
++		const uint64_t ptrs[3] = { ann[1], ann[2], ann[4] };
++		for (uint32_t k = 0; k < 3; k++) {
++			char text[241];
++			size_t done = 0;
++			int err;
++			if (ptrs[k] == 0) {
++				continue;
++			}
++			err = copyinstr((user_addr_t)ptrs[k], text, sizeof(text) - 1, &done);
++			if (err != 0 && err != ENAMETOOLONG) {
++				continue;
++			}
++			text[sizeof(text) - 1] = '\0';
++			for (char *c = text; *c != '\0'; c++) {
++				if ((unsigned char)*c < 0x20 || *c == 0x7f) {
++					*c = ' ';
++				}
++			}
++			size_t len = strlen(text);
++			for (size_t at = 0; at < len && at < 240; at += 120) {
++				if (lines++ >= N10_ABORT_LINES) {
++					return;
++				}
++				n10_dsslog_trace("N389C pid=%d i=%u %c%u %.120s", proc_getpid(p), i,
++				    kinds[k], (unsigned int)(at / 120), text + at);
++			}
++		}
++	}
++}
++
+ /*
+  * Note10 (v383): for a crash signal taken by the exiting thread itself
+  * (abort, fault, trap), one "N383A" line with the user PC and up to six
+@@ -213,6 +326,9 @@ n10_exit_frames(proc_t p, int sig)
+ 	n10_dsslog_trace("N383A pid=%d sig=%d n=%u pc=%lx f=%lx,%lx,%lx,%lx,%lx,%lx sc=%llx",
+ 	    proc_getpid(p), sig, n, bt[0], bt[1], bt[2], bt[3], bt[4], bt[5], bt[6],
+ 	    (unsigned long long)sc);
++	if (sc != 0 && (sig == SIGABRT || sig == SIGTRAP || sig == SIGILL)) {
++		n10_crash_messages(p, sc);
++	}
+ }
+ #endif
+ void gather_populate_corpse_crashinfo(proc_t p, task_t corpse_task,
+@@ -2159,7 +2275,19 @@ proc_prepareexit(proc_t p, int rv, boolean_t perf_notify)
+ 			}
+ 		}
+ #endif
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++		/*
++		 * Note10 (v389): no crash reporter. ReportCrash never stores a
++		 * report on this device (v386 pull: 0 reports) but every EXC_CRASH
++		 * launches or feeds it (v388: ReportCrash AKS loop, "Too many
++		 * corpses"). N376X/N383A/N389C already record each crash, so
++		 * EXC_CRASH is not delivered; kr 0 = handled, so no corpse is made
++		 * (a fatal memory-limit corpse_source map still gets one, as before).
++		 */
++		kr = 0;
++#else
+ 		kr = task_exception_notify(EXC_CRASH, code, subcode, /* fatal */ false);
++#endif
+ 		/* Nobody handled EXC_CRASH?? remember to make corpse */
+ 		if ((kr != 0 || corpse_source) && p == current_proc()) {
+ 			/*
+diff --git a/iokit/Kernel/IOUserClient.cpp b/iokit/Kernel/IOUserClient.cpp
+index e3c0911..e0ec57c 100644
+--- a/iokit/Kernel/IOUserClient.cpp
++++ b/iokit/Kernel/IOUserClient.cpp
+@@ -55,6 +55,7 @@
+ #include <os/hash.h>
+ 
+ #include <libkern/amfi/amfi.h>
++#include <pexpert/arm64/board_config.h>
+ 
+ #if CONFIG_MACF
+ 
+@@ -2728,6 +2729,110 @@ is_io_service_match_property_table_bin(
+ 	return internal_io_service_match_property_table(service, matching, matchingCnt, matches);
+ }
+ 
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++/* osfmk/arm64/note10/n10_dsslog.c (v376): one bounded line into the dss log ring. */
++extern "C" void n10_dsslog_trace(const char *fmt, ...) __printflike(1, 2);
++
++/*
++ * Note10 (v389): which IOKit services userspace asks for and does not find.
++ * There are no Apple kexts; backboardd/SpringBoard abort and the missing
++ * service is not visible in their frames. One "N389I" line per distinct
++ * (process, op, matching) lookup that finds no registered service now:
++ * op g = IOServiceGetMatchingService(s), n = matching notification
++ * (publish/match; the caller waits for it). c = IOProviderClass,
++ * n = IONameMatch, r = IOResourceMatch, b = BSD Name, p = first
++ * IOPropertyMatch key[=string value], k = key count. Read-only (lookup +
++ * log), at most N10_IOKIT_MAX lines per boot, no lookup once that is spent.
++ */
++#define N10_IOKIT_MAX   96u
++#define N10_IOKIT_SEEN  128u
++static uint32_t n10_iokit_seen[N10_IOKIT_SEEN];
++static uint32_t n10_iokit_next;
++static uint32_t n10_iokit_lines;
++
++static const char *
++n10_iokit_str(OSObject *o)
++{
++	OSString *s = OSDynamicCast(OSString, o);
++	if (s == NULL) {
++		OSArray *a = OSDynamicCast(OSArray, o);
++		if (a != NULL) {
++			s = OSDynamicCast(OSString, a->getObject(0));
++		}
++	}
++	return s != NULL ? s->getCStringNoCopy() : "";
++}
++
++static uint32_t
++n10_iokit_hash(uint32_t h, const char *s)
++{
++	while (*s != '\0') {
++		h = (h ^ (uint8_t)*s++) * 16777619u;
++	}
++	return (h ^ 0xffu) * 16777619u;
++}
++
++static void
++n10_iokit_miss(char op, OSDictionary *dict, bool known_missing)
++{
++	if (__atomic_load_n(&n10_iokit_lines, __ATOMIC_RELAXED) >= N10_IOKIT_MAX) {
++		return;
++	}
++	if (!known_missing) {
++		IOService *found = IOService::copyMatchingService(dict);
++		if (found != NULL) {
++			found->release();
++			return;
++		}
++	}
++	char name[MAXCOMLEN + 1];
++	proc_selfname(name, sizeof(name));
++	const char *cls = n10_iokit_str(dict->getObject(kIOProviderClassKey));
++	const char *nm = n10_iokit_str(dict->getObject(kIONameMatchKey));
++	const char *res = n10_iokit_str(dict->getObject(kIOResourceMatchKey));
++	const char *bsd = n10_iokit_str(dict->getObject(kIOBSDNameKey));
++	const char *pk = "";
++	const char *pv = "";
++	OSDictionary *pm = OSDynamicCast(OSDictionary, dict->getObject(kIOPropertyMatchKey));
++	if (pm != NULL) {
++		OSCollectionIterator *it = OSCollectionIterator::withCollection(pm);
++		if (it != NULL) {
++			const OSSymbol *key = OSDynamicCast(OSSymbol, it->getNextObject());
++			if (key != NULL) {
++				pk = key->getCStringNoCopy();
++				pv = n10_iokit_str(pm->getObject(key));
++			}
++			it->release();
++		}
++	}
++	char opstr[2] = { op, '\0' };
++	uint32_t h = 2166136261u;
++	h = n10_iokit_hash(h, name);
++	h = n10_iokit_hash(h, opstr);
++	h = n10_iokit_hash(h, cls);
++	h = n10_iokit_hash(h, nm);
++	h = n10_iokit_hash(h, res);
++	h = n10_iokit_hash(h, bsd);
++	h = n10_iokit_hash(h, pk);
++	h = n10_iokit_hash(h, pv);
++	if (h == 0) {
++		h = 1;
++	}
++	for (uint32_t i = 0; i < N10_IOKIT_SEEN; i++) {
++		if (__atomic_load_n(&n10_iokit_seen[i], __ATOMIC_RELAXED) == h) {
++			return;
++		}
++	}
++	__atomic_store_n(&n10_iokit_seen[__atomic_fetch_add(&n10_iokit_next, 1u, __ATOMIC_RELAXED) % N10_IOKIT_SEEN],
++	    h, __ATOMIC_RELAXED);
++	if (__atomic_fetch_add(&n10_iokit_lines, 1u, __ATOMIC_RELAXED) >= N10_IOKIT_MAX) {
++		return;
++	}
++	n10_dsslog_trace("N389I %s %c c=%.36s n=%.28s r=%.20s b=%.8s p=%.20s=%.12s k=%u",
++	    name, op, cls, nm, res, bsd, pk, pv, dict->getCount());
++}
++#endif /* ARM64_BOARD_CONFIG_EXYNOS9825 */
++
+ static kern_return_t
+ internal_io_service_get_matching_services(
+ 	mach_port_t main_port,
+@@ -2750,6 +2855,9 @@ internal_io_service_get_matching_services(
+ 		IOTaskRegistryCompatibilityMatching(current_task(), dict);
+ 		*existing = IOUserIterator::withIterator(IOService::getMatchingServices( dict ));
+ 		kr = kIOReturnSuccess;
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++		n10_iokit_miss('g', dict, false);
++#endif
+ 	} else {
+ 		kr = kIOReturnBadArgument;
+ 	}
+@@ -2833,6 +2941,11 @@ internal_io_service_get_matching_service(
+ 		IOTaskRegistryCompatibilityMatching(current_task(), dict);
+ 		*service = IOService::copyMatchingService( dict );
+ 		kr = *service ? kIOReturnSuccess : kIOReturnNotFound;
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++		if (*service == NULL) {
++			n10_iokit_miss('g', dict, true);
++		}
++#endif
+ 	} else {
+ 		kr = kIOReturnBadArgument;
+ 	}
+@@ -2949,6 +3062,12 @@ internal_io_service_add_notification(
+ 		} else {
+ 			userMsgType = kLastIOKitNotificationType;
+ 		}
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++		if (userMsgType == kIOServicePublishNotificationType ||
++		    userMsgType == kIOServiceMatchedNotificationType) {
++			n10_iokit_miss('n', dict, false);
++		}
++#endif
+ 
+ 		userNotify = new IOServiceUserNotification;
+ 
