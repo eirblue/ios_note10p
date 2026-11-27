@@ -141,6 +141,9 @@ OVERLAY = (
     ('0065-exynos9825-n10-pmu-calibrated-display-power-probe.patch',
      '2dab192e90d348410af954ad723969bfc3be4421727d7fafa874d875a1d43da9',
      ('iokit/Kernel/NoteFramebuffer.cpp',)),
+    ('0066-exynos9825-n10-pagewise-sysmmu-scanout.patch',
+     'fcf20fbd9b7613bb9ba908a6da6e5a5b568168a589e79992ccb71bf44cce19f9',
+     ('iokit/Kernel/NoteFramebuffer.cpp',)),
 )
 STAGED_DIRS = ('bsd/n10_hfs/core', 'bsd/n10_hfs/hfs_encodings')
 

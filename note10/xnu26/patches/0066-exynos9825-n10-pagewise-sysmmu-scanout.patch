@@ -1,0 +1,343 @@
+diff --git a/iokit/Kernel/NoteFramebuffer.cpp b/iokit/Kernel/NoteFramebuffer.cpp
+index 5e0fb61..97efe5e 100644
+--- a/iokit/Kernel/NoteFramebuffer.cpp
++++ b/iokit/Kernel/NoteFramebuffer.cpp
+@@ -163,6 +163,28 @@
+  * all 64 and not in byte 3 = bytes A,B,G,R (copy rotates by one byte); alpha
+  * is forced to 0xff for format 1 (per-pixel alpha); anything else stays
+  * read-only (N398A why=order). One N399O line. Formats 2/3/6/7 unchanged.
++ *
++ * v400: page-wise scanout. v399 found the fb window buffer behind the DPU
++ * SysMMU not physically contiguous (N398A why=contig), so the v398 single
++ * write-combined mapping is replaced: n10_disp_arm() now takes only the
++ * scanned rows (dpu20 decon_pan_display programs IDMA base = fb start and
++ * IDMA_SRC_OFFSET y = pan yoffset, so the scanned 1440x3040 half starts at
++ * base + yoffset * stride; x offset must be 0), translates every 4 KiB page
++ * of it through the SysMMU table (same walker) and checks the XNU page that
++ * holds each PA with the v398 rules (inside the /chosen DRAM span, not
++ * XNU-managed RAM, outside the XNU window, the UFS DMA block, the
++ * pstore/s2d/arraydump and dss carve-outs); a fault or a failed page leaves
++ * the path read-only (why=page, bad = 1 fault, 2 dram, 3 xnu_ram,
++ * 4 reserved). Physically contiguous pages form runs: with at most 512 runs
++ * each run is mapped write-combined once (map=wc_runs, permanent, as before);
++ * with more, nothing is kept mapped (map=otf): every copy walks the pages
++ * again with the same walker and checks, maps each contiguous chunk
++ * write-combined, copies into it and unmaps it; a page failing during a copy
++ * disables the path before any DECON write. The byte-order sampling reads
++ * the checked PAs with ml_phys_read_word_64. Conversions, the rate limit and
++ * the two DECON0 trigger writes are unchanged. N400P at arm (pages, runs,
++ * bad, yoffset, map mode), N400F on the first copy, every 64th and on a
++ * failed copy (copies, runs, pages, bad, sample hash).
+  */
+ #include <pexpert/arm64/board_config.h>
+ 
+@@ -1253,13 +1275,22 @@ static struct {
+ /* Armed state: set once by n10_disp_arm, frames by n10_disp_swap. */
+ static uint32_t n10_disp_armed, n10_disp_busy, n10_disp_swap_rb, n10_disp_trig0;
+ static uint32_t n10_disp_frames, n10_disp_skips, n10_disp_fails, n10_disp_rec_once;
+-static vm_offset_t n10_disp_fb;                 /* write-combined map of the window buffer */
++#define N10_DISP_RUNS           512u            /* v400: kept write-combined runs of the scanned rows */
++#define N10_WIMG_WCOMB          0x6u            /* osfmk/arm/memory_types.h VM_WIMG_WCOMB */
++static struct {
++	uint32_t off, len;                      /* byte offset in the scanned rows, run bytes (4 KiB pages) */
++	vm_offset_t va;                         /* write-combined mapping (wc_runs mode) */
++} n10_disp_run[N10_DISP_RUNS];
++static uint32_t n10_disp_nrun, n10_disp_pages, n10_disp_copies, n10_disp_otf;
++static uint64_t n10_disp_pt, n10_disp_iova, n10_disp_len;   /* SysMMU table, scanned IOVA, scanned bytes */
+ static uint32_t n10_disp_stride;                /* destination bytes per row */
+ static uint64_t n10_disp_last;                  /* mach_absolute_time of the last frame */
+ 
+ /* machine_routines.h declares these for PEXPERT/MACH_KERNEL_PRIVATE only */
+ extern "C" vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
+ extern "C" vm_offset_t ml_io_map_wcomb(vm_offset_t phys_addr, vm_size_t size);
++extern "C" vm_offset_t ml_io_map_unmappable(vm_offset_t phys_addr, vm_size_t size, uint32_t flags);
++extern "C" void ml_io_unmap(vm_offset_t addr, vm_size_t sz);
+ extern "C" uint64_t gDramBase, gDramSize;
+ extern "C" unsigned long gPhysBase;             /* osfmk/mach/arm/vm_param.h (MACH_KERNEL_PRIVATE only) */
+ extern "C" boolean_t pmap_valid_address(uint64_t addr);
+@@ -1415,13 +1446,43 @@ n10_disp_in_dram(uint64_t pa, uint64_t len)
+ 	return pa >= gDramBase && len <= gDramSize && pa - gDramBase <= gDramSize - len;
+ }
+ 
++/* v400: 0 when the XNU page holding PA p may be written, else 1 fault, 2 dram, 3 xnu_ram, 4 reserved. */
++static uint32_t
++n10_disp_page_bad(uint64_t p)
++{
++	if (p == 0) {
++		return 1;
++	}
++	p &= ~(uint64_t)(PAGE_SIZE - 1);
++	if (!n10_disp_in_dram(p, PAGE_SIZE)) {
++		return 2;
++	}
++	if (pmap_valid_address(p) || pmap_valid_address(p + PAGE_SIZE - 1)) {
++		return 3;
++	}
++	if (!n10_disp_outside(p, PAGE_SIZE, gPhysBase, N10_DISP_XNU_WINDOW) ||
++	    !n10_disp_outside(p, PAGE_SIZE, N10_DISP_UFS_DMA, N10_DISP_UFS_DMA_SIZE) ||
++	    !n10_disp_outside(p, PAGE_SIZE, N10_DISP_PSTORE, N10_DISP_PSTORE_SIZE) ||
++	    !n10_disp_outside(p, PAGE_SIZE, N10_DISP_DSS, N10_DISP_DSS_SIZE)) {
++		return 4;
++	}
++	return 0;
++}
++
++/* v400: PA of scanned-row byte offset o (walker or bypass). */
++static uint64_t
++n10_disp_pa(uint64_t o)
++{
++	return n10_disp_pt != 0 ? n10_disp_xlate(n10_disp_pt, (uint32_t)(n10_disp_iova + o)) : n10_disp_iova + o;
++}
++
+ /* Decide once (first SwapEnd, after the "se1" probe) whether frames may be written. */
+ static void
+ n10_disp_arm(void)
+ {
+ 	const char *why = "ok";
+-	uint32_t win = 6, ch = 6, nwin = 0, fmt = 0, sw = 0, sh = 0, mmus = 0;
+-	uint64_t pt = 0, pa = 0, len = 0;
++	uint32_t win = 6, ch = 6, nwin = 0, fmt = 0, sw = 0, sh = 0, mmus = 0, yoff = 0, r = 0, bad = 0;
++	uint64_t pt = 0, pa = 0, len = 0, last = 0;
+ 
+ 	if (!n10_disp.valid) {
+ 		why = "probe";
+@@ -1457,8 +1518,10 @@ n10_disp_arm(void)
+ 		why = "format";                         /* rotation/flip, AFBC, block mode; 8888 orders only (v399: + ABGR) */
+ 		goto out;
+ 	}
+-	if (n10_disp.img[ch] != (N10_FB_WIDTH | (N10_FB_HEIGHT << 16)) || n10_disp.off[ch] != 0 ||
+-	    sw < N10_FB_WIDTH || sh < N10_FB_HEIGHT || sw > 4096u || (n10_disp.base[ch] & 0xfffu) != 0) {
++	yoff = (n10_disp.off[ch] >> 16) & 0x1fffu;      /* v400: IDMA_SRC_OFFSET y = pan yoffset (scanned half) */
++	if (n10_disp.img[ch] != (N10_FB_WIDTH | (N10_FB_HEIGHT << 16)) || (n10_disp.off[ch] & 0x1fffu) != 0 ||
++	    sw < N10_FB_WIDTH || sh < N10_FB_HEIGHT + yoff || sw > 4096u || (n10_disp.base[ch] & 0xfffu) != 0 ||
++	    ((yoff * sw * 4u) & 0xfffu) != 0) {
+ 		why = "geometry";
+ 		goto out;
+ 	}
+@@ -1481,53 +1544,57 @@ n10_disp_arm(void)
+ 		why = "pt";
+ 		goto out;
+ 	}
+-	len = (uint64_t)sw * 4u * sh;
+-	if ((uint64_t)n10_disp.base[ch] + len > 0x100000000ull) {
++	len = (uint64_t)sw * 4u * N10_FB_HEIGHT;         /* v400: the scanned rows only */
++	n10_disp_pt = pt;
++	n10_disp_iova = (uint64_t)n10_disp.base[ch] + (uint64_t)yoff * sw * 4u;
++	n10_disp_len = len;
++	if (n10_disp_iova + len > 0x100000000ull) {
+ 		why = "geometry";
+ 		goto out;
+ 	}
+-	for (uint64_t o = 0; o < len; o += 0x1000) {
+-		uint64_t p = pt != 0 ? n10_disp_xlate(pt, (uint32_t)(n10_disp.base[ch] + o)) : n10_disp.base[ch] + o;
++	for (uint64_t o = 0; o < len; o += 0x1000) {   /* v400: every 4 KiB page; contiguous pages form runs */
++		uint64_t p = n10_disp_pa(o);
+ 		if (o == 0) {
+ 			pa = p;
+ 		}
+-		if (p == 0 || p != pa + o) {
+-			why = "contig";
++		bad = n10_disp_page_bad(p);
++		if (bad != 0) {
++			why = "page";                   /* fault, DRAM, XNU RAM, XNU window, UFS DMA, pstore..arraydump, dss */
+ 			goto out;
+ 		}
+-	}
+-	if (!n10_disp_in_dram(pa, len)) {
+-		why = "dram";
+-		goto out;
+-	}
+-	for (uint64_t o = 0; o <= len; o += PAGE_SIZE) {
+-		if (pmap_valid_address(pa + (o < len ? o : len - 1))) {
+-			why = "xnu_ram";
++		if (o == 0 || p != last + 0x1000) {
++			if (r < N10_DISP_RUNS) {
++				n10_disp_run[r].off = (uint32_t)o;
++				n10_disp_run[r].va = (vm_offset_t)p;
++			}
++			r++;
++		}
++		if (r <= N10_DISP_RUNS) {
++			n10_disp_run[r - 1].len += 0x1000u;
++		}
++		last = p;
++		n10_disp_pages++;
++	}
++	n10_disp_otf = r > N10_DISP_RUNS ? 1u : 0u;    /* v400: too fragmented -> map on the fly per copy */
++	for (uint32_t i = 0; n10_disp_otf == 0 && i < r; i++) {
++		vm_offset_t v = ml_io_map_wcomb(n10_disp_run[i].va, (vm_size_t)n10_disp_run[i].len);
++		if (v == 0) {
++			why = "map";
+ 			goto out;
+ 		}
++		n10_disp_run[i].va = v;
+ 	}
+-	if (!n10_disp_outside(pa, len, gPhysBase, N10_DISP_XNU_WINDOW) ||
+-	    !n10_disp_outside(pa, len, N10_DISP_UFS_DMA, N10_DISP_UFS_DMA_SIZE) ||
+-	    !n10_disp_outside(pa, len, N10_DISP_PSTORE, N10_DISP_PSTORE_SIZE) ||
+-	    !n10_disp_outside(pa, len, N10_DISP_DSS, N10_DISP_DSS_SIZE)) {
+-		why = "reserved";                       /* XNU window, UFS DMA block, pstore/s2d/arraydump, dss */
+-		goto out;
+-	}
+-	n10_disp_fb = ml_io_map_wcomb((vm_offset_t)pa, (vm_size_t)len);
+-	if (n10_disp_fb == 0) {
+-		why = "map";
+-		goto out;
+-	}
++	n10_disp_nrun = r;
+ 	n10_disp_stride = sw * 4u;
+ 	n10_disp_swap_rb = (fmt == 2 || fmt == 6) ? 1u : 0u;
+ 	if (fmt == 1) {
+ 		/* v399: byte order of ABGR8888 from the alpha byte of the opaque Linux frame (reads only) */
+ 		uint32_t a0 = 0, a3 = 0;
+-		for (uint32_t k = 0; k < 64; k++) {
+-			const volatile uint8_t *px = (const volatile uint8_t *)(n10_disp_fb +
+-			    (uint64_t)(23u + 47u * k) * n10_disp_stride + (uint64_t)(11u + 22u * k) * 4u);
+-			a0 += px[0] == 0xffu ? 1u : 0u;
+-			a3 += px[3] == 0xffu ? 1u : 0u;
++		for (uint32_t k = 0; k < 64; k++) {     /* v400: checked PAs, read through the phys window */
++			uint32_t px = ml_phys_read_word_64(n10_disp_pa(
++			    (uint64_t)(23u + 47u * k) * n10_disp_stride + (uint64_t)(11u + 22u * k) * 4u));
++			a0 += (px & 0xffu) == 0xffu ? 1u : 0u;
++			a3 += (px >> 24) == 0xffu ? 1u : 0u;
+ 		}
+ 		n10_disp_swap_rb = (a3 == 64u && a0 < 64u) ? 2u : (a0 == 64u && a3 < 64u) ? 3u : 0u;
+ 		n10_dsslog_trace("N399O fmt=%u a0=%u a3=%u mode=%u", fmt, a0, a3, n10_disp_swap_rb);
+@@ -1539,6 +1606,8 @@ n10_disp_arm(void)
+ 	n10_disp_trig0 = n10_disp.trig;
+ 	__atomic_store_n(&n10_disp_armed, 1u, __ATOMIC_RELEASE);
+ out:
++	n10_dsslog_trace("N400P pages=%u/%u runs=%u bad=%u yoff=%u map=%s", n10_disp_pages,
++	    (uint32_t)((len + 0xfffu) >> 12), r, bad, yoff, n10_disp_otf ? "otf" : "wc_runs");
+ 	n10_dsslog_trace("N398A arm=%u why=%s win=%u ch=%u fmt=%u src=%ux%u mmus=%u pa_mb=0x%llx len=%llu",
+ 	    __atomic_load_n(&n10_disp_armed, __ATOMIC_RELAXED), why, win, ch, fmt, sw, sh, mmus,
+ 	    (unsigned long long)(pa >> 20), (unsigned long long)len);
+@@ -1559,6 +1628,80 @@ n10_disp_sample(const uint8_t *src, uint32_t bpr)
+ 	return h;
+ }
+ 
++/* v400: n source pixels (BGRA) into the window buffer in the armed byte order (the 0064 / 0065 conversions). */
++static void
++n10_disp_cvt(uint32_t *d, const uint32_t *s, uint32_t n)
++{
++	const uint32_t m = n10_disp_swap_rb;
++
++	for (uint32_t x = 0; x < n; x++) {
++		uint32_t v = s[x];
++		if (m == 1u) {
++			v = (v & 0xff00ff00u) | ((v & 0xffu) << 16) | ((v >> 16) & 0xffu);
++		} else if (m == 2u) {                   /* v399 ABGR8888 as bytes R,G,B,A; alpha 0xff */
++			v = 0xff000000u | (v & 0x0000ff00u) | ((v & 0xffu) << 16) | ((v >> 16) & 0xffu);
++		} else if (m == 3u) {                   /* v399 ABGR8888 as bytes A,B,G,R; alpha 0xff */
++			v = (v << 8) | 0xffu;
++		}
++		d[x] = v;
++	}
++}
++
++/* v400: the visible pixels of scanned-row bytes [o, end) (end <= n10_disp_len) into va (= mapping of offset o). */
++static void
++n10_disp_put(uint64_t o, uint64_t end, vm_offset_t va, const uint32_t *src, uint32_t bpr)
++{
++	const uint64_t o0 = o;
++
++	while (o < end) {
++		uint32_t y = (uint32_t)(o / n10_disp_stride), x = (uint32_t)(o % n10_disp_stride) / 4u;
++		uint64_t stop = (uint64_t)y * n10_disp_stride + N10_FB_WIDTH * 4u;
++		if (x >= N10_FB_WIDTH) {                /* stride padding: next row */
++			o = (uint64_t)(y + 1) * n10_disp_stride;
++			continue;
++		}
++		stop = stop < end ? stop : end;
++		n10_disp_cvt((uint32_t *)(va + (o - o0)), src + (uint64_t)y * (bpr / 4u) + x,
++		    (uint32_t)((stop - o) / 4u));
++		o = stop;
++	}
++}
++
++/* v400 map=otf: walk and check every page again, map each contiguous chunk, copy, unmap; 0 or the bad code. */
++static uint32_t
++n10_disp_copy_otf(const uint32_t *src, uint32_t bpr)
++{
++	uint64_t o0 = 0, p0 = 0, n = 0;
++
++	for (uint64_t o = 0;; o += 0x1000) {
++		uint64_t p = 0;
++		if (o < n10_disp_len) {
++			p = n10_disp_pa(o);
++			uint32_t bad = n10_disp_page_bad(p);
++			if (bad != 0) {
++				return bad;
++			}
++			if (n != 0 && p == p0 + n) {
++				n += 0x1000;
++				continue;
++			}
++		}
++		if (n != 0) {
++			uint64_t lead = p0 & (PAGE_SIZE - 1);
++			vm_size_t sz = (vm_size_t)((n + lead + PAGE_SIZE - 1) & ~(uint64_t)(PAGE_SIZE - 1));
++			vm_offset_t v = ml_io_map_unmappable((vm_offset_t)p0, (vm_size_t)n, N10_WIMG_WCOMB);
++			n10_disp_put(o0, o0 + n < n10_disp_len ? o0 + n : n10_disp_len, v, src, bpr);
++			ml_io_unmap(v - lead, sz);
++		}
++		if (o >= n10_disp_len) {
++			return 0;
++		}
++		o0 = o;
++		p0 = p;
++		n = 0x1000;
++	}
++}
++
+ /* SwapEnd: copy the front surface into the window buffer and send one frame (armed only). */
+ static void
+ n10_disp_swap(IOExternalMethodArguments *args)
+@@ -1628,29 +1771,27 @@ n10_disp_swap(IOExternalMethodArguments *args)
+ 	}
+ 
+ 	const uint32_t *src = (const uint32_t *)md->getBytesNoCopy();
+-	uint32_t hash = n10_disp_sample((const uint8_t *)md->getBytesNoCopy(), bpr);
+-	for (uint32_t y = 0; y < N10_FB_HEIGHT; y++) {
+-		const uint32_t *s = src + (uint64_t)y * (bpr / 4u);
+-		uint32_t *d = (uint32_t *)(n10_disp_fb + (uint64_t)y * n10_disp_stride);
+-		if (n10_disp_swap_rb == 1u) {
+-			for (uint32_t x = 0; x < N10_FB_WIDTH; x++) {
+-				uint32_t v = s[x];
+-				d[x] = (v & 0xff00ff00u) | ((v & 0xffu) << 16) | ((v >> 16) & 0xffu);
+-			}
+-		} else if (n10_disp_swap_rb == 2u) {    /* v399 ABGR8888 as bytes R,G,B,A; alpha 0xff */
+-			for (uint32_t x = 0; x < N10_FB_WIDTH; x++) {
+-				uint32_t v = s[x];
+-				d[x] = 0xff000000u | (v & 0x0000ff00u) | ((v & 0xffu) << 16) | ((v >> 16) & 0xffu);
+-			}
+-		} else if (n10_disp_swap_rb == 3u) {    /* v399 ABGR8888 as bytes A,B,G,R; alpha 0xff */
+-			for (uint32_t x = 0; x < N10_FB_WIDTH; x++) {
+-				d[x] = (s[x] << 8) | 0xffu;
+-			}
+-		} else {
+-			memcpy(d, s, N10_FB_WIDTH * 4u);
++	uint32_t hash = n10_disp_sample((const uint8_t *)src, bpr), bad = 0;
++	if (n10_disp_otf) {                             /* v400 map=otf */
++		bad = n10_disp_copy_otf(src, bpr);
++	} else {                                        /* v400 map=wc_runs */
++		for (uint32_t i = 0; i < n10_disp_nrun; i++) {
++			uint64_t end = (uint64_t)n10_disp_run[i].off + n10_disp_run[i].len;
++			n10_disp_put(n10_disp_run[i].off, end < n10_disp_len ? end : n10_disp_len, n10_disp_run[i].va, src, bpr);
+ 		}
+ 	}
+ 	md->release();
++	n = ++n10_disp_copies;                          /* single in-flight (n10_disp_busy) */
++	if (n == 1 || (n & 63u) == 0 || bad != 0) {
++		n10_dsslog_trace("N400F copies=%u runs=%u pages=%u bad=%u hash=0x%08x", n, n10_disp_nrun, n10_disp_pages, bad,
++		    hash);
++	}
++	if (bad != 0) {                                 /* page changed under the walk: disable before any DECON write */
++		__atomic_fetch_add(&n10_disp_fails, 1u, __ATOMIC_RELAXED);
++		__atomic_store_n(&n10_disp_armed, 0u, __ATOMIC_RELEASE);
++		__atomic_store_n(&n10_disp_busy, 0u, __ATOMIC_RELEASE);
++		return;
++	}
+ 	__builtin_arm_dsb(0xf);
+ 
+ 	/* one frame: same order as Linux decon_reg_update_req_and_unmask / decon_reg_wait_update_done_and_mask */
