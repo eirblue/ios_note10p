@@ -99,6 +99,10 @@ OVERLAY = (
     ('0052-exynos9825-n10-text-tail-pad.patch',
      '1513be2868671c82177191a34a69f4f73900fafa5a5097dddefe8c8aae0fc099',
      ('osfmk/arm64/note10/n10_dsslog.c',)),
+    ('0053-exynos9825-n10-silent-stop-capture-crumbs.patch',
+     '022cc1c5ad5605c40402459286f5fc56ec9814f62605ad31869d8e78a28506b5',
+     ('bsd/dev/arm/systemcalls.c', 'osfmk/arm64/bsd_arm64.c', 'osfmk/arm64/locore.s',
+      'osfmk/arm64/note10/n10_dsslog.c', 'osfmk/arm64/sleh.c')),
 )
 STAGED_DIRS = ('bsd/n10_hfs/core', 'bsd/n10_hfs/hfs_encodings')
 

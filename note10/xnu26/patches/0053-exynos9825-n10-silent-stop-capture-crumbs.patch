@@ -1,0 +1,316 @@
+diff --git a/bsd/dev/arm/systemcalls.c b/bsd/dev/arm/systemcalls.c
+index 2f1cf57..5d18274 100644
+--- a/bsd/dev/arm/systemcalls.c
++++ b/bsd/dev/arm/systemcalls.c
+@@ -107,8 +107,10 @@ n10_xpc_note(int trap, int num, int err)
+ extern void n10_dsslog_write(const char *s, int n);
+ extern int n10_thread_peek(const void *th, uint64_t tid, char *buf, int len);
+ void n10_xpc_enter(int num, uint64_t opt, uint64_t rem_loc, uint64_t vou_id);
+-void n10_xpc_leave(void);
++void n10_xpc_leave(int num, int ret);
+ void n10_xpc_dump(void);
++/* v386: N386B crumb ring (osfmk/arm64/note10/n10_dsslog.c). */
++extern void n10_dss_crumb(char kind, int num, int pid, uint64_t tid, uint32_t a, uint32_t b);
+ static struct {
+ 	uint64_t tid;
+ 	const void *th;
+@@ -165,6 +167,11 @@ n10_xpc_slot(int alloc)
+ void
+ n10_xpc_enter(int num, uint64_t opt, uint64_t rem_loc, uint64_t vou_id)
+ {
++	proc_t p = current_proc();
++
++	n10_dss_crumb('E', num, p == PROC_NULL ? -1 : proc_getpid(p), thread_tid(current_thread()),
++	    num == N10_XQ_MSG2 ? (uint32_t)(vou_id >> 32) : (uint32_t)opt, (uint32_t)rem_loc);
++
+ 	int i = n10_xpc_slot(1);
+ 	uint64_t ns = 0;
+ 
+@@ -181,8 +188,12 @@ n10_xpc_enter(int num, uint64_t opt, uint64_t rem_loc, uint64_t vou_id)
+ }
+ 
+ void
+-n10_xpc_leave(void)
++n10_xpc_leave(int num, int ret)
+ {
++	proc_t p = current_proc();
++
++	n10_dss_crumb('X', num, p == PROC_NULL ? -1 : proc_getpid(p), thread_tid(current_thread()), (uint32_t)ret, 0);
++
+ 	int i = n10_xpc_slot(0);
+ 
+ 	if (i >= 0) {
+@@ -384,12 +395,12 @@ unix_syscall(
+ 
+ 	AUDIT_SYSCALL_ENTER(code, proc, uthread);
+ #if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
+-	n10_xpc_enter(code, 0, 0, 0);
++	n10_xpc_enter(code, uthread->uu_arg[0], uthread->uu_arg[1], 0);       /* v386: arg0/arg1 for N386B */
+ #endif
+ 	error = (*(callp->sy_call))(proc, &uthread->uu_arg[0], &(uthread->uu_rval[0]));
+ 	AUDIT_SYSCALL_EXIT(code, proc, uthread, error);
+ #if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
+-	n10_xpc_leave();
++	n10_xpc_leave(code, error);
+ 	if (__improbable(error != 0 && error != ERESTART && error != EJUSTRETURN)) {
+ 		n10_xpc_note(0, code, error);
+ 	}
+@@ -475,7 +486,7 @@ unix_syscall_return(int error)
+ 
+ 	AUDIT_SYSCALL_EXIT(code, proc, uthread, error);
+ #if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
+-	n10_xpc_leave();
++	n10_xpc_leave(code, error);
+ 	if (__improbable(error != 0 && error != ERESTART && error != EJUSTRETURN)) {
+ 		n10_xpc_note(0, code, error);
+ 	}
+diff --git a/osfmk/arm64/bsd_arm64.c b/osfmk/arm64/bsd_arm64.c
+index 648a866..fdba739 100644
+--- a/osfmk/arm64/bsd_arm64.c
++++ b/osfmk/arm64/bsd_arm64.c
+@@ -61,7 +61,7 @@
+ /* Note10 (v378): bsd/dev/arm/systemcalls.c, xpcproxy failing-call trace. */
+ extern void n10_xpc_note(int trap, int num, int err);
+ extern void n10_xpc_enter(int num, uint64_t opt, uint64_t rem_loc, uint64_t vou_id);
+-extern void n10_xpc_leave(void);
++extern void n10_xpc_leave(int num, int ret);
+ #endif
+ 
+ extern void throttle_lowpri_io(int);
+@@ -310,7 +310,7 @@ mach_syscall(struct arm_saved_state *state)
+ 
+ skip_machcall:
+ #if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
+-	n10_xpc_leave();
++	n10_xpc_leave(-(int)call_number, retval);
+ 	/* Note10 (v378): failing Mach traps of xpcproxy (bsd/dev/arm/systemcalls.c n10_xpc_note). */
+ 	if (__improbable(retval != KERN_SUCCESS) && !mach_trap_table[call_number].mach_trap_returns_port) {
+ 		n10_xpc_note(1, call_number, retval);
+diff --git a/osfmk/arm64/locore.s b/osfmk/arm64/locore.s
+index 3f42af8..c89329d 100644
+--- a/osfmk/arm64/locore.s
++++ b/osfmk/arm64/locore.s
+@@ -1372,7 +1372,11 @@ TRAP_UNWIND_DIRECTIVES
+ 	ARM64_JUMP_TARGET
+ 	BEGIN_INTERRUPT_HANDLER
+ 	PUSH_FRAME
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	bl		EXT(n10_sleh_fiq)	// v386: chain stop on sleh_fiq; capture instead (n10_dsslog.c)
++#else
+ 	bl		EXT(sleh_fiq)
++#endif
+ 	POP_FRAME_WITHOUT_LR
+ 	END_INTERRUPT_HANDLER
+ 
+@@ -1395,7 +1399,11 @@ TRAP_UNWIND_DIRECTIVES
+ 	mrs		x2, FAR_EL1							// Load fault address
+ 
+ 	PUSH_FRAME
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	bl		EXT(n10_sleh_serror)	// v386: chain stop on sleh_serror; capture instead (n10_dsslog.c)
++#else
+ 	bl		EXT(sleh_serror)
++#endif
+ 	POP_FRAME_WITHOUT_LR
+ 
+ #if XNU_MONITOR && !CONFIG_SPTM
+diff --git a/osfmk/arm64/note10/n10_dsslog.c b/osfmk/arm64/note10/n10_dsslog.c
+index a4ba216..fdcad73 100644
+--- a/osfmk/arm64/note10/n10_dsslog.c
++++ b/osfmk/arm64/note10/n10_dsslog.c
+@@ -61,6 +61,7 @@
+ #include <mach/arm/thread_status.h>
+ #include <machine/machine_routines.h>
+ #include <kern/startup.h>
++#include <kern/clock.h>
+ #include <pexpert/pexpert.h>
+ #include <pexpert/device_tree.h>
+ 
+@@ -516,6 +517,164 @@ n10_sync_kother_capture(arm_saved_state_t *ss, uint64_t esr, uint64_t far)
+ 	n10_sync_capture(1, ss, esr, far);
+ }
+ 
++/*
++ * v386: v385 ended with the ticks stopped (IRQs masked), no N347X, no panic
++ * line and a PMIC WTSR 2.4 s later. The chain still keeps silent stop words
++ * at the entries of sleh_fiq and sleh_serror ('b .', v326) and of
++ * panic_with_thread_kernel_state ('msr daifset; b .', v336), so an FIQ, an
++ * SError, a kernel stack overflow or any sleh panic_with_thread_kernel_state
++ * stop (e.g. an unresolved kfast kernel abort) ends exactly like that.
++ * fleh_fiq/fleh_serror (locore.s) now call n10_sleh_fiq/n10_sleh_serror and
++ * sleh.c routes panic_with_thread_kernel_state to n10_panic_with_state: one
++ * "N386F/N386S/N386P" tag line, then the unchanged N347X/N347R capture and
++ * the sync stop ladder. FIQ has no syndrome: esr = 0xfc000000 (EC 0x3f,
++ * unallocated, the FIQ marker), far = ISR_EL1. n10_keep_sleh keeps sleh_fiq
++ * and sleh_serror (chain anchors) linked under -dead_strip.
++ */
++void sleh_fiq(arm_saved_state_t *);
++void sleh_serror(arm_context_t *context, uint64_t esr, vm_offset_t far);
++void n10_sleh_fiq(arm_saved_state_t *state) __attribute__((noreturn));
++void n10_sleh_serror(arm_context_t *context, uint64_t esr, vm_offset_t far) __attribute__((noreturn));
++void n10_panic_with_state(const char *msg, arm_saved_state_t *ss) __attribute__((noreturn));
++__attribute__((used)) static void *const n10_keep_sleh[] = { (void *)sleh_fiq, (void *)sleh_serror };
++
++/* One "N347L <tag><value> <msg>" line ahead of the capture (DAIF masked, reserve kept for it). */
++static void
++n10_dss_tag(const char *tag, uint64_t value, const char *msg)
++{
++	char text[160];
++
++	if (n10_dss_state != N10_DSS_ON || n10_dss_busy) {
++		return;
++	}
++	n10_dss_busy = 1;
++	if (n10_dss_line_len) {
++		n10_dss_emit();
++	}
++	uint32_t at = n10_str(text, 0, "N347L ");
++	at = n10_str(text, at, tag);
++	at = n10_hex(text, at, value, 16);
++	if (msg) {
++		text[at++] = ' ';
++		for (uint32_t i = 0; msg[i] && i < 120; i++) {
++			char c = msg[i];
++			text[at++] = (c < 0x20 || c > 0x7e) ? '?' : c;
++		}
++	}
++	text[at++] = '\n';
++	(void)n10_dss_append(text, at, N10_DSS_RESERVE);
++	n10_dss_busy = 0;
++}
++
++__attribute__((used, noreturn, noinline)) void
++n10_sleh_fiq(arm_saved_state_t *state)
++{
++	uint64_t isr;
++
++	(void)n10_dss_irq_off();
++	__asm__ volatile ("mrs %0, isr_el1" : "=r" (isr));
++	n10_dss_tag("N386F fiq isr=", isr, NULL);
++	n10_sync_capture(0, state, 0xfc000000ull, isr);
++}
++
++__attribute__((used, noreturn, noinline)) void
++n10_sleh_serror(arm_context_t *context, uint64_t esr, vm_offset_t far)
++{
++	(void)n10_dss_irq_off();
++	n10_dss_tag("N386S serror esr=", esr, NULL);
++	n10_sync_capture(0, &context->ss, esr, far);
++}
++
++__attribute__((used, noreturn, noinline)) void
++n10_panic_with_state(const char *msg, arm_saved_state_t *ss)
++{
++	(void)n10_dss_irq_off();
++	n10_dss_tag("N386P esr=", ss->ss_64.esr, msg);
++	n10_sync_capture(0, ss, ss->ss_64.esr, ss->ss_64.far);
++}
++
++/*
++ * v386: N386B crumb ring. The last N381K tick before the v385 stop only says
++ * pid 92 (ReportCrash) was in the kernel (zalloc_ext). Every BSD syscall and
++ * Mach trap entry ('E': number, a/b = arg0/arg1 low words; mach_msg2 (-47):
++ * a = msgh_id, b = remote port name) and exit through the syscall/trap return
++ * path ('X': a = error/kern_return) is written as one fixed 77-byte line
++ * "N347L N386B q=<seq> t=<ms> p=<pid> h=<tid> <E|X> n=<+bsd|-trap> a= b="
++ * into slot seq % 32 of a 32-line block reserved once (first call, with the
++ * normal append) in the dss ring; later records overwrite their slot in place
++ * through the Device mapping (byte stores, dsb sy), so the block always holds
++ * the last 32 records and sorting by q gives their order. DAIF masked per
++ * record, no lock, no allocation; skipped while busy or when the
++ * reservation did not fit. Observation only.
++ */
++#define N10_CRUMB_SLOTS         32u
++#define N10_CRUMB_LEN           77u
++void n10_dss_crumb(char kind, int num, int pid, uint64_t tid, uint32_t a, uint32_t b);
++static uint64_t n10_crumb_pa;           /* PA of slot 0, 0 = not reserved */
++static uint32_t n10_crumb_seq, n10_crumb_off;
++
++static uint32_t
++n10_crumb_text(char *r, uint32_t seq, uint64_t ms, int pid, uint64_t tid, char kind, int num, uint32_t a, uint32_t b)
++{
++	uint32_t at = n10_str(r, 0, "N347L N386B q=");
++	at = n10_hex(r, at, seq, 8);
++	at = n10_str(r, at, " t=");
++	at = n10_hex(r, at, ms, 6);
++	at = n10_str(r, at, " p=");
++	at = n10_hex(r, at, (uint32_t)pid, 4);
++	at = n10_str(r, at, " h=");
++	at = n10_hex(r, at, tid, 4);
++	r[at++] = ' ';
++	r[at++] = kind;
++	at = n10_str(r, at, " n=");
++	r[at++] = num < 0 ? '-' : '+';
++	at = n10_hex(r, at, (uint32_t)(num < 0 ? -num : num), 3);
++	at = n10_str(r, at, " a=");
++	at = n10_hex(r, at, a, 8);
++	at = n10_str(r, at, " b=");
++	at = n10_hex(r, at, b, 8);
++	r[at++] = '\n';
++	return at;      /* N10_CRUMB_LEN */
++}
++
++void
++n10_dss_crumb(char kind, int num, int pid, uint64_t tid, uint32_t a, uint32_t b)
++{
++	char r[N10_CRUMB_LEN];
++	uint64_t ns = 0;
++
++	if (n10_dss_state != N10_DSS_ON || n10_crumb_off) {
++		return;
++	}
++	absolutetime_to_nanoseconds(mach_absolute_time(), &ns);
++	uint64_t daif = n10_dss_irq_off();
++	if (n10_dss_state == N10_DSS_ON && !n10_dss_busy) {
++		n10_dss_busy = 1;
++		if (n10_crumb_pa == 0) {
++			uint64_t first = n10_dss_pos;
++			(void)n10_crumb_text(r, 0, 0, 0, 0, '-', 0, 0, 0);
++			for (uint32_t i = 0; i < N10_CRUMB_SLOTS && !n10_crumb_off; i++) {
++				n10_crumb_off = !n10_dss_append(r, N10_CRUMB_LEN, N10_DSS_RESERVE);
++			}
++			if (!n10_crumb_off) {
++				n10_crumb_pa = first;
++			}
++		}
++		if (n10_crumb_pa) {
++			uint32_t seq = ++n10_crumb_seq;
++			(void)n10_crumb_text(r, seq, ns / NSEC_PER_MSEC, pid, tid, kind, num, a, b);
++			volatile uint8_t *dst = (volatile uint8_t *)(n10_dss_map + (vm_offset_t)(n10_crumb_pa +
++			    (uint64_t)(seq % N10_CRUMB_SLOTS) * N10_CRUMB_LEN - n10_dss_map_pa));
++			for (uint32_t i = 0; i < N10_CRUMB_LEN; i++) {
++				dst[i] = (uint8_t)r[i];
++			}
++			__asm__ volatile ("dsb sy" : : : "memory");
++		}
++		n10_dss_busy = 0;
++	}
++	n10_dss_irq_restore(daif);
++}
++
+ /*
+  * v385: cave space for the binary chain. The chain used to place its caves
+  * (v315 cave, v324/v325/v334 stubs, run-order text tail incl. the pthread trap
+diff --git a/osfmk/arm64/sleh.c b/osfmk/arm64/sleh.c
+index b82a36f..42cbdbe 100644
+--- a/osfmk/arm64/sleh.c
++++ b/osfmk/arm64/sleh.c
+@@ -670,6 +670,18 @@ panic_with_thread_kernel_state(const char *msg, arm_saved_state_t *ss)
+ 	    state->pc, state->cpsr, state->esr, state->far);
+ }
+ 
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++/*
++ * Note10 (v386): the chain keeps a silent 'msr daifset; b .' stop on the first
++ * words of panic_with_thread_kernel_state, so the callers below route to
++ * n10_panic_with_state (osfmk/arm64/note10/n10_dsslog.c): one N386P line with
++ * the message, then the N347X/N347R capture. The locore SP1 handlers keep the
++ * original reference (the chain anchors on that symbol).
++ */
++void n10_panic_with_state(const char *msg, arm_saved_state_t *ss) __abortlike;
++#define panic_with_thread_kernel_state(msg, ss) n10_panic_with_state((msg), (ss))
++#endif
++
+ void
+ sleh_synchronous_sp1(arm_context_t *context, uint64_t esr, vm_offset_t far __unused)
+ {
