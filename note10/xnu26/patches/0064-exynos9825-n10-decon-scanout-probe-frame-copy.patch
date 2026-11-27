@@ -1,0 +1,526 @@
+diff --git a/iokit/Kernel/NoteFramebuffer.cpp b/iokit/Kernel/NoteFramebuffer.cpp
+index dafefba..a39fe19 100644
+--- a/iokit/Kernel/NoteFramebuffer.cpp
++++ b/iokit/Kernel/NoteFramebuffer.cpp
+@@ -104,7 +104,37 @@
+  * when absent (read by the same MobileGestalt function, default -1). Registry
+  * properties only. One "N397D" line. N396S now logs every IOSurface selector
+  * call (not only the first per selector); the shared N396 cap is 192.
+- */
++ *
++ * v398: scanout. The S6E3HA9 panel runs in MIPI DSI command mode with the
++ * DECON0 hw (TE) trigger: the panel shows its own frame memory and DECON0
++ * fetches its window only while the trigger is unmasked; Linux dpu20 sets a
++ * global shadow update request, unmasks, waits for the request to clear and
++ * masks again for every frame. n10_disp_probe() first records the state the
++ * loader left (reads only): the always-on PMU DPU power-domain
++ * configuration/status (0x15861e00/04); only with STATUS bit 0 set DECON0
++ * (0x19030000) global/trigger/data-path/window registers, the six DPU IDMA
++ * channels (0x19071000 + 0x1000 * n) and the three DPU SysMMUs
++ * (0x190A0000/B/C); once at the end of n10_iomfb_publish ("pub") and once at
++ * the first SwapEnd ("se1"). n10_disp_arm() (at "se1") enables the write path
++ * only when that state is the expected Linux one: power domain on, DECON0
++ * command mode and enabled, trigger masked, no pending shadow update, exactly
++ * one enabled window whose IDMA channel reads an unrotated, uncompressed
++ * 8888 RGB image of 1440x3040 at offset 0, and the three SysMMUs all
++ * bypassed or all on one page table; the window buffer (IOVA) is translated
++ * through that table (read with ml_phys_read_word_64), must be physically
++ * contiguous, inside the loader /chosen DRAM span, outside XNU-managed RAM,
++ * the XNU window, the UFS DMA block, the pstore/s2d/arraydump and dss
++ * carve-outs, and is then mapped write-combined. On each later SwapEnd (at most one frame
++ * per 100 ms) n10_disp_swap() copies the front IOSurface (id at SwapEnd
++ * struct +0x54, else the newest 1440x3040 4-byte surface) into that buffer
++ * (R/B swapped for RGBA-order formats), DSB, writes SHADOW_REG_UPDATE_REQ =
++ * global, unmasks the trigger (HW_SW_TRIG_CONTROL: HW_TRIG_EN set,
++ * HW_TRIG_MASK_DECON clear), polls the request clear (50 ms) and masks the
++ * trigger again (bits 0/4 only, read-modify-write as Linux decon_write_mask);
++ * a timeout also masks it and disables the path. The only registers written are DECON0 0x60 and 0x70; no
++ * window, IDMA, DPP, SysMMU, DSIM, clock or PMIC register is written. N398
++ * lines: P power, D/W DECON, I IDMA, S SysMMU, E probe end, A arm decision,
++ * R first SwapEnd record words, F frames. */
+ #include <pexpert/arm64/board_config.h>
+ 
+ #if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
+@@ -122,7 +152,9 @@
+ #include <libkern/c++/OSUnserialize.h>
+ #include <IOKit/IOBufferMemoryDescriptor.h>
+ #include <kern/task.h>
++#include <kern/clock.h>
+ #include <sys/proc.h>
++#include <machine/machine_routines.h>
+ 
+ /* osfmk/arm64/note10/n10_dsslog.c (v376): one bounded line into the dss log ring. */
+ extern "C" void n10_dsslog_trace(const char *fmt, ...) __printflike(1, 2);
+@@ -145,7 +177,10 @@ enum {
+ static uint32_t n10_fb_lines;
+ static uint32_t n10_fb_seen[4];                 /* selectors 0..127 already logged */
+ static uint32_t n10_fb_swap_id;
+-
++static uint32_t n10_disp_se_once;               /* v398: first SwapEnd probe + arm taken */
++static void n10_disp_probe(const char *tag);
++static void n10_disp_arm(void);
++static void n10_disp_swap(IOExternalMethodArguments *args);
+ /* v392 N392F counters: opens, notification ports, selectors 3/4/5/6/8, others. */
+ enum { N10_FB_C_SURF, N10_FB_C_SB, N10_FB_C_SE, N10_FB_C_SW, N10_FB_C_DS, N10_FB_C_OTHER, N10_FB_C_N };
+ static uint32_t n10_fb_opens, n10_fb_notifies;
+@@ -850,7 +885,13 @@ IOMobileFramebufferUserClient::externalMethod(uint32_t selector, IOExternalMetho
+ 		break;
+ 	}
+ 
+-	n10_fb_count(selector);
++	if (selector == 5) {
++		if (__atomic_exchange_n(&n10_disp_se_once, 1u, __ATOMIC_RELAXED) == 0) {
++			n10_disp_probe("se1");
++			n10_disp_arm();
++		}
++		n10_disp_swap(args);
++	}	n10_fb_count(selector);
+ 	if (n10_fb_trace_ok(selector)) {
+ 		char name[32];
+ 		proc_selfname(name, sizeof(name));
+@@ -1139,6 +1180,437 @@ n10_chosen_publish(void)
+ 	    (long long)was_scale, (long long)was_rotation, added);
+ }
+ 
++/*
++ * v398 display probe and scanout (see the header). Public SoC addresses
++ * (exynos9820 device tree, dpu20 cal_9820, pmucal, exynos-iommu sources).
++ */
++#define N10_DISP_PMU_PD         0x15861e00u     /* DPU_CONFIGURATION, +4 DPU_STATUS */
++#define N10_DISP_DECON          0x19030000u
++#define N10_DISP_DECON_SIZE     0x8000u
++#define N10_DISP_IDMA           0x19070000u     /* channel n at +0x1000 * (n + 1) */
++#define N10_DISP_IDMA_SIZE      0x8000u
++#define N10_DISP_MMU0           0x190a0000u     /* DPUD0; DPUD1/2 at +0x10000 / +0x20000 */
++#define N10_DECON_SHADOW_REQ    0x0060u
++#define N10_DECON_TRIG          0x0070u
++#define N10_TRIG_EN             0x1u
++#define N10_TRIG_MASK_DECON     0x10u
++#define N10_SHADOW_GLOBAL       0x80000000u
++#define N10_DISP_MIN_GAP_NS     100000000ull    /* at most one frame per 100 ms */
++#define N10_DISP_POLL_US        100u
++#define N10_DISP_POLLS          500u            /* 50 ms */
++#define N10_DISP_FRAME_LINES    8u
++/* ranges the buffer must not overlap (public exynos9820.dts reserved-memory / v382 loader contract) */
++#define N10_DISP_XNU_WINDOW     0x20000000ull   /* XNU window [gPhysBase, +512 MiB) (Linux N311_WINDOW_BYTES) */
++#define N10_DISP_UFS_DMA        0xe2000000ull   /* N382_DMA_BASE, 1 MiB */
++#define N10_DISP_UFS_DMA_SIZE   0x100000ull
++#define N10_DISP_PSTORE         0xeb308000ull   /* log_pstore (ramoops) .. log_s2d .. log_arraydump end 0xed210000 */
++#define N10_DISP_PSTORE_SIZE    0x1f08000ull
++#define N10_DISP_DSS            0xfd900000ull   /* debug-snapshot header + log rings (dss ring) .. 4 GiB */
++#define N10_DISP_DSS_SIZE       0x2700000ull
++
++enum { N10_DISP_MAP_PMU, N10_DISP_MAP_DECON, N10_DISP_MAP_IDMA, N10_DISP_MAP_MMU, N10_DISP_MAPS = N10_DISP_MAP_MMU + 3 };
++static vm_offset_t n10_disp_va[N10_DISP_MAPS];  /* ml_io_map is permanent: map once, reuse */
++
++/* Last probe values (written by the probe, read by n10_disp_arm on the same thread). */
++static struct {
++	uint32_t pd_st, gc, sur, trig, dp0, dp1, ws0, we0, valid;
++	uint32_t con[6], src[6], off[6], img[6], base[6];
++	uint32_t mctrl[3], mpt[3];
++} n10_disp;
++
++/* Armed state: set once by n10_disp_arm, frames by n10_disp_swap. */
++static uint32_t n10_disp_armed, n10_disp_busy, n10_disp_swap_rb, n10_disp_trig0;
++static uint32_t n10_disp_frames, n10_disp_skips, n10_disp_fails, n10_disp_rec_once;
++static vm_offset_t n10_disp_fb;                 /* write-combined map of the window buffer */
++static uint32_t n10_disp_stride;                /* destination bytes per row */
++static uint64_t n10_disp_last;                  /* mach_absolute_time of the last frame */
++
++/* machine_routines.h declares these for PEXPERT/MACH_KERNEL_PRIVATE only */
++extern "C" vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
++extern "C" vm_offset_t ml_io_map_wcomb(vm_offset_t phys_addr, vm_size_t size);
++extern "C" uint64_t gDramBase, gDramSize;
++extern "C" unsigned long gPhysBase;             /* osfmk/mach/arm/vm_param.h (MACH_KERNEL_PRIVATE only) */
++extern "C" boolean_t pmap_valid_address(uint64_t addr);
++
++static vm_offset_t
++n10_disp_map(int i, uint32_t pa, uint32_t size)
++{
++	if (n10_disp_va[i] == 0) {
++		n10_disp_va[i] = ml_io_map(pa, size);
++	}
++	return n10_disp_va[i];
++}
++
++static inline uint32_t
++n10_disp_rd(vm_offset_t base, uint32_t off)
++{
++	return *(volatile uint32_t *)(base + off);
++}
++
++static void
++n10_disp_probe(const char *tag)
++{
++	vm_offset_t pmu = n10_disp_map(N10_DISP_MAP_PMU, N10_DISP_PMU_PD, 8);
++	uint32_t cfg, reads = 2;
++
++	n10_disp.valid = 0;
++	if (pmu == 0) {
++		n10_dsslog_trace("N398P %s pd=unknown map=0 skip", tag);
++		return;
++	}
++	cfg = n10_disp_rd(pmu, 0);
++	n10_disp.pd_st = n10_disp_rd(pmu, 4);
++	n10_dsslog_trace("N398P %s pd_cfg=0x%x pd_st=0x%x on=%u", tag, cfg, n10_disp.pd_st, n10_disp.pd_st & 1u);
++	if ((n10_disp.pd_st & 1u) == 0) {
++		n10_dsslog_trace("N398E %s skip pd_off reads=%u", tag, reads);
++		return;
++	}
++
++	vm_offset_t d = n10_disp_map(N10_DISP_MAP_DECON, N10_DISP_DECON, N10_DISP_DECON_SIZE);
++	if (d == 0) {
++		n10_dsslog_trace("N398E %s skip decon_map reads=%u", tag, reads);
++		return;
++	}
++	n10_disp.gc = n10_disp_rd(d, 0x0000);
++	uint32_t ip = n10_disp_rd(d, 0x004c);
++	n10_disp.sur = n10_disp_rd(d, N10_DECON_SHADOW_REQ);
++	n10_disp.trig = n10_disp_rd(d, N10_DECON_TRIG);
++	uint32_t te = n10_disp_rd(d, 0x0078), clk = n10_disp_rd(d, 0x00f0);
++	n10_disp.dp0 = n10_disp_rd(d, 0x0214);
++	n10_disp.dp1 = n10_disp_rd(d, 0x0218);
++	uint32_t dp2 = n10_disp_rd(d, 0x0230), sdp0 = n10_disp_rd(d, 0x7214);
++	uint32_t wc[6];
++	for (uint32_t w = 0; w < 6; w++) {
++		wc[w] = n10_disp_rd(d, 0x1000 + w * 0x30);
++	}
++	n10_disp.ws0 = n10_disp_rd(d, 0x1008);
++	n10_disp.we0 = n10_disp_rd(d, 0x100c);
++	reads += 18;
++	/* masked: HW_TRIG_MASK_DECON (bit 4) set and HW_TRIG_EN (bit 0) clear = Linux "trigger disabled" */
++	n10_dsslog_trace("N398D %s gc=0x%x ip=0x%x sur=0x%x trig=0x%x masked=%u te=0x%x clk=0x%x dp0=0x%x dp1=0x%x "
++	    "dp2=0x%x sdp0=0x%x", tag, n10_disp.gc, ip, n10_disp.sur, n10_disp.trig,
++	    (n10_disp.trig & (N10_TRIG_MASK_DECON | N10_TRIG_EN)) == N10_TRIG_MASK_DECON ? 1u : 0u, te, clk,
++	    n10_disp.dp0, n10_disp.dp1, dp2, sdp0);
++	n10_dsslog_trace("N398W %s w0=0x%x w1=0x%x w2=0x%x w3=0x%x w4=0x%x w5=0x%x ws0=0x%x we0=0x%x", tag,
++	    wc[0], wc[1], wc[2], wc[3], wc[4], wc[5], n10_disp.ws0, n10_disp.we0);
++
++	vm_offset_t m = n10_disp_map(N10_DISP_MAP_IDMA, N10_DISP_IDMA, N10_DISP_IDMA_SIZE);
++	if (m == 0) {
++		n10_dsslog_trace("N398E %s skip idma_map reads=%u", tag, reads);
++		return;
++	}
++	for (uint32_t ch = 0; ch < 6; ch++) {
++		uint32_t o = 0x1000u * (ch + 1), en = n10_disp_rd(m, o + 0x00);
++		n10_disp.con[ch] = n10_disp_rd(m, o + 0x08);
++		n10_disp.src[ch] = n10_disp_rd(m, o + 0x10);
++		n10_disp.off[ch] = n10_disp_rd(m, o + 0x14);
++		n10_disp.img[ch] = n10_disp_rd(m, o + 0x18);
++		n10_disp.base[ch] = n10_disp_rd(m, o + 0x40);
++		n10_dsslog_trace("N398I %s ch=%u en=0x%x con=0x%x src=0x%x off=0x%x img=0x%x base=0x%x", tag, ch, en,
++		    n10_disp.con[ch], n10_disp.src[ch], n10_disp.off[ch], n10_disp.img[ch], n10_disp.base[ch]);
++		reads += 6;
++	}
++
++	for (uint32_t k = 0; k < 3; k++) {
++		vm_offset_t s = n10_disp_map(N10_DISP_MAP_MMU + (int)k, N10_DISP_MMU0 + 0x10000u * k, 0x100);
++		if (s == 0) {
++			n10_dsslog_trace("N398E %s skip mmu%u_map reads=%u", tag, k, reads);
++			return;
++		}
++		n10_disp.mctrl[k] = n10_disp_rd(s, 0x00);
++		n10_disp.mpt[k] = n10_disp_rd(s, 0x0c);
++		n10_dsslog_trace("N398S %s mmu=%u ctrl=0x%x cfg=0x%x st=0x%x pt=0x%x ver=0x%x int=0x%x", tag, k,
++		    n10_disp.mctrl[k], n10_disp_rd(s, 0x04), n10_disp_rd(s, 0x08), n10_disp.mpt[k],
++		    n10_disp_rd(s, 0x34), n10_disp_rd(s, 0x60));
++		reads += 6;
++	}
++	n10_disp.valid = 1;
++	n10_dsslog_trace("N398E %s done reads=%u", tag, reads);
++}
++
++/* Exynos SysMMU v7 IOVA -> PA through the Linux page table at pt (4-byte entries, PA >> 4); 0 = fault. */
++static uint64_t
++n10_disp_xlate(uint64_t pt, uint32_t iova)
++{
++	uint32_t e1 = ml_phys_read_word_64(pt + 4ull * (iova >> 20));
++
++	if ((e1 & 7u) == 2u) {                          /* 1 MiB section */
++		return ((uint64_t)(e1 & ~0xffffu) << 4) | (iova & 0xfffffu);
++	}
++	if ((e1 & 7u) != 1u) {
++		return 0;
++	}
++	uint64_t l2 = (uint64_t)(e1 & ~0x3fu) << 4;
++	if (l2 < gDramBase || l2 - gDramBase >= gDramSize) {
++		return 0;
++	}
++	uint32_t e2 = ml_phys_read_word_64(l2 + 4ull * ((iova >> 12) & 0xffu));
++	if ((e2 & 3u) == 2u) {                          /* 4 KiB page */
++		return ((uint64_t)(e2 & ~0xffu) << 4) | (iova & 0xfffu);
++	}
++	if ((e2 & 3u) == 1u) {                          /* 64 KiB page */
++		return ((uint64_t)(e2 & ~0xfffu) << 4) | (iova & 0xffffu);
++	}
++	return 0;
++}
++
++static bool
++n10_disp_outside(uint64_t pa, uint64_t len, uint64_t base, uint64_t size)
++{
++	return pa + len <= base || base + size <= pa;
++}
++
++static bool
++n10_disp_in_dram(uint64_t pa, uint64_t len)
++{
++	return pa >= gDramBase && len <= gDramSize && pa - gDramBase <= gDramSize - len;
++}
++
++/* Decide once (first SwapEnd, after the "se1" probe) whether frames may be written. */
++static void
++n10_disp_arm(void)
++{
++	const char *why = "ok";
++	uint32_t win = 6, ch = 6, nwin = 0, fmt = 0, sw = 0, sh = 0, mmus = 0;
++	uint64_t pt = 0, pa = 0, len = 0;
++
++	if (!n10_disp.valid) {
++		why = "probe";
++		goto out;
++	}
++	if ((n10_disp.gc & 0x100u) == 0 || (n10_disp.gc & 0x3u) == 0) {
++		why = "gc";                             /* command mode + DECON enabled expected */
++		goto out;
++	}
++	if ((n10_disp.trig & (N10_TRIG_MASK_DECON | N10_TRIG_EN)) != N10_TRIG_MASK_DECON || n10_disp.sur != 0) {
++		why = "trig";                           /* masked trigger, no pending update expected */
++		goto out;
++	}
++	for (uint32_t w = 0; w < 6; w++) {
++		if (n10_disp.dp0 & (1u << (4 * w))) {
++			nwin++;
++			win = w;
++		}
++	}
++	if (nwin != 1) {
++		why = "win";
++		goto out;
++	}
++	ch = (n10_disp.dp1 >> (4 * win)) & 7u;
++	if (ch >= 6) {
++		why = "chmap";
++		goto out;
++	}
++	fmt = (n10_disp.con[ch] >> 11) & 0x3fu;
++	sw = n10_disp.src[ch] & 0xffffu;
++	sh = (n10_disp.src[ch] >> 16) & 0x3fffu;
++	if ((n10_disp.con[ch] & 0x7c8u) != 0 || !(fmt == 2 || fmt == 3 || fmt == 6 || fmt == 7)) {
++		why = "format";                         /* rotation/flip, AFBC, block mode; 8888 R/B orders only */
++		goto out;
++	}
++	if (n10_disp.img[ch] != (N10_FB_WIDTH | (N10_FB_HEIGHT << 16)) || n10_disp.off[ch] != 0 ||
++	    sw < N10_FB_WIDTH || sh < N10_FB_HEIGHT || sw > 4096u || (n10_disp.base[ch] & 0xfffu) != 0) {
++		why = "geometry";
++		goto out;
++	}
++	for (uint32_t k = 0; k < 3; k++) {
++		if (n10_disp.mctrl[k] & 1u) {
++			uint64_t p = (uint64_t)n10_disp.mpt[k] << 12;
++			if (p == 0 || (mmus != 0 && p != pt)) {
++				why = "iommu";
++				goto out;
++			}
++			pt = p;
++			mmus++;
++		}
++	}
++	if (mmus != 0 && mmus != 3) {
++		why = "iommu_mix";                      /* all three bypassed or all three on one table */
++		goto out;
++	}
++	if (pt != 0 && !n10_disp_in_dram(pt, 0x4000)) {
++		why = "pt";
++		goto out;
++	}
++	len = (uint64_t)sw * 4u * sh;
++	if ((uint64_t)n10_disp.base[ch] + len > 0x100000000ull) {
++		why = "geometry";
++		goto out;
++	}
++	for (uint64_t o = 0; o < len; o += 0x1000) {
++		uint64_t p = pt != 0 ? n10_disp_xlate(pt, (uint32_t)(n10_disp.base[ch] + o)) : n10_disp.base[ch] + o;
++		if (o == 0) {
++			pa = p;
++		}
++		if (p == 0 || p != pa + o) {
++			why = "contig";
++			goto out;
++		}
++	}
++	if (!n10_disp_in_dram(pa, len)) {
++		why = "dram";
++		goto out;
++	}
++	for (uint64_t o = 0; o <= len; o += PAGE_SIZE) {
++		if (pmap_valid_address(pa + (o < len ? o : len - 1))) {
++			why = "xnu_ram";
++			goto out;
++		}
++	}
++	if (!n10_disp_outside(pa, len, gPhysBase, N10_DISP_XNU_WINDOW) ||
++	    !n10_disp_outside(pa, len, N10_DISP_UFS_DMA, N10_DISP_UFS_DMA_SIZE) ||
++	    !n10_disp_outside(pa, len, N10_DISP_PSTORE, N10_DISP_PSTORE_SIZE) ||
++	    !n10_disp_outside(pa, len, N10_DISP_DSS, N10_DISP_DSS_SIZE)) {
++		why = "reserved";                       /* XNU window, UFS DMA block, pstore/s2d/arraydump, dss */
++		goto out;
++	}
++	n10_disp_fb = ml_io_map_wcomb((vm_offset_t)pa, (vm_size_t)len);
++	if (n10_disp_fb == 0) {
++		why = "map";
++		goto out;
++	}
++	n10_disp_stride = sw * 4u;
++	n10_disp_swap_rb = (fmt == 2 || fmt == 6) ? 1u : 0u;
++	n10_disp_trig0 = n10_disp.trig;
++	__atomic_store_n(&n10_disp_armed, 1u, __ATOMIC_RELEASE);
++out:
++	n10_dsslog_trace("N398A arm=%u why=%s win=%u ch=%u fmt=%u src=%ux%u mmus=%u pa_mb=0x%llx len=%llu",
++	    __atomic_load_n(&n10_disp_armed, __ATOMIC_RELAXED), why, win, ch, fmt, sw, sh, mmus,
++	    (unsigned long long)(pa >> 20), (unsigned long long)len);
++}
++
++/* FNV-1a over 64 diagonal pixels of the source frame (sample hash). */
++static uint32_t
++n10_disp_sample(const uint8_t *src, uint32_t bpr)
++{
++	uint32_t h = 2166136261u;
++
++	for (uint32_t i = 0; i < 64; i++) {
++		const uint8_t *p = src + (uint64_t)(i * (N10_FB_HEIGHT / 64)) * bpr + (uint64_t)(i * (N10_FB_WIDTH / 64)) * 4u;
++		for (uint32_t b = 0; b < 4; b++) {
++			h = (h ^ p[b]) * 16777619u;
++		}
++	}
++	return h;
++}
++
++/* SwapEnd: copy the front surface into the window buffer and send one frame (armed only). */
++static void
++n10_disp_swap(IOExternalMethodArguments *args)
++{
++	uint8_t rec[0x60];
++	uint32_t w[8], want = 0, k = N10_SURF_MAX, how = 0, n, bpr = 0;
++	uint64_t now = mach_absolute_time(), gap;
++	IOBufferMemoryDescriptor *md = NULL;
++
++	bzero(rec, sizeof(rec));
++	if (args->structureInputDescriptor != NULL) {
++		if (args->structureInputDescriptor->getLength() >= sizeof(rec)) {
++			args->structureInputDescriptor->readBytes(0, rec, sizeof(rec));
++		}
++	} else if (args->structureInput != NULL && args->structureInputSize >= sizeof(rec)) {
++		memcpy(rec, args->structureInput, sizeof(rec));
++	}
++	if (__atomic_exchange_n(&n10_disp_rec_once, 1u, __ATOMIC_RELAXED) == 0) {
++		memcpy(w, rec + 0x40, sizeof(w));       /* SwapEnd record words 0x40..0x5c, once (layout evidence) */
++		n10_dsslog_trace("N398R w40=0x%x w44=0x%x w48=0x%x w4c=0x%x w50=0x%x w54=0x%x w58=0x%x w5c=0x%x",
++		    w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7]);
++	}
++	if (!__atomic_load_n(&n10_disp_armed, __ATOMIC_ACQUIRE) || n10_surf_lock == NULL) {
++		return;
++	}
++	if (__atomic_exchange_n(&n10_disp_busy, 1u, __ATOMIC_ACQUIRE) != 0) {
++		__atomic_fetch_add(&n10_disp_skips, 1u, __ATOMIC_RELAXED);
++		return;
++	}
++	nanoseconds_to_absolutetime(N10_DISP_MIN_GAP_NS, &gap);
++	if (n10_disp_last != 0 && now - n10_disp_last < gap) {
++		__atomic_fetch_add(&n10_disp_skips, 1u, __ATOMIC_RELAXED);
++		__atomic_store_n(&n10_disp_busy, 0u, __ATOMIC_RELEASE);
++		return;
++	}
++	memcpy(&want, rec + 0x54, sizeof(want));
++
++	IOLockLock(n10_surf_lock);
++	if (want != 0) {
++		k = n10_surf_find(want);
++	}
++	if (k < N10_SURF_MAX && n10_surfs[k].w == N10_FB_WIDTH && n10_surfs[k].h == N10_FB_HEIGHT && n10_surfs[k].bpe == 4) {
++		how = 1;
++	} else {
++		k = N10_SURF_MAX;
++		for (uint32_t i = 0; i < N10_SURF_MAX; i++) {
++			struct n10_surf *s = &n10_surfs[i];
++			if (s->md != NULL && s->w == N10_FB_WIDTH && s->h == N10_FB_HEIGHT && s->bpe == 4 &&
++			    (k == N10_SURF_MAX || s->id > n10_surfs[k].id)) {
++				k = i;
++			}
++		}
++		how = k < N10_SURF_MAX ? 2 : 0;
++	}
++	if (k < N10_SURF_MAX && n10_surfs[k].bpr >= N10_FB_WIDTH * 4u && (n10_surfs[k].bpr & 3u) == 0 &&
++	    (uint64_t)n10_surfs[k].bpr * N10_FB_HEIGHT <= n10_surfs[k].alloc) {
++		md = n10_surfs[k].md;
++		md->retain();
++		bpr = n10_surfs[k].bpr;
++		want = n10_surfs[k].id;
++	}
++	IOLockUnlock(n10_surf_lock);
++	if (md == NULL) {
++		__atomic_fetch_add(&n10_disp_skips, 1u, __ATOMIC_RELAXED);
++		__atomic_store_n(&n10_disp_busy, 0u, __ATOMIC_RELEASE);
++		return;
++	}
++
++	const uint32_t *src = (const uint32_t *)md->getBytesNoCopy();
++	uint32_t hash = n10_disp_sample((const uint8_t *)md->getBytesNoCopy(), bpr);
++	for (uint32_t y = 0; y < N10_FB_HEIGHT; y++) {
++		const uint32_t *s = src + (uint64_t)y * (bpr / 4u);
++		uint32_t *d = (uint32_t *)(n10_disp_fb + (uint64_t)y * n10_disp_stride);
++		if (n10_disp_swap_rb) {
++			for (uint32_t x = 0; x < N10_FB_WIDTH; x++) {
++				uint32_t v = s[x];
++				d[x] = (v & 0xff00ff00u) | ((v & 0xffu) << 16) | ((v >> 16) & 0xffu);
++			}
++		} else {
++			memcpy(d, s, N10_FB_WIDTH * 4u);
++		}
++	}
++	md->release();
++	__builtin_arm_dsb(0xf);
++
++	/* one frame: same order as Linux decon_reg_update_req_and_unmask / decon_reg_wait_update_done_and_mask */
++	vm_offset_t pmu = n10_disp_va[N10_DISP_MAP_PMU], dec = n10_disp_va[N10_DISP_MAP_DECON];
++	uint32_t polls = 0, ok = 0, sur, trig;
++	const uint32_t bits = N10_TRIG_MASK_DECON | N10_TRIG_EN;
++	if ((n10_disp_rd(pmu, 4) & 1u) != 0 && n10_disp_rd(dec, N10_DECON_SHADOW_REQ) == 0 &&
++	    (trig = n10_disp_rd(dec, N10_DECON_TRIG)) == n10_disp_trig0) {
++		*(volatile uint32_t *)(dec + N10_DECON_SHADOW_REQ) = N10_SHADOW_GLOBAL;
++		*(volatile uint32_t *)(dec + N10_DECON_TRIG) = (trig & ~bits) | N10_TRIG_EN;
++		while ((sur = n10_disp_rd(dec, N10_DECON_SHADOW_REQ)) != 0 && polls < N10_DISP_POLLS) {
++			IODelay(N10_DISP_POLL_US);
++			polls++;
++		}
++		trig = n10_disp_rd(dec, N10_DECON_TRIG);
++		*(volatile uint32_t *)(dec + N10_DECON_TRIG) = (trig & ~bits) | N10_TRIG_MASK_DECON;
++		ok = sur == 0 ? 1u : 0u;
++	} else {
++		sur = 0xffffffffu;                      /* state changed since arming: no register write */
++	}
++	n10_disp_last = mach_absolute_time();
++	if (ok) {
++		n = __atomic_add_fetch(&n10_disp_frames, 1u, __ATOMIC_RELAXED);
++	} else {
++		n = __atomic_add_fetch(&n10_disp_fails, 1u, __ATOMIC_RELAXED);
++		__atomic_store_n(&n10_disp_armed, 0u, __ATOMIC_RELEASE);
++	}
++	if (!ok || n <= N10_DISP_FRAME_LINES || (n & 63u) == 0) {
++		n10_dsslog_trace("N398F ok=%u n=%u surf=%u how=%u polls=%u sur=0x%x skips=%u hash=0x%08x", ok, n, want,
++		    how, polls, sur, __atomic_load_n(&n10_disp_skips, __ATOMIC_RELAXED), hash);
++	}
++	__atomic_store_n(&n10_disp_busy, 0u, __ATOMIC_RELEASE);
++}
++
+ /*
+  * Called once from IOKitBSDInit: the v395 device-tree entries, the v397
+  * /chosen display properties, the display-subsystem node under IODeviceTree:/arm-io (arm-io itself only when
+@@ -1234,6 +1706,7 @@ n10_iomfb_publish(void)
+ 	}
+ 	OSSafeReleaseNULL(surf);
+ 	n10_dsslog_trace("N396R publish root=%d IOCoreSurfaceRoot", (int)surf_ok);
++	n10_disp_probe("pub");
+ }
+ 
+ #endif /* ARM64_BOARD_CONFIG_EXYNOS9825 */
