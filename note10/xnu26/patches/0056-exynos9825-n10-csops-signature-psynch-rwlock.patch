@@ -1,0 +1,323 @@
+diff --git a/bsd/kern/kern_proc.c b/bsd/kern/kern_proc.c
+index dfb3a45..0fd660f 100644
+--- a/bsd/kern/kern_proc.c
++++ b/bsd/kern/kern_proc.c
+@@ -3693,6 +3693,77 @@ csops_copy_token(const void *start, size_t length, user_size_t usize, user_addr_
+ 	return copyout(start, uaddr, length);
+ }
+ 
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++/* osfmk/arm64/note10/n10_dsslog.c (v376): one bounded line into the dss log ring. */
++extern void n10_dsslog_trace(const char *fmt, ...) __printflike(1, 2);
++
++static uint32_t n10_csops_lines;
++#define N10_CSOPS_LINES 64u
++
++/*
++ * Note10 (v390): AMFI is not loaded and CS_SIGNED/CS_VALID are never set on
++ * this port, so every entitlement and identity query of csops failed with
++ * EINVAL (v389: BSSelfTaskHasEntitlement("com.apple.springboard-ui.client")
++ * false in SpringBoard -> SpringBoardUI assertion; containermanagerd refused
++ * backboardd's system container -> nil path -> NSURL exception). Answer them
++ * from the target's own embedded signature: the entitlements blob
++ * (CSSLOT_ENTITLEMENTS XML, CSSLOT_DER_ENTITLEMENTS DER) and the code
++ * directory identifier / team id, as IOTaskHasEntitlement does (v341).
++ * Read only; MACF get_cs_info has already been checked by the caller.
++ */
++static int
++n10_csops_signature(proc_t pt, int ops, user_size_t usize, user_addr_t uaddr)
++{
++	struct cs_blob *blob = NULL;
++	const CS_GenericBlob *gb = NULL;
++	const char *identity = NULL;
++	uint8_t fakeheader[8] = { 0 };
++	uint32_t idlen;
++	size_t length = 0;
++	int error;
++
++	proc_lock(pt);
++	if (pt->p_textvp != NULLVP) {
++		blob = ubc_cs_blob_get(pt->p_textvp, -1, -1, pt->p_textoff);
++	}
++	proc_unlock(pt);
++
++	if (blob == NULL) {
++		error = EBADEXEC;
++	} else if (ops == CS_OPS_ENTITLEMENTS_BLOB || ops == CS_OPS_DER_ENTITLEMENTS_BLOB) {
++		gb = (ops == CS_OPS_DER_ENTITLEMENTS_BLOB) ?
++		    csblob_find_blob(blob, CSSLOT_DER_ENTITLEMENTS, CSMAGIC_EMBEDDED_DER_ENTITLEMENTS) :
++		    csblob_find_blob(blob, CSSLOT_ENTITLEMENTS, CSMAGIC_EMBEDDED_ENTITLEMENTS);
++		length = gb != NULL ? ntohl(gb->length) : 0;
++		/* no entitlements blob: zero header */
++		error = csops_copy_token(gb, length, usize, uaddr);
++	} else {
++		identity = (ops == CS_OPS_TEAMID) ? csblob_get_teamid(blob) : csblob_get_identity(blob);
++		if (usize < sizeof(fakeheader)) {
++			error = ERANGE;
++		} else if (identity == NULL) {
++			error = ENOENT;
++		} else {
++			length = strlen(identity) + 1;         /* include NUL */
++			idlen = htonl((uint32_t)(length + sizeof(fakeheader)));
++			memcpy(&fakeheader[4], &idlen, sizeof(idlen));
++			error = copyout(fakeheader, uaddr, sizeof(fakeheader));
++			if (error == 0 && usize < sizeof(fakeheader) + length) {
++				error = ERANGE;
++			} else if (error == 0) {
++				error = copyout(identity, uaddr + sizeof(fakeheader), length);
++			}
++		}
++	}
++
++	if (__atomic_fetch_add(&n10_csops_lines, 1u, __ATOMIC_RELAXED) < N10_CSOPS_LINES) {
++		n10_dsslog_trace("N390S %s op=%d pid=%d %s len=%u err=%d", current_proc()->p_comm, ops,
++		    proc_getpid(pt), pt->p_comm, (unsigned int)length, error);
++	}
++	return error;
++}
++#endif /* ARM64_BOARD_CONFIG_EXYNOS9825 */
++
+ static int
+ csops_internal(pid_t pid, int ops, user_addr_t uaddr, user_size_t usersize, user_addr_t uaudittoken)
+ {
+@@ -3777,6 +3848,14 @@ csops_internal(pid_t pid, int ops, user_addr_t uaddr, user_size_t usersize, user
+ 	}
+ #endif
+ 
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	if (amfi == NULL && (ops == CS_OPS_ENTITLEMENTS_BLOB || ops == CS_OPS_DER_ENTITLEMENTS_BLOB ||
++	    ops == CS_OPS_IDENTITY || ops == CS_OPS_TEAMID)) {
++		error = n10_csops_signature(pt, ops, usersize, uaddr);
++		goto out;
++	}
++#endif
++
+ 	switch (ops) {
+ 	case CS_OPS_STATUS: {
+ 		uint32_t retflags;
+diff --git a/bsd/pthread/n10_psynch.c b/bsd/pthread/n10_psynch.c
+index bf3ce8e..29bc171 100644
+--- a/bsd/pthread/n10_psynch.c
++++ b/bsd/pthread/n10_psynch.c
+@@ -44,8 +44,20 @@
+  * kind), referenced by the calls using them and freed when idle;
+  * pth_proc_hashdelete purges the rest.
+  * Limits: process-shared objects are keyed per process; targeted
+- * pthread_cond_signal_thread_np wakes any eligible waiter; rwlocks
+- * (handoff protocol) are refused with ENOTSUP and one N383P line.
++ * pthread_cond_signal_thread_np wakes any eligible waiter; longrdlock and
++ * yieldwrlock are refused with ENOTSUP and one N383P line.
++ *
++ * rwlock (v390; v389: logd rdlock got ENOTSUP -> "BUG IN LIBPTHREAD: kernel
++ * rwlock returned unknown error"). iOS 16 libpthread protocol: L counts every
++ * locker, S the granted ones, U the unlocks. A waiter enters with its own L
++ * (ordinal). When U reaches S with kernel bits set, userland sets L to
++ * count|K, marks S unset (IBIT) and calls rw_unlock with S = U: the kernel
++ * grants the waiter with ordinal S + 1 (in INC units), a writer alone or a
++ * run of consecutive readers present in the kernel, and every granted thread
++ * returns updatebits = n * INC | bits (writer K|E; W|K kept while ordinals
++ * up to the highest L seen are still waiting); the first one adds n to S in
++ * userland. A grant whose first ordinal is not in the kernel yet stays
++ * pending (credits = 1) until that waiter arrives.
+  */
+ 
+ #include <stdbool.h>
+@@ -77,6 +89,8 @@ int n10_psynch_cvbroad(proc_t, user_addr_t, uint64_t, uint64_t, uint32_t, user_a
+ int n10_psynch_cvclrprepost(proc_t, user_addr_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
+     int *);
+ int n10_psynch_rw_refuse(proc_t, const char *, user_addr_t, uint32_t, uint32_t);
++int n10_psynch_rw_lock(proc_t, user_addr_t, uint32_t, uint32_t, uint32_t, uint32_t *);
++int n10_psynch_rw_unlock(proc_t, user_addr_t, uint32_t, uint32_t, uint32_t, uint32_t *);
+ void n10_psynch_proc_purge(proc_t);
+ 
+ #define N10_PS_INC              0x100u
+@@ -84,13 +98,19 @@ void n10_psynch_proc_purge(proc_t);
+ #define N10_PS_BUCKETS          64u
+ #define N10_PS_MAX_SEC          100000000ll
+ #define N10_PS_RW_LINES         32u
++#define N10_PS_RW_K             0x01u
++#define N10_PS_RW_E             0x02u
++#define N10_PS_RW_W             0x04u
+ 
+-enum { N10_PS_MUTEX = 1, N10_PS_CV = 2 };
++enum { N10_PS_MUTEX = 1, N10_PS_CV = 2, N10_PS_RW = 3 };
++enum { N10_PS_READ = 1, N10_PS_WRITE = 2 };
+ 
+ struct n10_ps_waiter {
+ 	TAILQ_ENTRY(n10_ps_waiter) link;
+-	uint32_t                ord;    /* cv: own L */
++	uint32_t                ord;    /* cv: own L; rw: own L count */
+ 	int                     released;
++	uint32_t                type;   /* rw: N10_PS_READ / N10_PS_WRITE */
++	uint32_t                bits;   /* rw: updatebits of the grant */
+ };
+ 
+ struct n10_ps_obj {
+@@ -100,7 +120,10 @@ struct n10_ps_obj {
+ 	user_addr_t             addr;
+ 	uint32_t                kind;
+ 	uint32_t                refs;           /* calls currently using the object */
+-	uint32_t                credits;        /* wakeups not delivered to a sleeper */
++	uint32_t                credits;        /* wakeups not delivered to a sleeper; rw: grant pending */
++	uint32_t                rw_next;        /* rw: S count the pending grant follows */
++	uint32_t                rw_max;         /* rw: highest L count seen */
++	bool                    rw_seen;
+ };
+ 
+ static LIST_HEAD(, n10_ps_obj) n10_ps_hash[N10_PS_BUCKETS];
+@@ -377,6 +400,115 @@ n10_psynch_rw_refuse(proc_t p, const char *op, user_addr_t rwlock, uint32_t lgen
+ 	return ENOTSUP;
+ }
+ 
++static void
++n10_ps_rw_trace(proc_t p, const char *op, user_addr_t rwlock, uint32_t a, uint32_t b, uint32_t c)
++{
++	if (__atomic_fetch_add(&n10_ps_rw_lines, 1u, __ATOMIC_RELAXED) < N10_PS_RW_LINES) {
++		n10_dsslog_trace("N390R %s pid=%d %s lock=0x%llx 0x%x 0x%x 0x%x", op, proc_getpid(p), p->p_comm,
++		    (unsigned long long)rwlock, a, b, c);
++	}
++}
++
++static void
++n10_ps_rw_note(struct n10_ps_obj *o, uint32_t lgen)
++{
++	if (!o->rw_seen || n10_ps_le(o->rw_max, lgen)) {
++		o->rw_max = lgen & N10_PS_COUNT;
++		o->rw_seen = true;
++	}
++}
++
++static struct n10_ps_waiter *
++n10_ps_rw_find(struct n10_ps_obj *o, uint32_t ord)
++{
++	struct n10_ps_waiter *w;
++
++	TAILQ_FOREACH(w, &o->waiters, link) {
++		if (w->ord == ord) {
++			return w;
++		}
++	}
++	return NULL;
++}
++
++/* Make the pending grant if its first ordinal is in the kernel. Lock held. */
++static void
++n10_ps_rw_grant(proc_t p, user_addr_t rwlock, struct n10_ps_obj *o)
++{
++	uint32_t first = (o->rw_next + N10_PS_INC) & N10_PS_COUNT, last = first, n = 1, bits;
++	struct n10_ps_waiter *w;
++
++	if (o->credits == 0 || (w = n10_ps_rw_find(o, first)) == NULL) {
++		return;
++	}
++	if (w->type == N10_PS_READ) {
++		while (n10_ps_pending(o->rw_max, last) != 0 &&
++		    (w = n10_ps_rw_find(o, (last + N10_PS_INC) & N10_PS_COUNT)) != NULL && w->type == N10_PS_READ) {
++			last = w->ord;
++			n++;
++		}
++		bits = n10_ps_pending(o->rw_max, last) != 0 ? (N10_PS_RW_K | N10_PS_RW_W) : 0;
++	} else {
++		bits = N10_PS_RW_K | N10_PS_RW_E | (n10_ps_pending(o->rw_max, last) != 0 ? N10_PS_RW_W : 0);
++	}
++	bits |= n * N10_PS_INC;
++	for (uint32_t k = 0; k < n; k++) {
++		w = n10_ps_rw_find(o, (first + k * N10_PS_INC) & N10_PS_COUNT);
++		w->bits = bits;
++		n10_ps_wake(o, w);
++	}
++	o->credits = 0;
++	n10_ps_rw_trace(p, "grant", rwlock, first, n, bits);
++}
++
++int
++n10_psynch_rw_lock(proc_t p, user_addr_t rwlock, uint32_t lgenval, uint32_t ugenval, uint32_t type,
++    uint32_t *retval)
++{
++	struct n10_ps_waiter w = { .ord = lgenval & N10_PS_COUNT, .type = type };
++	struct n10_ps_obj *o;
++	int error = 0;
++
++	lck_mtx_lock(&n10_ps_lock);
++	o = n10_ps_lookup(p, rwlock, N10_PS_RW, true);
++	n10_ps_rw_note(o, lgenval);
++	TAILQ_INSERT_TAIL(&o->waiters, &w, link);
++	n10_ps_rw_grant(p, rwlock, o);
++	if (!w.released) {
++		TAILQ_REMOVE(&o->waiters, &w, link);
++		error = n10_ps_sleep(o, &w, 0);
++	}
++	n10_ps_release(o);
++	lck_mtx_unlock(&n10_ps_lock);
++	if (error == 0) {
++		*retval = w.bits;
++	} else {
++		n10_ps_rw_trace(p, type == N10_PS_READ ? "rd-err" : "wr-err", rwlock, lgenval, ugenval, (uint32_t)error);
++	}
++	return error;
++}
++
++int
++n10_psynch_rw_unlock(proc_t p, user_addr_t rwlock, uint32_t lgenval, uint32_t ugenval, uint32_t rw_wc,
++    uint32_t *retval)
++{
++	struct n10_ps_obj *o;
++
++	lck_mtx_lock(&n10_ps_lock);
++	o = n10_ps_lookup(p, rwlock, N10_PS_RW, true);
++	n10_ps_rw_note(o, lgenval);
++	if (o->credits != 0 || ((ugenval ^ rw_wc) & N10_PS_COUNT) != 0) {
++		n10_ps_rw_trace(p, "unlock?", rwlock, lgenval, ugenval, rw_wc);
++	}
++	o->rw_next = rw_wc & N10_PS_COUNT;
++	o->credits = 1;
++	n10_ps_rw_grant(p, rwlock, o);
++	n10_ps_release(o);
++	lck_mtx_unlock(&n10_ps_lock);
++	*retval = 0;
++	return 0;
++}
++
+ void
+ n10_psynch_proc_purge(proc_t p)
+ {
+diff --git a/bsd/pthread/pthread_shims.c b/bsd/pthread/pthread_shims.c
+index 9cfbb37..6635bf0 100644
+--- a/bsd/pthread/pthread_shims.c
++++ b/bsd/pthread/pthread_shims.c
+@@ -337,6 +337,8 @@ extern int n10_psynch_cvbroad(proc_t, user_addr_t, uint64_t, uint64_t, uint32_t,
+ extern int n10_psynch_cvclrprepost(proc_t, user_addr_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
+     int *);
+ extern int n10_psynch_rw_refuse(proc_t, const char *, user_addr_t, uint32_t, uint32_t);
++extern int n10_psynch_rw_lock(proc_t, user_addr_t, uint32_t, uint32_t, uint32_t, uint32_t *);
++extern int n10_psynch_rw_unlock(proc_t, user_addr_t, uint32_t, uint32_t, uint32_t, uint32_t *);
+ extern void n10_psynch_proc_purge(proc_t);
+ #endif
+ 
+@@ -502,7 +504,7 @@ int
+ psynch_rw_rdlock(proc_t p, struct psynch_rw_rdlock_args * uap, uint32_t * retval)
+ {
+ #if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
+-	return n10_psynch_rw_refuse(p, "rdlock", uap->rwlock, uap->lgenval, uap->ugenval);
++	return n10_psynch_rw_lock(p, uap->rwlock, uap->lgenval, uap->ugenval, 1 /* read */, retval);
+ #else
+ 	return pthread_functions->psynch_rw_rdlock(p, uap->rwlock, uap->lgenval, uap->ugenval, uap->rw_wc, uap->flags, retval);
+ #endif
+@@ -512,7 +514,7 @@ int
+ psynch_rw_unlock(proc_t p, struct psynch_rw_unlock_args *uap, uint32_t *retval)
+ {
+ #if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
+-	return n10_psynch_rw_refuse(p, "unlock", uap->rwlock, uap->lgenval, uap->ugenval);
++	return n10_psynch_rw_unlock(p, uap->rwlock, uap->lgenval, uap->ugenval, uap->rw_wc, retval);
+ #else
+ 	return pthread_functions->psynch_rw_unlock(p, uap->rwlock, uap->lgenval, uap->ugenval, uap->rw_wc, uap->flags, retval);
+ #endif
+@@ -528,7 +530,7 @@ int
+ psynch_rw_wrlock(proc_t p, struct psynch_rw_wrlock_args *uap, uint32_t *retval)
+ {
+ #if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
+-	return n10_psynch_rw_refuse(p, "wrlock", uap->rwlock, uap->lgenval, uap->ugenval);
++	return n10_psynch_rw_lock(p, uap->rwlock, uap->lgenval, uap->ugenval, 2 /* write */, retval);
+ #else
+ 	return pthread_functions->psynch_rw_wrlock(p, uap->rwlock, uap->lgenval, uap->ugenval, uap->rw_wc, uap->flags, retval);
+ #endif

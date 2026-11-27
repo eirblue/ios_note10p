@@ -109,6 +109,9 @@ OVERLAY = (
     ('0055-exynos9825-n10-abort-reason-iokit-miss-no-crash-reporter.patch',
      '23b008a29aea28555e3193927c6310c3a11cab968b1d7bf2375292f5bed81a69',
      ('bsd/kern/kern_exit.c', 'iokit/Kernel/IOUserClient.cpp')),
+    ('0056-exynos9825-n10-csops-signature-psynch-rwlock.patch',
+     '5eedf503e0473325b0e53c7f6b3bed036db6e53b3e7ed94fb425a1f510bd6fff',
+     ('bsd/kern/kern_proc.c', 'bsd/pthread/n10_psynch.c', 'bsd/pthread/pthread_shims.c')),
 )
 STAGED_DIRS = ('bsd/n10_hfs/core', 'bsd/n10_hfs/hfs_encodings')
 
