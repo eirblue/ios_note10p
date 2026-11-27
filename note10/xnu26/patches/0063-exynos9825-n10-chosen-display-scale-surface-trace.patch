@@ -1,0 +1,116 @@
+diff --git a/iokit/Kernel/NoteFramebuffer.cpp b/iokit/Kernel/NoteFramebuffer.cpp
+index a303a8b..dafefba 100644
+--- a/iokit/Kernel/NoteFramebuffer.cpp
++++ b/iokit/Kernel/NoteFramebuffer.cpp
+@@ -87,6 +87,23 @@
+  * No register, MMIO, interrupt or DMA. Trace: N396R publish, N396O open,
+  * N396S first call of each selector and every failure, N396C each create,
+  * N396T first lock / release trap and failures (shared cap 128).
++ *
++ * v397: v396 showed SpringBoard trapping (brk at 0x19b91abd4) in iOS 16.7.16
++ * FrontBoardServices -[FBSDisplayMode _initWithWidth:height:preferredScale:
++ * scaleOverride:refreshRate:gamut:hdr:rotation:virtual:validityCheck:]
++ * ("FBSDisplayMode cannot be configured as requested"), called for each
++ * CADisplay mode by _initWithCADisplayMode:scale:rotation:. The main display
++ * passes scale override 0, so the mode's preferredScale must be non-zero.
++ * QuartzCore -[CADisplayMode preferredScale] (0x18836b7a8) takes it from
++ * MGGetFloat32Answer("main-screen-scale"), and libMobileGestalt
++ * (MGIOMFBSupport.c, 0x19c560a54) answers that from IODeviceTree:/chosen
++ * "display-scale" with default 0 (iBoot fills this property; the public
++ * DeviceTree only has a 0 placeholder). n10_chosen_publish() therefore sets
++ * /chosen display-scale = 3 (the iPhone X value, as /product
++ * artwork-scale-factor 3) when it is absent or 0, and display-rotation = 0
++ * when absent (read by the same MobileGestalt function, default -1). Registry
++ * properties only. One "N397D" line. N396S now logs every IOSurface selector
++ * call (not only the first per selector); the shared N396 cap is 192.
+  */
+ #include <pexpert/arm64/board_config.h>
+ 
+@@ -252,7 +269,7 @@ OSDefineMetaClassAndStructors(IOMobileFramebufferUserClient, IOUserClient);
+ #define N10_SURF_ONE            (128ull << 20)
+ #define N10_SURF_ALL            (192ull << 20)
+ #define N10_SURF_IN_MAX         (1u << 20)
+-#define N10_SURF_LINES          128u
++#define N10_SURF_LINES          192u
+ 
+ struct n10_surf {
+ 	IOBufferMemoryDescriptor *md;           /* NULL: free slot */
+@@ -638,7 +655,7 @@ n10_surf_method(void *client, uint32_t selector, IOExternalMethodArguments *args
+ 		bzero(args->structureOutput, args->structureOutputSize);
+ 	}
+ 
+-	if (selector != 0 && n10_surf_trace_ok(selector < 62 ? selector : 61, ret != kIOReturnSuccess)) {
++	if (selector != 0 && n10_surf_trace_ok(64, true)) {     /* v397: every call (shared cap) */
+ 		in_len = args->structureInputDescriptor != NULL ?
+ 		    (uint32_t)args->structureInputDescriptor->getLength() : args->structureInputSize;
+ 		proc_selfname(name, sizeof(name));
+@@ -1072,9 +1089,59 @@ n10_dt_publish(void)
+ 	n10_dsslog_trace("N395D publish nodes=%u created=%u props=%u", n - 1, created, props);
+ }
+ 
++/* Existing u32 value of a property of e, -1 when absent or not 4 bytes. */
++static int64_t
++n10_dt_u32(IORegistryEntry *e, const char *key)
++{
++	OSData *d = OSDynamicCast(OSData, e->getProperty(key));
++	uint32_t v = 0;
++
++	if (d == NULL || d->getLength() != sizeof(v)) {
++		return -1;
++	}
++	memcpy(&v, d->getBytesNoCopy(), sizeof(v));
++	return v;
++}
++
++/*
++ * v397: /chosen display-scale 3 when absent or 0, display-rotation 0 when
++ * absent (MobileGestalt main-screen-scale / orientation; see the header).
++ */
++static void
++n10_chosen_publish(void)
++{
++	static const uint32_t scale = 3u, rotation = 0u;
++	IORegistryEntry *chosen = IORegistryEntry::fromPath("/chosen", gIODTPlane);
++	int64_t was_scale = -1, was_rotation = -1;
++	unsigned int added = 0;
++	int found = chosen != NULL ? 1 : 0;
++
++	if (chosen != NULL) {
++		was_scale = n10_dt_u32(chosen, "display-scale");
++		was_rotation = n10_dt_u32(chosen, "display-rotation");
++		if (was_scale <= 0) {
++			OSData *d = OSData::withBytes(&scale, sizeof(scale));
++			if (d != NULL) {
++				added |= chosen->setProperty("display-scale", d) ? 1u : 0u;
++				d->release();
++			}
++		}
++		if (chosen->getProperty("display-rotation") == NULL) {
++			OSData *d = OSData::withBytes(&rotation, sizeof(rotation));
++			if (d != NULL) {
++				added |= chosen->setProperty("display-rotation", d) ? 2u : 0u;
++				d->release();
++			}
++		}
++		chosen->release();
++	}
++	n10_dsslog_trace("N397D chosen=%d scale_was=%lld rotation_was=%lld added=0x%x", found,
++	    (long long)was_scale, (long long)was_rotation, added);
++}
++
+ /*
+- * Called once from IOKitBSDInit: the v395 device-tree entries, the
+- * display-subsystem node under IODeviceTree:/arm-io (arm-io itself only when
++ * Called once from IOKitBSDInit: the v395 device-tree entries, the v397
++ * /chosen display properties, the display-subsystem node under IODeviceTree:/arm-io (arm-io itself only when
+  * the boot device tree has none), then the IOMobileFramebuffer service on
+  * IOResources.
+  */
+@@ -1086,6 +1153,7 @@ n10_iomfb_publish(void)
+ 	IORegistryEntry *armio = IORegistryEntry::fromPath("/arm-io", gIODTPlane);
+ 
+ 	n10_dt_publish();
++	n10_chosen_publish();
+ 	if (armio != NULL) {
+ 		armio_state = 1;
+ 	} else {

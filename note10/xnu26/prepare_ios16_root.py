@@ -132,6 +132,9 @@ OVERLAY = (
     ('0062-exynos9825-n10-iosurface-root-user-client.patch',
      '14bec41c4fe24066df407a81423e403bdd955ddb053c50f300699a8d0b990ae5',
      ('iokit/Kernel/NoteFramebuffer.cpp',)),
+    ('0063-exynos9825-n10-chosen-display-scale-surface-trace.patch',
+     '37f19a4bce849c2eac7e6b629d01cf1a2369af262546d04fb4ad1af3199dbf9a',
+     ('iokit/Kernel/NoteFramebuffer.cpp',)),
 )
 STAGED_DIRS = ('bsd/n10_hfs/core', 'bsd/n10_hfs/hfs_encodings')
 
