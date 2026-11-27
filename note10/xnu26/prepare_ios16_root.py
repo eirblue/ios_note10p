@@ -123,6 +123,9 @@ OVERLAY = (
     ('0059-exynos9825-n10-fault-image-trace-open-fail-iokit-cap.patch',
      '7df625dd96cc91d3ce4fe3b3771d579f4bec0be92aa4b7a02b472d9d52c3260a',
      ('bsd/kern/kern_exit.c', 'iokit/Kernel/IOUserClient.cpp')),
+    ('0060-exynos9825-n10-fault-sc-offset-registry-path-miss.patch',
+     '3895c57cd2bfa164d8e1ad2e1ac77c8fd7c0ca94bbcb80c25bb839d3f58d25c3',
+     ('bsd/kern/kern_exit.c', 'iokit/Kernel/IOUserClient.cpp')),
 )
 STAGED_DIRS = ('bsd/n10_hfs/core', 'bsd/n10_hfs/hfs_encodings')
 
