@@ -144,6 +144,9 @@ OVERLAY = (
     ('0066-exynos9825-n10-pagewise-sysmmu-scanout.patch',
      'fcf20fbd9b7613bb9ba908a6da6e5a5b568168a589e79992ccb71bf44cce19f9',
      ('iokit/Kernel/NoteFramebuffer.cpp',)),
+    ('0067-exynos9825-n10-scanout-byte-order-dominance.patch',
+     'cce5604bd0525ad6a111af86dcf80c59b05eae45d5b666c1ea62c7c6ee399315',
+     ('iokit/Kernel/NoteFramebuffer.cpp',)),
 )
 STAGED_DIRS = ('bsd/n10_hfs/core', 'bsd/n10_hfs/hfs_encodings')
 

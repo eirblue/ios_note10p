@@ -1,0 +1,36 @@
+diff --git a/iokit/Kernel/NoteFramebuffer.cpp b/iokit/Kernel/NoteFramebuffer.cpp
+index 97efe5e..202c8dd 100644
+--- a/iokit/Kernel/NoteFramebuffer.cpp
++++ b/iokit/Kernel/NoteFramebuffer.cpp
+@@ -185,6 +185,18 @@
+  * the two DECON0 trigger writes are unchanged. N400P at arm (pages, runs,
+  * bad, yoffset, map mode), N400F on the first copy, every 64th and on a
+  * failed copy (copies, runs, pages, bad, sample hash).
++ *
++ * v401: byte-order dominance rule. v400 armed the page path but the 0065
++ * check needed all 64 samples opaque; the TWRP frame has non-opaque pixels
++ * too (N399O a0=0 a3=53), so it refused. Now: alpha 0xff in byte 3 of at
++ * least 32 samples and in byte 0 of none = bytes R,G,B,A; the mirrored case
++ * = bytes A,B,G,R; anything else stays read-only (why=order). dpu20 programs
++ * DPP formats in 32-bit word order, most significant byte first: helper.c
++ * dpu_translate_fmt_to_dpp() maps every HWC (memory-order) format to its
++ * byte-reversed DPP name before dpp_reg.c writes IDMA_IMG_FORMAT, so IDMA
++ * format 1 (IDMA_IMG_FORMAT_ABGR8888) is memory bytes R,G,B,A (alpha byte
++ * 3). A sampled order that disagrees with that (bytes A,B,G,R) is refused
++ * as well (why=order). Counts and the N399O line are unchanged.
+  */
+ #include <pexpert/arm64/board_config.h>
+ 
+@@ -1596,9 +1608,10 @@ n10_disp_arm(void)
+ 			a0 += (px & 0xffu) == 0xffu ? 1u : 0u;
+ 			a3 += (px >> 24) == 0xffu ? 1u : 0u;
+ 		}
+-		n10_disp_swap_rb = (a3 == 64u && a0 < 64u) ? 2u : (a0 == 64u && a3 < 64u) ? 3u : 0u;
++		/* v401: dominance rule; IDMA format 1 = memory bytes R,G,B,A (dpu20 word-order names), so only mode 2 arms */
++		n10_disp_swap_rb = (a3 >= 32u && a0 == 0) ? 2u : (a0 >= 32u && a3 == 0) ? 3u : 0u;
+ 		n10_dsslog_trace("N399O fmt=%u a0=%u a3=%u mode=%u", fmt, a0, a3, n10_disp_swap_rb);
+-		if (n10_disp_swap_rb == 0) {
++		if (n10_disp_swap_rb != 2u) {
+ 			why = "order";
+ 			goto out;
+ 		}
