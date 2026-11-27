@@ -1,0 +1,137 @@
+diff --git a/bsd/kern/kern_exit.c b/bsd/kern/kern_exit.c
+index 96d54e4..81d1bfa 100644
+--- a/bsd/kern/kern_exit.c
++++ b/bsd/kern/kern_exit.c
+@@ -296,6 +296,66 @@ n10_crash_messages(proc_t p, mach_vm_offset_t sc)
+ 	}
+ }
+ 
++/*
++ * Note10 (v393): for a fault signal (SIGSEGV/SIGBUS/SIGILL/SIGTRAP) one
++ * "N393M" line: fault code and address (uthread uu_code/uu_subcode, set by
++ * ux_exception), and pc, lr and the first two frame return addresses each as
++ * <file name>+<file offset> of the vnode-backed mapping that holds it, or the
++ * plain address when none does (shared cache: symbolize with N383A sc=).
++ * v392: mediaserverd died with sig 11 in a non-cache image (a dlopened
++ * module under CoreAudio) whose file N383A cannot name.
++ * Read-only (map lookup + vnode name), at most N10_FAULT_LINES per boot.
++ */
++#define N10_FAULT_LINES         48u
++static uint32_t n10_fault_lines;
++extern struct arm_saved_state *get_user_regs(thread_t);
++
++static void
++n10_fault_where(char *buf, size_t len, uint64_t va)
++{
++	struct proc_regioninfo_internal ri = { 0 };
++	uintptr_t vpa = 0;
++	uint32_t vid = 0;
++	const char *name = NULL;
++	vnode_t vp;
++
++	if (va != 0 && fill_procregioninfo_onlymappedvnodes(current_task(), va, &ri, &vpa, &vid) != 0 &&
++	    vpa != 0 && va >= ri.pri_address && va - ri.pri_address < ri.pri_size) {
++		vp = (vnode_t)vpa;
++		if (vnode_getwithvid(vp, vid) == 0) {
++			name = vnode_getname(vp);
++			if (name != NULL) {
++				snprintf(buf, len, "%.28s+0x%llx", name,
++				    (unsigned long long)(ri.pri_offset + (va - ri.pri_address)));
++				vnode_putname(name);
++			}
++			vnode_put(vp);
++		}
++	}
++	if (name == NULL) {
++		snprintf(buf, len, "0x%llx", (unsigned long long)va);
++	}
++}
++
++static void
++n10_fault_note(proc_t p, int sig, uintptr_t pc, uintptr_t f0, uintptr_t f1)
++{
++	struct uthread *ut = current_uthread();
++	char wpc[48], wlr[48], wf0[48], wf1[48];
++
++	if ((sig != SIGSEGV && sig != SIGBUS && sig != SIGILL && sig != SIGTRAP) ||
++	    __atomic_fetch_add(&n10_fault_lines, 1u, __ATOMIC_RELAXED) >= N10_FAULT_LINES) {
++		return;
++	}
++	n10_fault_where(wpc, sizeof(wpc), pc);
++	n10_fault_where(wlr, sizeof(wlr), (uint64_t)get_saved_state_lr(get_user_regs(current_thread())));
++	n10_fault_where(wf0, sizeof(wf0), f0);
++	n10_fault_where(wf1, sizeof(wf1), f1);
++	n10_dsslog_trace("N393M pid=%d %.16s sig=%d c=0x%llx far=0x%llx pc=%s lr=%s f0=%s f1=%s",
++	    proc_getpid(p), p->p_comm, sig, (unsigned long long)ut->uu_code,
++	    (unsigned long long)ut->uu_subcode, wpc, wlr, wf0, wf1);
++}
++
+ /*
+  * Note10 (v383): for a crash signal taken by the exiting thread itself
+  * (abort, fault, trap), one "N383A" line with the user PC and up to six
+@@ -329,6 +389,7 @@ n10_exit_frames(proc_t p, int sig)
+ 	if (sc != 0 && (sig == SIGABRT || sig == SIGTRAP || sig == SIGILL)) {
+ 		n10_crash_messages(p, sc);
+ 	}
++	n10_fault_note(p, sig, bt[0], bt[1], bt[2]);
+ }
+ #endif
+ void gather_populate_corpse_crashinfo(proc_t p, task_t corpse_task,
+diff --git a/iokit/Kernel/IOUserClient.cpp b/iokit/Kernel/IOUserClient.cpp
+index e0ec57c..ef78d7e 100644
+--- a/iokit/Kernel/IOUserClient.cpp
++++ b/iokit/Kernel/IOUserClient.cpp
+@@ -2743,9 +2743,11 @@ extern "C" void n10_dsslog_trace(const char *fmt, ...) __printflike(1, 2);
+  * n = IONameMatch, r = IOResourceMatch, b = BSD Name, p = first
+  * IOPropertyMatch key[=string value], k = key count. Read-only (lookup +
+  * log), at most N10_IOKIT_MAX lines per boot, no lookup once that is spent.
++ * v393: 96 -> 256 lines (v392 spent the 96 early in boot, so later lookups
++ * of backboardd / SpringBoard, e.g. IOSurfaceRoot, were not visible).
+  */
+-#define N10_IOKIT_MAX   96u
+-#define N10_IOKIT_SEEN  128u
++#define N10_IOKIT_MAX   256u
++#define N10_IOKIT_SEEN  256u
+ static uint32_t n10_iokit_seen[N10_IOKIT_SEEN];
+ static uint32_t n10_iokit_next;
+ static uint32_t n10_iokit_lines;
+@@ -2831,6 +2833,27 @@ n10_iokit_miss(char op, OSDictionary *dict, bool known_missing)
+ 	n10_dsslog_trace("N389I %s %c c=%.36s n=%.28s r=%.20s b=%.8s p=%.20s=%.12s k=%u",
+ 	    name, op, cls, nm, res, bsd, pk, pv, dict->getCount());
+ }
++
++/*
++ * Note10 (v393): IOServiceOpen of a service that exists but returns no user
++ * client (e.g. a registry-only stub, or a class without newUserClient): one
++ * "N393O" line with the caller, service class and name, connect type and
++ * IOReturn, at most N10_OPEN_MAX lines per boot. Log only.
++ */
++#define N10_OPEN_MAX    48u
++static uint32_t n10_open_lines;
++
++static void
++n10_open_fail(IOService *service, uint32_t type, IOReturn res)
++{
++	if (__atomic_fetch_add(&n10_open_lines, 1u, __ATOMIC_RELAXED) >= N10_OPEN_MAX) {
++		return;
++	}
++	char name[MAXCOMLEN + 1];
++	proc_selfname(name, sizeof(name));
++	n10_dsslog_trace("N393O %s c=%.36s n=%.28s t=%u ret=0x%x", name,
++	    service->getMetaClass()->getClassName(), service->getName(), type, res);
++}
+ #endif /* ARM64_BOARD_CONFIG_EXYNOS9825 */
+ 
+ static kern_return_t
+@@ -4560,6 +4583,11 @@ is_io_service_open_extended(
+ #endif
+ 		res = service->newUserClient( owningTask, (void *) owningTask,
+ 		    connect_type, propertiesDict, &client );
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++		if (res != kIOReturnSuccess) {
++			n10_open_fail(service, connect_type, res);
++		}
++#endif
+ 
+ 		if (propertiesDict) {
+ 			propertiesDict->release();
