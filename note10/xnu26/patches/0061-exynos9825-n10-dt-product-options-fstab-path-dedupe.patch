@@ -1,0 +1,295 @@
+diff --git a/iokit/Kernel/IOUserClient.cpp b/iokit/Kernel/IOUserClient.cpp
+index 2900125..aa82fc9 100644
+--- a/iokit/Kernel/IOUserClient.cpp
++++ b/iokit/Kernel/IOUserClient.cpp
+@@ -2860,18 +2860,40 @@ n10_open_fail(IOService *service, uint32_t type, IOReturn res)
+  * HAL audio plug-ins read IODeviceTree:/product/audio): one "N394P" line
+  * with the caller, the MIG variant (o = 0 inband, 1 out-of-line) and the
+  * path, at most N10_PATH_MAX lines per boot. Log only, result unchanged.
++ * v395: cap 48 -> 128; a (caller, path) pair already logged is skipped
++ * (FNV-1a hash of the caller name and the first 100 path bytes; a race
++ * between two first misses of the same pair may log it twice).
+  */
+-#define N10_PATH_MAX    48u
++#define N10_PATH_MAX    128u
+ static uint32_t n10_path_lines;
++static uint32_t n10_path_seen[N10_PATH_MAX];
+ 
+ static void
+ n10_path_miss(const char *path, uint32_t ool)
+ {
+-	if (__atomic_fetch_add(&n10_path_lines, 1u, __ATOMIC_RELAXED) >= N10_PATH_MAX) {
+-		return;
+-	}
+ 	char name[MAXCOMLEN + 1];
++	uint32_t h = 2166136261u, i, n;
++
+ 	proc_selfname(name, sizeof(name));
++	for (i = 0; name[i] != 0; i++) {
++		h = (h ^ (uint8_t)name[i]) * 16777619u;
++	}
++	h = (h ^ 0xffu) * 16777619u;
++	for (i = 0; i < 100 && path[i] != 0; i++) {
++		h = (h ^ (uint8_t)path[i]) * 16777619u;
++	}
++	h |= 1u;                        /* 0 = free slot */
++	n = __atomic_load_n(&n10_path_lines, __ATOMIC_RELAXED);
++	for (i = 0; i < n && i < N10_PATH_MAX; i++) {
++		if (__atomic_load_n(&n10_path_seen[i], __ATOMIC_RELAXED) == h) {
++			return;
++		}
++	}
++	n = __atomic_fetch_add(&n10_path_lines, 1u, __ATOMIC_RELAXED);
++	if (n >= N10_PATH_MAX) {
++		return;
++	}
++	__atomic_store_n(&n10_path_seen[n], h, __ATOMIC_RELAXED);
+ 	n10_dsslog_trace("N394P %s o=%u p=%.100s", name, ool, path);
+ }
+ #endif /* ARM64_BOARD_CONFIG_EXYNOS9825 */
+diff --git a/iokit/Kernel/NoteFramebuffer.cpp b/iokit/Kernel/NoteFramebuffer.cpp
+index cd05d16..7c6fb22 100644
+--- a/iokit/Kernel/NoteFramebuffer.cpp
++++ b/iokit/Kernel/NoteFramebuffer.cpp
+@@ -47,6 +47,19 @@
+  * "c=IOService p=HIDServiceSupport"), a vendor usage pair and no
+  * IOCFPlugInTypes / user client: it carries no events and touches no hardware
+  * (no touch controller, no register, no interrupt). One "N392H" publish line.
++ *
++ * v395: v394 N394P showed IODeviceTree:/product missing (MobileGestaltHelper,
++ * mediaserverd, backboardd, locationd, lsd, keybagd, ...), and also
++ * /product/camera, /product/audio, /options and /filesystems/fstab (mount,
++ * fsck). n10_dt_publish() adds these device-tree plane entries before user
++ * space starts: /product and its camera, facetime, maps, haptics and audio
++ * children with the property values of the public iOS 16.7.16 iPhone X
++ * (iPhone10,6, d221ap) DeviceTree (syscfg placeholders and product-id left
++ * out), an empty /options, and /filesystems/fstab with os_env_type 0 (the
++ * value mount and fsck use today without the node) plus system-vol / data-vol
++ * entries that mirror /etc/fstab. Existing nodes are kept as they are (no
++ * property is overwritten). Registry entries only: no hardware access. One
++ * "N395D" line.
+  */
+ #include <pexpert/arm64/board_config.h>
+ 
+@@ -340,9 +353,210 @@ n10_fb_dt_node(IORegistryEntry *parent, const char *name, const char *device_typ
+ }
+ 
+ /*
+- * Called once from IOKitBSDInit: the display-subsystem node under
+- * IODeviceTree:/arm-io (arm-io itself only when the boot device tree has
+- * none), then the IOMobileFramebuffer service on IOResources.
++ * v395 device-tree plane entries. Format: 0xF0 + k, name: new node under node
++ * k (0 = IODeviceTree root, then the nodes in blob order); len + 1, name,
++ * value: property (OSData, len bytes) of the last node; 0 ends the blob.
++ * Generated from the iOS 16.7.16 d221ap DeviceTree by the v395 gen_dt395.py.
++ */
++static const char n10_dt_blob[] =
++	"\xf0" "product" "\0"  /* /product */
++	"\x05" "sandman-support" "\0" "\x01\x00\x00\x00"
++	"\x05" "display-mirroring" "\0" "\x01\x00\x00\x00"
++	"\x05" "car-integration" "\0" "\x01\x00\x00\x00"
++	"\x05" "assistant" "\0" "\x01\x00\x00\x00"
++	"\x05" "lockdown-certtype" "\0" "\x01\x00\x00\x00"
++	"\x05" "ui-pip" "\0" "\x01\x00\x00\x00"
++	"\x06" "wifi-chipset" "\0" "\x34\x33\x35\x37\x00"
++	"\x0a" "product-name" "\0" "\x69\x50\x68\x6f\x6e\x65\x20\x58\x00"
++	"\x05" "hearingaid-audio-equalization" "\0" "\x01\x00\x00\x00"
++	"\x05" "RF-exposure-separation-distance" "\0" "\x05\x00\x00\x00"
++	"\x06" "mobiledevice-min-ver" "\0" "\x31\x34\x30\x30\x00"
++	"\x05" "gps-capable" "\0" "\x01\x00\x00\x00"
++	"\x0a" "product-description" "\0" "\x69\x50\x68\x6f\x6e\x65\x20\x58\x00"
++	"\x05" "allow-32bit-apps" "\0" "\x01\x00\x00\x00"
++	"\x05" "low-power-wallet-mode" "\0" "\x01\x00\x00\x00"
++	"\x05" "builtin-mics" "\0" "\x04\x00\x00\x00"
++	"\x05" "has-boot-chime" "\0" "\x00\x00\x00\x00"
++	"\x05" "supports-burnin-mitigation" "\0" "\x01\x00\x00\x00"
++	"\x0b" "compatible-device-fallback" "\0" "\x69\x50\x68\x6f\x6e\x65\x39\x2c\x32\x00"
++	"\x05" "device-perf-memory-class" "\0" "\x04\x00\x00\x00"
++	"\x05" "artwork-scale-factor" "\0" "\x03\x00\x00\x00"
++	"\x07" "baseband-chipset" "\0" "\x69\x63\x65\x31\x37\x00"
++	"\x05" "hearingaid-low-energy-audio" "\0" "\x01\x00\x00\x00"
++	"\x05" "ui-background-quality" "\0" "\x64\x00\x00\x00"
++	"\x01" "supports-avatars" "\0"
++	"\x05" "public-key-accelerator" "\0" "\x01\x00\x00\x00"
++	"\x01" "disable-globe-map" "\0"
++	"\x07" "artwork-device-idiom" "\0" "\x70\x68\x6f\x6e\x65\x00"
++	"\x05" "device-color-policy" "\0" "\x00\x00\x00\x00"
++	"\x08" "graphics-featureset-class" "\0" "\x41\x50\x50\x4c\x45\x34\x00"
++	"\x05" "siri-gesture" "\0" "\x01\x00\x00\x00"
++	"\x01" "supports-maps-optical-heading" "\0"
++	"\x03" "compatible-app-variant" "\0" "\x30\x00"
++	"\x03" "artwork-dynamic-displaymode" "\0" "\x30\x00"
++	"\x05" "bluetooth-le" "\0" "\x01\x00\x00\x00"
++	"\x05" "watch-companion" "\0" "\x01\x00\x00\x00"
++	"\x05" "has-applelpm" "\0" "\x00\x00\x00\x00"
++	"\x05" "iap2-protocol-supported" "\0" "\x01\x00\x00\x00"
++	"\x05" "ephemeral-data-mode" "\0" "\x00\x00\x00\x00"
++	"\x05" "activation-protocol-version" "\0" "\x02\x00\x00\x00"
++	"\x15" "volume-up-button-location" "\0" "\x78\xb0\x09\x00\xff\x96\x14\x00\x30\xe0\x03\x00\xca\x9d\x01\x00\x10\x27\x00\x00"
++	"\x05" "ptp-large-files" "\0" "\x01\x00\x00\x00"
++	"\x05" "udid-version" "\0" "\x01\x00\x00\x00"
++	"\x05" "offline-dictation" "\0" "\x01\x00\x00\x00"
++	"\x05" "location-reminders" "\0" "\x01\x00\x00\x00"
++	"\x05" "ui-weather-quality" "\0" "\x64\x00\x00\x00"
++	"\x27" "graphics-featureset-fallbacks" "\0" "\x41\x50\x50\x4c\x45\x33\x3a\x41\x50\x50\x4c\x45\x33\x76\x31\x3a\x41\x50\x50\x4c\x45\x32\x3a\x41\x50\x50\x4c\x45\x31\x3a\x47\x4c\x45\x53\x32\x2c\x30\x00"
++	"\x05" "dictation" "\0" "\x01\x00\x00\x00"
++	"\x05" "itunes-min-ver" "\0" "\x03\x07\x0c\x00"
++	"\x04" "artwork-display-gamut" "\0" "\x50\x33\x00"
++	"\x11" "front-cam-offset-from-center" "\0" "\xd0\x01\x01\x00\x9e\x1d\x00\x00\xe8\x03\x00\x00\x00\x00\x00\x00"
++	"\x05" "ui-reachability" "\0" "\x01\x00\x00\x00"
++	"\x15" "volume-down-button-location" "\0" "\x78\xb0\x09\x00\xff\x96\x14\x00\x48\xd0\x05\x00\xca\x9d\x01\x00\x10\x27\x00\x00"
++	"\x05" "personal-hotspot" "\0" "\x01\x00\x00\x00"
++	"\x05" "single-stage-boot" "\0" "\x01\x00\x00\x00"
++	"\x0c" "mobiledevice-beta-min-ver" "\0" "\x31\x31\x39\x30\x2e\x31\x30\x30\x2e\x32\x00"
++	"\x05" "oled-display" "\0" "\x01\x00\x00\x00"
++	"\x05" "thin-bezel" "\0" "\x01\x00\x00\x00"
++	"\x05" "artwork-device-subtype" "\0" "\x84\x09\x00\x00"
++	"\x15" "side-button-location" "\0" "\x75\xf3\x00\x00\x2a\x0f\x02\x00\x00\x71\x00\x00\xea\x3f\x00\x00\xe8\x03\x00\x00"
++	"\xf1" "camera" "\0"  /* /product/camera */
++	"\x05" "aggregate-cam-video-zoom" "\0" "\x58\x02\x00\x00"
++	"\x05" "rear-max-video-fps-4k" "\0" "\x3c\x00\x00\x00"
++	"\x05" "rear-max-video-zoom" "\0" "\x03\x00\x00\x00"
++	"\x05" "rear-max-burst-length" "\0" "\x58\x02\x00\x00"
++	"\x05" "camera-hdr-version" "\0" "\x02\x00\x00\x00"
++	"\x05" "front-max-burst-length" "\0" "\x58\x02\x00\x00"
++	"\x05" "auto-focus" "\0" "\x01\x00\x00\x00"
++	"\x05" "front-auto-hdr" "\0" "\x01\x00\x00\x00"
++	"\x05" "front-burst-image-duration" "\0" "\x64\x00\x00\x00"
++	"\x05" "rear-max-video-fps-720p" "\0" "\x3c\x00\x00\x00"
++	"\x05" "rear-slowmo" "\0" "\x01\x00\x00\x00"
++	"\x05" "flash" "\0" "\x01\x00\x00\x00"
++	"\x05" "pipelined-stillimage-capability" "\0" "\x01\x00\x00\x00"
++	"\x05" "rear-max-slomo-video-fps-1080p" "\0" "\xf0\x00\x00\x00"
++	"\x05" "front-hdr" "\0" "\x01\x00\x00\x00"
++	"\x05" "front-flash-capability" "\0" "\x01\x00\x00\x00"
++	"\x05" "pearl-camera" "\0" "\x01\x00\x00\x00"
++	"\x05" "video-cap" "\0" "\x02\x00\x00\x00"
++	"\x05" "front-hdr-on" "\0" "\x01\x00\x00\x00"
++	"\x05" "rear-auto-hdr" "\0" "\x01\x00\x00\x00"
++	"\x05" "front-burst" "\0" "\x01\x00\x00\x00"
++	"\x05" "p3-color-space-video-recording" "\0" "\x01\x00\x00\x00"
++	"\x05" "rear-burst-image-duration" "\0" "\x64\x00\x00\x00"
++	"\x05" "rear-max-slomo-video-fps-720p" "\0" "\xf0\x00\x00\x00"
++	"\x05" "video-stills" "\0" "\x01\x00\x00\x00"
++	"\x05" "rear-max-video-frame_rate" "\0" "\x3c\x00\x00\x00"
++	"\x05" "rear-hdr-on" "\0" "\x01\x00\x00\x00"
++	"\x05" "rear-max-video-fps-1080p" "\0" "\x3c\x00\x00\x00"
++	"\x05" "aggregate-camera" "\0" "\x01\x00\x00\x00"
++	"\x01" "rear-stage-light-portrait" "\0"
++	"\x05" "aggregate-cam-photo-zoom" "\0" "\xe8\x03\x00\x00"
++	"\x05" "rear-hdr" "\0" "\x01\x00\x00\x00"
++	"\x05" "rear-burst" "\0" "\x01\x00\x00\x00"
++	"\x05" "rear-cam-telephoto-capability" "\0" "\x01\x00\x00\x00"
++	"\x05" "post-effects" "\0" "\x01\x00\x00\x00"
++	"\x05" "stage-light-portrait-preview" "\0" "\x00\x00\x00\x00"
++	"\x05" "live-effects" "\0" "\x01\x00\x00\x00"
++	"\x05" "front-max-video-zoom" "\0" "\x01\x00\x00\x00"
++	"\x05" "front-max-video-fps-720p" "\0" "\x1e\x00\x00\x00"
++	"\x05" "panorama" "\0" "\x01\x00\x00\x00"
++	"\x05" "front-max-video-fps-1080p" "\0" "\x1e\x00\x00\x00"
++	"\x01" "front-stage-light-portrait" "\0"
++	"\x05" "live-photo-capture" "\0" "\x01\x00\x00\x00"
++	"\xf1" "facetime" "\0"  /* /product/facetime */
++	"\x05" "tnr-mode-back" "\0" "\x0a\x00\x00\x00"
++	"\x31" "decoding" "\0" "\x40\x01\x00\x00\x0f\x00\xf0\x00\x40\x01\x00\x00\x1e\x00\xf0\x00\xe0\x01\x00\x00\x0f\x00\x70\x01\xe0\x01\x00\x00\x1e\x00\x70\x01\x80\x02\x00\x00\x1e\x00\xe0\x01\x00\x04\x00\x00\x1e\x00\x00\x03"
++	"\x05" "bitrate-3g" "\0" "\xe4\x00\x00\x00"
++	"\x05" "bitrate-lte" "\0" "\xe4\x00\x00\x00"
++	"\x05" "tnr-mode-front" "\0" "\x0a\x00\x00\x00"
++	"\x05" "bitrate-2g" "\0" "\x64\x00\x00\x00"
++	"\x09" "pref-decoding" "\0" "\x00\x04\x00\x00\x1e\x00\x00\x03"
++	"\x05" "bitrate-wifi" "\0" "\xd0\x07\x00\x00"
++	"\x39" "encoding" "\0" "\x40\x01\x00\x00\x0f\x00\xf0\x00\x40\x01\x00\x00\x1e\x00\xf0\x00\xe0\x01\x00\x00\x0f\x00\x70\x01\xe0\x01\x00\x00\x1e\x00\x70\x01\x80\x02\x00\x00\x1e\x00\xe0\x01\x00\x04\x00\x00\x1e\x00\x00\x03\x00\x05\x00\x00\x1e\x00\xd0\x02"
++	"\xf1" "maps" "\0"  /* /product/maps */
++	"\x05" "navigation" "\0" "\x00\x00\x00\x00"
++	"\x01" "adaptive-ui" "\0"
++	"\x05" "3d-imagery" "\0" "\x00\x00\x00\x00"
++	"\x05" "3d-maps" "\0" "\x00\x00\x00\x00"
++	"\xf1" "haptics" "\0"  /* /product/haptics */
++	"\x05" "closed-loop" "\0" "\x01\x00\x00\x00"
++	"\x05" "supports-3rd-party-haptics" "\0" "\x01\x00\x00\x00"
++	"\xf1" "audio" "\0"  /* /product/audio */
++	"\x05" "wireless-splitter" "\0" "\x01\x00\x00\x00"
++	"\x05" "supports-always-listening" "\0" "\x01\x00\x00\x00"
++	"\xf0" "options" "\0"  /* /options */
++	"\xf0" "filesystems" "\0"  /* /filesystems */
++	"\xf8" "fstab" "\0"  /* /filesystems/fstab */
++	"\x05" "os_env_type" "\0" "\x00\x00\x00\x00"
++	"\x05" "max_fs_entries" "\0" "\x02\x00\x00\x00"
++	"\xf9" "system-vol" "\0"  /* /filesystems/fstab/system-vol */
++	"\x04" "vol.fs_type" "\0" "\x72\x6f\x00"
++	"\x03" "vol.fs_file" "\0" "\x2f\x00"
++	"\x0e" "vol.fs_spec" "\0" "\x2f\x64\x65\x76\x2f\x6e\x31\x30\x75\x66\x73\x30\x00"
++	"\x05" "vol.fs_vfstype" "\0" "\x68\x66\x73\x00"
++	"\x05" "vol.fs_passno" "\0" "\x00\x00\x00\x00"
++	"\xf9" "data-vol" "\0"  /* /filesystems/fstab/data-vol */
++	"\x04" "vol.fs_type" "\0" "\x72\x77\x00"
++	"\x0e" "vol.fs_file" "\0" "\x2f\x70\x72\x69\x76\x61\x74\x65\x2f\x76\x61\x72\x00"
++	"\x0e" "vol.fs_spec" "\0" "\x2f\x64\x65\x76\x2f\x6e\x31\x30\x75\x66\x73\x31\x00"
++	"\x05" "vol.fs_vfstype" "\0" "\x68\x66\x73\x00"
++	"\x0e" "vol.fs_mntopts" "\0" "\x6e\x6f\x73\x75\x69\x64\x2c\x6e\x6f\x64\x65\x76\x00"
++	"\x05" "vol.fs_passno" "\0" "\x02\x00\x00\x00";
++
++#define N10_DT_NODES    16u
++
++static void
++n10_dt_publish(void)
++{
++	IORegistryEntry *nodes[N10_DT_NODES];
++	bool made[N10_DT_NODES];
++	unsigned int n = 1, cur = 0, created = 0, props = 0;
++	const char *p = n10_dt_blob;
++
++	nodes[0] = IORegistryEntry::fromPath("/", gIODTPlane);
++	made[0] = false;
++	while (nodes[0] != NULL && *p != 0) {
++		unsigned int b = (uint8_t)*p++;
++		const char *name = p;
++
++		p += strlen(name) + 1;
++		if (b >= 0xf0u) {
++			if (n >= N10_DT_NODES || b - 0xf0u >= n) {
++				break;
++			}
++			IORegistryEntry *parent = nodes[b - 0xf0u];
++			IORegistryEntry *node = parent != NULL ? parent->childFromPath(name, gIODTPlane) : NULL;
++			made[n] = false;
++			if (node == NULL && parent != NULL) {
++				node = n10_fb_dt_node(parent, name, NULL);
++				made[n] = node != NULL;
++				created += made[n];
++			}
++			nodes[n] = node;
++			cur = n++;
++			continue;
++		}
++		if (made[cur]) {
++			OSData *d = OSData::withBytes(p, b - 1u);
++			if (d != NULL) {
++				props += nodes[cur]->setProperty(name, d);
++				d->release();
++			}
++		}
++		p += b - 1u;
++	}
++	for (unsigned int i = 0; i < n; i++) {
++		OSSafeReleaseNULL(nodes[i]);
++	}
++	n10_dsslog_trace("N395D publish nodes=%u created=%u props=%u", n - 1, created, props);
++}
++
++/*
++ * Called once from IOKitBSDInit: the v395 device-tree entries, the
++ * display-subsystem node under IODeviceTree:/arm-io (arm-io itself only when
++ * the boot device tree has none), then the IOMobileFramebuffer service on
++ * IOResources.
+  */
+ extern "C" void
+ n10_iomfb_publish(void)
+@@ -351,6 +565,7 @@ n10_iomfb_publish(void)
+ 	bool disp = false, fb_ok = false;
+ 	IORegistryEntry *armio = IORegistryEntry::fromPath("/arm-io", gIODTPlane);
+ 
++	n10_dt_publish();
+ 	if (armio != NULL) {
+ 		armio_state = 1;
+ 	} else {

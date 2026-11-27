@@ -126,6 +126,9 @@ OVERLAY = (
     ('0060-exynos9825-n10-fault-sc-offset-registry-path-miss.patch',
      '3895c57cd2bfa164d8e1ad2e1ac77c8fd7c0ca94bbcb80c25bb839d3f58d25c3',
      ('bsd/kern/kern_exit.c', 'iokit/Kernel/IOUserClient.cpp')),
+    ('0061-exynos9825-n10-dt-product-options-fstab-path-dedupe.patch',
+     'b3dd0a3c6a55b520590d52a0bcce80aaa144155249f495d47a9c0264c049de86',
+     ('iokit/Kernel/IOUserClient.cpp', 'iokit/Kernel/NoteFramebuffer.cpp')),
 )
 STAGED_DIRS = ('bsd/n10_hfs/core', 'bsd/n10_hfs/hfs_encodings')
 
