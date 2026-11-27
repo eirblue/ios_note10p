@@ -154,10 +154,10 @@ index 792099a..abf8a83 100644
  		if (uaddr != USER_ADDR_NULL) {
  			error = copyout(&retflags, uaddr, sizeof(uint32_t));
 diff --git a/iokit/Kernel/NoteFramebuffer.cpp b/iokit/Kernel/NoteFramebuffer.cpp
-index 258ac40..59a6119 100644
+index 258ac40..cd05d16 100644
 --- a/iokit/Kernel/NoteFramebuffer.cpp
 +++ b/iokit/Kernel/NoteFramebuffer.cpp
-@@ -30,6 +30,22 @@
+@@ -30,6 +30,23 @@
   * kIOReturnUnsupported. Other selectors succeed with zeroed outputs. The
   * first call of each selector and every open/notification port registration
   * is logged (N391F) into the dss ring.
@@ -171,16 +171,17 @@ index 258ac40..59a6119 100644
 + * bsd/dev/arm/systemcalls.c n10_xpc_dump writes at a heartbeat when it changed
 + * (own line cap there). Counting only: answers are unchanged.
 + *
-+ * v392 also publishes NoteHIDEventService: an IOService on IOResources with
-+ * HIDServiceSupport = true (the property backboardd's IOHIDEventSystem matches
-+ * on, v391 N389I "c=IOService p=HIDServiceSupport"), a vendor usage pair and
-+ * no IOCFPlugInTypes / user client: it carries no events and touches no
-+ * hardware (no touch controller, no register, no interrupt). One "N392H"
-+ * publish line.
++ * v392 also publishes a HID event service stub: a plain IOService instance
++ * (no new class, so no vtable / metaclass growth of __DATA_CONST, whose tail
++ * holds the chain table caves) on IOResources with HIDServiceSupport = true
++ * (the property backboardd's IOHIDEventSystem matches on, v391 N389I
++ * "c=IOService p=HIDServiceSupport"), a vendor usage pair and no
++ * IOCFPlugInTypes / user client: it carries no events and touches no hardware
++ * (no touch controller, no register, no interrupt). One "N392H" publish line.
   */
  #include <pexpert/arm64/board_config.h>
  
-@@ -67,6 +83,56 @@ static uint32_t n10_fb_lines;
+@@ -67,6 +84,56 @@ static uint32_t n10_fb_lines;
  static uint32_t n10_fb_seen[4];                 /* selectors 0..127 already logged */
  static uint32_t n10_fb_swap_id;
  
@@ -237,7 +238,7 @@ index 258ac40..59a6119 100644
  static bool
  n10_fb_trace_ok(uint32_t selector)
  {
-@@ -126,6 +192,7 @@ IOMobileFramebufferUserClient::start(IOService *provider)
+@@ -126,6 +193,7 @@ IOMobileFramebufferUserClient::start(IOService *provider)
  		return false;
  	}
  	notifyPort = NULL;
@@ -245,7 +246,7 @@ index 258ac40..59a6119 100644
  	if (__atomic_fetch_add(&n10_fb_lines, 1u, __ATOMIC_RELAXED) < N10_FB_LINES) {
  		char name[32];
  		proc_selfname(name, sizeof(name));
-@@ -153,6 +220,7 @@ IOMobileFramebufferUserClient::registerNotificationPort(mach_port_t port, UInt32
+@@ -153,6 +221,7 @@ IOMobileFramebufferUserClient::registerNotificationPort(mach_port_t port, UInt32
  		releaseNotificationPort(notifyPort);
  	}
  	notifyPort = port;
@@ -253,7 +254,7 @@ index 258ac40..59a6119 100644
  	if (__atomic_fetch_add(&n10_fb_lines, 1u, __ATOMIC_RELAXED) < N10_FB_LINES) {
  		char name[32];
  		proc_selfname(name, sizeof(name));
-@@ -231,6 +299,7 @@ IOMobileFramebufferUserClient::externalMethod(uint32_t selector, IOExternalMetho
+@@ -231,6 +300,7 @@ IOMobileFramebufferUserClient::externalMethod(uint32_t selector, IOExternalMetho
  		break;
  	}
  
@@ -261,50 +262,27 @@ index 258ac40..59a6119 100644
  	if (n10_fb_trace_ok(selector)) {
  		char name[32];
  		proc_selfname(name, sizeof(name));
-@@ -240,6 +309,33 @@ IOMobileFramebufferUserClient::externalMethod(uint32_t selector, IOExternalMetho
- 	return ret;
- }
- 
-+/*
-+ * v392: HID event service stub for backboardd's IOHIDEventSystem match
-+ * (IOProviderClass IOService + HIDServiceSupport). Registry object only.
-+ */
-+class NoteHIDEventService : public IOService {
-+	OSDeclareDefaultStructors(NoteHIDEventService);
-+
-+public:
-+	bool start(IOService *provider) APPLE_KEXT_OVERRIDE;
-+};
-+
-+OSDefineMetaClassAndStructors(NoteHIDEventService, IOService);
-+
-+bool
-+NoteHIDEventService::start(IOService *provider)
-+{
-+	if (!IOService::start(provider)) {
-+		return false;
-+	}
-+	setProperty("HIDServiceSupport", true);
-+	setProperty("PrimaryUsagePage", 0xff00u, 32);   /* vendor-defined: no event processor expects events */
-+	setProperty("PrimaryUsage", 1u, 32);
-+	setProperty("Product", "Note10 HID stub");
-+	registerService();
-+	return true;
-+}
-+
- /* One device-tree plane entry with a name and string properties. */
- static IORegistryEntry *
- n10_fb_dt_node(IORegistryEntry *parent, const char *name, const char *device_type)
-@@ -310,6 +406,17 @@ n10_iomfb_publish(void)
+@@ -310,6 +380,28 @@ n10_iomfb_publish(void)
  
  	n10_dsslog_trace("N391F publish arm-io=%d disp=%d fb=%d %ux%u", armio_state, (int)disp, (int)fb_ok,
  	    N10_FB_WIDTH, N10_FB_HEIGHT);
 +
++	/*
++	 * v392 HID event service stub (IOProviderClass IOService + HIDServiceSupport
++	 * match of backboardd's IOHIDEventSystem): plain IOService, registry only.
++	 */
 +	bool hid_ok = false;
-+	NoteHIDEventService *hid = OSTypeAlloc(NoteHIDEventService);
++	IOService *hid = OSTypeAlloc(IOService);
 +	if (hid != NULL && resources != NULL && hid->init() && hid->attach(resources)) {
++		hid->setName("NoteHIDEventService");
++		hid->setProperty("HIDServiceSupport", true);
++		hid->setProperty("PrimaryUsagePage", 0xff00u, 32);   /* vendor-defined: no event processor expects events */
++		hid->setProperty("PrimaryUsage", 1u, 32);
++		hid->setProperty("Product", "Note10 HID stub");
 +		hid_ok = hid->start(resources);
-+		if (!hid_ok) {
++		if (hid_ok) {
++			hid->registerService();
++		} else {
 +			hid->detach(resources);
 +		}
 +	}

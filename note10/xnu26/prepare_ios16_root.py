@@ -117,7 +117,7 @@ OVERLAY = (
      ('bsd/dev/arm/systemcalls.c', 'bsd/kern/kern_proc.c', 'iokit/Kernel/NoteFramebuffer.cpp',
       'iokit/bsddev/IOKitBSDInit.cpp', 'iokit/conf/files', 'security/mac_base.c')),
     ('0058-exynos9825-n10-csops-status-valid-hid-stub-iomfb-counts.patch',
-     '4ce0ddb2d7c6eb434be6b2b2701f2e78d482e45d2835db77dfab7e530e580674',
+     '1eb11ec92335b520d1ecf77adb6760796158879289b2d6deefbf5c6934cd7f8b',
      ('bsd/dev/arm/systemcalls.c', 'bsd/kern/kern_proc.c', 'iokit/Kernel/NoteFramebuffer.cpp',
       'osfmk/arm64/note10/n10_dsslog.c')),
 )
