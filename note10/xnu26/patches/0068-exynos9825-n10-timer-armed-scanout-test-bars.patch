@@ -1,0 +1,223 @@
+diff --git a/iokit/Kernel/NoteFramebuffer.cpp b/iokit/Kernel/NoteFramebuffer.cpp
+index 202c8dd..9ac0292 100644
+--- a/iokit/Kernel/NoteFramebuffer.cpp
++++ b/iokit/Kernel/NoteFramebuffer.cpp
+@@ -197,6 +197,26 @@
+  * format 1 (IDMA_IMG_FORMAT_ABGR8888) is memory bytes R,G,B,A (alpha byte
+  * 3). A sampled order that disagrees with that (bytes A,B,G,R) is refused
+  * as well (why=order). Counts and the N399O line are unchanged.
++ *
++ * v402: scanout no longer waits for the first SwapEnd. v401 user space never
++ * reached a swap (backboardd starved before opening IOCoreSurfaceRoot), so
++ * no arm happened. n10_iomfb_publish() now also starts a thread call
++ * (THREAD_CALL_PRIORITY_KERNEL): 15 s after publish and then every 2 s (at
++ * most 43 ticks, last ~99 s after publish) it takes the single probe + arm
++ * (shared with the SwapEnd path, whichever comes first; probe tag "tmr").
++ * If that arm was refused only because the DPU/DECON state was not ready
++ * (why=probe, gc, trig or win: refusals taken before any mapping), the timer
++ * probes and arms again, at most 3 times, 5 s apart; every other refusal
++ * (chmap, format, geometry, iommu, iommu_mix, pt, page, map, order) is final.
++ * While no SwapEnd has been seen each tick sends one frame from
++ * the newest 1440x3040 4-byte IOSurface or, with none yet, from a 1440-pixel
++ * test row of eight vertical colour bars (white, yellow, cyan, green,
++ * magenta, red, blue, black; BGRA like the surfaces) repeated on every row.
++ * The frame takes the same path as a SwapEnd frame: armed state, one in
++ * flight, 100 ms rate limit, copy through the validated pages (0066), the
++ * 0065/0067 conversion and the two DECON0 trigger writes with the same
++ * checks. The first SwapEnd stops the timer frames. N402S at publish, N402T
++ * per tick (first four, every 8th, re-probes, last); N398F how=3 = test bars.
+  */
+ #include <pexpert/arm64/board_config.h>
+ 
+@@ -218,6 +238,7 @@
+ #include <kern/clock.h>
+ #include <sys/proc.h>
+ #include <machine/machine_routines.h>
++#include <kern/thread_call.h>
+ 
+ /* osfmk/arm64/note10/n10_dsslog.c (v376): one bounded line into the dss log ring. */
+ extern "C" void n10_dsslog_trace(const char *fmt, ...) __printflike(1, 2);
+@@ -244,6 +265,17 @@ static uint32_t n10_disp_se_once;               /* v398: first SwapEnd probe + a
+ static void n10_disp_probe(const char *tag);
+ static void n10_disp_arm(void);
+ static void n10_disp_swap(IOExternalMethodArguments *args);
++static void n10_disp_frame(uint32_t want, uint32_t tmr);
++static void n10_disp_tick(thread_call_param_t p0, thread_call_param_t p1);
++#define N10_DISP_TMR_FIRST_S    15u             /* v402: first timer tick after publish */
++#define N10_DISP_TMR_NS         2000000000ull   /* then one tick every 2 s */
++#define N10_DISP_TMR_TICKS      43u             /* last tick ~99 s after publish */
++#define N10_DISP_RETRY_NS       5000000000ull   /* v402 r2: re-probe spacing */
++#define N10_DISP_RETRIES        3u
++static thread_call_t n10_disp_tmr;
++static uint32_t n10_disp_ticks, n10_disp_se_seen, n10_disp_retry, n10_disp_retries;
++static uint64_t n10_disp_retry_at;
++static uint32_t *n10_disp_bars;                 /* v402: one 1440-pixel test row (BGRA), every row */
+ /* v392 N392F counters: opens, notification ports, selectors 3/4/5/6/8, others. */
+ enum { N10_FB_C_SURF, N10_FB_C_SB, N10_FB_C_SE, N10_FB_C_SW, N10_FB_C_DS, N10_FB_C_OTHER, N10_FB_C_N };
+ static uint32_t n10_fb_opens, n10_fb_notifies;
+@@ -1496,16 +1528,20 @@ n10_disp_arm(void)
+ 	uint32_t win = 6, ch = 6, nwin = 0, fmt = 0, sw = 0, sh = 0, mmus = 0, yoff = 0, r = 0, bad = 0;
+ 	uint64_t pt = 0, pa = 0, len = 0, last = 0;
+ 
++	n10_disp_retry = 0;                             /* v402 r2: set only for the state-not-ready refusals below */
+ 	if (!n10_disp.valid) {
+ 		why = "probe";
++		n10_disp_retry = 1;
+ 		goto out;
+ 	}
+ 	if ((n10_disp.gc & 0x100u) == 0 || (n10_disp.gc & 0x3u) == 0) {
+ 		why = "gc";                             /* command mode + DECON enabled expected */
++		n10_disp_retry = 1;
+ 		goto out;
+ 	}
+ 	if ((n10_disp.trig & (N10_TRIG_MASK_DECON | N10_TRIG_EN)) != N10_TRIG_MASK_DECON || n10_disp.sur != 0) {
+ 		why = "trig";                           /* masked trigger, no pending update expected */
++		n10_disp_retry = 1;
+ 		goto out;
+ 	}
+ 	for (uint32_t w = 0; w < 6; w++) {
+@@ -1516,6 +1552,7 @@ n10_disp_arm(void)
+ 	}
+ 	if (nwin != 1) {
+ 		why = "win";
++		n10_disp_retry = 1;
+ 		goto out;
+ 	}
+ 	ch = (n10_disp.dp1 >> (4 * win)) & 7u;
+@@ -1720,9 +1757,7 @@ static void
+ n10_disp_swap(IOExternalMethodArguments *args)
+ {
+ 	uint8_t rec[0x60];
+-	uint32_t w[8], want = 0, k = N10_SURF_MAX, how = 0, n, bpr = 0;
+-	uint64_t now = mach_absolute_time(), gap;
+-	IOBufferMemoryDescriptor *md = NULL;
++	uint32_t w[8], want = 0;
+ 
+ 	bzero(rec, sizeof(rec));
+ 	if (args->structureInputDescriptor != NULL) {
+@@ -1737,6 +1772,20 @@ n10_disp_swap(IOExternalMethodArguments *args)
+ 		n10_dsslog_trace("N398R w40=0x%x w44=0x%x w48=0x%x w4c=0x%x w50=0x%x w54=0x%x w58=0x%x w5c=0x%x",
+ 		    w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7]);
+ 	}
++	memcpy(&want, rec + 0x54, sizeof(want));
++	__atomic_store_n(&n10_disp_se_seen, 1u, __ATOMIC_RELAXED);      /* v402: SwapEnd frames replace timer frames */
++	n10_disp_frame(want, 0);
++}
++
++/* v402: one frame: SwapEnd (want = surface id) or timer (tmr 1: newest surface, else the test bars). */
++static void
++n10_disp_frame(uint32_t want, uint32_t tmr)
++{
++	uint32_t k = N10_SURF_MAX, how = 0, n, bpr = 0;
++	uint64_t now = mach_absolute_time(), gap;
++	IOBufferMemoryDescriptor *md = NULL;
++	const uint32_t *src = NULL;
++
+ 	if (!__atomic_load_n(&n10_disp_armed, __ATOMIC_ACQUIRE) || n10_surf_lock == NULL) {
+ 		return;
+ 	}
+@@ -1750,7 +1799,6 @@ n10_disp_swap(IOExternalMethodArguments *args)
+ 		__atomic_store_n(&n10_disp_busy, 0u, __ATOMIC_RELEASE);
+ 		return;
+ 	}
+-	memcpy(&want, rec + 0x54, sizeof(want));
+ 
+ 	IOLockLock(n10_surf_lock);
+ 	if (want != 0) {
+@@ -1777,13 +1825,17 @@ n10_disp_swap(IOExternalMethodArguments *args)
+ 		want = n10_surfs[k].id;
+ 	}
+ 	IOLockUnlock(n10_surf_lock);
+-	if (md == NULL) {
++	if (md != NULL) {
++		src = (const uint32_t *)md->getBytesNoCopy();
++	} else if (tmr != 0 && n10_disp_bars != NULL) {
++		src = n10_disp_bars;                    /* v402 test bars: bpr 0 repeats the row */
++		how = 3;
++	}
++	if (src == NULL) {
+ 		__atomic_fetch_add(&n10_disp_skips, 1u, __ATOMIC_RELAXED);
+ 		__atomic_store_n(&n10_disp_busy, 0u, __ATOMIC_RELEASE);
+ 		return;
+ 	}
+-
+-	const uint32_t *src = (const uint32_t *)md->getBytesNoCopy();
+ 	uint32_t hash = n10_disp_sample((const uint8_t *)src, bpr), bad = 0;
+ 	if (n10_disp_otf) {                             /* v400 map=otf */
+ 		bad = n10_disp_copy_otf(src, bpr);
+@@ -1793,7 +1845,9 @@ n10_disp_swap(IOExternalMethodArguments *args)
+ 			n10_disp_put(n10_disp_run[i].off, end < n10_disp_len ? end : n10_disp_len, n10_disp_run[i].va, src, bpr);
+ 		}
+ 	}
+-	md->release();
++	if (md != NULL) {
++		md->release();
++	}
+ 	n = ++n10_disp_copies;                          /* single in-flight (n10_disp_busy) */
+ 	if (n == 1 || (n & 63u) == 0 || bad != 0) {
+ 		n10_dsslog_trace("N400F copies=%u runs=%u pages=%u bad=%u hash=0x%08x", n, n10_disp_nrun, n10_disp_pages, bad,
+@@ -1935,6 +1989,64 @@ n10_iomfb_publish(void)
+ 	OSSafeReleaseNULL(surf);
+ 	n10_dsslog_trace("N396R publish root=%d IOCoreSurfaceRoot", (int)surf_ok);
+ 	n10_disp_probe("pub");
++	/* v402: timer arm + frames until the first SwapEnd */
++	n10_disp_tmr = thread_call_allocate_with_priority(n10_disp_tick, NULL, THREAD_CALL_PRIORITY_KERNEL);
++	if (n10_disp_tmr != NULL) {
++		uint64_t d;
++		nanoseconds_to_absolutetime(N10_DISP_TMR_FIRST_S * 1000000000ull, &d);
++		thread_call_enter_delayed(n10_disp_tmr, mach_absolute_time() + d);
++	}
++	n10_dsslog_trace("N402S timer=%u first_s=%u period_ms=%u ticks=%u", n10_disp_tmr != NULL ? 1u : 0u,
++	    N10_DISP_TMR_FIRST_S, (uint32_t)(N10_DISP_TMR_NS / 1000000ull), N10_DISP_TMR_TICKS);
++}
++
++/* v402 thread call: single probe + arm if the SwapEnd path has not taken it, then one frame per tick until SwapEnd. */
++static void
++n10_disp_tick(thread_call_param_t p0, thread_call_param_t p1)
++{
++	static const uint32_t bars[8] = { 0xffffffffu, 0xffffff00u, 0xff00ffffu, 0xff00ff00u, 0xffff00ffu, 0xffff0000u,
++		                          0xff0000ffu, 0xff000000u };     /* BGRA words: A R G B */
++	uint32_t tick = ++n10_disp_ticks, seen, re = 0;
++	uint64_t d, now = mach_absolute_time();
++
++	(void)p0;
++	(void)p1;
++	if (__atomic_exchange_n(&n10_disp_se_once, 1u, __ATOMIC_RELAXED) == 0) {
++		n10_disp_probe("tmr");
++		n10_disp_arm();
++		nanoseconds_to_absolutetime(N10_DISP_RETRY_NS, &d);
++		n10_disp_retry_at = now + d;
++	} else if (n10_disp_retry != 0 && n10_disp_retries < N10_DISP_RETRIES && now >= n10_disp_retry_at && n10_disp_retry_at != 0 &&
++	    !__atomic_load_n(&n10_disp_armed, __ATOMIC_ACQUIRE) && !__atomic_load_n(&n10_disp_se_seen, __ATOMIC_RELAXED)) {
++		/* v402 r2: the timer's own arm was refused for state not ready (before any mapping): probe and arm again */
++		re = ++n10_disp_retries;
++		n10_disp_probe("tmr");
++		n10_disp_arm();
++		nanoseconds_to_absolutetime(N10_DISP_RETRY_NS, &d);
++		n10_disp_retry_at = now + d;
++	}
++	if (n10_disp_bars == NULL) {
++		uint32_t *row = (uint32_t *)IOMalloc(N10_FB_WIDTH * 4u);
++		if (row != NULL) {
++			for (uint32_t x = 0; x < N10_FB_WIDTH; x++) {
++				row[x] = bars[x / (N10_FB_WIDTH / 8u)];
++			}
++			n10_disp_bars = row;
++		}
++	}
++	seen = __atomic_load_n(&n10_disp_se_seen, __ATOMIC_RELAXED);
++	if (seen == 0) {
++		n10_disp_frame(0, 1);
++	}
++	if (tick <= 4u || (tick & 7u) == 0 || re != 0 || seen != 0 || tick >= N10_DISP_TMR_TICKS) {
++		n10_dsslog_trace("N402T tick=%u armed=%u se=%u copies=%u frames=%u fails=%u re=%u", tick,
++		    __atomic_load_n(&n10_disp_armed, __ATOMIC_RELAXED), seen, n10_disp_copies,
++		    __atomic_load_n(&n10_disp_frames, __ATOMIC_RELAXED), __atomic_load_n(&n10_disp_fails, __ATOMIC_RELAXED), re);
++	}
++	if (seen == 0 && tick < N10_DISP_TMR_TICKS) {
++		nanoseconds_to_absolutetime(N10_DISP_TMR_NS, &d);
++		thread_call_enter_delayed(n10_disp_tmr, mach_absolute_time() + d);
++	}
+ }
+ 
+ #endif /* ARM64_BOARD_CONFIG_EXYNOS9825 */

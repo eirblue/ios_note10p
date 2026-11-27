@@ -147,6 +147,9 @@ OVERLAY = (
     ('0067-exynos9825-n10-scanout-byte-order-dominance.patch',
      'cce5604bd0525ad6a111af86dcf80c59b05eae45d5b666c1ea62c7c6ee399315',
      ('iokit/Kernel/NoteFramebuffer.cpp',)),
+    ('0068-exynos9825-n10-timer-armed-scanout-test-bars.patch',
+     '29f0b023436f7835306262aba339279437b41edd954aad9e1d2e747d0d0ee763',
+     ('iokit/Kernel/NoteFramebuffer.cpp',)),
 )
 STAGED_DIRS = ('bsd/n10_hfs/core', 'bsd/n10_hfs/hfs_encodings')
 
