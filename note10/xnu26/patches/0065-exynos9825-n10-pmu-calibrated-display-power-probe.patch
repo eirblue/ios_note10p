@@ -1,0 +1,152 @@
+diff --git a/iokit/Kernel/NoteFramebuffer.cpp b/iokit/Kernel/NoteFramebuffer.cpp
+index a39fe19..5e0fb61 100644
+--- a/iokit/Kernel/NoteFramebuffer.cpp
++++ b/iokit/Kernel/NoteFramebuffer.cpp
+@@ -134,7 +134,36 @@
+  * a timeout also masks it and disables the path. The only registers written are DECON0 0x60 and 0x70; no
+  * window, IDMA, DPP, SysMMU, DSIM, clock or PMIC register is written. N398
+  * lines: P power, D/W DECON, I IDMA, S SysMMU, E probe end, A arm decision,
+- * R first SwapEnd record words, F frames. */
++ * R first SwapEnd record words, F frames.
++ *
++ * v399: PMU calibration. v398 read DPU CONFIGURATION/STATUS = 0/0 at publish
++ * and at the first SwapEnd. The loader Linux (stock dpu20, "display supports
++ * hibernation mode") leaves DECON0 in command-mode hibernation when TWRP is
++ * idle: DSIM in ULPS, D-PHY isolated, pm_runtime_put -> pd-dpu off, panel on
++ * with its own frame memory. To tell a real power-off from a bad read,
++ * n10_disp_probe() now first reads always-on PMU registers that must be on
++ * (pmucal flexpmu_cal_cpu_exynos9820.h: CLUSTER0_CPU0 CONFIGURATION/STATUS
++ * 0x1000/0x1004, CLUSTER0_NONCPU_STATUS 0x1204) plus record-only values
++ * (CLUSTER0_CPU1 0x1084, CLUSTER1_CPU0 0x1304, CLUSTER2_CPU0 0x1504,
++ * CLUSTER2_NONCPU 0x1604, MIPI D-PHY isolation 0x70c/0x710 of the DSIM0
++ * m4s4/m4s0 PHYs (exynos9820.dts), DPU 0x1e00/0x1e04) through one PMU
++ * mapping (0x15860000, reads only); one N399C line, cal = CPU0 and NONCPU0
++ * status bit 0 set. DECON0 / IDMA / SysMMU are read only when cal = 1 and the
++ * DPU status bit 0 is set (v398: status bit only); an uncalibrated PMU read
++ * skips them ("N398E skip pmu_uncal"). Arm, frame and write path unchanged.
++ *
++ * v399 (b): n10_disp_arm() also accepts IDMA format 1 (ABGR8888), the format
++ * the Linux fbdev pan (decon_pan_display, used by TWRP and by the v399 loader
++ * keep-on) programs on the fb window. dpu20 gives no byte order for it
++ * (decon_enable programs BGRA8888 on the same buffer, the fb var says red
++ * 16-23), so the order is checked at run time from the alpha byte of the
++ * opaque frame Linux left in the window buffer: 64 pixels are read through the
++ * write-combined buffer mapping (reads only); alpha 0xff in byte 3 of all 64
++ * and not in byte 0 = bytes R,G,B,A (copy swaps R/B), alpha 0xff in byte 0 of
++ * all 64 and not in byte 3 = bytes A,B,G,R (copy rotates by one byte); alpha
++ * is forced to 0xff for format 1 (per-pixel alpha); anything else stays
++ * read-only (N398A why=order). One N399O line. Formats 2/3/6/7 unchanged.
++ */
+ #include <pexpert/arm64/board_config.h>
+ 
+ #if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
+@@ -1185,6 +1214,8 @@ n10_chosen_publish(void)
+  * (exynos9820 device tree, dpu20 cal_9820, pmucal, exynos-iommu sources).
+  */
+ #define N10_DISP_PMU_PD         0x15861e00u     /* DPU_CONFIGURATION, +4 DPU_STATUS */
++#define N10_DISP_PMU            0x15860000u     /* v399: PMU_ALIVE base (calibration reads) */
++#define N10_DISP_PMU_SIZE       0x2000u
+ #define N10_DISP_DECON          0x19030000u
+ #define N10_DISP_DECON_SIZE     0x8000u
+ #define N10_DISP_IDMA           0x19070000u     /* channel n at +0x1000 * (n + 1) */
+@@ -1208,7 +1239,8 @@ n10_chosen_publish(void)
+ #define N10_DISP_DSS            0xfd900000ull   /* debug-snapshot header + log rings (dss ring) .. 4 GiB */
+ #define N10_DISP_DSS_SIZE       0x2700000ull
+ 
+-enum { N10_DISP_MAP_PMU, N10_DISP_MAP_DECON, N10_DISP_MAP_IDMA, N10_DISP_MAP_MMU, N10_DISP_MAPS = N10_DISP_MAP_MMU + 3 };
++enum { N10_DISP_MAP_PMU, N10_DISP_MAP_DECON, N10_DISP_MAP_IDMA, N10_DISP_MAP_MMU, N10_DISP_MAP_PMUCAL = N10_DISP_MAP_MMU + 3,
++       N10_DISP_MAPS };
+ static vm_offset_t n10_disp_va[N10_DISP_MAPS];  /* ml_io_map is permanent: map once, reuse */
+ 
+ /* Last probe values (written by the probe, read by n10_disp_arm on the same thread). */
+@@ -1251,9 +1283,22 @@ static void
+ n10_disp_probe(const char *tag)
+ {
+ 	vm_offset_t pmu = n10_disp_map(N10_DISP_MAP_PMU, N10_DISP_PMU_PD, 8);
+-	uint32_t cfg, reads = 2;
++	vm_offset_t pc = n10_disp_map(N10_DISP_MAP_PMUCAL, N10_DISP_PMU, N10_DISP_PMU_SIZE);
++	uint32_t cfg, reads = 2, cal = 0;
+ 
+ 	n10_disp.valid = 0;
++	if (pc != 0) {
++		/* v399: always-on PMU calibration (CPU0 runs this code; its cluster is on) */
++		uint32_t c0c = n10_disp_rd(pc, 0x1000), c0s = n10_disp_rd(pc, 0x1004), n0s = n10_disp_rd(pc, 0x1204);
++		uint32_t c1s = n10_disp_rd(pc, 0x1084), k1s = n10_disp_rd(pc, 0x1304), k2s = n10_disp_rd(pc, 0x1504);
++		uint32_t n2s = n10_disp_rd(pc, 0x1604), iso0 = n10_disp_rd(pc, 0x070c), iso1 = n10_disp_rd(pc, 0x0710);
++		uint32_t dc = n10_disp_rd(pc, 0x1e00), ds = n10_disp_rd(pc, 0x1e04);
++		cal = (c0s & 1u) != 0 && (n0s & 1u) != 0;
++		reads += 11;
++		/* hex without 0x: <= 157 chars even with every value 8 digits (n10_dsslog_trace keeps 158) */
++		n10_dsslog_trace("N399C %s cal=%u c0=%x/%x n0=%x dpu=%x/%x iso=%x/%x c1=%x k1=%x k2=%x n2=%x", tag, cal,
++		    c0c, c0s, n0s, dc, ds, iso0, iso1, c1s, k1s, k2s, n2s);
++	}
+ 	if (pmu == 0) {
+ 		n10_dsslog_trace("N398P %s pd=unknown map=0 skip", tag);
+ 		return;
+@@ -1261,6 +1306,10 @@ n10_disp_probe(const char *tag)
+ 	cfg = n10_disp_rd(pmu, 0);
+ 	n10_disp.pd_st = n10_disp_rd(pmu, 4);
+ 	n10_dsslog_trace("N398P %s pd_cfg=0x%x pd_st=0x%x on=%u", tag, cfg, n10_disp.pd_st, n10_disp.pd_st & 1u);
++	if (cal == 0) {
++		n10_dsslog_trace("N398E %s skip pmu_uncal reads=%u", tag, reads);
++		return;
++	}
+ 	if ((n10_disp.pd_st & 1u) == 0) {
+ 		n10_dsslog_trace("N398E %s skip pd_off reads=%u", tag, reads);
+ 		return;
+@@ -1404,8 +1453,8 @@ n10_disp_arm(void)
+ 	fmt = (n10_disp.con[ch] >> 11) & 0x3fu;
+ 	sw = n10_disp.src[ch] & 0xffffu;
+ 	sh = (n10_disp.src[ch] >> 16) & 0x3fffu;
+-	if ((n10_disp.con[ch] & 0x7c8u) != 0 || !(fmt == 2 || fmt == 3 || fmt == 6 || fmt == 7)) {
+-		why = "format";                         /* rotation/flip, AFBC, block mode; 8888 R/B orders only */
++	if ((n10_disp.con[ch] & 0x7c8u) != 0 || !(fmt == 1 || fmt == 2 || fmt == 3 || fmt == 6 || fmt == 7)) {
++		why = "format";                         /* rotation/flip, AFBC, block mode; 8888 orders only (v399: + ABGR) */
+ 		goto out;
+ 	}
+ 	if (n10_disp.img[ch] != (N10_FB_WIDTH | (N10_FB_HEIGHT << 16)) || n10_disp.off[ch] != 0 ||
+@@ -1471,6 +1520,22 @@ n10_disp_arm(void)
+ 	}
+ 	n10_disp_stride = sw * 4u;
+ 	n10_disp_swap_rb = (fmt == 2 || fmt == 6) ? 1u : 0u;
++	if (fmt == 1) {
++		/* v399: byte order of ABGR8888 from the alpha byte of the opaque Linux frame (reads only) */
++		uint32_t a0 = 0, a3 = 0;
++		for (uint32_t k = 0; k < 64; k++) {
++			const volatile uint8_t *px = (const volatile uint8_t *)(n10_disp_fb +
++			    (uint64_t)(23u + 47u * k) * n10_disp_stride + (uint64_t)(11u + 22u * k) * 4u);
++			a0 += px[0] == 0xffu ? 1u : 0u;
++			a3 += px[3] == 0xffu ? 1u : 0u;
++		}
++		n10_disp_swap_rb = (a3 == 64u && a0 < 64u) ? 2u : (a0 == 64u && a3 < 64u) ? 3u : 0u;
++		n10_dsslog_trace("N399O fmt=%u a0=%u a3=%u mode=%u", fmt, a0, a3, n10_disp_swap_rb);
++		if (n10_disp_swap_rb == 0) {
++			why = "order";
++			goto out;
++		}
++	}
+ 	n10_disp_trig0 = n10_disp.trig;
+ 	__atomic_store_n(&n10_disp_armed, 1u, __ATOMIC_RELEASE);
+ out:
+@@ -1567,11 +1632,20 @@ n10_disp_swap(IOExternalMethodArguments *args)
+ 	for (uint32_t y = 0; y < N10_FB_HEIGHT; y++) {
+ 		const uint32_t *s = src + (uint64_t)y * (bpr / 4u);
+ 		uint32_t *d = (uint32_t *)(n10_disp_fb + (uint64_t)y * n10_disp_stride);
+-		if (n10_disp_swap_rb) {
++		if (n10_disp_swap_rb == 1u) {
+ 			for (uint32_t x = 0; x < N10_FB_WIDTH; x++) {
+ 				uint32_t v = s[x];
+ 				d[x] = (v & 0xff00ff00u) | ((v & 0xffu) << 16) | ((v >> 16) & 0xffu);
+ 			}
++		} else if (n10_disp_swap_rb == 2u) {    /* v399 ABGR8888 as bytes R,G,B,A; alpha 0xff */
++			for (uint32_t x = 0; x < N10_FB_WIDTH; x++) {
++				uint32_t v = s[x];
++				d[x] = 0xff000000u | (v & 0x0000ff00u) | ((v & 0xffu) << 16) | ((v >> 16) & 0xffu);
++			}
++		} else if (n10_disp_swap_rb == 3u) {    /* v399 ABGR8888 as bytes A,B,G,R; alpha 0xff */
++			for (uint32_t x = 0; x < N10_FB_WIDTH; x++) {
++				d[x] = (s[x] << 8) | 0xffu;
++			}
+ 		} else {
+ 			memcpy(d, s, N10_FB_WIDTH * 4u);
+ 		}
