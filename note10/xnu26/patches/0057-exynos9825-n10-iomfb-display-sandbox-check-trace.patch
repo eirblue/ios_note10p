@@ -1,0 +1,482 @@
+diff --git a/bsd/dev/arm/systemcalls.c b/bsd/dev/arm/systemcalls.c
+index 5d18274..b95d93c 100644
+--- a/bsd/dev/arm/systemcalls.c
++++ b/bsd/dev/arm/systemcalls.c
+@@ -62,13 +62,27 @@ static void     arm_clear_syscall_error(struct arm_saved_state *);
+ extern void n10_dsslog_trace(const char *fmt, ...) __printflike(1, 2);
+ void n10_xpc_note(int trap, int num, int err);
+ static uint32_t n10_xpc_lines;
++#define N10_BBD_MAX             96u
++static uint32_t n10_bbd_lines;
+ 
+ void
+ n10_xpc_note(int trap, int num, int err)
+ {
+ 	proc_t p = current_proc();
+ 
+-	if (p == PROC_NULL || strncmp(p->p_comm, "xpcproxy", 8) != 0 ||
++	if (p == PROC_NULL) {
++		return;
++	}
++	/*
++	 * v391: also the failing calls of processes named "backboardd" (v390: its
++	 * system-container path came back nil without a containermanagerd query),
++	 * on their own cap N10_BBD_MAX.
++	 */
++	if (strncmp(p->p_comm, "backboardd", 10) == 0) {
++		if (__atomic_fetch_add(&n10_bbd_lines, 1u, __ATOMIC_RELAXED) >= N10_BBD_MAX) {
++			return;
++		}
++	} else if (strncmp(p->p_comm, "xpcproxy", 8) != 0 ||
+ 	    __atomic_fetch_add(&n10_xpc_lines, 1u, __ATOMIC_RELAXED) >= N10_XPC_MAX) {
+ 		return;
+ 	}
+diff --git a/bsd/kern/kern_proc.c b/bsd/kern/kern_proc.c
+index 0fd660f..792099a 100644
+--- a/bsd/kern/kern_proc.c
++++ b/bsd/kern/kern_proc.c
+@@ -3697,8 +3697,41 @@ csops_copy_token(const void *start, size_t length, user_size_t usize, user_addr_
+ /* osfmk/arm64/note10/n10_dsslog.c (v376): one bounded line into the dss log ring. */
+ extern void n10_dsslog_trace(const char *fmt, ...) __printflike(1, 2);
+ 
+-static uint32_t n10_csops_lines;
+-#define N10_CSOPS_LINES 64u
++/*
++ * N390S line budget (v391; v390 used one global cap of 64 lines and launchd's
++ * early identity queries plus the ERANGE size probes spent it before
++ * backboardd's container lookup). No line for launchd (pid 1) or for an
++ * ERANGE answer (size probe; the following read logs the length). A query on
++ * another process has its own cap; a process querying itself gets at most
++ * N10_CSOPS_PER_PROC lines in one of N10_CSOPS_SLOTS per-caller slots.
++ */
++#define N10_CSOPS_SLOTS         64u
++#define N10_CSOPS_PER_PROC      4u
++#define N10_CSOPS_CROSS         64u
++static pid_t n10_csops_slot_pid[N10_CSOPS_SLOTS];
++static uint32_t n10_csops_slot_lines[N10_CSOPS_SLOTS];
++static uint32_t n10_csops_cross_lines;
++
++static bool
++n10_csops_trace_ok(pid_t caller, pid_t target, int error)
++{
++	if (caller == 1 || error == ERANGE) {
++		return false;
++	}
++	if (caller != target) {
++		return __atomic_fetch_add(&n10_csops_cross_lines, 1u, __ATOMIC_RELAXED) < N10_CSOPS_CROSS;
++	}
++	for (uint32_t i = 0; i < N10_CSOPS_SLOTS; i++) {
++		pid_t cur = 0;
++
++		if (!__atomic_compare_exchange_n(&n10_csops_slot_pid[i], &cur, caller, false,
++		    __ATOMIC_RELAXED, __ATOMIC_RELAXED) && cur != caller) {
++			continue;       /* slot owned by another pid */
++		}
++		return __atomic_fetch_add(&n10_csops_slot_lines[i], 1u, __ATOMIC_RELAXED) < N10_CSOPS_PER_PROC;
++	}
++	return false;
++}
+ 
+ /*
+  * Note10 (v390): AMFI is not loaded and CS_SIGNED/CS_VALID are never set on
+@@ -3756,7 +3789,7 @@ n10_csops_signature(proc_t pt, int ops, user_size_t usize, user_addr_t uaddr)
+ 		}
+ 	}
+ 
+-	if (__atomic_fetch_add(&n10_csops_lines, 1u, __ATOMIC_RELAXED) < N10_CSOPS_LINES) {
++	if (n10_csops_trace_ok(proc_getpid(current_proc()), proc_getpid(pt), error)) {
+ 		n10_dsslog_trace("N390S %s op=%d pid=%d %s len=%u err=%d", current_proc()->p_comm, ops,
+ 		    proc_getpid(pt), pt->p_comm, (unsigned int)length, error);
+ 	}
+diff --git a/iokit/Kernel/NoteFramebuffer.cpp b/iokit/Kernel/NoteFramebuffer.cpp
+new file mode 100644
+index 0000000..258ac40
+--- /dev/null
++++ b/iokit/Kernel/NoteFramebuffer.cpp
+@@ -0,0 +1,315 @@
++/*
++ * Built-in IOMobileFramebuffer for the Note10+ main display (v391).
++ *
++ * v390: SpringBoard stopped at "failed to find the main CADisplay" and
++ * IOMFB_FDR_Loader / backboardd found no IOMobileFramebuffer service.
++ * iOS 16.7.16 IOMobileFramebuffer.framework (unslid) enumerates displays as:
++ *   - IOMobileFramebufferCreateDisplayList (0x1af229880, once block
++ *     0x1af229980) counts the children of IODeviceTree:/arm-io whose
++ *     device_type is "display-subsystem" (or "ext-display-subsystem", or
++ *     compatible "paravirtualizedgraphics,gpu") as the expected display count
++ *     and only when that count is above the number found so far does it run
++ *     iomfb_populate_thread, which arms the IOServiceFirstMatch notification on
++ *     IOServiceMatching("IOMobileFramebuffer") (0x1af2241d8). With no such
++ *     node the list stays empty, so a display node is added to the device-tree
++ *     plane here (software registry entry only).
++ *   - iomfb_match_callback (0x1af22b9b8): a matched service without the
++ *     "dfr", "AppleTV" and "external" booleans becomes the main display
++ *     "primary".
++ *   - IOMobileFramebufferOpen (0x1af2267dc): IOServiceOpen only; every API is
++ *     then one user-client selector (vtable from 0x1af226a00), e.g.
++ *     8 GetDisplaySize (0 in, 2 scalars out), 3 GetLayerDefaultSurface (2 in,
++ *     1 out = IOSurface id), 7 GetID (1 out), 0x1c GetDotPitch (1 out),
++ *     0x1d GetDisplayArea (8-byte struct out), 4 SwapBegin (1 out = swap id),
++ *     5 SwapEnd (0x46c-byte struct in), 6 SwapWait (3 in).
++ *
++ * This service answers with a fixed 1440x3040 panel description. Swaps are
++ * accepted and dropped: no buffer is scanned out, no display controller
++ * (DECON/DSIM) register, MMIO or interrupt is touched, and there is no
++ * IOSurface provider in this kernel, so GetLayerDefaultSurface fails with
++ * kIOReturnUnsupported. Other selectors succeed with zeroed outputs. The
++ * first call of each selector and every open/notification port registration
++ * is logged (N391F) into the dss ring.
++ */
++#include <pexpert/arm64/board_config.h>
++
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++
++#include <IOKit/IOService.h>
++#include <IOKit/IOUserClient.h>
++#include <IOKit/IOKitKeys.h>
++#include <IOKit/IOLib.h>
++#include <IOKit/IOMemoryDescriptor.h>
++#include <IOKit/IODeviceTreeSupport.h>
++#include <libkern/c++/OSData.h>
++#include <libkern/c++/OSNumber.h>
++#include <sys/proc.h>
++
++/* osfmk/arm64/note10/n10_dsslog.c (v376): one bounded line into the dss log ring. */
++extern "C" void n10_dsslog_trace(const char *fmt, ...) __printflike(1, 2);
++extern "C" void n10_iomfb_publish(void);
++
++#define N10_FB_WIDTH            1440u
++#define N10_FB_HEIGHT           3040u
++#define N10_FB_DOT_PITCH        498u            /* pixels per inch, 6.8" 1440x3040 */
++#define N10_FB_DISPLAY_ID       1u
++#define N10_FB_LINES            96u
++
++enum {
++	kN10FBGetLayerDefaultSurface = 3,
++	kN10FBSwapBegin              = 4,
++	kN10FBGetID                  = 7,
++	kN10FBGetDisplaySize         = 8,
++	kN10FBGetDotPitch            = 0x1c,
++};
++
++static uint32_t n10_fb_lines;
++static uint32_t n10_fb_seen[4];                 /* selectors 0..127 already logged */
++static uint32_t n10_fb_swap_id;
++
++static bool
++n10_fb_trace_ok(uint32_t selector)
++{
++	if (selector < 128) {
++		uint32_t bit = 1u << (selector & 31);
++		if (__atomic_fetch_or(&n10_fb_seen[selector >> 5], bit, __ATOMIC_RELAXED) & bit) {
++			return false;
++		}
++	}
++	return __atomic_fetch_add(&n10_fb_lines, 1u, __ATOMIC_RELAXED) < N10_FB_LINES;
++}
++
++class IOMobileFramebuffer : public IOService {
++	OSDeclareDefaultStructors(IOMobileFramebuffer);
++
++public:
++	bool start(IOService *provider) APPLE_KEXT_OVERRIDE;
++};
++
++OSDefineMetaClassAndStructors(IOMobileFramebuffer, IOService);
++
++bool
++IOMobileFramebuffer::start(IOService *provider)
++{
++	if (!IOService::start(provider)) {
++		return false;
++	}
++	setProperty(kIOUserClientClassKey, "IOMobileFramebufferUserClient");
++	setProperty("external", false);
++	setProperty("DisplayWidth", N10_FB_WIDTH, 32);
++	setProperty("DisplayHeight", N10_FB_HEIGHT, 32);
++	registerService();
++	return true;
++}
++
++class IOMobileFramebufferUserClient : public IOUserClient {
++	OSDeclareDefaultStructors(IOMobileFramebufferUserClient);
++
++	mach_port_t notifyPort;
++
++public:
++	using IOUserClient::registerNotificationPort;
++	bool start(IOService *provider) APPLE_KEXT_OVERRIDE;
++	IOReturn clientClose(void) APPLE_KEXT_OVERRIDE;
++	IOReturn registerNotificationPort(mach_port_t port, UInt32 type, UInt32 refCon) APPLE_KEXT_OVERRIDE;
++	IOReturn externalMethod(uint32_t selector, IOExternalMethodArguments *args,
++	    IOExternalMethodDispatch *dispatch, OSObject *target,
++	    void *reference) APPLE_KEXT_OVERRIDE;
++};
++
++OSDefineMetaClassAndStructors(IOMobileFramebufferUserClient, IOUserClient);
++
++bool
++IOMobileFramebufferUserClient::start(IOService *provider)
++{
++	if (!IOUserClient::start(provider)) {
++		return false;
++	}
++	notifyPort = NULL;
++	if (__atomic_fetch_add(&n10_fb_lines, 1u, __ATOMIC_RELAXED) < N10_FB_LINES) {
++		char name[32];
++		proc_selfname(name, sizeof(name));
++		n10_dsslog_trace("N391F open %s", name);
++	}
++	return true;
++}
++
++IOReturn
++IOMobileFramebufferUserClient::clientClose(void)
++{
++	if (notifyPort != NULL) {
++		releaseNotificationPort(notifyPort);
++		notifyPort = NULL;
++	}
++	terminate();
++	return kIOReturnSuccess;
++}
++
++/* VSync / hot-plug / power notification ports: kept, no event is ever sent. */
++IOReturn
++IOMobileFramebufferUserClient::registerNotificationPort(mach_port_t port, UInt32 type, UInt32 refCon)
++{
++	if (notifyPort != NULL) {
++		releaseNotificationPort(notifyPort);
++	}
++	notifyPort = port;
++	if (__atomic_fetch_add(&n10_fb_lines, 1u, __ATOMIC_RELAXED) < N10_FB_LINES) {
++		char name[32];
++		proc_selfname(name, sizeof(name));
++		n10_dsslog_trace("N391F notify %s type=%u ref=0x%x", name, (unsigned int)type, (unsigned int)refCon);
++	}
++	return kIOReturnSuccess;
++}
++
++/* Zero the caller's structure output (inband or descriptor), keeping its size. */
++static void
++n10_fb_zero_struct_out(IOExternalMethodArguments *args)
++{
++	if (args->structureOutputDescriptor != NULL) {
++		static const uint8_t zero[256] = { 0 };
++		IOMemoryDescriptor *md = args->structureOutputDescriptor;
++		IOByteCount len = md->getLength();
++
++		if (md->prepare() == kIOReturnSuccess) {
++			for (IOByteCount off = 0; off < len; off += sizeof(zero)) {
++				md->writeBytes(off, zero, (len - off) < sizeof(zero) ? (len - off) : sizeof(zero));
++			}
++			md->complete();
++		}
++		args->structureOutputDescriptorSize = (uint32_t)len;
++	} else if (args->structureOutput != NULL && args->structureOutputSize != 0) {
++		bzero(args->structureOutput, args->structureOutputSize);
++	}
++}
++
++IOReturn
++IOMobileFramebufferUserClient::externalMethod(uint32_t selector, IOExternalMethodArguments *args,
++    __unused IOExternalMethodDispatch *dispatch, __unused OSObject *target,
++    __unused void *reference)
++{
++	IOReturn ret = kIOReturnSuccess;
++	uint32_t in_scalars = args->scalarInputCount;
++	uint32_t in_struct = args->structureInputDescriptor != NULL ?
++	    (uint32_t)args->structureInputDescriptor->getLength() : args->structureInputSize;
++	uint32_t out_scalars = args->scalarOutputCount;
++	uint32_t out_struct = args->structureOutputDescriptor != NULL ?
++	    (uint32_t)args->structureOutputDescriptor->getLength() : args->structureOutputSize;
++
++	for (uint32_t i = 0; i < out_scalars; i++) {
++		args->scalarOutput[i] = 0;
++	}
++	n10_fb_zero_struct_out(args);
++
++	switch (selector) {
++	case kN10FBGetLayerDefaultSurface:
++		ret = kIOReturnUnsupported;     /* no IOSurface provider */
++		break;
++	case kN10FBSwapBegin:
++		if (out_scalars >= 1) {
++			args->scalarOutput[0] = __atomic_add_fetch(&n10_fb_swap_id, 1u, __ATOMIC_RELAXED);
++		}
++		break;
++	case kN10FBGetID:
++		if (out_scalars >= 1) {
++			args->scalarOutput[0] = N10_FB_DISPLAY_ID;
++		}
++		break;
++	case kN10FBGetDisplaySize:
++		if (out_scalars >= 2) {
++			args->scalarOutput[0] = N10_FB_WIDTH;
++			args->scalarOutput[1] = N10_FB_HEIGHT;
++		} else {
++			ret = kIOReturnBadArgument;
++		}
++		break;
++	case kN10FBGetDotPitch:
++		if (out_scalars >= 1) {
++			args->scalarOutput[0] = N10_FB_DOT_PITCH;
++		}
++		break;
++	default:
++		break;
++	}
++
++	if (n10_fb_trace_ok(selector)) {
++		char name[32];
++		proc_selfname(name, sizeof(name));
++		n10_dsslog_trace("N391F %s sel=%u in=%u/%u out=%u/%u ret=0x%x", name, selector,
++		    in_scalars, in_struct, out_scalars, out_struct, ret);
++	}
++	return ret;
++}
++
++/* One device-tree plane entry with a name and string properties. */
++static IORegistryEntry *
++n10_fb_dt_node(IORegistryEntry *parent, const char *name, const char *device_type)
++{
++	IORegistryEntry *node = OSTypeAlloc(IORegistryEntry);
++
++	if (node == NULL || !node->init()) {
++		OSSafeReleaseNULL(node);
++		return NULL;
++	}
++	node->setName(name);
++	OSData *d = OSData::withBytes(name, (unsigned int)strlen(name) + 1);
++	if (d != NULL) {
++		node->setProperty("name", d);
++		d->release();
++	}
++	if (device_type != NULL) {
++		d = OSData::withBytes(device_type, (unsigned int)strlen(device_type) + 1);
++		if (d != NULL) {
++			node->setProperty("device_type", d);
++			d->release();
++		}
++	}
++	if (!node->attachToParent(parent, gIODTPlane)) {
++		OSSafeReleaseNULL(node);
++	}
++	return node;
++}
++
++/*
++ * Called once from IOKitBSDInit: the display-subsystem node under
++ * IODeviceTree:/arm-io (arm-io itself only when the boot device tree has
++ * none), then the IOMobileFramebuffer service on IOResources.
++ */
++extern "C" void
++n10_iomfb_publish(void)
++{
++	int armio_state = 0;            /* 1 found, 2 created, 0 none */
++	bool disp = false, fb_ok = false;
++	IORegistryEntry *armio = IORegistryEntry::fromPath("/arm-io", gIODTPlane);
++
++	if (armio != NULL) {
++		armio_state = 1;
++	} else {
++		IORegistryEntry *root = IORegistryEntry::fromPath("/", gIODTPlane);
++		if (root != NULL) {
++			armio = n10_fb_dt_node(root, "arm-io", NULL);
++			armio_state = armio != NULL ? 2 : 0;
++			root->release();
++		}
++	}
++	if (armio != NULL) {
++		IORegistryEntry *node = n10_fb_dt_node(armio, "disp0", "display-subsystem");
++		disp = node != NULL;
++		OSSafeReleaseNULL(node);
++		armio->release();
++	}
++
++	IOService *resources = IOService::getResourceService();
++	IOMobileFramebuffer *fb = OSTypeAlloc(IOMobileFramebuffer);
++	if (fb != NULL && resources != NULL && fb->init() && fb->attach(resources)) {
++		fb_ok = fb->start(resources);
++		if (!fb_ok) {
++			fb->detach(resources);
++		}
++	}
++	OSSafeReleaseNULL(fb);
++
++	n10_dsslog_trace("N391F publish arm-io=%d disp=%d fb=%d %ux%u", armio_state, (int)disp, (int)fb_ok,
++	    N10_FB_WIDTH, N10_FB_HEIGHT);
++}
++
++#endif /* ARM64_BOARD_CONFIG_EXYNOS9825 */
+diff --git a/iokit/bsddev/IOKitBSDInit.cpp b/iokit/bsddev/IOKitBSDInit.cpp
+index 54756eb..a4b8673 100644
+--- a/iokit/bsddev/IOKitBSDInit.cpp
++++ b/iokit/bsddev/IOKitBSDInit.cpp
+@@ -113,10 +113,18 @@ thread_call_t corefile_open_call = NULL;
+ SECURITY_READ_ONLY_LATE(const char*) kdp_corefile_path = kIOCoreDumpPath;
+ #endif
+ 
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++/* iokit/Kernel/NoteFramebuffer.cpp (v391): built-in IOMobileFramebuffer for the main display. */
++extern "C" void n10_iomfb_publish(void);
++#endif
++
+ kern_return_t
+ IOKitBSDInit( void )
+ {
+ 	IOService::publishResource("IOBSD");
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	n10_iomfb_publish();
++#endif
+ 
+ #if IOPOLLED_COREFILE
+ 	corefile_open_call = thread_call_allocate_with_options(IOOpenPolledCoreFile, NULL, THREAD_CALL_PRIORITY_KERNEL, THREAD_CALL_OPTIONS_ONCE);
+diff --git a/iokit/conf/files b/iokit/conf/files
+index c72c690..3a66347 100644
+--- a/iokit/conf/files
++++ b/iokit/conf/files
+@@ -94,6 +94,7 @@ iokit/Kernel/IOInterruptController.cpp			optional iokitcpp
+ iokit/Kernel/PassthruInterruptController.cpp		optional iokitcpp
+ 
+ iokit/Kernel/IOUserClient.cpp				optional iokitcpp
++iokit/Kernel/NoteFramebuffer.cpp			optional iokitcpp
+ 
+ iokit/Kernel/IOKitDebug.cpp				optional iokitcpp
+ iokit/Kernel/IODataQueue.cpp				optional iokitcpp
+diff --git a/security/mac_base.c b/security/mac_base.c
+index 3f45c3f..376dea3 100644
+--- a/security/mac_base.c
++++ b/security/mac_base.c
+@@ -1564,6 +1564,8 @@ mac_proc_check_mac_syscall(proc_t p, const char *target, int callnum)
+ #define N10_MACP_MAX            48u
+ extern void n10_dsslog_trace(const char *fmt, ...) __printflike(1, 2);
+ static uint32_t n10_macp_lines;
++#define N10_SBX_MAX             48u
++static uint32_t n10_sbx_lines;
+ #endif
+ 
+ int
+@@ -1621,6 +1623,22 @@ __mac_syscall(proc_t p, struct __mac_syscall_args *uap, int *retv __unused)
+ 
+ done:
+ #if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	/*
++	 * Note10 (v391): libsystem_sandbox sandbox_check*() issue
++	 * __mac_syscall("Sandbox", 2, args) and return -1 on any error, which
++	 * callers read as "denied" / "sandboxed": launchd refused lookups of
++	 * sandboxed services (v390 lsd mapdb: error 159 "Sandbox restriction"),
++	 * containermanagerd's container_client_is_sandboxed() is true for every
++	 * client. No Sandbox policy is registered in this kernel, so answer the
++	 * check call as allowed: return 0 and leave the caller's result word as
++	 * userland initialised it (0). One N391K line each, cap N10_SBX_MAX.
++	 */
++	if (error == ENOPOLICY && uap->call == 2 && strcmp(target, "Sandbox") == 0) {
++		error = 0;
++		if (__atomic_fetch_add(&n10_sbx_lines, 1u, __ATOMIC_RELAXED) < N10_SBX_MAX) {
++			n10_dsslog_trace("N391K pid=%d %.16s sandbox check allowed", proc_getpid(p), p->p_comm);
++		}
++	}
+ 	/*
+ 	 * Note10 (v379): which policy/call returns ENOPOLICY (no MAC policy is
+ 	 * registered in this kernel). First N10_MACP_MAX lines into the dss ring

@@ -112,6 +112,10 @@ OVERLAY = (
     ('0056-exynos9825-n10-csops-signature-psynch-rwlock.patch',
      '5eedf503e0473325b0e53c7f6b3bed036db6e53b3e7ed94fb425a1f510bd6fff',
      ('bsd/kern/kern_proc.c', 'bsd/pthread/n10_psynch.c', 'bsd/pthread/pthread_shims.c')),
+    ('0057-exynos9825-n10-iomfb-display-sandbox-check-trace.patch',
+     'c761b69a7be63af679f4b15a34f2396c69d36caf3ecce23bbe4de70c6313d2bb',
+     ('bsd/dev/arm/systemcalls.c', 'bsd/kern/kern_proc.c', 'iokit/Kernel/NoteFramebuffer.cpp',
+      'iokit/bsddev/IOKitBSDInit.cpp', 'iokit/conf/files', 'security/mac_base.c')),
 )
 STAGED_DIRS = ('bsd/n10_hfs/core', 'bsd/n10_hfs/hfs_encodings')
 
