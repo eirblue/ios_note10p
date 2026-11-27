@@ -1,0 +1,613 @@
+diff --git a/iokit/Kernel/NoteFramebuffer.cpp b/iokit/Kernel/NoteFramebuffer.cpp
+index 7c6fb22..a303a8b 100644
+--- a/iokit/Kernel/NoteFramebuffer.cpp
++++ b/iokit/Kernel/NoteFramebuffer.cpp
+@@ -60,6 +60,33 @@
+  * entries that mirror /etc/fstab. Existing nodes are kept as they are (no
+  * property is overwritten). Registry entries only: no hardware access. One
+  * "N395D" line.
++ *
++ * v396: v395 showed backboardd stop after IOMFB selectors 12, 6, 27, 17, 84,
++ * 50 and the registry lookups of AGXAccelerator and the service name
++ * IOCoreSurfaceRoot (N389I), with no swap ever (N392F sb = se = 0). iOS
++ * 16.7.16 IOSurface.framework _iosConnectInitalize (0x1a3983ca0) looks up
++ * IOServiceNameMatching("IOCoreSurfaceRoot") and, while it is missing, sleeps
++ * one second and retries up to 241 times before IOSurfaceCreate fails
++ * ("IOSurface service not present"): CoreAnimation's render server in
++ * backboardd blocks there for longer than the whole 120 s run. A plain
++ * IOService instance named IOCoreSurfaceRoot (no new class: __DATA_CONST holds
++ * the chain table caves) now opens the existing IOMobileFramebufferUserClient
++ * class, which serves the IOSurface user-client ABI of that framework when its
++ * provider is the surface root: selector 13 limits (0x18 bytes, version 1),
++ * 0 create (binary-serialized properties in, 0xa68-byte surface record out),
++ * 4 lookup (map an existing surface into the caller), traps 2/3 lock/unlock
++ * and 4/5 release (getTargetAndTrapForIndex override, same vtable size).
++ * Surface memory is ordinary pageable kernel memory (IOBufferMemoryDescriptor,
++ * kIOMemoryKernelUserShared) mapped into the caller with one zeroed shared
++ * page after it (the record's second pointer: seed / flags page), 64-byte row
++ * and plane alignment, at most 128 MiB per surface and 192 MiB live in total;
++ * mappings are dropped on release and when the client closes. Other
++ * selectors answer success with zeroed outputs, except value / mach-port
++ * reads (10, 26, 34, 35: unsupported). No Metal device: QuartzCore keeps its
++ * software renderer path ("Failed to initialize Metal or OpenGLES contexts!").
++ * No register, MMIO, interrupt or DMA. Trace: N396R publish, N396O open,
++ * N396S first call of each selector and every failure, N396C each create,
++ * N396T first lock / release trap and failures (shared cap 128).
+  */
+ #include <pexpert/arm64/board_config.h>
+ 
+@@ -73,6 +100,11 @@
+ #include <IOKit/IODeviceTreeSupport.h>
+ #include <libkern/c++/OSData.h>
+ #include <libkern/c++/OSNumber.h>
++#include <libkern/c++/OSArray.h>
++#include <libkern/c++/OSDictionary.h>
++#include <libkern/c++/OSUnserialize.h>
++#include <IOKit/IOBufferMemoryDescriptor.h>
++#include <kern/task.h>
+ #include <sys/proc.h>
+ 
+ /* osfmk/arm64/note10/n10_dsslog.c (v376): one bounded line into the dss log ring. */
+@@ -195,10 +227,475 @@ public:
+ 	IOReturn externalMethod(uint32_t selector, IOExternalMethodArguments *args,
+ 	    IOExternalMethodDispatch *dispatch, OSObject *target,
+ 	    void *reference) APPLE_KEXT_OVERRIDE;
++	IOExternalTrap *getTargetAndTrapForIndex(IOService **targetP, UInt32 index) APPLE_KEXT_OVERRIDE;
++	IOReturn n10SurfLock(void *p1, void *p2, void *p3, void *p4, void *p5, void *p6);
++	IOReturn n10SurfRelease(void *p1, void *p2, void *p3, void *p4, void *p5, void *p6);
+ };
+ 
+ OSDefineMetaClassAndStructors(IOMobileFramebufferUserClient, IOUserClient);
+ 
++/*
++ * v396 IOSurface root (see the header comment). Record offsets follow the
++ * iOS 16.7.16 IOSurface.framework accessors (client object = 0x68-byte header
++ * + this record): +0x00 base address, +0x08 shared page, +0x18 id, +0x1c
++ * alloc size, +0x20 width, +0x24 height, +0x28 bytes per row, +0x30 pixel
++ * format, +0x38 plane count, +0x40 bytes per element (16 bit), +0x42/+0x43
++ * element width/height, +0x44 cache mode; plane i at 0x68 + 0x80 * i: +0x00
++ * width, +0x04 height, +0x0c offset, +0x10 bytes per row, +0x14 size, +0x18
++ * bytes per element (16 bit), +0x1a/+0x1b element width/height.
++ */
++#define N10_SURF_MAX            128u
++#define N10_SURF_MAPS           256u
++#define N10_SURF_PLANES         4u
++#define N10_SURF_OUT            0xa68u
++#define N10_SURF_DIM            16384u
++#define N10_SURF_ONE            (128ull << 20)
++#define N10_SURF_ALL            (192ull << 20)
++#define N10_SURF_IN_MAX         (1u << 20)
++#define N10_SURF_LINES          128u
++
++struct n10_surf {
++	IOBufferMemoryDescriptor *md;           /* NULL: free slot */
++	uint64_t bytes;                         /* md length (surface + shared page) */
++	uint32_t id, alloc, w, h, bpr, pf, planes, cache, bpe, ew, eh;
++	uint32_t pl[N10_SURF_PLANES][8];        /* w, h, offset, bpr, size, bpe, ew, eh */
++};
++
++struct n10_surf_map {
++	IOMemoryMap *map;                       /* NULL: free entry */
++	void *client;
++	uint32_t slot, refs;
++};
++
++static IOService *n10_surf_root;
++static IOLock *n10_surf_lock;
++static struct n10_surf *n10_surfs;
++static struct n10_surf_map *n10_surf_maps;
++static uint64_t n10_surf_bytes;
++static uint32_t n10_surf_next_id, n10_surf_lines, n10_surf_live;
++static uint32_t n10_surf_seen[2];               /* selectors 0..61, 62 lock trap, 63 release trap */
++static IOExternalTrap n10_surf_traps[4];        /* trap index 2..5, filled once at publish */
++
++/* One N396 line allowed: bit < 64 only the first time unless always; shared cap. */
++static bool
++n10_surf_trace_ok(uint32_t bit, bool always)
++{
++	if (!always && bit < 64) {
++		uint32_t m = 1u << (bit & 31);
++		if (__atomic_fetch_or(&n10_surf_seen[bit >> 5], m, __ATOMIC_RELAXED) & m) {
++			return false;
++		}
++	}
++	return __atomic_fetch_add(&n10_surf_lines, 1u, __ATOMIC_RELAXED) < N10_SURF_LINES;
++}
++
++static uint32_t
++n10_surf_num(OSDictionary *d, const char *key)
++{
++	OSNumber *n = d != NULL ? OSDynamicCast(OSNumber, d->getObject(key)) : NULL;
++
++	return n != NULL ? n->unsigned32BitValue() : 0;
++}
++
++static uint32_t
++n10_surf_num1(OSDictionary *d, const char *key)
++{
++	uint32_t v = n10_surf_num(d, key);
++
++	return v != 0 ? v : 1;
++}
++
++/* Row bytes: at least the requested value, at least ceil(w / ew) * bpe rounded up to 64. */
++static uint64_t
++n10_surf_row(uint32_t w, uint32_t ew, uint32_t bpe, uint32_t bpr)
++{
++	uint64_t row = (((uint64_t)w + ew - 1) / ew * bpe + 63) & ~63ull;
++
++	return bpr > row ? bpr : row;
++}
++
++static void
++n10_put32(uint8_t *o, uint32_t off, uint32_t v)
++{
++	memcpy(o + off, &v, sizeof(v));
++}
++
++static void
++n10_surf_fill(uint8_t *o, const struct n10_surf *s, uint64_t base)
++{
++	uint64_t shared = base + s->alloc;
++	uint16_t bpe = (uint16_t)s->bpe;
++
++	bzero(o, N10_SURF_OUT);
++	memcpy(o + 0x00, &base, sizeof(base));
++	memcpy(o + 0x08, &shared, sizeof(shared));
++	n10_put32(o, 0x18, s->id);
++	n10_put32(o, 0x1c, s->alloc);
++	n10_put32(o, 0x20, s->w);
++	n10_put32(o, 0x24, s->h);
++	n10_put32(o, 0x28, s->bpr);
++	n10_put32(o, 0x30, s->pf);
++	n10_put32(o, 0x38, s->planes);
++	memcpy(o + 0x40, &bpe, sizeof(bpe));
++	o[0x42] = (uint8_t)s->ew;
++	o[0x43] = (uint8_t)s->eh;
++	n10_put32(o, 0x44, s->cache);
++	for (uint32_t i = 0; i < s->planes; i++) {
++		uint8_t *q = o + 0x68 + 0x80 * i;
++		bpe = (uint16_t)s->pl[i][5];
++		n10_put32(q, 0x00, s->pl[i][0]);
++		n10_put32(q, 0x04, s->pl[i][1]);
++		n10_put32(q, 0x0c, s->pl[i][2]);
++		n10_put32(q, 0x10, s->pl[i][3]);
++		n10_put32(q, 0x14, s->pl[i][4]);
++		memcpy(q + 0x18, &bpe, sizeof(bpe));
++		q[0x1a] = (uint8_t)s->pl[i][6];
++		q[0x1b] = (uint8_t)s->pl[i][7];
++	}
++}
++
++/* Slot of a live surface id, N10_SURF_MAX when none (lock held). */
++static uint32_t
++n10_surf_find(uint32_t id)
++{
++	for (uint32_t k = 0; k < N10_SURF_MAX; k++) {
++		if (n10_surfs[k].md != NULL && n10_surfs[k].id == id) {
++			return k;
++		}
++	}
++	return N10_SURF_MAX;
++}
++
++/* The client's mapping of slot k in the calling task, one reference more (lock held). */
++static IOMemoryMap *
++n10_surf_map_get(void *client, uint32_t k)
++{
++	struct n10_surf_map *f = NULL;
++
++	for (uint32_t i = 0; i < N10_SURF_MAPS; i++) {
++		struct n10_surf_map *m = &n10_surf_maps[i];
++		if (m->map != NULL && m->client == client && m->slot == k) {
++			m->refs++;
++			return m->map;
++		}
++		if (m->map == NULL && f == NULL) {
++			f = m;
++		}
++	}
++	if (f == NULL) {
++		return NULL;
++	}
++	IOMemoryMap *map = n10_surfs[k].md->createMappingInTask(current_task(), 0, kIOMapAnywhere);
++	if (map != NULL) {
++		f->map = map;
++		f->client = client;
++		f->slot = k;
++		f->refs = 1;
++	}
++	return map;
++}
++
++/*
++ * Drop one reference of the client's mapping of slot k (every reference when
++ * all); the surface memory goes with its last mapping (lock held).
++ */
++static void
++n10_surf_unmap(void *client, uint32_t k, bool all)
++{
++	bool used = false;
++
++	for (uint32_t i = 0; i < N10_SURF_MAPS; i++) {
++		struct n10_surf_map *m = &n10_surf_maps[i];
++		if (m->map == NULL || m->slot != k) {
++			continue;
++		}
++		if (m->client == client && (all || --m->refs == 0)) {
++			m->map->release();
++			m->map = NULL;
++			m->client = NULL;
++			continue;
++		}
++		used = true;
++	}
++	if (!used && n10_surfs[k].md != NULL) {
++		n10_surf_bytes -= n10_surfs[k].bytes;
++		n10_surf_live--;
++		n10_surfs[k].md->release();
++		n10_surfs[k].md = NULL;
++	}
++}
++
++/* Selector 0: lay out, allocate and map a surface; record into out (takes the lock). */
++static IOReturn
++n10_surf_create(void *client, OSDictionary *d, uint8_t *out, struct n10_surf *s)
++{
++	OSArray *pi = OSDynamicCast(OSArray, d->getObject("IOSurfacePlaneInfo"));
++	uint32_t req = n10_surf_num(d, "IOSurfaceAllocSize");
++	uint64_t end = 0;
++
++	s->w = n10_surf_num(d, "IOSurfaceWidth");
++	s->h = n10_surf_num(d, "IOSurfaceHeight");
++	s->bpe = n10_surf_num1(d, "IOSurfaceBytesPerElement");
++	s->ew = n10_surf_num1(d, "IOSurfaceElementWidth");
++	s->eh = n10_surf_num1(d, "IOSurfaceElementHeight");
++	s->bpr = n10_surf_num(d, "IOSurfaceBytesPerRow");
++	s->pf = n10_surf_num(d, "IOSurfacePixelFormat");
++	s->cache = n10_surf_num(d, "IOSurfaceCacheMode");
++	s->planes = pi != NULL ? pi->getCount() : 0;
++	if (s->w > N10_SURF_DIM || s->h > N10_SURF_DIM || s->bpe > 0xffffu || s->ew > 0xffu || s->eh > 0xffu ||
++	    s->planes > N10_SURF_PLANES) {
++		return kIOReturnBadArgument;
++	}
++	for (uint32_t i = 0; i < s->planes; i++) {
++		OSDictionary *p = OSDynamicCast(OSDictionary, pi->getObject(i));
++		uint32_t *q = s->pl[i];
++		q[0] = n10_surf_num(p, "IOSurfacePlaneWidth");
++		q[1] = n10_surf_num(p, "IOSurfacePlaneHeight");
++		q[5] = n10_surf_num1(p, "IOSurfacePlaneBytesPerElement");
++		q[6] = n10_surf_num1(p, "IOSurfacePlaneElementWidth");
++		q[7] = n10_surf_num1(p, "IOSurfacePlaneElementHeight");
++		if (p == NULL || q[0] > N10_SURF_DIM || q[1] > N10_SURF_DIM || q[5] > 0xffffu || q[6] > 0xffu || q[7] > 0xffu) {
++			return kIOReturnBadArgument;
++		}
++		uint64_t row = n10_surf_row(q[0], q[6], q[5], n10_surf_num(p, "IOSurfacePlaneBytesPerRow"));
++		uint64_t size = row * ((q[1] + q[7] - 1) / q[7]);
++		uint64_t off = (end + 63) & ~63ull;
++		uint32_t want_off = n10_surf_num(p, "IOSurfacePlaneOffset");
++		uint32_t want_size = n10_surf_num(p, "IOSurfacePlaneSize");
++		if (want_off > off) {
++			off = want_off;
++		}
++		if (want_size > size) {
++			size = want_size;
++		}
++		if (row > N10_SURF_ONE || size > N10_SURF_ONE || off > N10_SURF_ONE) {
++			return kIOReturnBadArgument;
++		}
++		q[2] = (uint32_t)off;
++		q[3] = (uint32_t)row;
++		q[4] = (uint32_t)size;
++		end = off + size;
++	}
++	if (s->planes == 0) {
++		uint64_t row = n10_surf_row(s->w, s->ew, s->bpe, s->bpr);
++		if (row > N10_SURF_ONE) {
++			return kIOReturnBadArgument;
++		}
++		s->bpr = (uint32_t)row;
++		end = row * ((s->h + s->eh - 1) / s->eh);
++	}
++	if (req > end) {
++		end = req;
++	}
++	end = (end + page_size - 1) & ~((uint64_t)page_size - 1);
++	if (end == 0 || end > N10_SURF_ONE) {
++		return kIOReturnBadArgument;
++	}
++	s->alloc = (uint32_t)end;
++	s->bytes = end + page_size;
++
++	IOReturn ret = kIOReturnNoResources;
++	uint32_t k = 0;
++	IOLockLock(n10_surf_lock);
++	while (k < N10_SURF_MAX && n10_surfs[k].md != NULL) {
++		k++;
++	}
++	if (k < N10_SURF_MAX && n10_surf_bytes + s->bytes <= N10_SURF_ALL) {
++		s->md = IOBufferMemoryDescriptor::withOptions(kIODirectionInOut | kIOMemoryKernelUserShared,
++		    (vm_size_t)s->bytes, page_size);
++		ret = kIOReturnNoMemory;
++		if (s->md != NULL) {
++			bzero((uint8_t *)s->md->getBytesNoCopy() + s->alloc, page_size);
++			if (++n10_surf_next_id == 0) {
++				n10_surf_next_id = 1;
++			}
++			s->id = n10_surf_next_id;
++			n10_surfs[k] = *s;
++			n10_surf_bytes += s->bytes;
++			n10_surf_live++;
++			IOMemoryMap *map = n10_surf_map_get(client, k);
++			if (map != NULL) {
++				n10_surf_fill(out, s, map->getAddress());
++				ret = kIOReturnSuccess;
++			} else {
++				n10_surf_unmap(client, k, true);
++			}
++		}
++	}
++	IOLockUnlock(n10_surf_lock);
++	return ret;
++}
++
++/* Struct input of a call: inband or descriptor (copied); *own set when the buffer must be freed. */
++static const char *
++n10_surf_in(IOExternalMethodArguments *args, uint32_t *len, bool *own)
++{
++	*own = false;
++	if (args->structureInputDescriptor == NULL) {
++		*len = args->structureInputSize;
++		return (const char *)args->structureInput;
++	}
++	IOMemoryDescriptor *md = args->structureInputDescriptor;
++	IOByteCount n = md->getLength();
++	char *buf = n != 0 && n <= N10_SURF_IN_MAX ? (char *)IOMallocData(n) : NULL;
++	if (buf == NULL || md->prepare() != kIOReturnSuccess) {
++		if (buf != NULL) {
++			IOFreeData(buf, n);
++		}
++		*len = 0;
++		return NULL;
++	}
++	md->readBytes(0, buf, n);
++	md->complete();
++	*len = (uint32_t)n;
++	*own = true;
++	return buf;
++}
++
++/* Copy len bytes to the struct output (inband or descriptor); false when it is smaller. */
++static bool
++n10_surf_out(IOExternalMethodArguments *args, const void *buf, uint32_t len)
++{
++	if (args->structureOutputDescriptor != NULL) {
++		IOMemoryDescriptor *md = args->structureOutputDescriptor;
++		if (md->getLength() < len || md->prepare() != kIOReturnSuccess) {
++			return false;
++		}
++		md->writeBytes(0, buf, len);
++		md->complete();
++		args->structureOutputDescriptorSize = len;
++		return true;
++	}
++	if (args->structureOutput == NULL || args->structureOutputSize < len) {
++		return false;
++	}
++	memcpy(args->structureOutput, buf, len);
++	args->structureOutputSize = len;
++	return true;
++}
++
++/* The IOSurface user-client selectors (provider = n10_surf_root). */
++static IOReturn
++n10_surf_method(void *client, uint32_t selector, IOExternalMethodArguments *args)
++{
++	IOReturn ret = kIOReturnSuccess;
++	uint32_t in_len = 0, out_struct = args->structureOutputDescriptor != NULL ?
++	    (uint32_t)args->structureOutputDescriptor->getLength() : args->structureOutputSize;
++	struct n10_surf s;
++	char name[32];
++
++	bzero(&s, sizeof(s));
++	for (uint32_t i = 0; i < args->scalarOutputCount; i++) {
++		args->scalarOutput[i] = 0;
++	}
++	if (selector == 13) {
++		/* offset / row alignment masks, max row bytes, max width, max height, u16 0 + u16 version 1 */
++		uint32_t lim[6] = { 63, 63, 0x40000, N10_SURF_DIM, N10_SURF_DIM, 1u << 16 };
++		ret = n10_surf_out(args, lim, sizeof(lim)) ? kIOReturnSuccess : kIOReturnBadArgument;
++	} else if (selector == 0 || selector == 4) {
++		uint8_t *out = (uint8_t *)IOMallocZeroData(N10_SURF_OUT);
++		ret = kIOReturnNoMemory;
++		if (out != NULL && selector == 0) {
++			bool own = false;
++			const char *in = n10_surf_in(args, &in_len, &own);
++			OSObject *obj = in != NULL && in_len != 0 ? OSUnserializeXML(in, (size_t)in_len) : NULL;
++			OSDictionary *d = OSDynamicCast(OSDictionary, obj);
++			ret = d != NULL ? n10_surf_create(client, d, out, &s) : kIOReturnBadArgument;
++			OSSafeReleaseNULL(obj);
++			if (own) {
++				IOFreeData((void *)(uintptr_t)in, in_len);
++			}
++		} else if (out != NULL) {
++			ret = kIOReturnNotFound;
++			IOLockLock(n10_surf_lock);
++			uint32_t k = args->scalarInputCount >= 1 ? n10_surf_find((uint32_t)args->scalarInput[0]) : N10_SURF_MAX;
++			if (k < N10_SURF_MAX) {
++				IOMemoryMap *map = n10_surf_map_get(client, k);
++				s = n10_surfs[k];
++				ret = kIOReturnNoMemory;
++				if (map != NULL) {
++					n10_surf_fill(out, &s, map->getAddress());
++					ret = kIOReturnSuccess;
++				}
++			}
++			IOLockUnlock(n10_surf_lock);
++		}
++		if (ret == kIOReturnSuccess && !n10_surf_out(args, out, N10_SURF_OUT)) {
++			ret = kIOReturnBadArgument;     /* the mapping stays until release / close */
++		}
++		if (out != NULL) {
++			IOFreeData(out, N10_SURF_OUT);
++		}
++		if (selector == 0 && n10_surf_trace_ok(64, true)) {
++			proc_selfname(name, sizeof(name));
++			n10_dsslog_trace("N396C %s id=%u %ux%u bpe=%u bpr=%u pf=0x%x pl=%u alloc=%u live=%u ret=0x%x", name, s.id,
++			    s.w, s.h, s.bpe, s.bpr, s.pf, s.planes, s.alloc, __atomic_load_n(&n10_surf_live, __ATOMIC_RELAXED), ret);
++		}
++	} else if (selector == 10 || selector == 26 || selector == 34 || selector == 35) {
++		ret = kIOReturnUnsupported;     /* values / mach ports are not kept */
++	} else if (args->structureOutputDescriptor == NULL && args->structureOutput != NULL &&
++	    args->structureOutputSize != 0) {
++		bzero(args->structureOutput, args->structureOutputSize);
++	}
++
++	if (selector != 0 && n10_surf_trace_ok(selector < 62 ? selector : 61, ret != kIOReturnSuccess)) {
++		in_len = args->structureInputDescriptor != NULL ?
++		    (uint32_t)args->structureInputDescriptor->getLength() : args->structureInputSize;
++		proc_selfname(name, sizeof(name));
++		n10_dsslog_trace("N396S %s sel=%u in=%u/%u out=%u/%u ret=0x%x", name, selector, args->scalarInputCount,
++		    in_len, args->scalarOutputCount, out_struct, ret);
++	}
++	return ret;
++}
++
++IOExternalTrap *
++IOMobileFramebufferUserClient::getTargetAndTrapForIndex(IOService **targetP, UInt32 index)
++{
++	if (n10_surf_root == NULL || getProvider() != n10_surf_root || index < 2 || index > 5) {
++		return NULL;
++	}
++	*targetP = this;
++	return &n10_surf_traps[index - 2];
++}
++
++/* Traps 2 / 3 (lock / unlock: id, options, seed out): the framework zeroes the seed itself. */
++IOReturn
++IOMobileFramebufferUserClient::n10SurfLock(void *p1, __unused void *p2, __unused void *p3, __unused void *p4,
++    __unused void *p5, __unused void *p6)
++{
++	IOLockLock(n10_surf_lock);
++	IOReturn ret = n10_surf_find((uint32_t)(uintptr_t)p1) < N10_SURF_MAX ? kIOReturnSuccess : kIOReturnNotFound;
++	IOLockUnlock(n10_surf_lock);
++	if (n10_surf_trace_ok(62, ret != kIOReturnSuccess)) {
++		char name[32];
++		proc_selfname(name, sizeof(name));
++		n10_dsslog_trace("N396T %s trap=lock id=%u ret=0x%x", name, (uint32_t)(uintptr_t)p1, ret);
++	}
++	return ret;
++}
++
++/* Traps 4 / 5 (release: id): drops this client's mapping reference. */
++IOReturn
++IOMobileFramebufferUserClient::n10SurfRelease(void *p1, __unused void *p2, __unused void *p3, __unused void *p4,
++    __unused void *p5, __unused void *p6)
++{
++	IOReturn ret = kIOReturnNotFound;
++
++	IOLockLock(n10_surf_lock);
++	uint32_t k = n10_surf_find((uint32_t)(uintptr_t)p1);
++	if (k < N10_SURF_MAX) {
++		n10_surf_unmap(this, k, false);
++		ret = kIOReturnSuccess;
++	}
++	IOLockUnlock(n10_surf_lock);
++	if (n10_surf_trace_ok(63, ret != kIOReturnSuccess)) {
++		char name[32];
++		proc_selfname(name, sizeof(name));
++		n10_dsslog_trace("N396T %s trap=release id=%u ret=0x%x", name, (uint32_t)(uintptr_t)p1, ret);
++	}
++	return ret;
++}
++
+ bool
+ IOMobileFramebufferUserClient::start(IOService *provider)
+ {
+@@ -206,6 +703,14 @@ IOMobileFramebufferUserClient::start(IOService *provider)
+ 		return false;
+ 	}
+ 	notifyPort = NULL;
++	if (n10_surf_root != NULL && provider == n10_surf_root) {
++		if (n10_surf_trace_ok(64, true)) {
++			char name[32];
++			proc_selfname(name, sizeof(name));
++			n10_dsslog_trace("N396O open %s", name);
++		}
++		return true;
++	}
+ 	__atomic_fetch_add(&n10_fb_opens, 1u, __ATOMIC_RELAXED);
+ 	if (__atomic_fetch_add(&n10_fb_lines, 1u, __ATOMIC_RELAXED) < N10_FB_LINES) {
+ 		char name[32];
+@@ -218,6 +723,15 @@ IOMobileFramebufferUserClient::start(IOService *provider)
+ IOReturn
+ IOMobileFramebufferUserClient::clientClose(void)
+ {
++	if (n10_surf_root != NULL && getProvider() == n10_surf_root) {
++		IOLockLock(n10_surf_lock);
++		for (uint32_t k = 0; k < N10_SURF_MAX; k++) {
++			if (n10_surfs[k].md != NULL) {
++				n10_surf_unmap(this, k, true);
++			}
++		}
++		IOLockUnlock(n10_surf_lock);
++	}
+ 	if (notifyPort != NULL) {
+ 		releaseNotificationPort(notifyPort);
+ 		notifyPort = NULL;
+@@ -234,6 +748,9 @@ IOMobileFramebufferUserClient::registerNotificationPort(mach_port_t port, UInt32
+ 		releaseNotificationPort(notifyPort);
+ 	}
+ 	notifyPort = port;
++	if (n10_surf_root != NULL && getProvider() == n10_surf_root) {
++		return kIOReturnSuccess;        /* v396: surface clients are not IOMFB notifications */
++	}
+ 	__atomic_fetch_add(&n10_fb_notifies, 1u, __ATOMIC_RELAXED);
+ 	if (__atomic_fetch_add(&n10_fb_lines, 1u, __ATOMIC_RELAXED) < N10_FB_LINES) {
+ 		char name[32];
+@@ -277,6 +794,9 @@ IOMobileFramebufferUserClient::externalMethod(uint32_t selector, IOExternalMetho
+ 	uint32_t out_struct = args->structureOutputDescriptor != NULL ?
+ 	    (uint32_t)args->structureOutputDescriptor->getLength() : args->structureOutputSize;
+ 
++	if (n10_surf_root != NULL && getProvider() == n10_surf_root) {
++		return n10_surf_method(this, selector, args);
++	}
+ 	for (uint32_t i = 0; i < out_scalars; i++) {
+ 		args->scalarOutput[i] = 0;
+ 	}
+@@ -617,6 +1137,35 @@ n10_iomfb_publish(void)
+ 	}
+ 	OSSafeReleaseNULL(hid);
+ 	n10_dsslog_trace("N392H publish hid=%d HIDServiceSupport", (int)hid_ok);
++
++	/*
++	 * v396 IOSurface root: plain IOService named IOCoreSurfaceRoot (the name
++	 * IOSurface.framework matches) whose user clients are the existing
++	 * IOMobileFramebufferUserClient class; tables allocated once here.
++	 */
++	bool surf_ok = false;
++	n10_surf_traps[0].func = (IOTrap)&IOMobileFramebufferUserClient::n10SurfLock;
++	n10_surf_traps[1].func = (IOTrap)&IOMobileFramebufferUserClient::n10SurfLock;
++	n10_surf_traps[2].func = (IOTrap)&IOMobileFramebufferUserClient::n10SurfRelease;
++	n10_surf_traps[3].func = (IOTrap)&IOMobileFramebufferUserClient::n10SurfRelease;
++	n10_surf_lock = IOLockAlloc();
++	n10_surfs = (struct n10_surf *)IOMallocZero(sizeof(struct n10_surf) * N10_SURF_MAX);
++	n10_surf_maps = (struct n10_surf_map *)IOMallocZero(sizeof(struct n10_surf_map) * N10_SURF_MAPS);
++	IOService *surf = OSTypeAlloc(IOService);
++	if (n10_surf_lock != NULL && n10_surfs != NULL && n10_surf_maps != NULL && surf != NULL && resources != NULL &&
++	    surf->init() && surf->attach(resources)) {
++		surf->setName("IOCoreSurfaceRoot");
++		surf->setProperty(kIOUserClientClassKey, "IOMobileFramebufferUserClient");
++		surf_ok = surf->start(resources);
++		if (surf_ok) {
++			n10_surf_root = surf;
++			surf->registerService();
++		} else {
++			surf->detach(resources);
++		}
++	}
++	OSSafeReleaseNULL(surf);
++	n10_dsslog_trace("N396R publish root=%d IOCoreSurfaceRoot", (int)surf_ok);
+ }
+ 
+ #endif /* ARM64_BOARD_CONFIG_EXYNOS9825 */

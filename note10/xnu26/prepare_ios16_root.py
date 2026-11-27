@@ -129,6 +129,9 @@ OVERLAY = (
     ('0061-exynos9825-n10-dt-product-options-fstab-path-dedupe.patch',
      'b3dd0a3c6a55b520590d52a0bcce80aaa144155249f495d47a9c0264c049de86',
      ('iokit/Kernel/IOUserClient.cpp', 'iokit/Kernel/NoteFramebuffer.cpp')),
+    ('0062-exynos9825-n10-iosurface-root-user-client.patch',
+     '14bec41c4fe24066df407a81423e403bdd955ddb053c50f300699a8d0b990ae5',
+     ('iokit/Kernel/NoteFramebuffer.cpp',)),
 )
 STAGED_DIRS = ('bsd/n10_hfs/core', 'bsd/n10_hfs/hfs_encodings')
 
