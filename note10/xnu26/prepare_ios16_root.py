@@ -116,6 +116,10 @@ OVERLAY = (
      'c761b69a7be63af679f4b15a34f2396c69d36caf3ecce23bbe4de70c6313d2bb',
      ('bsd/dev/arm/systemcalls.c', 'bsd/kern/kern_proc.c', 'iokit/Kernel/NoteFramebuffer.cpp',
       'iokit/bsddev/IOKitBSDInit.cpp', 'iokit/conf/files', 'security/mac_base.c')),
+    ('0058-exynos9825-n10-csops-status-valid-hid-stub-iomfb-counts.patch',
+     '4ce0ddb2d7c6eb434be6b2b2701f2e78d482e45d2835db77dfab7e530e580674',
+     ('bsd/dev/arm/systemcalls.c', 'bsd/kern/kern_proc.c', 'iokit/Kernel/NoteFramebuffer.cpp',
+      'osfmk/arm64/note10/n10_dsslog.c')),
 )
 STAGED_DIRS = ('bsd/n10_hfs/core', 'bsd/n10_hfs/hfs_encodings')
 

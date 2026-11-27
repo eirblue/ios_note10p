@@ -1,0 +1,336 @@
+diff --git a/bsd/dev/arm/systemcalls.c b/bsd/dev/arm/systemcalls.c
+index b95d93c..498b409 100644
+--- a/bsd/dev/arm/systemcalls.c
++++ b/bsd/dev/arm/systemcalls.c
+@@ -64,6 +64,8 @@ void n10_xpc_note(int trap, int num, int err);
+ static uint32_t n10_xpc_lines;
+ #define N10_BBD_MAX             96u
+ static uint32_t n10_bbd_lines;
++#define N10_CMD_MAX             64u
++static uint32_t n10_cmd_lines;
+ 
+ void
+ n10_xpc_note(int trap, int num, int err)
+@@ -82,6 +84,11 @@ n10_xpc_note(int trap, int num, int err)
+ 		if (__atomic_fetch_add(&n10_bbd_lines, 1u, __ATOMIC_RELAXED) >= N10_BBD_MAX) {
+ 			return;
+ 		}
++	} else if (strncmp(p->p_comm, "containermanager", 16) == 0) {
++		/* v392: containermanagerd (p_comm keeps 16 chars), own cap N10_CMD_MAX. */
++		if (__atomic_fetch_add(&n10_cmd_lines, 1u, __ATOMIC_RELAXED) >= N10_CMD_MAX) {
++			return;
++		}
+ 	} else if (strncmp(p->p_comm, "xpcproxy", 8) != 0 ||
+ 	    __atomic_fetch_add(&n10_xpc_lines, 1u, __ATOMIC_RELAXED) >= N10_XPC_MAX) {
+ 		return;
+@@ -138,6 +145,14 @@ static struct {
+ 	uint32_t sum;           /* FNV-1a of the last printed N380T text */
+ } n10_xq[N10_XQ_SLOTS];
+ static uint32_t n10_xq_lines, n10_xq_wsum, n10_xq_olog;
++/*
++ * v392: N392F = IOMobileFramebuffer user-client call counters
++ * (iokit/Kernel/NoteFramebuffer.cpp n10_iomfb_counts), one line per heartbeat
++ * when they changed, own cap N10_FB_DUMPS (outside the shared trace budget).
++ */
++#define N10_FB_DUMPS            64u
++extern int n10_iomfb_counts(char *buf, int len);
++static uint32_t n10_fb_dumps, n10_fb_dsum;
+ 
+ static int
+ n10_xpc_slot(int alloc)
+@@ -215,9 +230,12 @@ n10_xpc_leave(int num, int ret)
+ 	}
+ }
+ 
+-/* Append one bounded line (text without newline, n chars) if it changed since this key's last line. */
++/*
++ * Append one bounded line (text without newline, n chars) if it changed since
++ * this key's last line and fewer than max lines were counted in *count.
++ */
+ static void
+-n10_xq_emit(char *line, int n, int cap, uint32_t *last)
++n10_cap_emit(char *line, int n, int cap, uint32_t *last, uint32_t *count, uint32_t max)
+ {
+ 	uint32_t sum = 2166136261u;
+ 
+@@ -230,7 +248,7 @@ n10_xq_emit(char *line, int n, int cap, uint32_t *last)
+ 	for (int k = 0; k < n; k++) {
+ 		sum = (sum ^ (uint8_t)line[k]) * 16777619u;
+ 	}
+-	if (sum == *last || __atomic_fetch_add(&n10_xq_lines, 1u, __ATOMIC_RELAXED) >= N10_XQ_LINES) {
++	if (sum == *last || __atomic_fetch_add(count, 1u, __ATOMIC_RELAXED) >= max) {
+ 		return;
+ 	}
+ 	*last = sum;
+@@ -238,6 +256,13 @@ n10_xq_emit(char *line, int n, int cap, uint32_t *last)
+ 	n10_dsslog_write(line, n);
+ }
+ 
++/* N380O/N380T/N380W lines share N10_XQ_LINES. */
++static void
++n10_xq_emit(char *line, int n, int cap, uint32_t *last)
++{
++	n10_cap_emit(line, n, cap, last, &n10_xq_lines, N10_XQ_LINES);
++}
++
+ void
+ n10_xpc_dump(void)
+ {
+@@ -279,6 +304,10 @@ n10_xpc_dump(void)
+ 		    wq->wq_reqcount, wq->wq_creations, (unsigned)wq->wq_constrained_threads_scheduled);
+ 		n10_xq_emit(line, n, (int)sizeof(line), &n10_xq_wsum);
+ 	}
++	n = n10_iomfb_counts(line, (int)sizeof(line));
++	if (n > 0) {
++		n10_cap_emit(line, n, (int)sizeof(line), &n10_fb_dsum, &n10_fb_dumps, N10_FB_DUMPS);
++	}
+ }
+ #endif /* ARM64_BOARD_CONFIG_EXYNOS9825 */
+ #define save_r0         r[0]
+diff --git a/bsd/kern/kern_proc.c b/bsd/kern/kern_proc.c
+index 792099a..abf8a83 100644
+--- a/bsd/kern/kern_proc.c
++++ b/bsd/kern/kern_proc.c
+@@ -3733,6 +3733,21 @@ n10_csops_trace_ok(pid_t caller, pid_t target, int error)
+ 	return false;
+ }
+ 
++/*
++ * N392C line budget (v392): one line per CS_OPS_STATUS answer that the
++ * embedded-signature rule marked signed and valid, only for a query on another
++ * process by a caller other than launchd, at most N10_STATUS_CROSS lines.
++ */
++#define N10_STATUS_CROSS        32u
++static uint32_t n10_status_lines;
++
++static bool
++n10_status_trace_ok(pid_t caller, pid_t target)
++{
++	return caller != 1 && caller != target &&
++	       __atomic_fetch_add(&n10_status_lines, 1u, __ATOMIC_RELAXED) < N10_STATUS_CROSS;
++}
++
+ /*
+  * Note10 (v390): AMFI is not loaded and CS_SIGNED/CS_VALID are never set on
+  * this port, so every entitlement and identity query of csops failed with
+@@ -3892,6 +3907,9 @@ csops_internal(pid_t pid, int ops, user_addr_t uaddr, user_size_t usersize, user
+ 	switch (ops) {
+ 	case CS_OPS_STATUS: {
+ 		uint32_t retflags;
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++		bool n10_status_sig = false;
++#endif
+ 
+ 		proc_lock(pt);
+ 		retflags = (uint32_t)proc_getcsflags(pt);
+@@ -3908,7 +3926,29 @@ csops_internal(pid_t pid, int ops, user_addr_t uaddr, user_size_t usersize, user
+ 		if ((proc_getcsflags(pt) & CS_FORCED_LV) == CS_FORCED_LV) {
+ 			retflags &= (~CS_REQUIRE_LV);
+ 		}
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++		/*
++		 * Note10 (v392): with AMFI absent CS_VALID/CS_SIGNED are never set, so
++		 * containermanagerd refused every client ("Client pid [%d] is not
++		 * signed or has died.", error 98) before reading its entitlements:
++		 * backboardd's system container path came back nil (NSURL abort in
++		 * StartWindowServer), lsd and aggregated failed the same way. Report
++		 * a process whose executable carries an embedded signature as signed
++		 * and valid in this answer only; its csflags are not changed.
++		 */
++		if (amfi == NULL && pt->p_textvp != NULLVP &&
++		    ubc_cs_blob_get(pt->p_textvp, -1, -1, pt->p_textoff) != NULL) {
++			retflags |= CS_VALID | CS_SIGNED;
++			n10_status_sig = true;
++		}
++#endif
+ 		proc_unlock(pt);
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++		if (n10_status_sig && n10_status_trace_ok(proc_getpid(current_proc()), proc_getpid(pt))) {
++			n10_dsslog_trace("N392C %s op=0 pid=%d %s flags=0x%x", current_proc()->p_comm,
++			    proc_getpid(pt), pt->p_comm, retflags);
++		}
++#endif
+ 
+ 		if (uaddr != USER_ADDR_NULL) {
+ 			error = copyout(&retflags, uaddr, sizeof(uint32_t));
+diff --git a/iokit/Kernel/NoteFramebuffer.cpp b/iokit/Kernel/NoteFramebuffer.cpp
+index 258ac40..59a6119 100644
+--- a/iokit/Kernel/NoteFramebuffer.cpp
++++ b/iokit/Kernel/NoteFramebuffer.cpp
+@@ -30,6 +30,22 @@
+  * kIOReturnUnsupported. Other selectors succeed with zeroed outputs. The
+  * first call of each selector and every open/notification port registration
+  * is logged (N391F) into the dss ring.
++ *
++ * v392: v391 showed only IOMFB_FDR_Loader opening the service before the
++ * shared dss trace budget ran out (t = 16.3 s), so whether SpringBoard /
++ * backboardd ever swap was not visible. The user client now counts opens,
++ * notification ports and calls (GetLayerDefaultSurface 3, SwapBegin 4,
++ * SwapEnd 5, SwapWait 6, GetDisplaySize 8, all others) and keeps the name of
++ * the last caller; n10_iomfb_counts() formats them as one "N392F" line that
++ * bsd/dev/arm/systemcalls.c n10_xpc_dump writes at a heartbeat when it changed
++ * (own line cap there). Counting only: answers are unchanged.
++ *
++ * v392 also publishes NoteHIDEventService: an IOService on IOResources with
++ * HIDServiceSupport = true (the property backboardd's IOHIDEventSystem matches
++ * on, v391 N389I "c=IOService p=HIDServiceSupport"), a vendor usage pair and
++ * no IOCFPlugInTypes / user client: it carries no events and touches no
++ * hardware (no touch controller, no register, no interrupt). One "N392H"
++ * publish line.
+  */
+ #include <pexpert/arm64/board_config.h>
+ 
+@@ -67,6 +83,56 @@ static uint32_t n10_fb_lines;
+ static uint32_t n10_fb_seen[4];                 /* selectors 0..127 already logged */
+ static uint32_t n10_fb_swap_id;
+ 
++/* v392 N392F counters: opens, notification ports, selectors 3/4/5/6/8, others. */
++enum { N10_FB_C_SURF, N10_FB_C_SB, N10_FB_C_SE, N10_FB_C_SW, N10_FB_C_DS, N10_FB_C_OTHER, N10_FB_C_N };
++static uint32_t n10_fb_opens, n10_fb_notifies;
++static uint32_t n10_fb_calls[N10_FB_C_N];
++static char n10_fb_last[17];                    /* last caller (p_comm), single writer races are harmless */
++
++static void
++n10_fb_count(uint32_t selector)
++{
++	int k;
++
++	switch (selector) {
++	case 3: k = N10_FB_C_SURF; break;
++	case 4: k = N10_FB_C_SB; break;
++	case 5: k = N10_FB_C_SE; break;
++	case 6: k = N10_FB_C_SW; break;
++	case 8: k = N10_FB_C_DS; break;
++	default: k = N10_FB_C_OTHER; break;
++	}
++	__atomic_fetch_add(&n10_fb_calls[k], 1u, __ATOMIC_RELAXED);
++	proc_selfname(n10_fb_last, sizeof(n10_fb_last));
++}
++
++/*
++ * One N392F line (no newline) into buf; 0 while the user client was never
++ * opened. Reads the counters only (called from the heartbeat).
++ */
++extern "C" int n10_iomfb_counts(char *buf, int len);
++
++extern "C" int
++n10_iomfb_counts(char *buf, int len)
++{
++	uint32_t opens = __atomic_load_n(&n10_fb_opens, __ATOMIC_RELAXED);
++	char last[17];
++
++	if (opens == 0 || len <= 0) {
++		return 0;
++	}
++	memcpy(last, n10_fb_last, sizeof(last));
++	last[sizeof(last) - 1] = '\0';
++	return snprintf(buf, (size_t)len, "N392F op=%u nt=%u surf=%u sb=%u se=%u sw=%u ds=%u oth=%u last=%.16s",
++	    opens, __atomic_load_n(&n10_fb_notifies, __ATOMIC_RELAXED),
++	    __atomic_load_n(&n10_fb_calls[N10_FB_C_SURF], __ATOMIC_RELAXED),
++	    __atomic_load_n(&n10_fb_calls[N10_FB_C_SB], __ATOMIC_RELAXED),
++	    __atomic_load_n(&n10_fb_calls[N10_FB_C_SE], __ATOMIC_RELAXED),
++	    __atomic_load_n(&n10_fb_calls[N10_FB_C_SW], __ATOMIC_RELAXED),
++	    __atomic_load_n(&n10_fb_calls[N10_FB_C_DS], __ATOMIC_RELAXED),
++	    __atomic_load_n(&n10_fb_calls[N10_FB_C_OTHER], __ATOMIC_RELAXED), last);
++}
++
+ static bool
+ n10_fb_trace_ok(uint32_t selector)
+ {
+@@ -126,6 +192,7 @@ IOMobileFramebufferUserClient::start(IOService *provider)
+ 		return false;
+ 	}
+ 	notifyPort = NULL;
++	__atomic_fetch_add(&n10_fb_opens, 1u, __ATOMIC_RELAXED);
+ 	if (__atomic_fetch_add(&n10_fb_lines, 1u, __ATOMIC_RELAXED) < N10_FB_LINES) {
+ 		char name[32];
+ 		proc_selfname(name, sizeof(name));
+@@ -153,6 +220,7 @@ IOMobileFramebufferUserClient::registerNotificationPort(mach_port_t port, UInt32
+ 		releaseNotificationPort(notifyPort);
+ 	}
+ 	notifyPort = port;
++	__atomic_fetch_add(&n10_fb_notifies, 1u, __ATOMIC_RELAXED);
+ 	if (__atomic_fetch_add(&n10_fb_lines, 1u, __ATOMIC_RELAXED) < N10_FB_LINES) {
+ 		char name[32];
+ 		proc_selfname(name, sizeof(name));
+@@ -231,6 +299,7 @@ IOMobileFramebufferUserClient::externalMethod(uint32_t selector, IOExternalMetho
+ 		break;
+ 	}
+ 
++	n10_fb_count(selector);
+ 	if (n10_fb_trace_ok(selector)) {
+ 		char name[32];
+ 		proc_selfname(name, sizeof(name));
+@@ -240,6 +309,33 @@ IOMobileFramebufferUserClient::externalMethod(uint32_t selector, IOExternalMetho
+ 	return ret;
+ }
+ 
++/*
++ * v392: HID event service stub for backboardd's IOHIDEventSystem match
++ * (IOProviderClass IOService + HIDServiceSupport). Registry object only.
++ */
++class NoteHIDEventService : public IOService {
++	OSDeclareDefaultStructors(NoteHIDEventService);
++
++public:
++	bool start(IOService *provider) APPLE_KEXT_OVERRIDE;
++};
++
++OSDefineMetaClassAndStructors(NoteHIDEventService, IOService);
++
++bool
++NoteHIDEventService::start(IOService *provider)
++{
++	if (!IOService::start(provider)) {
++		return false;
++	}
++	setProperty("HIDServiceSupport", true);
++	setProperty("PrimaryUsagePage", 0xff00u, 32);   /* vendor-defined: no event processor expects events */
++	setProperty("PrimaryUsage", 1u, 32);
++	setProperty("Product", "Note10 HID stub");
++	registerService();
++	return true;
++}
++
+ /* One device-tree plane entry with a name and string properties. */
+ static IORegistryEntry *
+ n10_fb_dt_node(IORegistryEntry *parent, const char *name, const char *device_type)
+@@ -310,6 +406,17 @@ n10_iomfb_publish(void)
+ 
+ 	n10_dsslog_trace("N391F publish arm-io=%d disp=%d fb=%d %ux%u", armio_state, (int)disp, (int)fb_ok,
+ 	    N10_FB_WIDTH, N10_FB_HEIGHT);
++
++	bool hid_ok = false;
++	NoteHIDEventService *hid = OSTypeAlloc(NoteHIDEventService);
++	if (hid != NULL && resources != NULL && hid->init() && hid->attach(resources)) {
++		hid_ok = hid->start(resources);
++		if (!hid_ok) {
++			hid->detach(resources);
++		}
++	}
++	OSSafeReleaseNULL(hid);
++	n10_dsslog_trace("N392H publish hid=%d HIDServiceSupport", (int)hid_ok);
+ }
+ 
+ #endif /* ARM64_BOARD_CONFIG_EXYNOS9825 */
+diff --git a/osfmk/arm64/note10/n10_dsslog.c b/osfmk/arm64/note10/n10_dsslog.c
+index fdcad73..90e06c3 100644
+--- a/osfmk/arm64/note10/n10_dsslog.c
++++ b/osfmk/arm64/note10/n10_dsslog.c
+@@ -257,10 +257,13 @@ n10_dsslog_putc(char c)
+  * v376: one bounded diagnostic line (exec/exit/spawn/reboot) formatted into a
+  * stack buffer and appended with a single n10_dsslog_write call, so it is not
+  * split by other console text. No allocation, no lock; vsnprintf only formats.
+- * At most N10_TRACE_MAX lines per boot (~120 KiB), so the ring keeps room for
+- * later console and panic text.
++ * At most N10_TRACE_MAX lines per boot, so the ring keeps room for later
++ * console and panic text. v392: 768 -> 2048 (v391 spent all 768 by t=16.3 s,
++ * about 35 KiB at 45 bytes a line, so later exec/exit lines were lost; 2048
++ * lines are about 92 KiB, and a full area only drops lines, the N347X/N347R
++ * reserve stays).
+  */
+-#define N10_TRACE_MAX           768u
++#define N10_TRACE_MAX           2048u
+ #define N10_TRACE_TEXT          160u
+ extern int vsnprintf(char *, size_t, const char *, va_list) __printflike(3, 0);
+ void n10_dsslog_trace(const char *fmt, ...) __printflike(1, 2);
