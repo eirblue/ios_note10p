@@ -1,0 +1,52 @@
+diff --git a/bsd/dev/n10_ufs.c b/bsd/dev/n10_ufs.c
+index cc461cd..ea23464 100644
+--- a/bsd/dev/n10_ufs.c
++++ b/bsd/dev/n10_ufs.c
+@@ -358,8 +358,10 @@ n10_ufs_cmd_once(uint8_t op, uint64_t lba, uint32_t count, uint32_t attempt)
+ 	if (wr && !n10_ufs_write_inside(lba, count)) {
+ 		n10_ufs_stop(6, n10_ufs_ticks() | 6);
+ 	}
++	/* v388: WRITE(10) FUA=1 (byte 1 bit 3): write-through, so a completed write survives a WDT/WTSR reset and the
++	 * HFS journal's write order holds on media (v385 reset left catalog/bitmap out of step on the data volume). */
+ 	uint8_t cdb[10] = {
+-		op, 0,
++		op, wr ? 0x08 : 0,
+ 		(uint8_t)(lba >> 24), (uint8_t)(lba >> 16), (uint8_t)(lba >> 8), (uint8_t)lba,
+ 		0, (uint8_t)(count >> 8), (uint8_t)count, 0
+ 	};
+diff --git a/osfmk/kern/debug.c b/osfmk/kern/debug.c
+index 76cc073..0337c49 100644
+--- a/osfmk/kern/debug.c
++++ b/osfmk/kern/debug.c
+@@ -1102,6 +1102,7 @@ register_additional_panic_data_buffer(const char *producer_name, void *buf, int
+  * according to the device's boot-args.
+  */
+ #if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++#include <kern/backtrace.h>
+ /* osfmk/arm64/note10/n10_dsslog.c (v347): lock-free copy of text into the dss log ring. */
+ extern void n10_dsslog_putc(char c);
+ 
+@@ -1128,6 +1129,23 @@ n10_panic_note(const char *str, va_list *args, unsigned long caller)
+ 		_doprnt_log(str, args, n10_dsslog_putc, 16);
+ 	}
+ 	n10_dsslog_putc('\n');
++
++	/*
++	 * v388: the panicking thread's kernel call chain (bounded, stack-checked walk), 6 frames per "N388B ..." line
++	 * (each line stays under the 200 B dss line split).
++	 */
++	uintptr_t bt[12];
++	struct backtrace_control ctl = BTCTL_INIT;
++	unsigned int n = backtrace(bt, 12, &ctl, NULL);
++	uint64_t tid = thread_tid(current_thread());
++
++	for (unsigned int i = 0; i == 0 || i < n; i += 6) {
++		n10_panic_note_printf("N388B tid=0x%llx n=%u i=%u", tid, n, i);
++		for (unsigned int k = i; k < n && k < i + 6; k++) {
++			n10_panic_note_printf(" 0x%lx", (unsigned long)bt[k]);
++		}
++		n10_dsslog_putc('\n');
++	}
+ }
+ #define N10_PANIC_NOTE(str, args) \
+ 	n10_panic_note((str), (args), (unsigned long)(char *)__builtin_return_address(0))

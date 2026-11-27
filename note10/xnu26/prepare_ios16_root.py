@@ -103,6 +103,9 @@ OVERLAY = (
      '022cc1c5ad5605c40402459286f5fc56ec9814f62605ad31869d8e78a28506b5',
      ('bsd/dev/arm/systemcalls.c', 'osfmk/arm64/bsd_arm64.c', 'osfmk/arm64/locore.s',
       'osfmk/arm64/note10/n10_dsslog.c', 'osfmk/arm64/sleh.c')),
+    ('0054-exynos9825-n10-ufs-fua-panic-backtrace.patch',
+     'da83122175cd24d475997d93e6e3a2cbf289ed5d7ab72eded71d07e483a4ae4e',
+     ('bsd/dev/n10_ufs.c', 'osfmk/kern/debug.c')),
 )
 STAGED_DIRS = ('bsd/n10_hfs/core', 'bsd/n10_hfs/hfs_encodings')
 
