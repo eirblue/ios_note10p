@@ -26,7 +26,7 @@ index aa82fc9..52028e2 100644
  	return kIOReturnSuccess;
  }
 diff --git a/iokit/Kernel/NoteFramebuffer.cpp b/iokit/Kernel/NoteFramebuffer.cpp
-index f63e72f..24aa38b 100644
+index f63e72f..07937d0 100644
 --- a/iokit/Kernel/NoteFramebuffer.cpp
 +++ b/iokit/Kernel/NoteFramebuffer.cpp
 @@ -227,6 +227,40 @@
@@ -110,7 +110,7 @@ index f63e72f..24aa38b 100644
  			if (++n10_surf_next_id == 0) {
  				n10_surf_next_id = 1;
  			}
-@@ -856,6 +901,644 @@ IOMobileFramebufferUserClient::n10SurfRelease(void *p1, __unused void *p2, __unu
+@@ -856,6 +901,647 @@ IOMobileFramebufferUserClient::n10SurfRelease(void *p1, __unused void *p2, __unu
  	return ret;
  }
  
@@ -505,6 +505,9 @@ index f63e72f..24aa38b 100644
 +	}
 +}
 +
++/* osfmk/arm64 machine_routines (not in the IOKit-visible headers; same declaration as the 0064 display code below). */
++extern "C" vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
++
 +static void
 +n10_ts_init(void)
 +{
@@ -755,7 +758,7 @@ index f63e72f..24aa38b 100644
  bool
  IOMobileFramebufferUserClient::start(IOService *provider)
  {
-@@ -863,6 +1546,10 @@ IOMobileFramebufferUserClient::start(IOService *provider)
+@@ -863,6 +1549,10 @@ IOMobileFramebufferUserClient::start(IOService *provider)
  		return false;
  	}
  	notifyPort = NULL;
@@ -766,7 +769,7 @@ index f63e72f..24aa38b 100644
  	if (n10_surf_root != NULL && provider == n10_surf_root) {
  		if (n10_surf_trace_ok(64, true)) {
  			char name[32];
-@@ -883,6 +1570,9 @@ IOMobileFramebufferUserClient::start(IOService *provider)
+@@ -883,6 +1573,9 @@ IOMobileFramebufferUserClient::start(IOService *provider)
  IOReturn
  IOMobileFramebufferUserClient::clientClose(void)
  {
@@ -776,7 +779,7 @@ index f63e72f..24aa38b 100644
  	if (n10_surf_root != NULL && getProvider() == n10_surf_root) {
  		IOLockLock(n10_surf_lock);
  		for (uint32_t k = 0; k < N10_SURF_MAX; k++) {
-@@ -908,6 +1598,10 @@ IOMobileFramebufferUserClient::registerNotificationPort(mach_port_t port, UInt32
+@@ -908,6 +1601,10 @@ IOMobileFramebufferUserClient::registerNotificationPort(mach_port_t port, UInt32
  		releaseNotificationPort(notifyPort);
  	}
  	notifyPort = port;
@@ -787,7 +790,7 @@ index f63e72f..24aa38b 100644
  	if (n10_surf_root != NULL && getProvider() == n10_surf_root) {
  		return kIOReturnSuccess;        /* v396: surface clients are not IOMFB notifications */
  	}
-@@ -920,6 +1614,23 @@ IOMobileFramebufferUserClient::registerNotificationPort(mach_port_t port, UInt32
+@@ -920,6 +1617,23 @@ IOMobileFramebufferUserClient::registerNotificationPort(mach_port_t port, UInt32
  	return kIOReturnSuccess;
  }
  
@@ -811,7 +814,7 @@ index f63e72f..24aa38b 100644
  /* Zero the caller's structure output (inband or descriptor), keeping its size. */
  static void
  n10_fb_zero_struct_out(IOExternalMethodArguments *args)
-@@ -957,6 +1668,9 @@ IOMobileFramebufferUserClient::externalMethod(uint32_t selector, IOExternalMetho
+@@ -957,6 +1671,9 @@ IOMobileFramebufferUserClient::externalMethod(uint32_t selector, IOExternalMetho
  	if (n10_surf_root != NULL && getProvider() == n10_surf_root) {
  		return n10_surf_method(this, selector, args);
  	}
@@ -821,7 +824,7 @@ index f63e72f..24aa38b 100644
  	for (uint32_t i = 0; i < out_scalars; i++) {
  		args->scalarOutput[i] = 0;
  	}
-@@ -1765,6 +2479,36 @@ n10_disp_copy_otf(const uint32_t *src, uint32_t bpr)
+@@ -1765,6 +2482,36 @@ n10_disp_copy_otf(const uint32_t *src, uint32_t bpr)
  	}
  }
  
@@ -858,7 +861,7 @@ index f63e72f..24aa38b 100644
  /* SwapEnd: copy the front surface into the window buffer and send one frame (armed only). */
  static void
  n10_disp_swap(IOExternalMethodArguments *args)
-@@ -1873,6 +2617,9 @@ n10_disp_frame(uint32_t want, uint32_t tmr)
+@@ -1873,6 +2620,9 @@ n10_disp_frame(uint32_t want, uint32_t tmr)
  		return;
  	}
  	__builtin_arm_dsb(0xf);
@@ -868,7 +871,7 @@ index f63e72f..24aa38b 100644
  
  	/* one frame: same order as Linux decon_reg_update_req_and_unmask / decon_reg_wait_update_done_and_mask */
  	vm_offset_t pmu = n10_disp_va[N10_DISP_MAP_PMU], dec = n10_disp_va[N10_DISP_MAP_DECON];
-@@ -1977,6 +2724,7 @@ n10_iomfb_publish(void)
+@@ -1977,6 +2727,7 @@ n10_iomfb_publish(void)
  	}
  	OSSafeReleaseNULL(hid);
  	n10_dsslog_trace("N392H publish hid=%d HIDServiceSupport", (int)hid_ok);

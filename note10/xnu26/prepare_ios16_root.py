@@ -154,7 +154,7 @@ OVERLAY = (
      '613eda8cb2790f60bef2afc6ae16577fbb84057061a7d54bd3356e668a4e795c',
      ('iokit/Kernel/NoteFramebuffer.cpp',)),
     ('0070-exynos9825-n10-sec-ts-touch-hid.patch',
-     'f8d556698e209a6bcf54890c71cfb2d38886df46439a03a9ec0269d0a9ce5bc3',
+     'd3df9994b0a3d67303b9c3c86ecf807e4104a3e196080abce2e4b4267f56f772',
      ('iokit/Kernel/IOUserClient.cpp', 'iokit/Kernel/NoteFramebuffer.cpp')),
 )
 STAGED_DIRS = ('bsd/n10_hfs/core', 'bsd/n10_hfs/hfs_encodings')
