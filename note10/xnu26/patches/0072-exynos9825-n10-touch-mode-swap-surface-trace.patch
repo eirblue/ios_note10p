@@ -1,0 +1,642 @@
+diff --git a/bsd/dev/arm/systemcalls.c b/bsd/dev/arm/systemcalls.c
+index 498b409..664fecf 100644
+--- a/bsd/dev/arm/systemcalls.c
++++ b/bsd/dev/arm/systemcalls.c
+@@ -66,6 +66,11 @@ static uint32_t n10_xpc_lines;
+ static uint32_t n10_bbd_lines;
+ #define N10_CMD_MAX             64u
+ static uint32_t n10_cmd_lines;
++/* v406: SpringBoard failing calls (N406F) on their own cap; helpers defined below. */
++#define N10_SB_F_MAX            48u
++static uint32_t n10_sb_fl, n10_sb_flast;
++static void n10_cap_emit(char *line, int n, int cap, uint32_t *last, uint32_t *count, uint32_t max);
++static int n10_sb_who(proc_t p);
+ 
+ void
+ n10_xpc_note(int trap, int num, int err)
+@@ -75,6 +80,13 @@ n10_xpc_note(int trap, int num, int err)
+ 	if (p == PROC_NULL) {
+ 		return;
+ 	}
++	if (n10_sb_who(p) == 1) {                       /* v406 N406F */
++		char line[80];
++		int n = snprintf(line, sizeof(line), "N406F pid=%d %s=%d err=0x%x", proc_getpid(p), trap ? "trap" : "sys", num,
++		    err);
++		n10_cap_emit(line, n, (int)sizeof(line), &n10_sb_flast, &n10_sb_fl, N10_SB_F_MAX);
++		return;
++	}
+ 	/*
+ 	 * v391: also the failing calls of processes named "backboardd" (v390: its
+ 	 * system-container path came back nil without a containermanagerd query),
+@@ -263,6 +275,324 @@ n10_xq_emit(char *line, int n, int cap, uint32_t *last)
+ 	n10_cap_emit(line, n, cap, last, &n10_xq_lines, N10_XQ_LINES);
+ }
+ 
++/* v406: 1 SpringBoard, 2 backboardd, 0 other (p_comm, exact). */
++static int
++n10_sb_who(proc_t p)
++{
++	if (p == PROC_NULL) {
++		return 0;
++	}
++	if (strncmp(p->p_comm, "SpringBoard", 12) == 0) {
++		return 1;
++	}
++	return strncmp(p->p_comm, "backboardd", 11) == 0 ? 2 : 0;
++}
++
++/*
++ * v406: why does SpringBoard not draw? v405 SpringBoard ran 120 s without an exit, no IOKit miss (N389I covers all
++ * callers) and no logged failure. Per SpringBoard thread (N10_SB_SLOTS slots keyed on the thread id) the BSD syscall
++ * (> 0) or Mach trap (< 0) it is in, since when, and for mach_msg2 the options, remote port, msgh_id and the XPC
++ * "name" string of the message it sent (bootstrap / XPC service name; the serialized dictionary is scanned for the
++ * wire magic and a "name" key of string type, at most N10_SB_BUF bytes copied in from the caller's own buffer).
++ *   N406N  first send of each distinct service name by SpringBoard or backboardd (<= N10_SB_N_MAX)
++ *   N406R  a SpringBoard call that took >= N10_SB_LONG_MS, at its return (end=r) or, when it returned through a
++ *          continuation, at the thread's next call (end=c, duration is then an upper bound) (<= N10_SB_R_MAX)
++ *   N406X  the reply of such a named request carried a non-zero XPC "error" int (<= N10_SB_X_MAX)
++ *   N406T  every 5th heartbeat (~10 s) one line per tracked SpringBoard thread whose state changed (all lines every
++ *          ~40 s): call, in-call flag, port / id / name, n10_thread_peek state, block hint, wait event, pc, age
++ *          (<= N10_SB_T_MAX); a thread found gone frees its slot
++ *   N406F  failing BSD syscalls / Mach traps of SpringBoard (<= N10_SB_F_MAX)
++ * Written with n10_dsslog_write on own caps (outside the shared trace budget, inside the dss area). Observation only:
++ * no argument, return value or state of any call is changed; copyin failures are ignored.
++ */
++#define N10_SB_SLOTS            24
++#define N10_SB_N_MAX            48u
++#define N10_SB_R_MAX            48u
++#define N10_SB_X_MAX            24u
++#define N10_SB_T_MAX            128u
++#define N10_SB_LONG_MS          2000u
++#define N10_SB_BUF              512
++#define N10_M64_SEND            0x1ull                  /* MACH64_SEND_MSG */
++#define N10_M64_RCV             0x2ull                  /* MACH64_RCV_MSG */
++#define N10_M64_VECTOR          0x0000000100000000ull   /* MACH64_MSG_VECTOR */
++void n10_sb_enter(int num, const uint64_t *a);
++void n10_sb_leave(int num, int ret);
++static struct {
++	uint64_t tid;
++	const void *th;
++	uint64_t rcv;
++	int pid;
++	int num;
++	uint32_t in, ms, opt, rem, id, rsz, sum;
++	char name[48];
++} n10_sb[N10_SB_SLOTS];
++static uint32_t n10_sb_nl, n10_sb_rl, n10_sb_xl, n10_sb_tl, n10_sb_dumps;
++static uint32_t n10_sb_nlast, n10_sb_rlast, n10_sb_xlast, n10_sb_nnext;
++static uint32_t n10_sb_seen[N10_SB_N_MAX];
++
++static uint32_t
++n10_sb_now_ms(void)
++{
++	uint64_t ns = 0;
++
++	absolutetime_to_nanoseconds(mach_absolute_time(), &ns);
++	return (uint32_t)(ns / NSEC_PER_MSEC);
++}
++
++static int
++n10_sb_slot(uint64_t tid, const void *th, int pid, int alloc)
++{
++	for (int i = 0; i < N10_SB_SLOTS; i++) {
++		if (n10_sb[i].tid == tid) {
++			return i;
++		}
++		if (n10_sb[i].tid == 0) {
++			if (!alloc) {
++				return -1;
++			}
++			n10_sb[i].pid = pid;
++			n10_sb[i].th = th;
++			n10_sb[i].in = 0;
++			n10_sb[i].sum = 0;
++			n10_sb[i].tid = tid;
++			return i;
++		}
++	}
++	return -1;
++}
++
++/* Offset of the value after an XPC dictionary key (key incl. NUL, kl bytes) behind the wire magic, or -1. */
++static int
++n10_sb_key(const uint8_t *b, int n, const char *key, int kl)
++{
++	int m = -1;
++
++	for (int i = 0; i + 4 <= n && m < 0; i += 4) {
++		if ((b[i] == 'C' && b[i + 1] == 'P' && b[i + 2] == 'X' && b[i + 3] == '@') ||
++		    (b[i] == '@' && b[i + 1] == 'X' && b[i + 2] == 'P' && b[i + 3] == 'C')) {
++			m = i;
++		}
++	}
++	if (m < 0) {
++		return -1;
++	}
++	for (int i = m + 4; i + kl + 12 <= n; i += 4) {
++		if (memcmp(b + i, key, (size_t)kl) == 0) {
++			return i + ((kl + 3) & ~3);
++		}
++	}
++	return -1;
++}
++
++static int
++n10_sb_copy(uint64_t uaddr, uint32_t size, uint8_t *b)
++{
++	int n = size < N10_SB_BUF ? (int)size : N10_SB_BUF;
++
++	if (uaddr == 0 || n < 32) {
++		return 0;
++	}
++	return copyin((user_addr_t)uaddr, b, (size_t)n) == 0 ? n : 0;
++}
++
++/* The "name" string (type 0x9000) of a serialized XPC message, printable ASCII, or 0. */
++static int
++n10_sb_name(const uint8_t *b, int n, char *out, int cap)
++{
++	int o = n10_sb_key(b, n, "name", 5), k = 0;
++	uint32_t type, len;
++
++	if (o < 0 || o + 8 > n) {
++		return 0;
++	}
++	memcpy(&type, b + o, sizeof(type));
++	memcpy(&len, b + o + 4, sizeof(len));
++	if (type != 0x9000u) {
++		return 0;
++	}
++	for (int i = o + 8; i < n && k < cap - 1 && (uint32_t)k + 1 < len && b[i] != 0; i++) {
++		out[k++] = (b[i] >= 0x20 && b[i] < 0x7f) ? (char)b[i] : '?';
++	}
++	out[k] = '\0';
++	return k;
++}
++
++static void
++n10_sb_msg(int who, int pid, int i, const uint64_t *a)
++{
++	uint64_t opt = a[1], msg = a[0], rcv = a[0], v[3];
++	uint32_t ssz = (uint32_t)(a[2] >> 32), rsz = (uint32_t)a[6], h = 2166136261u;
++	uint8_t b[N10_SB_BUF];
++	char nm[48], line[200];
++	int n;
++
++	if ((opt & N10_M64_VECTOR) != 0) {
++		if (copyin((user_addr_t)a[0], v, sizeof(v)) != 0) {
++			return;
++		}
++		msg = v[0];
++		rcv = v[1] != 0 ? v[1] : v[0];
++		ssz = (uint32_t)v[2];
++		rsz = (uint32_t)(v[2] >> 32);
++	}
++	if (i >= 0) {
++		n10_sb[i].name[0] = '\0';
++		n10_sb[i].rcv = (opt & N10_M64_RCV) != 0 ? rcv : 0;
++		n10_sb[i].rsz = rsz;
++	}
++	if ((opt & N10_M64_SEND) == 0 || (n = n10_sb_copy(msg, ssz, b)) == 0 || n10_sb_name(b, n, nm, (int)sizeof(nm)) == 0) {
++		return;
++	}
++	if (i >= 0) {
++		memcpy(n10_sb[i].name, nm, sizeof(nm));
++	}
++	for (int k = 0; nm[k] != '\0'; k++) {
++		h = (h ^ (uint8_t)nm[k]) * 16777619u;
++	}
++	h = (h ^ (uint32_t)who) * 16777619u;
++	h = h != 0 ? h : 1u;
++	for (uint32_t k = 0; k < N10_SB_N_MAX; k++) {
++		if (n10_sb_seen[k] == h) {
++			return;
++		}
++	}
++	n10_sb_seen[n10_sb_nnext++ % N10_SB_N_MAX] = h;
++	n = snprintf(line, sizeof(line), "N406N %s pid=%d id=0x%x r=0x%x o=0x%llx n=%s", who == 1 ? "sb" : "bbd", pid,
++	    (uint32_t)(a[4] >> 32), (uint32_t)a[3], opt, nm);
++	n10_cap_emit(line, n, (int)sizeof(line), &n10_sb_nlast, &n10_sb_nl, N10_SB_N_MAX);
++}
++
++/* A tracked call ended (end 'r' return, 'c' next call after a continuation return): long-wait and reply lines. */
++static void
++n10_sb_end(int i, uint32_t dur, int ret, char end)
++{
++	uint8_t b[N10_SB_BUF];
++	char line[200];
++	uint32_t type;
++	int64_t err;
++	int n, o;
++
++	n10_sb[i].in = 0;
++	if (dur >= N10_SB_LONG_MS) {
++		n = snprintf(line, sizeof(line), "N406R t=%llx c=%d ret=0x%x ms=%u end=%c o=0x%x r=0x%x id=0x%x n=%.40s",
++		    n10_sb[i].tid, n10_sb[i].num, ret, dur, end, n10_sb[i].opt, n10_sb[i].rem, n10_sb[i].id, n10_sb[i].name);
++		n10_cap_emit(line, n, (int)sizeof(line), &n10_sb_rlast, &n10_sb_rl, N10_SB_R_MAX);
++	}
++	if (n10_sb[i].rcv == 0 || n10_sb[i].name[0] == '\0' || ret != 0) {
++		n10_sb[i].rcv = 0;
++		return;
++	}
++	n = n10_sb_copy(n10_sb[i].rcv, n10_sb[i].rsz, b);
++	n10_sb[i].rcv = 0;
++	o = n > 0 ? n10_sb_key(b, n, "error", 6) : -1;
++	if (o < 0 || o + 12 > n) {
++		return;
++	}
++	memcpy(&type, b + o, sizeof(type));
++	memcpy(&err, b + o + 4, sizeof(err));
++	if ((type != 0x3000u && type != 0x4000u) || err == 0) {
++		return;
++	}
++	n = snprintf(line, sizeof(line), "N406X t=%llx err=%lld ms=%u end=%c n=%.40s", n10_sb[i].tid, err, dur, end,
++	    n10_sb[i].name);
++	n10_cap_emit(line, n, (int)sizeof(line), &n10_sb_xlast, &n10_sb_xl, N10_SB_X_MAX);
++}
++
++void
++n10_sb_enter(int num, const uint64_t *a)
++{
++	proc_t p = current_proc();
++	int who = n10_sb_who(p), i = -1, pid;
++
++	if (who == 0) {
++		return;
++	}
++	pid = proc_getpid(p);
++	if (who == 1) {
++		thread_t th = current_thread();
++		uint32_t now = n10_sb_now_ms();
++
++		i = n10_sb_slot(thread_tid(th), th, pid, 1);
++		if (i >= 0) {
++			if (n10_sb[i].in) {
++				n10_sb_end(i, now - n10_sb[i].ms, 0, 'c');
++			}
++			n10_sb[i].num = num;
++			n10_sb[i].ms = now;
++			n10_sb[i].opt = num == N10_XQ_MSG2 && a != NULL ? (uint32_t)a[1] : 0;
++			n10_sb[i].rem = num == N10_XQ_MSG2 && a != NULL ? (uint32_t)a[3] : 0;
++			n10_sb[i].id = num == N10_XQ_MSG2 && a != NULL ? (uint32_t)(a[4] >> 32) : 0;
++			n10_sb[i].rcv = 0;
++			n10_sb[i].name[0] = '\0';
++			n10_sb[i].in = 1;
++		}
++	}
++	if (num == N10_XQ_MSG2 && a != NULL) {
++		n10_sb_msg(who, pid, i, a);
++	}
++}
++
++void
++n10_sb_leave(int num, int ret)
++{
++	int i;
++
++	(void)num;
++	if (n10_sb_who(current_proc()) != 1 || (i = n10_sb_slot(thread_tid(current_thread()), NULL, 0, 0)) < 0 ||
++	    !n10_sb[i].in) {
++		return;
++	}
++	n10_sb_end(i, n10_sb_now_ms() - n10_sb[i].ms, ret, 'r');
++}
++
++static void
++n10_sb_dump(void)
++{
++	char line[240];
++	uint32_t now, full, sum, last;
++	int n, m;
++
++	if ((n10_sb_dumps++ % 5u) != 0) {
++		return;
++	}
++	full = (n10_sb_dumps / 5u) % 4u == 1u;
++	now = n10_sb_now_ms();
++	for (int i = 0; i < N10_SB_SLOTS; i++) {
++		uint64_t tid = n10_sb[i].tid;
++		if (tid == 0) {
++			continue;
++		}
++		n = snprintf(line, sizeof(line), "N406T t=%llx c=%d in=%u o=0x%x r=0x%x id=0x%x n=%.32s", tid, n10_sb[i].num,
++		    n10_sb[i].in, n10_sb[i].opt, n10_sb[i].rem, n10_sb[i].id, n10_sb[i].name);
++		if (n <= 0 || n >= (int)sizeof(line) - 1) {
++			continue;
++		}
++		m = n10_thread_peek(n10_sb[i].th, tid, line + n, (int)sizeof(line) - n);
++		int gone = m <= 0;
++		if (gone) {
++			m = snprintf(line + n, sizeof(line) - (size_t)n, " gone");
++		}
++		n += m > 0 ? m : 0;
++		sum = 2166136261u;
++		for (int k = 0; k < n && k < (int)sizeof(line); k++) {
++			sum = (sum ^ (uint8_t)line[k]) * 16777619u;
++		}
++		if (gone) {
++			n10_sb[i].tid = 0;          /* free the slot (also when the line is not printed) */
++		} else if (sum == n10_sb[i].sum && !full) {
++			continue;
++		}
++		n10_sb[i].sum = sum;
++		if (n < (int)sizeof(line) - 1) {
++			m = snprintf(line + n, sizeof(line) - (size_t)n, " age=%u", n10_sb[i].in ? now - n10_sb[i].ms : 0u);
++			n += m > 0 ? m : 0;
++		}
++		last = 0;
++		n10_cap_emit(line, n, (int)sizeof(line), &last, &n10_sb_tl, N10_SB_T_MAX);
++	}
++}
++
++
+ void
+ n10_xpc_dump(void)
+ {
+@@ -308,6 +638,7 @@ n10_xpc_dump(void)
+ 	if (n > 0) {
+ 		n10_cap_emit(line, n, (int)sizeof(line), &n10_fb_dsum, &n10_fb_dumps, N10_FB_DUMPS);
+ 	}
++	n10_sb_dump();                                  /* v406 N406T */
+ }
+ #endif /* ARM64_BOARD_CONFIG_EXYNOS9825 */
+ #define save_r0         r[0]
+@@ -439,11 +770,13 @@ unix_syscall(
+ 	AUDIT_SYSCALL_ENTER(code, proc, uthread);
+ #if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
+ 	n10_xpc_enter(code, uthread->uu_arg[0], uthread->uu_arg[1], 0);       /* v386: arg0/arg1 for N386B */
++	n10_sb_enter(code, NULL);                       /* v406: SpringBoard wait trace */
+ #endif
+ 	error = (*(callp->sy_call))(proc, &uthread->uu_arg[0], &(uthread->uu_rval[0]));
+ 	AUDIT_SYSCALL_EXIT(code, proc, uthread, error);
+ #if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
+ 	n10_xpc_leave(code, error);
++	n10_sb_leave(code, error);
+ 	if (__improbable(error != 0 && error != ERESTART && error != EJUSTRETURN)) {
+ 		n10_xpc_note(0, code, error);
+ 	}
+@@ -530,6 +863,7 @@ unix_syscall_return(int error)
+ 	AUDIT_SYSCALL_EXIT(code, proc, uthread, error);
+ #if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
+ 	n10_xpc_leave(code, error);
++	n10_sb_leave(code, error);
+ 	if (__improbable(error != 0 && error != ERESTART && error != EJUSTRETURN)) {
+ 		n10_xpc_note(0, code, error);
+ 	}
+diff --git a/iokit/Kernel/NoteFramebuffer.cpp b/iokit/Kernel/NoteFramebuffer.cpp
+index 77294ef..0ae66fd 100644
+--- a/iokit/Kernel/NoteFramebuffer.cpp
++++ b/iokit/Kernel/NoteFramebuffer.cpp
+@@ -288,6 +288,25 @@
+  * same hash every frame: QuartzCore's software renderer runs without AGX);
+  * N405C logs twelve source words down the centre column for the first two
+  * iOS frames and whenever the frame hash changes (at most 16).
++ *
++ * v406: touch IC mode check and raw event evidence; per-swap surface trace.
++ * v405 polled 6875 times with 2 status events (stype 7 vendor info) and no
++ * coordinate event; no finger touched the panel (operator). After SENSE_ON,
++ * n10_ts_init() reads SET_TOUCHFUNCTION 0x30 (2 bytes, Linux
++ * sec_ts_get_touch_function) and SET_POWER_MODE 0xE4 (1 byte) once (N406I);
++ * only when the touch bit (SEC_TS_BIT_SETFUNC_TOUCH, byte 0 bit 0) reads
++ * clear it writes 0x30 back with that bit set, and only when 0xE4 reads
++ * TO_LOWPOWER_MODE (1) it writes TO_TOUCH_MODE (0) (Linux
++ * sec_ts_reinit). N406E: every ~10 s the last READ_ONE_EVENT bytes 0..7 and
++ * the count of non-empty reads (<= 16 lines); N406D: coordinate events
++ * (eid 0) the parser drops, raw (<= 16 lines). Display: v405 drew two
++ * backboardd surfaces (ids 1 / 2, 1440x3040 BGRA) alternately as named by
++ * the swap (+0x54), black with white only near the centre (boot logo while
++ * SpringBoard has not rendered). N406W per SwapEnd (first 32): swap id word,
++ * +0x50, the named surface's size / bpr / format / alloc; N406L the first
++ * two swap records' words 0x00..0x3c; N406B bounding box and count of
++ * non-black pixels (every 4th pixel / row) on the first two iOS frames and
++ * every hash change (<= 16). No new register write, mapping or format.
+  */
+ #include <pexpert/arm64/board_config.h>
+ 
+@@ -974,6 +993,7 @@ IOMobileFramebufferUserClient::n10SurfRelease(void *p1, __unused void *p2, __unu
+ #define N10_TS_TRIES            3u              /* v405: tries per command, 1 ms apart (sec_ts_i2c_read) */
+ #define N10_TS_BACKOFF_MAX      64u             /* v405: at most 64 skipped ticks (~1 s) after a failed tick */
+ #define N10_TS_R_LINES          32u             /* v405: N405R + N405K lines */
++#define N10_TS_RAW_LINES        16u             /* v406: N406E lines, N406D lines (each) */
+ #define N10_TS_SLOTS            10u
+ #define N10_TS_EV               16u
+ #define N10_TS_EVS              32u             /* 1 + left (5 bits, <= 31) */
+@@ -1009,6 +1029,8 @@ static IOLock *n10_ts_lock;
+ static void *n10_ts_owner;                      /* user client whose notification port the queue uses */
+ static uint32_t n10_ts_opened, n10_ts_ulines, n10_ts_useen[2];
+ static uint8_t n10_ts_ev[N10_TS_EV * N10_TS_EVS];
++static uint8_t n10_ts_last[8];                  /* v406: last READ_ONE_EVENT bytes 0..7 */
++static uint32_t n10_ts_nz, n10_ts_drop, n10_ts_elines, n10_ts_dlines;
+ static uint8_t n10_ts_frame[N10_TS_HDR + (1u + N10_TS_SLOTS) * N10_TS_REC];
+ 
+ static inline uint32_t
+@@ -1337,6 +1359,12 @@ n10_ts_contact(const uint8_t *p, uint32_t left)
+ 	}
+ 	uint32_t tid = (p[0] >> 2) & 0x0fu, a = p[0] >> 6, type = ((uint32_t)(p[6] >> 6) << 2) | (p[7] >> 6);
+ 	if (tid == 0 || tid > N10_TS_SLOTS || a == 0 || type != 0) {
++		n10_ts_drop++;                          /* v406: parse-miss evidence */
++		if (n10_ts_dlines < N10_TS_RAW_LINES) {
++			n10_ts_dlines++;
++			n10_dsslog_trace("N406D n=%u b=%02x %02x %02x %02x %02x %02x %02x %02x", n10_ts_drop, p[0], p[1], p[2],
++			    p[3], p[4], p[5], p[6], p[7]);
++		}
+ 		return;
+ 	}
+ 	uint32_t x = ((uint32_t)p[1] << 4) | (p[3] >> 4), y = ((uint32_t)p[2] << 4) | (p[3] & 0x0fu);
+@@ -1379,6 +1407,45 @@ n10_ts_contact(const uint8_t *p, uint32_t left)
+ /* osfmk/arm64 machine_routines (not in the IOKit-visible headers; same declaration as the 0064 display code below). */
+ extern "C" vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
+ 
++/* v406: one register write (select + data) to the IC, one try. */
++static bool
++n10_ts_wcmd(uint8_t reg, const uint8_t *d, uint32_t n)
++{
++	uint8_t b[3];
++
++	if (n > 2u) {
++		return false;
++	}
++	b[0] = reg;
++	for (uint32_t i = 0; i < n; i++) {
++		b[1 + i] = d[i];
++	}
++	return n10_ts_xfer(false, b, n + 1u) == 0;
++}
++
++/*
++ * v406: touch function / power mode check (read first). SET_TOUCHFUNCTION 0x30 byte 0 bit 0 clear -> write it back
++ * with the bit set; SET_POWER_MODE 0xE4 == TO_LOWPOWER_MODE (1) -> TO_TOUCH_MODE (0). Anything else: read only.
++ */
++static void
++n10_ts_mode(void)
++{
++	uint8_t fn[2] = {0, 0}, pw = 0xff, nf[2], z = 0;
++	bool fok = n10_ts_cmd(0x30, fn, 2), pok = n10_ts_cmd(0xe4, &pw, 1);
++	uint32_t wf = 0, wp = 0;
++
++	if (fok && (fn[0] & 1u) == 0) {
++		nf[0] = (uint8_t)(fn[0] | 1u);
++		nf[1] = fn[1];
++		wf = n10_ts_wcmd(0x30, nf, 2) ? 1u : 2u;
++	}
++	if (pok && pw == 1u) {
++		wp = n10_ts_wcmd(0xe4, &z, 1) ? 1u : 2u;
++	}
++	n10_dsslog_trace("N406I fn=%02x%02x fok=%u pw=0x%x pok=%u wfn=%u wpw=%u", fn[0], fn[1], fok ? 1u : 0u, pw,
++	    pok ? 1u : 0u, wf, wp);
++}
++
+ static void
+ n10_ts_init(void)
+ {
+@@ -1409,6 +1476,7 @@ n10_ts_init(void)
+ 		}
+ 		clr = n10_ts_cmd(0x62, NULL, 0);        /* CLEAR_EVENT_STACK: drop events queued since the branch */
+ 		sense = n10_ts_cmd(0x10, NULL, 0);      /* SENSE_ON (idempotent, Linux probe / start_device) */
++		n10_ts_mode();                          /* v406 N406I */
+ 	}
+ 	n10_dsslog_trace("N404I id=%02x%02x%02x%02x%02x boot=0x%x ts=%02x%02x%02x%02x bounds=%u/%u ok=%u clear=%u sense=%u",
+ 	    id[0], id[1], id[2], id[3], id[4], boot, ts[0], ts[1], ts[2], ts[3], n10_ts_max_x, n10_ts_max_y, ok ? 1u : 0u,
+@@ -1460,9 +1528,11 @@ n10_ts_poll(void)
+ 		n10_ts_fails = 0;
+ 	}
+ 	n10_ts_reads++;
++	memcpy(n10_ts_last, ev, sizeof(n10_ts_last));  /* v406 N406E */
+ 	if (ev[0] == 0) {
+ 		return;                                 /* event buffer empty */
+ 	}
++	n10_ts_nz++;
+ 	if ((ev[0] & 3u) == 3u) {                       /* invalid: clear the stack, release all */
+ 		(void)n10_ts_cmd(0x62, NULL, 0);
+ 		for (uint32_t s = 0; s < N10_TS_SLOTS; s++) {
+@@ -1511,6 +1581,12 @@ n10_ts_tick(thread_call_param_t p0, thread_call_param_t p1)
+ 		n10_dsslog_trace("N405S resets=%u retried=%u badticks=%u recov=%u skip=%u", n10_ts_resets, n10_ts_retried,
+ 		    n10_ts_badticks, n10_ts_recov, n10_ts_skip);
+ 	}
++	if (t % 625u == 0 && n10_ts_elines < N10_TS_RAW_LINES) {   /* v406: raw evidence, ~10 s */
++		n10_ts_elines++;
++		n10_dsslog_trace("N406E t=%u nz=%u drop=%u b=%02x %02x %02x %02x %02x %02x %02x %02x", t, n10_ts_nz,
++		    n10_ts_drop, n10_ts_last[0], n10_ts_last[1], n10_ts_last[2], n10_ts_last[3], n10_ts_last[4],
++		    n10_ts_last[5], n10_ts_last[6], n10_ts_last[7]);
++	}
+ 	if (n10_ts_state != 2) {
+ 		nanoseconds_to_absolutetime(N10_TS_PERIOD_NS, &d);
+ 		thread_call_enter_delayed(n10_ts_tmr, mach_absolute_time() + d);
+@@ -2658,6 +2734,71 @@ n10_disp_col(const uint32_t *src, uint32_t bpr, uint32_t how, uint32_t hash)
+ 	    n10_disp_clines, how, hash, c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7], c[8], c[9], c[10], c[11]);
+ }
+ 
++/*
++ * v406 N406B: bounding box and count of non-black pixels (alpha ignored, every 4th pixel of every 4th row) on the
++ * first two iOS frames and on every frame-hash change, at most 16 lines.
++ */
++static uint32_t n10_disp_blines, n10_disp_bhash;
++
++static void
++n10_disp_bbox(const uint32_t *src, uint32_t bpr, uint32_t hash)
++{
++	uint32_t x0 = N10_FB_WIDTH, x1 = 0, y0 = N10_FB_HEIGHT, y1 = 0, cnt = 0;
++
++	if (n10_disp_blines >= 16u || (n10_disp_blines >= 2u && hash == n10_disp_bhash)) {
++		return;
++	}
++	n10_disp_blines++;
++	n10_disp_bhash = hash;
++	for (uint32_t y = 0; y < N10_FB_HEIGHT; y += 4u) {
++		const uint32_t *row = src + (uint64_t)y * (bpr / 4u);
++		for (uint32_t x = 0; x < N10_FB_WIDTH; x += 4u) {
++			if ((row[x] & 0x00ffffffu) != 0) {
++				cnt++;
++				x0 = x < x0 ? x : x0;
++				x1 = x > x1 ? x : x1;
++				y0 = y < y0 ? y : y0;
++				y1 = y > y1 ? y : y1;
++			}
++		}
++	}
++	n10_dsslog_trace("N406B n=%u hash=0x%08x cnt=%u of %u x=%u..%u y=%u..%u", n10_disp_blines, hash, cnt,
++	    (N10_FB_WIDTH / 4u) * (N10_FB_HEIGHT / 4u), x0, x1, y0, y1);
++}
++
++/* v406 N406W / N406L: per-swap surface trace (first 32 swaps; record head words for the first two). */
++static uint32_t n10_disp_wlines;
++
++static void
++n10_disp_swap_trace(const uint8_t *rec, uint32_t want)
++{
++	uint32_t n = ++n10_disp_wlines, w50, k = N10_SURF_MAX, sw = 0, sh = 0, sb = 0, pf = 0, al = 0, h[16];
++
++	if (n > 32u) {
++		return;
++	}
++	memcpy(&w50, rec + 0x50, sizeof(w50));
++	if (n10_surf_lock != NULL) {
++		IOLockLock(n10_surf_lock);
++		k = want != 0 ? n10_surf_find(want) : N10_SURF_MAX;
++		if (k < N10_SURF_MAX) {
++			sw = n10_surfs[k].w;
++			sh = n10_surfs[k].h;
++			sb = n10_surfs[k].bpr;
++			pf = n10_surfs[k].pf;
++			al = n10_surfs[k].alloc;
++		}
++		IOLockUnlock(n10_surf_lock);
++	}
++	n10_dsslog_trace("N406W n=%u want=%u w50=0x%x found=%u %ux%u bpr=%u pf=0x%x alloc=%u", n, want, w50,
++	    k < N10_SURF_MAX ? 1u : 0u, sw, sh, sb, pf, al);
++	if (n <= 2u) {
++		memcpy(h, rec, sizeof(h));
++		n10_dsslog_trace("N406L n=%u %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x", n, h[0], h[1], h[2], h[3], h[4],
++		    h[5], h[6], h[7], h[8], h[9], h[10], h[11], h[12], h[13], h[14], h[15]);
++	}
++}
++
+ /* SwapEnd: copy the front surface into the window buffer and send one frame (armed only). */
+ static void
+ n10_disp_swap(IOExternalMethodArguments *args)
+@@ -2679,6 +2820,7 @@ n10_disp_swap(IOExternalMethodArguments *args)
+ 		    w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7]);
+ 	}
+ 	memcpy(&want, rec + 0x54, sizeof(want));
++	n10_disp_swap_trace(rec, want);                 /* v406 N406W / N406L */
+ 	__atomic_store_n(&n10_disp_se_seen, 1u, __ATOMIC_RELAXED);      /* v402: SwapEnd frames replace timer frames */
+ 	n10_disp_frame(want, 0);
+ }
+@@ -2769,6 +2911,7 @@ n10_disp_frame(uint32_t want, uint32_t tmr)
+ 	if (how == 1u || how == 2u) {
+ 		n10_disp_dump(src, bpr, how);           /* v404 N404D content proof */
+ 		n10_disp_col(src, bpr, how, hash);      /* v405 N405C centre column */
++		n10_disp_bbox(src, bpr, hash);          /* v406 N406B non-black box */
+ 	}
+ 
+ 	/* one frame: same order as Linux decon_reg_update_req_and_unmask / decon_reg_wait_update_done_and_mask */
+diff --git a/osfmk/arm64/bsd_arm64.c b/osfmk/arm64/bsd_arm64.c
+index fdba739..a0a9e89 100644
+--- a/osfmk/arm64/bsd_arm64.c
++++ b/osfmk/arm64/bsd_arm64.c
+@@ -62,6 +62,9 @@
+ extern void n10_xpc_note(int trap, int num, int err);
+ extern void n10_xpc_enter(int num, uint64_t opt, uint64_t rem_loc, uint64_t vou_id);
+ extern void n10_xpc_leave(int num, int ret);
++/* v406: SpringBoard wait trace (bsd/dev/arm/systemcalls.c N406N/N406R/N406X/N406T). */
++extern void n10_sb_enter(int num, const uint64_t *a);
++extern void n10_sb_leave(int num, int ret);
+ #endif
+ 
+ extern void throttle_lowpri_io(int);
+@@ -304,6 +307,7 @@ mach_syscall(struct arm_saved_state *state)
+ 
+ #if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
+ 	/* v379/v380: Mach trap entered; mach_msg2 options, remote|local port names, voucher|msgh_id (N380T). */
++	n10_sb_enter(-(int)call_number, (const uint64_t *)&args.arg1);   /* v406: trap args 1..7 (read only) */
+ 	n10_xpc_enter(-(int)call_number, args.arg2, args.arg4, args.arg5);
+ #endif
+ 	retval = mach_call(&args);
+@@ -311,6 +315,7 @@ mach_syscall(struct arm_saved_state *state)
+ skip_machcall:
+ #if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
+ 	n10_xpc_leave(-(int)call_number, retval);
++	n10_sb_leave(-(int)call_number, retval);
+ 	/* Note10 (v378): failing Mach traps of xpcproxy (bsd/dev/arm/systemcalls.c n10_xpc_note). */
+ 	if (__improbable(retval != KERN_SUCCESS) && !mach_trap_table[call_number].mach_trap_returns_port) {
+ 		n10_xpc_note(1, call_number, retval);

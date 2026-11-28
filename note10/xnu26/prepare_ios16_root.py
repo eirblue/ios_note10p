@@ -159,6 +159,9 @@ OVERLAY = (
     ('0071-exynos9825-n10-touch-i2c-recover-hid-display.patch',
      '6f71d8faf932a3b42208776a2f19927f3bbfd954834e701fe7ec572a70eeb435',
      ('iokit/Kernel/NoteFramebuffer.cpp',)),
+    ('0072-exynos9825-n10-touch-mode-swap-surface-trace.patch',
+     'ac378704c707a6fab88df48ab7a6bb87f1b7a2eac4729ec8ef8b78689df792a7',
+     ('bsd/dev/arm/systemcalls.c', 'iokit/Kernel/NoteFramebuffer.cpp', 'osfmk/arm64/bsd_arm64.c')),
 )
 STAGED_DIRS = ('bsd/n10_hfs/core', 'bsd/n10_hfs/hfs_encodings')
 
