@@ -150,6 +150,9 @@ OVERLAY = (
     ('0068-exynos9825-n10-timer-armed-scanout-test-bars.patch',
      '29f0b023436f7835306262aba339279437b41edd954aad9e1d2e747d0d0ee763',
      ('iokit/Kernel/NoteFramebuffer.cpp',)),
+    ('0069-exynos9825-n10-continuous-ios-frames.patch',
+     '613eda8cb2790f60bef2afc6ae16577fbb84057061a7d54bd3356e668a4e795c',
+     ('iokit/Kernel/NoteFramebuffer.cpp',)),
 )
 STAGED_DIRS = ('bsd/n10_hfs/core', 'bsd/n10_hfs/hfs_encodings')
 

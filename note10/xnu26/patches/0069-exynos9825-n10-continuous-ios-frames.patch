@@ -1,0 +1,92 @@
+diff --git a/iokit/Kernel/NoteFramebuffer.cpp b/iokit/Kernel/NoteFramebuffer.cpp
+index 9ac0292..f63e72f 100644
+--- a/iokit/Kernel/NoteFramebuffer.cpp
++++ b/iokit/Kernel/NoteFramebuffer.cpp
+@@ -217,6 +217,16 @@
+  * 0065/0067 conversion and the two DECON0 trigger writes with the same
+  * checks. The first SwapEnd stops the timer frames. N402S at publish, N402T
+  * per tick (first four, every 8th, re-probes, last); N398F how=3 = test bars.
++ *
++ * v403: keep the panel updating after the first SwapEnd. v402 armed from the
++ * timer and sent 35 test-bar frames; the first SwapEnd then stopped the
++ * timer. Now the timer keeps ticking (at most 50 ticks, 2 s apart): before
++ * any SwapEnd as in v402; after it, a tick sends the newest 1440x3040 iOS
++ * surface (how=2, never the bars) only when no SwapEnd frame completed in the
++ * last 4 s. N398F is logged for the first 24 frames, every 8th after, every
++ * failure and the first 8 SwapEnd frames (surf = front surface id, how = 1
++ * id match / 2 newest). N402T also on the first tick after a SwapEnd.
++ * Frame path, checks and the two DECON0 trigger writes are unchanged.
+  */
+ #include <pexpert/arm64/board_config.h>
+ 
+@@ -269,12 +279,15 @@ static void n10_disp_frame(uint32_t want, uint32_t tmr);
+ static void n10_disp_tick(thread_call_param_t p0, thread_call_param_t p1);
+ #define N10_DISP_TMR_FIRST_S    15u             /* v402: first timer tick after publish */
+ #define N10_DISP_TMR_NS         2000000000ull   /* then one tick every 2 s */
+-#define N10_DISP_TMR_TICKS      43u             /* last tick ~99 s after publish */
++#define N10_DISP_TMR_TICKS      50u             /* v403: last tick ~113 s after publish */
++#define N10_DISP_SE_QUIET_NS    4000000000ull   /* v403: timer frame after 4 s without a SwapEnd frame */
+ #define N10_DISP_RETRY_NS       5000000000ull   /* v402 r2: re-probe spacing */
+ #define N10_DISP_RETRIES        3u
+ static thread_call_t n10_disp_tmr;
+ static uint32_t n10_disp_ticks, n10_disp_se_seen, n10_disp_retry, n10_disp_retries;
+ static uint64_t n10_disp_retry_at;
++static uint64_t n10_disp_se_ok_at;              /* v403: last completed SwapEnd frame */
++static uint32_t n10_disp_se_frames, n10_disp_se_logged;
+ static uint32_t *n10_disp_bars;                 /* v402: one 1440-pixel test row (BGRA), every row */
+ /* v392 N392F counters: opens, notification ports, selectors 3/4/5/6/8, others. */
+ enum { N10_FB_C_SURF, N10_FB_C_SB, N10_FB_C_SE, N10_FB_C_SW, N10_FB_C_DS, N10_FB_C_OTHER, N10_FB_C_N };
+@@ -1295,7 +1308,7 @@ n10_chosen_publish(void)
+ #define N10_DISP_MIN_GAP_NS     100000000ull    /* at most one frame per 100 ms */
+ #define N10_DISP_POLL_US        100u
+ #define N10_DISP_POLLS          500u            /* 50 ms */
+-#define N10_DISP_FRAME_LINES    8u
++#define N10_DISP_FRAME_LINES    24u             /* v403: was 8 */
+ /* ranges the buffer must not overlap (public exynos9820.dts reserved-memory / v382 loader contract) */
+ #define N10_DISP_XNU_WINDOW     0x20000000ull   /* XNU window [gPhysBase, +512 MiB) (Linux N311_WINDOW_BYTES) */
+ #define N10_DISP_UFS_DMA        0xe2000000ull   /* N382_DMA_BASE, 1 MiB */
+@@ -1827,7 +1840,7 @@ n10_disp_frame(uint32_t want, uint32_t tmr)
+ 	IOLockUnlock(n10_surf_lock);
+ 	if (md != NULL) {
+ 		src = (const uint32_t *)md->getBytesNoCopy();
+-	} else if (tmr != 0 && n10_disp_bars != NULL) {
++	} else if (tmr == 1u && n10_disp_bars != NULL) {    /* v403: tmr 2 (after a SwapEnd) never uses the bars */
+ 		src = n10_disp_bars;                    /* v402 test bars: bpr 0 repeats the row */
+ 		how = 3;
+ 	}
+@@ -1886,7 +1899,12 @@ n10_disp_frame(uint32_t want, uint32_t tmr)
+ 		n = __atomic_add_fetch(&n10_disp_fails, 1u, __ATOMIC_RELAXED);
+ 		__atomic_store_n(&n10_disp_armed, 0u, __ATOMIC_RELEASE);
+ 	}
+-	if (!ok || n <= N10_DISP_FRAME_LINES || (n & 63u) == 0) {
++	uint32_t sen = 0;
++	if (ok && tmr == 0) {                           /* v403: SwapEnd frame bookkeeping */
++		sen = ++n10_disp_se_frames;
++		n10_disp_se_ok_at = n10_disp_last;
++	}
++	if (!ok || n <= N10_DISP_FRAME_LINES || (n & 7u) == 0 || (sen != 0 && sen <= 8u)) {
+ 		n10_dsslog_trace("N398F ok=%u n=%u surf=%u how=%u polls=%u sur=0x%x skips=%u hash=0x%08x", ok, n, want,
+ 		    how, polls, sur, __atomic_load_n(&n10_disp_skips, __ATOMIC_RELAXED), hash);
+ 	}
+@@ -2037,13 +2055,19 @@ n10_disp_tick(thread_call_param_t p0, thread_call_param_t p1)
+ 	seen = __atomic_load_n(&n10_disp_se_seen, __ATOMIC_RELAXED);
+ 	if (seen == 0) {
+ 		n10_disp_frame(0, 1);
++	} else {                                        /* v403: newest surface when SwapEnd frames stop for 4 s */
++		nanoseconds_to_absolutetime(N10_DISP_SE_QUIET_NS, &d);
++		if (n10_disp_se_ok_at == 0 || mach_absolute_time() - n10_disp_se_ok_at >= d) {
++			n10_disp_frame(0, 2);
++		}
+ 	}
+-	if (tick <= 4u || (tick & 7u) == 0 || re != 0 || seen != 0 || tick >= N10_DISP_TMR_TICKS) {
++	if (tick <= 4u || (tick & 7u) == 0 || re != 0 || (seen != 0 && n10_disp_se_logged++ == 0) ||
++	    tick >= N10_DISP_TMR_TICKS) {
+ 		n10_dsslog_trace("N402T tick=%u armed=%u se=%u copies=%u frames=%u fails=%u re=%u", tick,
+ 		    __atomic_load_n(&n10_disp_armed, __ATOMIC_RELAXED), seen, n10_disp_copies,
+ 		    __atomic_load_n(&n10_disp_frames, __ATOMIC_RELAXED), __atomic_load_n(&n10_disp_fails, __ATOMIC_RELAXED), re);
+ 	}
+-	if (seen == 0 && tick < N10_DISP_TMR_TICKS) {
++	if (tick < N10_DISP_TMR_TICKS) {                /* v403: keeps ticking after the first SwapEnd */
+ 		nanoseconds_to_absolutetime(N10_DISP_TMR_NS, &d);
+ 		thread_call_enter_delayed(n10_disp_tmr, mach_absolute_time() + d);
+ 	}
