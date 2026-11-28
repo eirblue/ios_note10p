@@ -1,0 +1,790 @@
+diff --git a/bsd/dev/arm/systemcalls.c b/bsd/dev/arm/systemcalls.c
+index 05059a4..d017468 100644
+--- a/bsd/dev/arm/systemcalls.c
++++ b/bsd/dev/arm/systemcalls.c
+@@ -420,6 +420,7 @@ static struct {
+ static uint32_t n10_cpu_n, n10_cpu_o;
+ extern uint32_t n10_prio_floor_hits;
+ extern void n10_dsslog_final(const char *s, int n);
++extern void n10_smp_final(void);                /* v412: osfmk/arm64/note10/n10_smp.c N412F */
+ void n10_cpu_sample(void);
+ 
+ void
+@@ -1082,6 +1083,7 @@ n10_sb_final(void)
+ 	uint32_t now = n10_sb_now_ms();
+ 	int n, m;
+ 
++	n10_smp_final();                                /* v412 N412F */
+ 	n10_cpu_final();                                /* v411 N411C */
+ 	for (int i = 0; i < N10_SB_SLOTS; i++) {
+ 		int w = n10_sb[i].who;
+diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
+index 0ffea1c..b3002b6 100644
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -1063,6 +1063,12 @@ bsd_init(void)
+ 	bsd_init_kprintf("calling siginit\n");
+ 	siginit(kernproc);
+ 
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	/* v412: register the boot CPU and start cluster0 cores 1..3 (osfmk/arm64/note10/n10_smp.c) before launchd */
++	extern void n10_smp_boot(void);
++	n10_smp_boot();
++#endif
++
+ 	bsd_init_kprintf("calling bsd_utaskbootstrap\n");
+ 	bsd_utaskbootstrap();
+ 
+diff --git a/osfmk/arm/cpu_common.c b/osfmk/arm/cpu_common.c
+index eadffaf..c203640 100644
+--- a/osfmk/arm/cpu_common.c
++++ b/osfmk/arm/cpu_common.c
+@@ -57,6 +57,11 @@
+ #include <arm/machine_routines.h>
+ #include <arm64/proc_reg.h>
+ #include <libkern/OSAtomic.h>
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++/* v412: osfmk/arm64/note10/n10_smp.c (no IOCPU objects: cpu_id is opaque, never passed to PE_cpu_*) */
++extern void n10_smp_signal(cpu_data_t *target);
++extern void n10_smp_cpu_machine_init(unsigned int cpu, boolean_t boot);
++#endif
+ 
+ SECURITY_READ_ONLY_LATE(struct percpu_base) percpu_base;
+ vm_address_t     percpu_base_cur;
+@@ -514,6 +519,8 @@ cpu_signal_internal(cpu_data_t *target_proc,
+ 			} else {
+ 				PE_cpu_signal_deferred(getCpuDatap()->cpu_id, target_proc->cpu_id);
+ 			}
++#elif defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++			n10_smp_signal(target_proc);    /* v412: GIC SGI; no deferred IPI on Note10 */
+ #else
+ 			PE_cpu_signal_deferred(getCpuDatap()->cpu_id, target_proc->cpu_id);
+ #endif /* defined(HAS_IPI) */
+@@ -524,6 +531,8 @@ cpu_signal_internal(cpu_data_t *target_proc,
+ 			} else {
+ 				PE_cpu_signal(getCpuDatap()->cpu_id, target_proc->cpu_id);
+ 			}
++#elif defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++			n10_smp_signal(target_proc);    /* v412: GIC SGI */
+ #else
+ 			PE_cpu_signal(getCpuDatap()->cpu_id, target_proc->cpu_id);
+ #endif /* defined(HAS_IPI) */
+@@ -587,6 +596,8 @@ cpu_signal_cancel(cpu_data_t *target_proc, cpu_signal_t signal)
+ 		} else {
+ 			PE_cpu_signal_cancel(getCpuDatap()->cpu_id, target_proc->cpu_id);
+ 		}
++#elif defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++		/* v412: an SGI cannot be retracted; the handler finds no signal bit */
+ #else
+ 		PE_cpu_signal_cancel(getCpuDatap()->cpu_id, target_proc->cpu_id);
+ #endif /* defined(HAS_IPI) */
+@@ -755,7 +766,11 @@ cpu_machine_init(void)
+ 	bool started = os_atomic_or_orig(&cpu_data_ptr->cpu_flags, StartedState, relaxed) & StartedState;
+ 
+ 	/* Note: this calls IOCPURunPlatformActiveActions when resuming on boot cpu */
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	n10_smp_cpu_machine_init(cpu_data_ptr->cpu_number, !started);   /* v412: instead of IOCPU::initCPU */
++#else
+ 	PE_cpu_machine_init(cpu_data_ptr->cpu_id, !started);
++#endif
+ 
+ 	ml_init_interrupt();
+ }
+diff --git a/osfmk/arm64/cpu.c b/osfmk/arm64/cpu.c
+index 53f9ce5..c3cd8d4 100644
+--- a/osfmk/arm64/cpu.c
++++ b/osfmk/arm64/cpu.c
+@@ -84,6 +84,9 @@ void sleep_token_buffer_init(void);
+ extern uintptr_t resume_idle_cpu;
+ extern uintptr_t start_cpu;
+ vm_address_t   start_cpu_paddr;
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++extern void n10_smp_cpu_on(cpu_data_t *cdp);   /* v412: osfmk/arm64/note10/n10_smp.c */
++#endif
+ #endif
+ 
+ #if __ARM_KERNEL_PROTECT__
+@@ -965,7 +968,11 @@ cpu_start(int cpu)
+ #endif
+ #endif /* CONFIG_SPTM */
+ 
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++		n10_smp_cpu_on(cpu_data_ptr);   /* v412: no IOCPU on Note10; PSCI CPU_ON, asynchronous */
++#else
+ 		PE_cpu_start_internal(cpu_data_ptr->cpu_id, (vm_offset_t)NULL, (vm_offset_t)NULL);
++#endif
+ 
+ 	}
+ }
+diff --git a/osfmk/arm64/note10/n10_dsslog.c b/osfmk/arm64/note10/n10_dsslog.c
+index 29535dc..4108b8c 100644
+--- a/osfmk/arm64/note10/n10_dsslog.c
++++ b/osfmk/arm64/note10/n10_dsslog.c
+@@ -163,6 +163,31 @@ __asm__ (
+ 	"	br x16\n"
+ 	"1:	b _n10_sync_kother_capture\n");
+ 
++/*
++ * v412 (SMP): the busy flag is taken with an atomic exchange. Another CPU's append is waited for (bounded, DAIF
++ * masked; an append is a few hundred Device byte stores); a CPU that still finds it busy after N10_DSS_SPIN tries
++ * (a fault inside its own append) drops its text as before. Crumbs keep a single try.
++ */
++#define N10_DSS_SPIN            1000000u
++
++static bool
++n10_dss_take(uint32_t tries)
++{
++	for (uint32_t i = 0; i < tries; i++) {
++		if (__atomic_exchange_n(&n10_dss_busy, 1u, __ATOMIC_ACQUIRE) == 0) {
++			return true;
++		}
++		__asm__ volatile ("yield");
++	}
++	return false;
++}
++
++static inline void
++n10_dss_give(void)
++{
++	__atomic_store_n(&n10_dss_busy, 0u, __ATOMIC_RELEASE);
++}
++
+ static inline uint64_t
+ n10_dss_irq_off(void)
+ {
+@@ -252,14 +277,13 @@ n10_dss_write_mode(const char *s, int n, uint32_t final)
+ 		return;
+ 	}
+ 	uint64_t daif = n10_dss_irq_off();
+-	if (!n10_dss_busy) {
+-		n10_dss_busy = 1;
++	if (n10_dss_take(N10_DSS_SPIN)) {
+ 		n10_dss_final = final;
+ 		for (int i = 0; i < n; i++) {
+ 			n10_dss_char(s[i]);
+ 		}
+ 		n10_dss_final = 0;
+-		n10_dss_busy = 0;
++		n10_dss_give();
+ 	}
+ 	n10_dss_irq_restore(daif);
+ }
+@@ -519,7 +543,7 @@ n10_sync_capture(uint32_t kother, arm_saved_state_t *ss, uint64_t esr, uint64_t
+ 	}
+ 	n10_sync_index = (uint32_t)index;
+ 	if (n10_dss_state == N10_DSS_ON) {
+-		n10_dss_busy = 1;
++		(void)n10_dss_take(N10_DSS_SPIN);       /* v412: terminal path; writes even when the wait ran out */
+ 		if (n10_dss_line_len) {
+ 			n10_dss_emit();         /* pending partial console line */
+ 		}
+@@ -575,6 +599,7 @@ n10_sync_capture(uint32_t kother, arm_saved_state_t *ss, uint64_t esr, uint64_t
+ 		}
+ 		n10_sync_text[at++] = '\n';
+ 		(void)n10_dss_append(n10_sync_text, at, 0);
++		n10_dss_give();                         /* v412: other CPUs keep logging */
+ 	}
+ 	n10_sync_stop(index);
+ }
+@@ -618,10 +643,9 @@ n10_dss_tag(const char *tag, uint64_t value, const char *msg)
+ {
+ 	char text[160];
+ 
+-	if (n10_dss_state != N10_DSS_ON || n10_dss_busy) {
++	if (n10_dss_state != N10_DSS_ON || !n10_dss_take(N10_DSS_SPIN)) {
+ 		return;
+ 	}
+-	n10_dss_busy = 1;
+ 	if (n10_dss_line_len) {
+ 		n10_dss_emit();
+ 	}
+@@ -637,7 +661,7 @@ n10_dss_tag(const char *tag, uint64_t value, const char *msg)
+ 	}
+ 	text[at++] = '\n';
+ 	(void)n10_dss_append(text, at, N10_DSS_RESERVE);
+-	n10_dss_busy = 0;
++	n10_dss_give();
+ }
+ 
+ __attribute__((used, noreturn, noinline)) void
+@@ -722,8 +746,7 @@ n10_dss_crumb(char kind, int num, int pid, uint64_t tid, uint32_t a, uint32_t b)
+ 	}
+ 	absolutetime_to_nanoseconds(mach_absolute_time(), &ns);
+ 	uint64_t daif = n10_dss_irq_off();
+-	if (n10_dss_state == N10_DSS_ON && !n10_dss_busy) {
+-		n10_dss_busy = 1;
++	if (n10_dss_state == N10_DSS_ON && n10_dss_take(1)) {
+ 		if (n10_crumb_pa == 0) {
+ 			uint64_t first = n10_dss_pos;
+ 			(void)n10_crumb_text(r, 0, 0, 0, 0, '-', 0, 0, 0);
+@@ -744,7 +767,7 @@ n10_dss_crumb(char kind, int num, int pid, uint64_t tid, uint32_t a, uint32_t b)
+ 			}
+ 			__asm__ volatile ("dsb sy" : : : "memory");
+ 		}
+-		n10_dss_busy = 0;
++		n10_dss_give();
+ 	}
+ 	n10_dss_irq_restore(daif);
+ }
+diff --git a/osfmk/arm64/note10/n10_smp.c b/osfmk/arm64/note10/n10_smp.c
+new file mode 100644
+index 0000000..bd1e215
+--- /dev/null
++++ b/osfmk/arm64/note10/n10_smp.c
+@@ -0,0 +1,333 @@
++/*
++ * Note10 (v412): secondary CPUs under XNU.
++ *
++ * v410 / v411 r1: XNU ran on CPU0 only (EXYNOS9825.h MAX_CPUS 1; no IOCPU / AppleARMCPU kext, so nothing called
++ * ml_processor_register). About 100 daemons start from ~49 s and lsd got 2 of ~70 CPU0 samples; its LaunchServices
++ * database scan did not finish in the 300 s window and SpringBoard waited on lsd. v412 raises MAX_CPUS to 4: ADT
++ * /cpus cpu0..cpu3 = the cluster0 Cortex-A55 cores (Linux DT reg 0..3, enable-method psci), the boot CPU's own core
++ * type, cluster, power domain and DVFS domain. The A75 (reg 4, 5) and M4 (reg 0x100, 0x101) cores stay off. The
++ * controller offlines Linux CPUs 1-7 (hotplug, PSCI CPU_OFF) before the actor, so EL3 holds them OFF and CPU_ON is
++ * valid; a core Linux kept online answers ALREADY_ON and simply is not used.
++ *
++ *   n10_smp_boot()              bsd_init, before launchd: ml_processor_register for the boot CPU (processor_boot,
++ *                               cpu_machine_init: cpu_signal enabled by a self-SGI), then for cpus 1..3
++ *                               (processor_boot -> processor_dostartup -> cpu_start -> n10_smp_cpu_on)
++ *   n10_smp_cpu_on()            PSCI CPU_ON (SMC64 0xC4000003, target = ADT reg, entry = PA of n10_smp_entry
++ *                               (start.s), context id = PA of the cpu data); asynchronous, result in N412S
++ *   n10_smp_cpu_machine_init()  cpu_machine_init on every CPU instead of IOCPU::initCPU: GIC banked setup on a
++ *                               secondary (pe_note10_cpu_init), self-SGI, ml_cpu_up when interrupts are on (boot
++ *                               CPU, as PE_cpu_machine_init), N412O
++ *   n10_smp_signal()            cpu_signal IPIs = GIC SGI 0 (pe_note10_send_ipi); n10_smp_ipi() is its handler
++ *   n10_smp_sample()            per-CPU timer IRQ sample (busy = not the idle thread, lsd = proc name "lsd")
++ *   n10_smp_tick()              CPU0 watchdog timer (250 ms): N412Q every 10 s until the quiet phase (run =
++ *                               runnable threads, per CPU state and sample deltas), one N412T for a core that is not
++ *                               online 5 s after CPU_ON
++ *   n10_smp_final()             window end: N412F totals
++ *   n10_smp_badirq()            N412I for an interrupt source pe_note10_handle_irq disabled (cap 16)
++ *
++ * Fail-safe: nothing here waits for a secondary. A core that never comes online stays PROCESSOR_START (never
++ * dispatched to; timeshare threads use the shared pset run queue) and only costs its N412T line; XNU continues on
++ * the CPUs that came up. The watchdog pet stays a CPU0 timer call (n10_wdt.c: armed on CPU0 before any secondary
++ * exists and re-armed from its own callout, so it stays on CPU0's timer queue). Observation counters are per CPU and
++ * written only by their own CPU; CPU0 reads them unlocked (32-bit, record only).
++ */
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++#include <stdint.h>
++#include <stdbool.h>
++#include <mach/vm_types.h>
++#include <machine/machine_routines.h>
++#include <kern/clock.h>
++#include <kern/cpu_number.h>
++#include <kern/processor.h>
++#include <kern/sched.h>
++#include <kern/thread.h>
++#include <kern/task.h>
++#include <arm/cpu_data.h>
++#include <arm/cpu_data_internal.h>
++#include <arm/caches_internal.h>
++#include <arm/machine_cpu.h>
++#include <arm/machine_routines.h>
++#include <arm/pmap.h>
++#include <string.h>
++
++#define N10_PSCI_CPU_ON         0xc4000003ull   /* SMC64; Linux DT /psci cpu_on, method smc */
++#define N10_SMP_ONLINE_NS       5000000000ull   /* N412T when a core is not online 5 s after CPU_ON */
++#define N10_SMP_Q_EVERY         40u             /* 250 ms watchdog ticks: N412Q every 10 s */
++#define N10_SMP_BAD_MAX         16u             /* N412I cap */
++
++enum { N10_SMP_NONE = 0, N10_SMP_PENDING, N10_SMP_FAILED, N10_SMP_UP };
++
++extern void n10_smp_entry(void);                /* osfmk/arm64/start.s */
++extern int pe_note10_cpu_init(unsigned int cpu);        /* pexpert/arm/pe_note10_irq.c */
++extern int pe_note10_send_ipi(unsigned int cpu);
++extern void n10_dsslog_trace(const char *fmt, ...) __printflike(1, 2);
++extern void n10_dsslog_write(const char *s, int n);
++extern void n10_dsslog_final(const char *s, int n);
++extern int snprintf(char *, size_t, const char *, ...) __printflike(3, 4);
++extern char *proc_name_address(void *p);
++extern void *get_bsdtask_info(task_t t);
++
++void n10_smp_boot(void);
++void n10_smp_cpu_on(cpu_data_t *cdp);
++void n10_smp_cpu_machine_init(unsigned int cpu, boolean_t boot);
++void n10_smp_signal(cpu_data_t *target);
++void n10_smp_ipi(void);
++void n10_smp_sample(void);
++void n10_smp_tick(bool quiet);
++void n10_smp_final(void);
++void n10_smp_badirq(uint32_t intid);
++
++static struct {
++	uint32_t state;
++	int32_t psci;                   /* CPU_ON return value (x0, low word) */
++	uint64_t on_abs, up_abs;
++	uint32_t mpidr, gic;
++	uint32_t irq, busy, lsd, ipi;   /* written only by that CPU */
++	uint32_t irq0, busy0, lsd0;     /* at the previous N412Q (CPU0) */
++	bool late_logged;
++} n10_smp[MAX_CPUS];
++static bool n10_smp_started;
++static uint32_t n10_smp_ticks, n10_smp_bad, n10_smp_bad_lines;
++
++static uint32_t
++n10_smp_ms(uint64_t abs)
++{
++	uint64_t ns = 0;
++
++	absolutetime_to_nanoseconds(abs, &ns);
++	return (uint32_t)(ns / NSEC_PER_MSEC);
++}
++
++static int64_t
++n10_smp_psci_on(uint64_t target, uint64_t entry, uint64_t context)
++{
++	register uint64_t x0 __asm__("x0") = N10_PSCI_CPU_ON;
++	register uint64_t x1 __asm__("x1") = target;
++	register uint64_t x2 __asm__("x2") = entry;
++	register uint64_t x3 __asm__("x3") = context;
++
++	/* SMCCC: x0-x3 results, x4-x17 not preserved, x18-x30 / SP preserved */
++	__asm__ volatile ("smc #0" : "+r" (x0), "+r" (x1), "+r" (x2), "+r" (x3) : :
++	    "x4", "x5", "x6", "x7", "x8", "x9", "x10", "x11", "x12", "x13", "x14", "x15", "x16", "x17", "memory");
++	return (int64_t)x0;
++}
++
++static void
++n10_smp_register(const ml_topology_cpu_t *c)
++{
++	ml_processor_info_t info;
++	processor_t processor = PROCESSOR_NULL;
++	ipi_handler_t ipi = NULL;
++	perfmon_interrupt_handler_func pmi = NULL;
++	kern_return_t kr;
++
++	bzero(&info, sizeof(info));
++	info.cpu_id = (cpu_id_t)(uintptr_t)(c->cpu_id + 1);    /* opaque: the PE_cpu_* users are bypassed */
++	info.phys_id = c->phys_id;
++	info.log_id = c->cpu_id;
++	info.cluster_id = c->cluster_id;
++	info.cluster_type = c->cluster_type;
++	info.l2_cache_id = c->l2_cache_id;
++	info.l2_cache_size = c->l2_cache_size;
++	info.l3_cache_id = c->l3_cache_id;
++	info.l3_cache_size = c->l3_cache_size;
++	kr = ml_processor_register(&info, &processor, &ipi, &pmi);
++	if (kr != KERN_SUCCESS) {
++		n10_dsslog_trace("N412R cpu=%u kr=%d", c->cpu_id, kr);
++	}
++}
++
++void
++n10_smp_boot(void)
++{
++	const ml_topology_info_t *ti = ml_get_topology_info();
++	unsigned int boot = (unsigned int)ml_get_boot_cpu_number();
++
++	n10_smp_started = true;
++	n10_dsslog_trace("N412B cpus=%u boot=%u t=%u", ti->num_cpus, boot, n10_smp_ms(mach_absolute_time()));
++	n10_smp_register(&ti->cpus[boot]);      /* first: its cpu_signal must work before others can signal it */
++	for (unsigned int i = 0; i < ti->num_cpus && i < MAX_CPUS; i++) {
++		if (i != boot) {
++			n10_smp_register(&ti->cpus[i]);
++		}
++	}
++}
++
++void
++n10_smp_cpu_on(cpu_data_t *cdp)
++{
++	const ml_topology_info_t *ti = ml_get_topology_info();
++	unsigned int cpu = cdp->cpu_number;
++
++	if (cpu >= MAX_CPUS || cpu >= ti->num_cpus || CpuDataEntries[cpu].cpu_data_paddr == NULL) {
++		return;
++	}
++	uint64_t entry = ml_static_vtop((vm_offset_t)&n10_smp_entry);
++	uint64_t context = (uint64_t)(uintptr_t)CpuDataEntries[cpu].cpu_data_paddr;
++
++	/* read with the MMU off by n10_smp_entry / start_cpu; cpu_start already cleaned CpuDataEntries and the cpu data */
++	flush_dcache((vm_offset_t)&cpu_ttep, (unsigned)sizeof(cpu_ttep), FALSE);
++	flush_dcache((vm_offset_t)BootArgs, (unsigned)sizeof(*BootArgs), FALSE);
++	n10_smp[cpu].on_abs = mach_absolute_time();
++	int64_t r = n10_smp_psci_on(ti->cpus[cpu].phys_id, entry, context);
++	n10_smp[cpu].psci = (int32_t)r;
++	if (n10_smp[cpu].state != N10_SMP_UP) {
++		n10_smp[cpu].state = r == 0 ? N10_SMP_PENDING : N10_SMP_FAILED;
++	}
++	n10_dsslog_trace("N412S cpu=%u reg=0x%x psci=%d", cpu, ti->cpus[cpu].phys_id, (int)n10_smp[cpu].psci);
++}
++
++void
++n10_smp_cpu_machine_init(unsigned int cpu, boolean_t boot)
++{
++	uint64_t mpidr;
++	int gic = 1;
++
++	if (cpu >= MAX_CPUS) {
++		return;
++	}
++	__asm__ volatile ("mrs %0, mpidr_el1" : "=r" (mpidr));
++	if (cpu != (unsigned int)ml_get_boot_cpu_number()) {
++		gic = pe_note10_cpu_init(cpu);
++	}
++	n10_smp[cpu].mpidr = (uint32_t)mpidr;
++	n10_smp[cpu].gic = (uint32_t)gic;
++	n10_smp[cpu].up_abs = mach_absolute_time();
++	n10_smp[cpu].state = N10_SMP_UP;
++	/* as IOCPU::initCPU: a self-IPI, taken once interrupts are enabled, clears SIGPdisabled (cpu_signal_handler) */
++	(void)pe_note10_send_ipi(cpu);
++	n10_dsslog_trace("N412O cpu=%u mpidr=0x%x gic=%d first=%d up_ms=%u", cpu, (uint32_t)mpidr, gic, (int)boot,
++	    n10_smp[cpu].on_abs ? n10_smp_ms(n10_smp[cpu].up_abs - n10_smp[cpu].on_abs) : 0u);
++	if (ml_get_interrupts_enabled()) {
++		/* boot CPU registered from n10_smp_boot (thread context), as PE_cpu_machine_init does it */
++		boolean_t intr = ml_set_interrupts_enabled(FALSE);
++		ml_cpu_up();
++		ml_set_interrupts_enabled(intr);
++	}
++}
++
++void
++n10_smp_signal(cpu_data_t *target)
++{
++	(void)pe_note10_send_ipi(target->cpu_number);
++}
++
++void
++n10_smp_ipi(void)
++{
++	unsigned int cpu = (unsigned int)cpu_number();
++
++	if (cpu < MAX_CPUS) {
++		n10_smp[cpu].ipi++;
++	}
++	cpu_signal_handler();
++}
++
++void
++n10_smp_sample(void)
++{
++	unsigned int cpu = (unsigned int)cpu_number();
++	thread_t th = current_thread();
++
++	if (!n10_smp_started || cpu >= MAX_CPUS) {
++		return;
++	}
++	n10_smp[cpu].irq++;
++	if (th == THREAD_NULL || th == current_processor()->idle_thread || th->t_tro == NULL) {
++		return;
++	}
++	n10_smp[cpu].busy++;
++	void *bp = get_bsdtask_info(get_threadtask(th));
++	const char *nm = bp != NULL ? proc_name_address(bp) : NULL;
++	if (nm != NULL && nm[0] == 'l' && nm[1] == 's' && nm[2] == 'd' && nm[3] == '\0') {
++		n10_smp[cpu].lsd++;
++	}
++}
++
++static char
++n10_smp_state(unsigned int cpu)
++{
++	switch (n10_smp[cpu].state) {
++	case N10_SMP_PENDING:
++		return 'P';
++	case N10_SMP_FAILED:
++		return 'F';
++	case N10_SMP_UP:
++		return (cpu_datap((int)cpu)->cpu_signal & SIGPdisabled) ? 'S' : 'U';
++	default:
++		return '-';
++	}
++}
++
++void
++n10_smp_tick(bool quiet)
++{
++	char ub[256];
++	int n, m;
++	uint64_t now;
++	unsigned int count = ml_get_topology_info()->num_cpus;
++
++	if (!n10_smp_started || quiet || ++n10_smp_ticks % N10_SMP_Q_EVERY != 0) {
++		return;
++	}
++	now = mach_absolute_time();
++	n = snprintf(ub, sizeof(ub) - 2, "N412Q t=%u run=%u", n10_smp_ms(now), sched_run_buckets[TH_BUCKET_RUN]);
++	if (n <= 0 || n >= (int)sizeof(ub) - 2) {
++		return;
++	}
++	for (unsigned int cpu = 0; cpu < count && cpu < MAX_CPUS; cpu++) {
++		uint32_t irq = n10_smp[cpu].irq, busy = n10_smp[cpu].busy, lsd = n10_smp[cpu].lsd;
++		m = snprintf(ub + n, sizeof(ub) - 2 - (size_t)n, " %u%c%u/%u/%u", cpu, n10_smp_state(cpu),
++		    busy - n10_smp[cpu].busy0, irq - n10_smp[cpu].irq0, lsd - n10_smp[cpu].lsd0);
++		n10_smp[cpu].irq0 = irq;
++		n10_smp[cpu].busy0 = busy;
++		n10_smp[cpu].lsd0 = lsd;
++		if (m <= 0 || n + m >= (int)sizeof(ub) - 2) {
++			break;
++		}
++		n += m;
++	}
++	ub[n++] = '\n';
++	n10_dsslog_write(ub, n);
++	for (unsigned int cpu = 0; cpu < count && cpu < MAX_CPUS; cpu++) {
++		if (n10_smp[cpu].state == N10_SMP_PENDING && !n10_smp[cpu].late_logged &&
++		    n10_smp_ms(now - n10_smp[cpu].on_abs) >= (uint32_t)(N10_SMP_ONLINE_NS / NSEC_PER_MSEC)) {
++			n10_smp[cpu].late_logged = true;
++			n10_dsslog_trace("N412T cpu=%u psci=%d waited_ms=%u", cpu, (int)n10_smp[cpu].psci,
++			    n10_smp_ms(now - n10_smp[cpu].on_abs));
++		}
++	}
++}
++
++void
++n10_smp_final(void)
++{
++	char ub[256];
++	int n, m;
++	unsigned int count = ml_get_topology_info()->num_cpus;
++
++	n = snprintf(ub, sizeof(ub) - 2, "N412F run=%u bad=%u", sched_run_buckets[TH_BUCKET_RUN], n10_smp_bad);
++	if (n <= 0 || n >= (int)sizeof(ub) - 2) {
++		return;
++	}
++	for (unsigned int cpu = 0; cpu < count && cpu < MAX_CPUS; cpu++) {
++		m = snprintf(ub + n, sizeof(ub) - 2 - (size_t)n, " %u%c%u/%u/%u/%u", cpu, n10_smp_state(cpu),
++		    n10_smp[cpu].busy, n10_smp[cpu].irq, n10_smp[cpu].lsd, n10_smp[cpu].ipi);
++		if (m <= 0 || n + m >= (int)sizeof(ub) - 2) {
++			break;
++		}
++		n += m;
++	}
++	ub[n++] = '\n';
++	n10_dsslog_final(ub, n);
++}
++
++void
++n10_smp_badirq(uint32_t intid)
++{
++	(void)__atomic_fetch_add(&n10_smp_bad, 1u, __ATOMIC_RELAXED);
++	if (__atomic_fetch_add(&n10_smp_bad_lines, 1u, __ATOMIC_RELAXED) < N10_SMP_BAD_MAX) {
++		n10_dsslog_trace("N412I cpu=%d intid=%u disabled", cpu_number(), intid);
++	}
++}
++#endif /* ARM64_BOARD_CONFIG_EXYNOS9825 */
+diff --git a/osfmk/arm64/note10/n10_wdt.c b/osfmk/arm64/note10/n10_wdt.c
+index 57dac75..d0ecffb 100644
+--- a/osfmk/arm64/note10/n10_wdt.c
++++ b/osfmk/arm64/note10/n10_wdt.c
+@@ -117,6 +117,7 @@ extern void n10_dsslog_quiet(uint32_t t);
+ extern void n10_dsslog_final(const char *s, int n);
+ extern void n10_sb_final(void);                 /* v407: bsd/dev/arm/systemcalls.c N407W */
+ extern void n10_cpu_sample(void);               /* v411: bsd/dev/arm/systemcalls.c N411C (pid of the interrupted thread) */
++extern void n10_smp_tick(bool quiet);           /* v412: osfmk/arm64/note10/n10_smp.c N412Q / N412T */
+ 
+ /*
+  * v376: one "N376H" line per timer-path pet into the dss ring
+@@ -275,6 +276,7 @@ n10_wdt_tick(__unused timer_call_param_t p0, __unused timer_call_param_t p1)
+ 		n10_wdt_tickline(now, c0, c2);
+ 	}
+ 	n10_cpu_sample();                               /* v411 N411C */
++	n10_smp_tick(n10_wdt_quiet);                    /* v412 N412Q / N412T (no register access) */
+ 	if (!n10_wdt_quiet && now - n10_wdt_start_abs >= n10_wdt_quiet_abs) {
+ 		n10_wdt_quiet = true;
+ 		n10_dsslog_quiet(N10_WDT_QUIET_S);
+diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
+index d2de176..ca3cece 100644
+--- a/osfmk/arm64/start.s
++++ b/osfmk/arm64/start.s
+@@ -315,6 +315,27 @@ LEXT(start_cpu)
+ 	add		lr, lr, EXT(arm_init_cpu)@pageoff
+ 	b		start_cpu
+ 
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++/*
++ * Note10 (v412): PSCI CPU_ON entry of a secondary core (osfmk/arm64/note10/n10_smp.c): EL1, MMU and caches off,
++ * x0 = context id = PA of the core's cpu data. Same state as the reset-vector path gives start_cpu
++ * (x20 = PA of the boot args, x21 = PA of the cpu data, VBAR on the low vectors), without the MPIDR table walk.
++ */
++	.align 2
++	.globl EXT(n10_smp_entry)
++LEXT(n10_smp_entry)
++	msr		OSLAR_EL1, xzr
++	msr		DAIFSet, #(DAIFSC_ALL)
++	adrp	x1, EXT(LowExceptionVectorBase)@page
++	add		x1, x1, EXT(LowExceptionVectorBase)@pageoff
++	msr		VBAR_EL1, x1
++	isb
++	mov		x21, x0
++	adrp	x20, EXT(const_boot_args)@page
++	add		x20, x20, EXT(const_boot_args)@pageoff
++	b		EXT(start_cpu)
++#endif
++
+ 	.align 2
+ start_cpu:
+ #if defined(KERNEL_INTEGRITY_KTRR) || defined(KERNEL_INTEGRITY_CTRR) || defined(KERNEL_INTEGRITY_PV_CTRR)
+diff --git a/osfmk/conf/files.arm64 b/osfmk/conf/files.arm64
+index b902567..8a1f8ed 100644
+--- a/osfmk/conf/files.arm64
++++ b/osfmk/conf/files.arm64
+@@ -149,3 +149,4 @@ osfmk/arm64/machine_routines_asm.s optional config_note10_native_bootstrap
+ osfmk/arm64/start.s optional config_note10_native_bootstrap
+ osfmk/arm64/note10/n10_wdt.c optional config_note10_native_bootstrap
+ osfmk/arm64/note10/n10_dsslog.c optional config_note10_native_bootstrap
++osfmk/arm64/note10/n10_smp.c optional config_note10_native_bootstrap
+diff --git a/pexpert/arm/pe_note10_bootstrap.c b/pexpert/arm/pe_note10_bootstrap.c
+index 2486577..c59159f 100644
+--- a/pexpert/arm/pe_note10_bootstrap.c
++++ b/pexpert/arm/pe_note10_bootstrap.c
+@@ -31,8 +31,9 @@ void
+ pe_note10_init_irq(void)
+ {
+     const ml_topology_info_t *topology=ml_get_topology_info();
+-    if (!topology || topology->num_cpus!=1 || ml_get_interrupts_enabled())
+-        panic("Note10 bootstrap: single CPU and masked interrupts required");
++    /* v412: up to MAX_CPUS topology CPUs; this runs on the boot CPU before any other is started. */
++    if (!topology || topology->num_cpus<1 || ml_get_interrupts_enabled())
++        panic("Note10 bootstrap: CPU topology and masked interrupts required");
+     DTEntry entry;
+     if (SecureDTLookupEntry(NULL,"/chosen/note10-platform",&entry)!=kSuccess)
+         panic("Note10 bootstrap: platform contract missing");
+diff --git a/pexpert/arm/pe_note10_irq.c b/pexpert/arm/pe_note10_irq.c
+index 296b38a..41955a7 100644
+--- a/pexpert/arm/pe_note10_irq.c
++++ b/pexpert/arm/pe_note10_irq.c
+@@ -1,4 +1,4 @@
+-/* Single-CPU XNU IRQ bridge. GIC initialization/mapping is a caller prerequisite. */
++/* XNU IRQ bridge. GIC initialization/mapping is a caller prerequisite (boot CPU). v412: SMP (see below). */
+ #if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
+ #include <mach/vm_types.h>
+ #include <machine/machine_routines.h>
+@@ -12,12 +12,47 @@ static struct n10_gic_io note10_io;
+ static uint32_t note10_irq_count, note10_timer_intid;
+ static int note10_irq_ready;
+ 
++/*
++ * v412 SMP (osfmk/arm64/note10/n10_smp.c). The GICv2 CPU interface and the SGI/PPI distributor registers are
++ * banked per CPU. The boot CPU's banked state was set up by Linux (handoff); bind records it and
++ * pe_note10_cpu_init copies it to each secondary (SGI/PPI priorities, PMR, BPR, CTLR) and enables the timer PPI
++ * and N10_IPI_SGI there. A CPU's GIC target bit is its banked ITARGETSR0 byte. IPIs are GICD_SGIR writes of
++ * N10_IPI_SGI (SGI 0, Linux IPI_RESCHEDULE, a non-secure SGI on this firmware). Group / security setup stays
++ * firmware-owned. An unexpected interrupt source (Linux hotplug moved the SPI targets of CPUs 1-7 to CPU0) is
++ * disabled at the distributor and completed instead of panicking (N412I).
++ */
++#define N10_IPI_SGI             0u
++#define N10_SMP_MAX             8u
++#define N10_GICD_ISENABLER0     0x100u
++#define N10_GICD_IPRIORITYR     0x400u
++#define N10_GICD_ITARGETSR0     0x800u
++#define N10_GICD_SGIR           0xf00u
++#define N10_GICC_CTLR           0x000u
++#define N10_GICC_PMR            0x004u
++#define N10_GICC_BPR            0x008u
++static uint32_t note10_prio[8], note10_pmr, note10_bpr, note10_cctlr;
++static uint8_t note10_gic_mask[N10_SMP_MAX];
++extern void n10_smp_ipi(void);
++extern void n10_smp_sample(void);
++extern void n10_smp_badirq(uint32_t intid);
++
++static inline volatile uint32_t *
++note10_gicd(uint32_t offset)
++{
++    return (volatile uint32_t *)(note10_view.distributor+offset);
++}
++
++static inline volatile uint32_t *
++note10_gicc(uint32_t offset)
++{
++    return (volatile uint32_t *)(note10_view.cpu+offset);
++}
++
+ static void
+ note10_require_cpu_context(void)
+ {
+-    const ml_topology_info_t *topology=ml_get_topology_info();
+-    if (!topology || topology->num_cpus!=1 || ml_get_interrupts_enabled())
+-        panic("Note10 IRQ: single CPU and masked interrupts required");
++    if (ml_get_interrupts_enabled())
++        panic("Note10 IRQ: masked interrupts required");
+ }
+ 
+ void
+@@ -42,9 +77,43 @@ pe_note10_bind_irq(vm_offset_t distributor, vm_size_t distributor_size,
+         panic("Note10 IRQ: cannot enable timer PPI");
+     note10_irq_count=info.irq_count;
+     note10_timer_intid=timer_intid;
++    /* v412: the boot CPU's banked state, copied to the secondaries */
++    for (uint32_t i=0;i<8;++i) note10_prio[i]=*note10_gicd(N10_GICD_IPRIORITYR+4*i);
++    note10_pmr=*note10_gicc(N10_GICC_PMR);
++    note10_bpr=*note10_gicc(N10_GICC_BPR);
++    note10_cctlr=cpu_ctl;
++    note10_gic_mask[0]=(uint8_t)(*note10_gicd(N10_GICD_ITARGETSR0)&0xff);
+     note10_irq_ready=1;
+ }
+ 
++/* v412: on secondary CPU cpu (interrupts masked, before they are enabled); 1 = CPU interface on, one target bit. */
++int
++pe_note10_cpu_init(unsigned int cpu)
++{
++    if (!note10_irq_ready || cpu==0 || cpu>=N10_SMP_MAX) return 0;
++    for (uint32_t i=0;i<8;++i) *note10_gicd(N10_GICD_IPRIORITYR+4*i)=note10_prio[i];
++    *note10_gicd(N10_GICD_ISENABLER0)=(1U<<N10_IPI_SGI)|(1U<<note10_timer_intid);
++    *note10_gicc(N10_GICC_BPR)=note10_bpr;
++    *note10_gicc(N10_GICC_PMR)=note10_pmr;
++    __builtin_arm_dsb(15);
++    *note10_gicc(N10_GICC_CTLR)=note10_cctlr;
++    __builtin_arm_dsb(15);
++    __builtin_arm_isb(15);
++    uint8_t mask=(uint8_t)(*note10_gicd(N10_GICD_ITARGETSR0)&0xff);
++    note10_gic_mask[cpu]=mask;
++    return (*note10_gicc(N10_GICC_CTLR)&1) && mask && !(mask&(mask-1));
++}
++
++/* v412: one N10_IPI_SGI to XNU cpu (also to itself); 0 when its GIC target bit is unknown. */
++int
++pe_note10_send_ipi(unsigned int cpu)
++{
++    if (!note10_irq_ready || cpu>=N10_SMP_MAX || !note10_gic_mask[cpu]) return 0;
++    __builtin_arm_dsb(14);
++    *note10_gicd(N10_GICD_SGIR)=((uint32_t)note10_gic_mask[cpu]<<16)|N10_IPI_SGI;
++    return 1;
++}
++
+ void
+ pe_note10_handle_irq(void)
+ {
+@@ -54,7 +123,22 @@ pe_note10_handle_irq(void)
+     enum n10_gic_result status=n10_gic_take(&note10_io,note10_irq_count,&irq);
+     if (status==N10_GIC_SPECIAL) return;
+     if (status!=N10_GIC_OK) panic("Note10 IRQ: acknowledge failed");
+-    if (irq.intid!=note10_timer_intid) panic("Note10 IRQ: unimplemented interrupt source");
++    if (irq.intid<16) {
++        /* v412: SGI; complete first so a new IPI can pend while the signal bits are handled */
++        if (n10_gic_complete(&note10_io,note10_irq_count,&irq)!=N10_GIC_OK)
++            panic("Note10 IRQ: completion failed");
++        if (irq.intid==N10_IPI_SGI) n10_smp_ipi();
++        return;
++    }
++    if (irq.intid!=note10_timer_intid) {
++        /* v412: not ours; keep it from firing again */
++        (void)n10_gic_set_enabled(&note10_io,note10_irq_count,irq.intid,0);
++        if (n10_gic_complete(&note10_io,note10_irq_count,&irq)!=N10_GIC_OK)
++            panic("Note10 IRQ: completion failed");
++        n10_smp_badirq(irq.intid);
++        return;
++    }
++    n10_smp_sample();   /* v412: per-CPU timer IRQ sample */
+ 
+     /* Mask the level source across the callback/EOI. rtclock_intr must rearm
+      * through the physical decrementer selected by patch 0002.
+diff --git a/pexpert/pexpert/arm64/EXYNOS9825.h b/pexpert/pexpert/arm64/EXYNOS9825.h
+index a1fb61e..fbd5112 100644
+--- a/pexpert/pexpert/arm64/EXYNOS9825.h
++++ b/pexpert/pexpert/arm64/EXYNOS9825.h
+@@ -30,8 +30,10 @@
+ #error Note10 monitor and SPTM support are not implemented
+ #endif
+ 
+-/* Software bring-up restriction; not the physical topology of SM-N976N. */
+-#define MAX_CPUS 1
++/* Software bring-up restriction; not the physical topology of SM-N976N (8 cores).
++ * v412: 4 = ADT cpu0..cpu3 = the cluster0 Cortex-A55 cores (Linux DT reg 0..3, enable-method psci), the boot
++ * CPU's own core type; the A75 / M4 cores stay off (osfmk/arm64/note10/n10_smp.c). */
++#define MAX_CPUS 4
+ #define MAX_CPU_CLUSTERS 1
+ #define MAX_L2_CLINE N10_MAX_CACHE_LINE_LOG2
+ #define __ARM_ARCH__ 8

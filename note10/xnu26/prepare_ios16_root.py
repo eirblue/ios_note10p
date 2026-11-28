@@ -181,6 +181,12 @@ OVERLAY = (
      '3a6842dfd6b31496bcc590ef9ca6cd56a45078aff2dc606def4bca3e19f8ec5f',
      ('bsd/dev/arm/systemcalls.c', 'osfmk/arm64/note10/n10_wdt.c', 'osfmk/kern/thread_policy.c',
       'security/mac_base.c')),
+    ('0078-exynos9825-n10-smp-cluster0-psci.patch',
+     'cc2822fd2c007d48c8d4a1b4049a6f2e93d23c1d2b6a1c06910b4f248b8fc272',
+     ('bsd/dev/arm/systemcalls.c', 'bsd/kern/bsd_init.c', 'osfmk/arm/cpu_common.c', 'osfmk/arm64/cpu.c',
+      'osfmk/arm64/note10/n10_dsslog.c', 'osfmk/arm64/note10/n10_smp.c', 'osfmk/arm64/note10/n10_wdt.c',
+      'osfmk/arm64/start.s', 'osfmk/conf/files.arm64', 'pexpert/arm/pe_note10_bootstrap.c',
+      'pexpert/arm/pe_note10_irq.c', 'pexpert/pexpert/arm64/EXYNOS9825.h')),
 )
 STAGED_DIRS = ('bsd/n10_hfs/core', 'bsd/n10_hfs/hfs_encodings')
 
