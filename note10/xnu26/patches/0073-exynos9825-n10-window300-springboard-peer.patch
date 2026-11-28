@@ -1,0 +1,585 @@
+diff --git a/bsd/dev/arm/systemcalls.c b/bsd/dev/arm/systemcalls.c
+index 664fecf..336f75d 100644
+--- a/bsd/dev/arm/systemcalls.c
++++ b/bsd/dev/arm/systemcalls.c
+@@ -135,7 +135,8 @@ n10_xpc_note(int trap, int num, int err)
+ #define N10_XQ_XPC              8
+ #define N10_XQ_LD               6
+ #define N10_XQ_SLOTS            (N10_XQ_XPC + N10_XQ_LD)
+-#define N10_XQ_LINES            448u
++#define N10_XQ_LINES            128u            /* v407: was 448 (dss budget for the 300 s window) */
++extern uint32_t n10_dss_quiet;                  /* v407: osfmk/arm64/note10/n10_dsslog.c; N380O/T/W off when set */
+ #define N10_XQ_MSG2             (-47)           /* mach_msg2_trap */
+ extern void n10_dsslog_write(const char *s, int n);
+ extern int n10_thread_peek(const void *th, uint64_t tid, char *buf, int len);
+@@ -325,10 +326,40 @@ static struct {
+ 	int num;
+ 	uint32_t in, ms, opt, rem, id, rsz, sum;
+ 	char name[48];
++	int ppid;               /* v407: receiver pid of rem (send+receive mach_msg2), -1 unknown */
++	uint32_t pty;           /* v407: port object type */
++	char pcomm[17];         /* v407: receiver p_comm */
++	char svc[48];           /* v407: service name of rem from a lookup reply (N407S map) */
+ } n10_sb[N10_SB_SLOTS];
+ static uint32_t n10_sb_nl, n10_sb_rl, n10_sb_xl, n10_sb_tl, n10_sb_dumps;
+ static uint32_t n10_sb_nlast, n10_sb_rlast, n10_sb_xlast, n10_sb_nnext;
+ static uint32_t n10_sb_seen[N10_SB_N_MAX];
++/*
++ * v407: who does SpringBoard wait on? v406 r2: its main thread sat 51 s in one mach_msg2 (o=0x304003 r=0x3b03
++ * id=0x5b9171, no XPC name) and was again in mach_msg2 at the 120 s end.
++ *   N407Q  each distinct (remote port, receiver pid, msgh_id) of a SpringBoard send+receive mach_msg2, resolved at the
++ *          call in thread context by n10_port_peer (osfmk/arm64/bsd_arm64.c): receiver pid / p_comm, port object
++ *          type and the service name of the port from the N407S map (<= N10_SB_Q_MAX)
++ *   N407S  a SpringBoard XPC request with a "name" got a complex reply whose first descriptor is a port: that port
++ *          name (in SpringBoard's space) -> service name (map of N10_SVC_MAX, <= N10_SVC_LINES lines)
++ *   N407W  once, N10_WDT_FINAL_S before the WDT deadline (n10_wdt timer, CPU0): every tracked SpringBoard thread
++ *          (m=1 the lowest thread id = main thread) with its call, port, msgh_id, receiver, service, n10_thread_peek
++ *          state and age, written with n10_dsslog_final (late reserve)
++ * Observation only: the reply buffer was already copied in (<= N10_SB_BUF) for N406X; no argument, return value or
++ * state of any call changes.
++ */
++#define N10_SB_Q_MAX            64u
++#define N10_SVC_MAX             32
++#define N10_SVC_LINES           48u
++extern int n10_port_peer(uint32_t name, int *pid, char *comm, int len, uint32_t *ty);
++extern void n10_dsslog_final(const char *s, int n);
++void n10_sb_final(void);
++static struct {
++	uint32_t name;
++	char svc[48];
++} n10_svc[N10_SVC_MAX];
++static uint32_t n10_svc_next, n10_svc_lines, n10_svc_last, n10_sb_ql, n10_sb_qlast, n10_sb_qnext;
++static uint32_t n10_sb_qseen[N10_SB_Q_MAX];
+ 
+ static uint32_t
+ n10_sb_now_ms(void)
+@@ -462,6 +493,87 @@ n10_sb_msg(int who, int pid, int i, const uint64_t *a)
+ 	n10_cap_emit(line, n, (int)sizeof(line), &n10_sb_nlast, &n10_sb_nl, N10_SB_N_MAX);
+ }
+ 
++/* v407: complex reply to a named request: first descriptor a port -> remember port name -> service name (N407S). */
++static void
++n10_sb_svc_note(const uint8_t *b, int n, const char *svc)
++{
++	uint32_t bits, cnt, pn, w;
++	char line[120];
++	int k, m;
++
++	if (n < 40 || svc[0] == '\0') {
++		return;
++	}
++	memcpy(&bits, b, sizeof(bits));
++	memcpy(&cnt, b + 24, sizeof(cnt));
++	memcpy(&pn, b + 28, sizeof(pn));
++	memcpy(&w, b + 36, sizeof(w));
++	if ((bits & 0x80000000u) == 0 || cnt == 0 || pn == 0 || (w >> 24) != 0u) {    /* MACH_MSGH_BITS_COMPLEX, PORT_DESCRIPTOR */
++		return;
++	}
++	for (k = 0; k < N10_SVC_MAX && n10_svc[k].name != pn; k++) {
++	}
++	if (k < N10_SVC_MAX && strncmp(n10_svc[k].svc, svc, sizeof(n10_svc[k].svc)) == 0) {
++		return;
++	}
++	if (k == N10_SVC_MAX) {
++		k = (int)(n10_svc_next++ % (uint32_t)N10_SVC_MAX);
++	}
++	n10_svc[k].name = pn;
++	memcpy(n10_svc[k].svc, svc, sizeof(n10_svc[k].svc));
++	n10_svc[k].svc[sizeof(n10_svc[k].svc) - 1] = '\0';
++	m = snprintf(line, sizeof(line), "N407S r=0x%x s=%.40s", pn, n10_svc[k].svc);
++	n10_cap_emit(line, m, (int)sizeof(line), &n10_svc_last, &n10_svc_lines, N10_SVC_LINES);
++}
++
++/* v407: receiver of a SpringBoard send+receive mach_msg2 (N407Q); stored in the slot for N407W. */
++static void
++n10_sb_peer(int i, uint64_t tid, const uint64_t *a)
++{
++	uint64_t opt = a[1];
++	uint32_t rem = (uint32_t)a[3], id = (uint32_t)(a[4] >> 32), ty = 0, h = 2166136261u;
++	const char *svc = "";
++	char comm[17], line[200];
++	int pp = -1, n, k;
++
++	if ((opt & (N10_M64_SEND | N10_M64_RCV)) != (N10_M64_SEND | N10_M64_RCV) || rem == 0) {
++		return;
++	}
++	for (k = 0; k < N10_SVC_MAX; k++) {
++		if (n10_svc[k].name == rem) {
++			svc = n10_svc[k].svc;
++			break;
++		}
++	}
++	if (!n10_port_peer(rem, &pp, comm, (int)sizeof(comm), &ty)) {
++		pp = -1;
++		comm[0] = '-';
++		comm[1] = '\0';
++	}
++	if (i >= 0) {
++		n10_sb[i].ppid = pp;
++		n10_sb[i].pty = ty;
++		memcpy(n10_sb[i].pcomm, comm, sizeof(comm));
++		for (k = 0; k < (int)sizeof(n10_sb[i].svc) - 1 && svc[k] != '\0'; k++) {
++			n10_sb[i].svc[k] = svc[k];
++		}
++		n10_sb[i].svc[k] = '\0';
++	}
++	h = (h ^ rem) * 16777619u;
++	h = (h ^ (uint32_t)pp) * 16777619u;
++	h = (h ^ id) * 16777619u;
++	h = h != 0 ? h : 1u;
++	for (uint32_t q = 0; q < N10_SB_Q_MAX; q++) {
++		if (n10_sb_qseen[q] == h) {
++			return;
++		}
++	}
++	n10_sb_qseen[n10_sb_qnext++ % N10_SB_Q_MAX] = h;
++	n = snprintf(line, sizeof(line), "N407Q t=%llx r=0x%x id=0x%x o=0x%llx p=%d %.16s ty=%u s=%.40s", tid, rem, id, opt, pp,
++	    comm, ty, svc);
++	n10_cap_emit(line, n, (int)sizeof(line), &n10_sb_qlast, &n10_sb_ql, N10_SB_Q_MAX);
++}
++
+ /* A tracked call ended (end 'r' return, 'c' next call after a continuation return): long-wait and reply lines. */
+ static void
+ n10_sb_end(int i, uint32_t dur, int ret, char end)
+@@ -484,6 +596,9 @@ n10_sb_end(int i, uint32_t dur, int ret, char end)
+ 	}
+ 	n = n10_sb_copy(n10_sb[i].rcv, n10_sb[i].rsz, b);
+ 	n10_sb[i].rcv = 0;
++	if (n > 0) {
++		n10_sb_svc_note(b, n, n10_sb[i].name);  /* v407 N407S */
++	}
+ 	o = n > 0 ? n10_sb_key(b, n, "error", 6) : -1;
+ 	if (o < 0 || o + 12 > n) {
+ 		return;
+@@ -524,10 +639,17 @@ n10_sb_enter(int num, const uint64_t *a)
+ 			n10_sb[i].id = num == N10_XQ_MSG2 && a != NULL ? (uint32_t)(a[4] >> 32) : 0;
+ 			n10_sb[i].rcv = 0;
+ 			n10_sb[i].name[0] = '\0';
++			n10_sb[i].ppid = -1;                    /* v407: peer set by n10_sb_peer (send+receive mach_msg2) */
++			n10_sb[i].pty = 0;
++			n10_sb[i].pcomm[0] = '\0';
++			n10_sb[i].svc[0] = '\0';
+ 			n10_sb[i].in = 1;
+ 		}
+ 	}
+ 	if (num == N10_XQ_MSG2 && a != NULL) {
++		if (who == 1) {
++			n10_sb_peer(i, thread_tid(current_thread()), a);       /* v407 N407Q */
++		}
+ 		n10_sb_msg(who, pid, i, a);
+ 	}
+ }
+@@ -592,6 +714,47 @@ n10_sb_dump(void)
+ 	}
+ }
+ 
++/* v407: window-end SpringBoard thread lines (N407W), once, from the n10_wdt timer (CPU0) before the deadline. */
++void
++n10_sb_final(void)
++{
++	char line[200];
++	uint64_t mt = 0;
++	uint32_t now = n10_sb_now_ms();
++	int n, m;
++
++	for (int i = 0; i < N10_SB_SLOTS; i++) {
++		if (n10_sb[i].tid != 0 && (mt == 0 || n10_sb[i].tid < mt)) {
++			mt = n10_sb[i].tid;
++		}
++	}
++	for (int i = 0; i < N10_SB_SLOTS; i++) {
++		uint64_t tid = n10_sb[i].tid;
++		if (tid == 0) {
++			continue;
++		}
++		n = snprintf(line, sizeof(line) - 2, "N407W t=%llx m=%u c=%d in=%u o=0x%x r=0x%x id=0x%x p=%d %.16s ty=%u s=%.32s",
++		    tid, tid == mt ? 1u : 0u, n10_sb[i].num, n10_sb[i].in, n10_sb[i].opt, n10_sb[i].rem, n10_sb[i].id,
++		    n10_sb[i].ppid, n10_sb[i].pcomm, n10_sb[i].pty, n10_sb[i].svc[0] != '\0' ? n10_sb[i].svc : n10_sb[i].name);
++		if (n <= 0 || n >= (int)sizeof(line) - 2) {
++			continue;
++		}
++		m = n10_thread_peek(n10_sb[i].th, tid, line + n, (int)sizeof(line) - 2 - n);
++		if (m <= 0) {
++			m = snprintf(line + n, sizeof(line) - 2 - (size_t)n, " gone");
++		}
++		n += m > 0 ? m : 0;
++		if (n < (int)sizeof(line) - 2) {
++			m = snprintf(line + n, sizeof(line) - 2 - (size_t)n, " age=%u", n10_sb[i].in ? now - n10_sb[i].ms : 0u);
++			n += m > 0 ? m : 0;
++		}
++		if (n > (int)sizeof(line) - 2) {
++			n = (int)sizeof(line) - 2;
++		}
++		line[n++] = '\n';
++		n10_dsslog_final(line, n);
++	}
++}
+ 
+ void
+ n10_xpc_dump(void)
+@@ -599,11 +762,11 @@ n10_xpc_dump(void)
+ 	char line[200];
+ 	int n, m;
+ 
+-	if (n10_xq_olog == 0) {
++	if (n10_xq_olog == 0 && n10_dss_quiet == 0) {                  /* v407: no N380O/T/W lines in the quiet phase */
+ 		n = snprintf(line, sizeof(line), "N380O thr=u+0x%lx", (unsigned long)__builtin_offsetof(struct uthread, uu_on_throttlelist));
+ 		n10_xq_emit(line, n, (int)sizeof(line), &n10_xq_olog);
+ 	}
+-	for (int i = 0; i < N10_XQ_SLOTS; i++) {
++	for (int i = 0; i < N10_XQ_SLOTS && n10_dss_quiet == 0; i++) {
+ 		uint64_t tid = n10_xq[i].tid;
+ 		if (tid == 0) {
+ 			continue;
+@@ -628,7 +791,7 @@ n10_xpc_dump(void)
+ 	}
+ 	proc_t ip = initproc;
+ 	struct workqueue *wq = ip != PROC_NULL ? ip->p_wqptr : NULL;
+-	if (wq != NULL && wq != (struct workqueue *)~(uintptr_t)0) {
++	if (wq != NULL && wq != (struct workqueue *)~(uintptr_t)0 && n10_dss_quiet == 0) {
+ 		n = snprintf(line, sizeof(line), "N380W ld nth=%u idle=%u dying=%u req=%u cre=%u con=%u",
+ 		    (unsigned)wq->wq_nthreads, (unsigned)wq->wq_thidlecount, (unsigned)wq->wq_thdying_count,
+ 		    wq->wq_reqcount, wq->wq_creations, (unsigned)wq->wq_constrained_threads_scheduled);
+diff --git a/iokit/Kernel/NoteFramebuffer.cpp b/iokit/Kernel/NoteFramebuffer.cpp
+index 0ae66fd..d75b2bb 100644
+--- a/iokit/Kernel/NoteFramebuffer.cpp
++++ b/iokit/Kernel/NoteFramebuffer.cpp
+@@ -360,7 +360,7 @@ static void n10_disp_frame(uint32_t want, uint32_t tmr);
+ static void n10_disp_tick(thread_call_param_t p0, thread_call_param_t p1);
+ #define N10_DISP_TMR_FIRST_S    15u             /* v402: first timer tick after publish */
+ #define N10_DISP_TMR_NS         2000000000ull   /* then one tick every 2 s */
+-#define N10_DISP_TMR_TICKS      50u             /* v403: last tick ~113 s after publish */
++#define N10_DISP_TMR_TICKS      150u            /* v407: through the 300 s window (last tick ~313 s after publish); v403: 50 */
+ #define N10_DISP_SE_QUIET_NS    4000000000ull   /* v403: timer frame after 4 s without a SwapEnd frame */
+ #define N10_DISP_RETRY_NS       5000000000ull   /* v402 r2: re-probe spacing */
+ #define N10_DISP_RETRIES        3u
+diff --git a/osfmk/arm64/bsd_arm64.c b/osfmk/arm64/bsd_arm64.c
+index a0a9e89..0c837d8 100644
+--- a/osfmk/arm64/bsd_arm64.c
++++ b/osfmk/arm64/bsd_arm64.c
+@@ -45,6 +45,7 @@
+ #include <kern/spl.h>
+ #include <kern/syscall_sw.h>
+ #include <ipc/ipc_port.h>
++#include <ipc/ipc_space.h>
+ #include <vm/vm_kern.h>
+ #include <mach/thread_status.h>
+ #include <vm/pmap.h>
+@@ -65,6 +66,46 @@ extern void n10_xpc_leave(int num, int ret);
+ /* v406: SpringBoard wait trace (bsd/dev/arm/systemcalls.c N406N/N406R/N406X/N406T). */
+ extern void n10_sb_enter(int num, const uint64_t *a);
+ extern void n10_sb_leave(int num, int ret);
++/*
++ * v407: receiver of a send right named in the current task's space (bsd/dev/arm/systemcalls.c N407Q / N407W:
++ * SpringBoard mach_msg2 send+receive calls only, thread context, before the trap runs). ipc_port_translate_send
++ * returns the port locked and active; the receiving space's task pid and p_comm and the port's object type are read,
++ * then the port is unlocked. Read only: no right, reference or port state changes. 1 = resolved; 0 = not a send right
++ * (send-once, dead, invalid) or the port is not in a space (in transit).
++ */
++extern const char *proc_name_address(void *p);
++int n10_port_peer(uint32_t name, int *pid, char *comm, int len, uint32_t *ty);
++
++int
++n10_port_peer(uint32_t name, int *pid, char *comm, int len, uint32_t *ty)
++{
++	ipc_port_t port = IP_NULL;
++	ipc_space_t space;
++	task_t task;
++	void *bp;
++	const char *nm;
++	int k = 0, ok = 0;
++
++	if (name == 0 || pid == NULL || comm == NULL || len <= 1 || ty == NULL ||
++	    ipc_port_translate_send(current_space(), (mach_port_name_t)name, &port) != KERN_SUCCESS) {
++		return 0;
++	}
++	*ty = (uint32_t)ip_type(port);
++	space = ip_get_receiver(port);
++	if (space != NULL) {
++		task = space->is_task;
++		bp = task != TASK_NULL ? get_bsdtask_info(task) : NULL;
++		nm = bp != NULL ? proc_name_address(bp) : NULL;
++		*pid = task != TASK_NULL ? task_pid(task) : -1;
++		for (; nm != NULL && k < len - 1 && nm[k] != '\0'; k++) {
++			comm[k] = nm[k];
++		}
++		ok = 1;
++	}
++	comm[k] = '\0';
++	ip_mq_unlock(port);
++	return ok;
++}
+ #endif
+ 
+ extern void throttle_lowpri_io(int);
+diff --git a/osfmk/arm64/note10/n10_dsslog.c b/osfmk/arm64/note10/n10_dsslog.c
+index 90e06c3..8e9b4ef 100644
+--- a/osfmk/arm64/note10/n10_dsslog.c
++++ b/osfmk/arm64/note10/n10_dsslog.c
+@@ -90,6 +90,20 @@ static volatile uint32_t *n10_dss_cursor;
+ static vm_offset_t n10_dss_map;         /* VA of PA n10_dss_map_pa */
+ static uint64_t n10_dss_map_pa, n10_dss_lo, n10_dss_hi, n10_dss_pos;
+ static uint32_t n10_dss_dropped;
++/*
++ * v407: 300 s window in the same 256 KiB area. n10_wdt calls n10_dsslog_quiet at 120 s: from then on console text
++ * (n10_dsslog_console) is dropped, n10_dsslog_trace keeps only the frame lines N402T / N406B / N406W (own cap
++ * N10_TRACE_LATE, outside N10_TRACE_MAX), and every other line leaves N10_DSS_LATE_RESERVE free above
++ * N10_DSS_RESERVE; only n10_dsslog_final (N407G, N407W window-end lines, N376W) may use it. Panic notes
++ * (n10_dsslog_putc) and the N347X/N347R capture are unchanged.
++ */
++#define N10_DSS_LATE_RESERVE    6144u
++uint32_t n10_dss_quiet;
++static uint32_t n10_dss_final;
++extern int snprintf(char *, size_t, const char *, ...) __printflike(3, 4);
++void n10_dsslog_quiet(uint32_t t);
++void n10_dsslog_final(const char *s, int n);
++void n10_dsslog_console(const char *s, int n);
+ static char n10_dss_early[N10_DSS_EARLY];
+ static uint32_t n10_dss_early_len;
+ static char n10_dss_line[6 + N10_DSS_LINE + 1] = "N347L ";
+@@ -198,7 +212,8 @@ n10_dss_emit(void)
+ 	n10_dss_line[len - 1] = '\n';
+ 	n10_dss_line_len = 0;
+ 	if (n10_dss_state == N10_DSS_ON) {
+-		(void)n10_dss_append(n10_dss_line, len, N10_DSS_RESERVE);
++		(void)n10_dss_append(n10_dss_line, len,
++		    N10_DSS_RESERVE + ((n10_dss_quiet != 0 && n10_dss_final == 0) ? N10_DSS_LATE_RESERVE : 0u));
+ 	} else if (n10_dss_state == N10_DSS_EARLY_STATE) {
+ 		if (len <= N10_DSS_EARLY - n10_dss_early_len) {
+ 			for (uint32_t i = 0; i < len; i++) {
+@@ -230,8 +245,8 @@ n10_dss_char(char c)
+ 	}
+ }
+ 
+-void
+-n10_dsslog_write(const char *s, int n)
++static void
++n10_dss_write_mode(const char *s, int n, uint32_t final)
+ {
+ 	if (n10_dss_state == N10_DSS_OFF || !s || n <= 0) {
+ 		return;
+@@ -239,14 +254,55 @@ n10_dsslog_write(const char *s, int n)
+ 	uint64_t daif = n10_dss_irq_off();
+ 	if (!n10_dss_busy) {
+ 		n10_dss_busy = 1;
++		n10_dss_final = final;
+ 		for (int i = 0; i < n; i++) {
+ 			n10_dss_char(s[i]);
+ 		}
++		n10_dss_final = 0;
+ 		n10_dss_busy = 0;
+ 	}
+ 	n10_dss_irq_restore(daif);
+ }
+ 
++void
++n10_dsslog_write(const char *s, int n)
++{
++	n10_dss_write_mode(s, n, 0);
++}
++
++/* v407: window-end lines; may use the late reserve. */
++void
++n10_dsslog_final(const char *s, int n)
++{
++	n10_dss_write_mode(s, n, 1);
++}
++
++/* v407: console text (osfmk/console/serial_console.c); dropped in the quiet phase. */
++void
++n10_dsslog_console(const char *s, int n)
++{
++	if (n10_dss_quiet == 0) {
++		n10_dss_write_mode(s, n, 0);
++	}
++}
++
++/* v407: start of the quiet phase (n10_wdt, t seconds); one N407G line with the area use so far. */
++void
++n10_dsslog_quiet(uint32_t t)
++{
++	char line[96];
++	uint64_t used = n10_dss_state == N10_DSS_ON ? n10_dss_pos - n10_dss_lo : 0;
++	uint64_t left = n10_dss_state == N10_DSS_ON ? n10_dss_hi - n10_dss_pos : 0;
++	int n;
++
++	n10_dss_quiet = 1;
++	n = snprintf(line, sizeof(line), "N407G quiet t=%u used=%u left=%u drop=%u\n", t, (uint32_t)used, (uint32_t)left,
++	    n10_dss_dropped);
++	if (n > 0) {
++		n10_dss_write_mode(line, n < (int)sizeof(line) ? n : (int)sizeof(line) - 1, 1);
++	}
++}
++
+ void
+ n10_dsslog_putc(char c)
+ {
+@@ -265,9 +321,18 @@ n10_dsslog_putc(char c)
+  */
+ #define N10_TRACE_MAX           2048u
+ #define N10_TRACE_TEXT          160u
++#define N10_TRACE_LATE          96u             /* v407: frame lines N402T / N406B / N406W, own cap */
+ extern int vsnprintf(char *, size_t, const char *, va_list) __printflike(3, 0);
+ void n10_dsslog_trace(const char *fmt, ...) __printflike(1, 2);
+-static uint32_t n10_trace_lines;
++static uint32_t n10_trace_lines, n10_trace_late;
++
++/* v407: frame lines (N402T timer ticks, N406B non-black box, N406W swap trace) are counted on their own cap. */
++static int
++n10_trace_frame(const char *fmt)
++{
++	return fmt[0] == 'N' && fmt[1] == '4' && fmt[2] == '0' && ((fmt[3] == '2' && fmt[4] == 'T') ||
++	       (fmt[3] == '6' && (fmt[4] == 'B' || fmt[4] == 'W'))) && fmt[5] == ' ';
++}
+ 
+ void
+ n10_dsslog_trace(const char *fmt, ...)
+@@ -276,8 +341,14 @@ n10_dsslog_trace(const char *fmt, ...)
+ 	va_list args;
+ 	int n;
+ 
+-	if (n10_dss_state == N10_DSS_OFF ||
+-	    __atomic_fetch_add(&n10_trace_lines, 1u, __ATOMIC_RELAXED) >= N10_TRACE_MAX) {
++	if (n10_dss_state == N10_DSS_OFF) {
++		return;
++	}
++	if (n10_trace_frame(fmt)) {
++		if (__atomic_fetch_add(&n10_trace_late, 1u, __ATOMIC_RELAXED) >= N10_TRACE_LATE) {
++			return;
++		}
++	} else if (n10_dss_quiet != 0 || __atomic_fetch_add(&n10_trace_lines, 1u, __ATOMIC_RELAXED) >= N10_TRACE_MAX) {
+ 		return;
+ 	}
+ 	va_start(args, fmt);
+diff --git a/osfmk/arm64/note10/n10_wdt.c b/osfmk/arm64/note10/n10_wdt.c
+index ad404cc..93ada07 100644
+--- a/osfmk/arm64/note10/n10_wdt.c
++++ b/osfmk/arm64/note10/n10_wdt.c
+@@ -80,8 +80,11 @@
+ #define N10_WTCON_ENABLE        (1u << 5)
+ #define N10_WDT_PERIOD_NS       (250ull * NSEC_PER_MSEC)   /* v381: was 2 s */
+ #define N10_WDT_NOTE_EVERY      8u                          /* v381: heartbeat output every 2 s */
+-#define N10_WDT_TICK_LINES      600u                        /* v381: N381K cap (120 s x 4 = 480) */
++#define N10_WDT_TICK_LINES      120u                        /* v407: N381K cap (every 4th tick = 1 s, 120 s); v381: 600 */
++#define N10_WDT_TICK_EVERY      4u                          /* v407: N381K on every 4th tick (v381: every tick) */
+ #define N10_WDT_DEADLINE_S      300u
++#define N10_WDT_QUIET_S         120u                        /* v407: dss quiet phase from 120 s (n10_dsslog_quiet) */
++#define N10_WDT_FINAL_S         3u                          /* v407: N407W window-end lines 3 s before the deadline */
+ #define N10_WDT_DEADLINE_MAX_S  900u
+ #define N10_WDT_CL0_PA          0x10050000ull   /* 10050000.watchdog_cl0 */
+ #define N10_WDT_CL2_PA          0x10060000ull   /* 10060000.watchdog_cl2 (multistage) */
+@@ -99,6 +102,20 @@ static vm_offset_t n10_wdt2_regs;       /* v380: cl2 multistage WDT, 0 = not rel
+ static uint32_t n10_wdt2_reload;
+ static vm_offset_t n10_wdt2_page;       /* v381: cl2 mapping for the N381K WTCNT read */
+ static uint32_t n10_wdt_tick_lines;
++/*
++ * v407: 300 s window. The reused v399 loader's compiled command line still carries n10wdt_deadline=120; the boot-arg
++ * is no longer read: petting stops at N10_WDT_DEADLINE_S (300 s) and the planned cl0 WDT reset follows (guards and
++ * cl0/cl2 register accesses unchanged). The 256 KiB dss area held the v406 120 s run (~251 KiB), so from
++ * N10_WDT_QUIET_S the dss log is quiet (n10_dsslog_quiet: console text and the shared trace dropped except the frame
++ * lines, every other line keeps a late reserve free), N376H / N378M print on every 5th heartbeat only, N381K is spaced
++ * 1 s (120 lines), and N10_WDT_FINAL_S before the deadline n10_sb_final writes the SpringBoard window-end lines
++ * (N407W) into the reserve; the N376W stop line also uses it.
++ */
++static uint64_t n10_wdt_quiet_abs, n10_wdt_final_abs;
++static bool n10_wdt_quiet, n10_wdt_final;
++extern void n10_dsslog_quiet(uint32_t t);
++extern void n10_dsslog_final(const char *s, int n);
++extern void n10_sb_final(void);                 /* v407: bsd/dev/arm/systemcalls.c N407W */
+ 
+ /*
+  * v376: one "N376H" line per timer-path pet into the dss ring
+@@ -129,9 +146,17 @@ n10_wdt_note(uint64_t now, const char *stop)
+ 	int n;
+ 
+ 	absolutetime_to_nanoseconds(now - n10_wdt_start_abs, &ns);
++	/* v407: in the quiet phase N376H / N378M only on every 5th heartbeat (n10_xpc_dump still every heartbeat). */
++	bool brief = stop == NULL && n10_wdt_quiet && (n10_wdt_ticks / N10_WDT_NOTE_EVERY) % 5u != 0;
+ 	if (stop != NULL) {
+ 		n = snprintf(line, sizeof(line), "N376W stop t=%llu.%03llu %s\n",
+ 		    ns / NSEC_PER_SEC, (ns % NSEC_PER_SEC) / NSEC_PER_MSEC, stop);
++		if (n > 0) {
++			n10_dsslog_final(line, n < (int)sizeof(line) ? n : (int)sizeof(line) - 1);      /* v407: late reserve */
++		}
++		n = 0;
++	} else if (brief) {
++		n = 0;
+ 	} else {
+ 		arm_saved_state_t *ss = (arm_saved_state_t *)getCpuDatap()->cpu_int_state;
+ 		if (ss != NULL) {
+@@ -150,7 +175,7 @@ n10_wdt_note(uint64_t now, const char *stop)
+ 	 * by the compressor and the pid of the interrupted thread's process (0 = kernel).
+ 	 */
+ 	if (stop == NULL) {
+-		n = snprintf(line, sizeof(line), "N378M avail=%u cmp=%u cur=%d\n",
++		n = brief ? 0 : snprintf(line, sizeof(line), "N378M avail=%u cmp=%u cur=%d\n",
+ 		    memorystatus_available_pages, c_segment_pages_compressed, proc_selfpid());
+ 		if (n > 0) {
+ 			n10_dsslog_write(line, n < (int)sizeof(line) ? n : (int)sizeof(line) - 1);
+@@ -245,7 +270,17 @@ n10_wdt_tick(__unused timer_call_param_t p0, __unused timer_call_param_t p1)
+ 	if (!n10_wdt_pet(now)) {
+ 		return;
+ 	}
+-	n10_wdt_tickline(now, c0, c2);
++	if (n10_wdt_ticks % N10_WDT_TICK_EVERY == 0) {
++		n10_wdt_tickline(now, c0, c2);
++	}
++	if (!n10_wdt_quiet && now - n10_wdt_start_abs >= n10_wdt_quiet_abs) {
++		n10_wdt_quiet = true;
++		n10_dsslog_quiet(N10_WDT_QUIET_S);
++	}
++	if (!n10_wdt_final && now + n10_wdt_final_abs >= n10_wdt_deadline_abs) {
++		n10_wdt_final = true;
++		n10_sb_final();
++	}
+ 	if (n10_wdt_ticks++ % N10_WDT_NOTE_EVERY == 0) {
+ 		n10_wdt_note(now, NULL);
+ 	}
+@@ -326,7 +361,7 @@ n10_wdt_start(void)
+ 			    con2, dat2, cnt2, want2, ok2 ? "reloading" : "not reloading");
+ 		}
+ 	}
+-	PE_parse_boot_argn("n10wdt_deadline", &deadline_s, sizeof(deadline_s));
++	/* v407: the n10wdt_deadline boot-arg (120, reused v399 loader) is not read; window = N10_WDT_DEADLINE_S. */
+ 	if (deadline_s > N10_WDT_DEADLINE_MAX_S) {
+ 		deadline_s = N10_WDT_DEADLINE_MAX_S;
+ 	}
+@@ -338,6 +373,8 @@ n10_wdt_start(void)
+ 	nanoseconds_to_absolutetime(N10_WDT_PERIOD_NS, &n10_wdt_period_abs);
+ 	nanoseconds_to_absolutetime((uint64_t)deadline_s * NSEC_PER_SEC, &deadline_abs);
+ 	n10_wdt_deadline_abs = start + deadline_abs;
++	nanoseconds_to_absolutetime((uint64_t)N10_WDT_QUIET_S * NSEC_PER_SEC, &n10_wdt_quiet_abs);
++	nanoseconds_to_absolutetime((uint64_t)N10_WDT_FINAL_S * NSEC_PER_SEC, &n10_wdt_final_abs);
+ 	n10_wdt_start_abs = start;
+ 	n10_wdt_running = true;
+ 	n10_wdt_kick();                 /* synchronous first pet at EARLY_BOOT */
+diff --git a/osfmk/console/serial_console.c b/osfmk/console/serial_console.c
+index b3a1e56..dd29f56 100644
+--- a/osfmk/console/serial_console.c
++++ b/osfmk/console/serial_console.c
+@@ -115,6 +115,7 @@ extern void serial_putc_options(char, bool);
+ #if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
+ /* osfmk/arm64/note10/n10_dsslog.c (v347): copy console text into the Linux dss log ring. */
+ extern void n10_dsslog_write(const char *s, int n);
++extern void n10_dsslog_console(const char *s, int n);  /* v407: dropped in the dss quiet phase */
+ #endif
+ 
+ #if DEBUG || DEVELOPMENT
+@@ -528,7 +529,7 @@ void
+ console_write(char *str, int size)
+ {
+ #if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
+-	n10_dsslog_write(str, size);  /* v347: every console write, also when output is disabled */
++	n10_dsslog_console(str, size);  /* v347: every console write, also when output is disabled (v407: quiet) */
+ #endif
+ 	if (disableConsoleOutput) {
+ 		return;
+@@ -616,7 +617,7 @@ void
+ console_write_unbuffered(char c)
+ {
+ #if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
+-	n10_dsslog_write(&c, 1);
++	n10_dsslog_console(&c, 1);   /* v407: quiet phase drops console text */
+ #endif
+ 	if (disableConsoleOutput) {
+ 		return;

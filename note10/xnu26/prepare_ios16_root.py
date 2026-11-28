@@ -162,6 +162,10 @@ OVERLAY = (
     ('0072-exynos9825-n10-touch-mode-swap-surface-trace.patch',
      'ac378704c707a6fab88df48ab7a6bb87f1b7a2eac4729ec8ef8b78689df792a7',
      ('bsd/dev/arm/systemcalls.c', 'iokit/Kernel/NoteFramebuffer.cpp', 'osfmk/arm64/bsd_arm64.c')),
+    ('0073-exynos9825-n10-window300-springboard-peer.patch',
+     'e7cd94e448a88de06fb072940676cb87f1aef936a6f3e2c1b42db53d875d64f9',
+     ('bsd/dev/arm/systemcalls.c', 'iokit/Kernel/NoteFramebuffer.cpp', 'osfmk/arm64/bsd_arm64.c',
+      'osfmk/arm64/note10/n10_dsslog.c', 'osfmk/arm64/note10/n10_wdt.c', 'osfmk/console/serial_console.c')),
 )
 STAGED_DIRS = ('bsd/n10_hfs/core', 'bsd/n10_hfs/hfs_encodings')
 
