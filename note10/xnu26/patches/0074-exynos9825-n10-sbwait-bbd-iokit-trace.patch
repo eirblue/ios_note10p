@@ -510,6 +510,94 @@ index 52028e2..bfea689 100644
  
  	*connection = client;
  	*result = res;
+diff --git a/iokit/Kernel/NoteFramebuffer.cpp b/iokit/Kernel/NoteFramebuffer.cpp
+index d75b2bb..65f0f15 100644
+--- a/iokit/Kernel/NoteFramebuffer.cpp
++++ b/iokit/Kernel/NoteFramebuffer.cpp
+@@ -2154,6 +2154,75 @@ n10_dt_publish(void)
+ 	n10_dsslog_trace("N395D publish nodes=%u created=%u props=%u", n - 1, created, props);
+ }
+ 
++/*
++ * v408: IODeviceTree:/buttons and IODeviceTree:/arm-io/pearl-sep were looked up by SpringBoard and backboardd and
++ * missing (v407 N394P). Both are published as plain device-tree plane entries (IORegistryEntry, never an IOService:
++ * no registerService, no driver match, no hardware access), with the shape of the iOS 16.7.16 d221ap DeviceTree
++ * (iPhone10,6, same file as v395): name, device_type, compatible, and for /buttons the button names, priorities,
++ * delays, opposed-power-vol-buttons and home-button-type 2; the GPIO / interrupt wiring (function-button_*,
++ * interrupts*, interrupt-parent*), clock-gates and AAPL,phandle are left out. An existing node is kept untouched.
++ * Format of the property blobs: len + 1, name, value (OSData, len bytes); 0 ends. One "N408D" line
++ * (1 kept, 2 created, 0 failed, -1 no parent).
++ */
++static const char n10_dt8_buttons[] =
++	"\x09" "compatible" "\0" "buttons\0"
++	"\x1d" "button-names" "\0" "volup\0voldown\0hold\0ringerab\0"
++	"\x05" "button-priority_hold" "\0" "\x01\x00\x00\x00"
++	"\x05" "button-priority_voldown" "\0" "\x02\x00\x00\x00"
++	"\x05" "button-priority_volup" "\0" "\x02\x00\x00\x00"
++	"\x05" "button-delay_hold" "\0" "\xf8\x24\x01\x00"
++	"\x05" "button-delay_voldown" "\0" "\xf8\x24\x01\x00"
++	"\x05" "button-delay_volup" "\0" "\xf8\x24\x01\x00"
++	"\x05" "opposed-power-vol-buttons" "\0" "\x01\x00\x00\x00"
++	"\x05" "home-button-type" "\0" "\x02\x00\x00\x00";
++static const char n10_dt8_pearl[] =
++	"\x11" "compatible" "\0" "biosensor,pearl\0";
++
++static int
++n10_dt8_node(IORegistryEntry *parent, const char *name, const char *device_type, const char *p, unsigned int *props)
++{
++	IORegistryEntry *node;
++
++	if (parent == NULL) {
++		return -1;
++	}
++	node = parent->childFromPath(name, gIODTPlane);
++	if (node != NULL) {
++		node->release();
++		return 1;
++	}
++	node = n10_fb_dt_node(parent, name, device_type);
++	if (node == NULL) {
++		return 0;
++	}
++	while (*p != 0) {
++		unsigned int b = (uint8_t)*p++;
++		const char *key = p;
++
++		p += strlen(key) + 1;
++		OSData *d = OSData::withBytes(p, b - 1u);
++		if (d != NULL) {
++			*props += node->setProperty(key, d);
++			d->release();
++		}
++		p += b - 1u;
++	}
++	node->release();
++	return 2;
++}
++
++static void
++n10_dt8_publish(IORegistryEntry *armio)
++{
++	unsigned int props = 0;
++	IORegistryEntry *root = IORegistryEntry::fromPath("/", gIODTPlane);
++	int buttons = n10_dt8_node(root, "buttons", "buttons", n10_dt8_buttons, &props);
++	int pearl = n10_dt8_node(armio, "pearl-sep", "pearl-sep", n10_dt8_pearl, &props);
++
++	OSSafeReleaseNULL(root);
++	n10_dsslog_trace("N408D publish buttons=%d pearl-sep=%d props=%u", buttons, pearl, props);
++}
++
+ /* Existing u32 value of a property of e, -1 when absent or not 4 bytes. */
+ static int64_t
+ n10_dt_u32(IORegistryEntry *e, const char *key)
+@@ -2976,6 +3045,7 @@ n10_iomfb_publish(void)
+ 			root->release();
+ 		}
+ 	}
++	n10_dt8_publish(armio);                         /* v408 N408D: /buttons, /arm-io/pearl-sep (registry only) */
+ 	if (armio != NULL) {
+ 		IORegistryEntry *node = n10_fb_dt_node(armio, "disp0", "display-subsystem");
+ 		disp = node != NULL;
 diff --git a/osfmk/arm64/note10/n10_dsslog.c b/osfmk/arm64/note10/n10_dsslog.c
 index 8e9b4ef..65ebdc8 100644
 --- a/osfmk/arm64/note10/n10_dsslog.c
