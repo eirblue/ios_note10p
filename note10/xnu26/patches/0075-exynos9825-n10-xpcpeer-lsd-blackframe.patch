@@ -1,0 +1,373 @@
+diff --git a/bsd/dev/arm/systemcalls.c b/bsd/dev/arm/systemcalls.c
+index ca3c8d4..7cf6d30 100644
+--- a/bsd/dev/arm/systemcalls.c
++++ b/bsd/dev/arm/systemcalls.c
+@@ -288,6 +288,9 @@ n10_sb_who(proc_t p)
+ 	if (strncmp(p->p_comm, "SpringBoard", 12) == 0) {
+ 		return 1;
+ 	}
++	if (strncmp(p->p_comm, "lsd", 4) == 0) {
++		return 3;                               /* v409: LaunchServices daemon (N409B / N409L) */
++	}
+ 	return strncmp(p->p_comm, "backboardd", 11) == 0 ? 2 : 0;
+ }
+ 
+@@ -308,10 +311,12 @@ n10_sb_who(proc_t p)
+  * Written with n10_dsslog_write on own caps (outside the shared trace budget, inside the dss area). Observation only:
+  * no argument, return value or state of any call is changed; copyin failures are ignored.
+  */
+-#define N10_SB_SLOTS            64              /* v408: 24 -> 64; backboardd threads from slot N10_SB_BBD_FIRST */
++#define N10_SB_SLOTS            80              /* v408: 24 -> 64; backboardd threads from slot N10_SB_BBD_FIRST; v409: 80 */
+ #define N10_SB_BBD_FIRST        24
+-#define N10_SB_BT               10              /* v408: user frames per slot (backtrace_user) */
+-#define N10_BB_R_MAX            64u             /* v408: N408B cap */
++#define N10_SB_LSD_FIRST        64              /* v409: lsd threads in slots 64..79 */
++#define N10_SB_BT               22              /* v408: user frames per slot (backtrace_user); v409: 10 -> 22 (N409U) */
++#define N10_BB_R_MAX            16u             /* v408: N408B cap; v409: 64 -> 16 (dss budget) */
++#define N10_LSD_R_MAX           24u             /* v409: N409B cap */
+ #define N10_SB_N_MAX            48u
+ #define N10_SB_R_MAX            48u
+ #define N10_SB_X_MAX            24u
+@@ -335,7 +340,12 @@ static struct {
+ 	uint32_t pty;           /* v407: port object type */
+ 	char pcomm[17];         /* v407: receiver p_comm */
+ 	char svc[48];           /* v407: service name of rem from a lookup reply (N407S map) */
+-	int who;                /* v408: 1 SpringBoard, 2 backboardd */
++	char lcomm[17];         /* v409: receiver p_comm of the last send-only mach_msg2 (N409W) */
++	char lsvc[48];          /* v409: its service name (N407S map) */
++	int who;                /* v408: 1 SpringBoard, 2 backboardd; v409: 3 lsd */
++	uint32_t calls;         /* v409: calls entered by this thread (N409L) */
++	uint32_t lrem, lid, lms;        /* v409: last send-only mach_msg2 of a SpringBoard / lsd thread: port, msgh_id, time */
++	int lpp;                /* v409: its receiver pid (-1 unknown) */
+ 	uint32_t nbt, uop;      /* v408: frames captured at the entry of this call; ulock operation */
+ 	uint64_t ua, uv, otid;  /* v408: ulock address / value, UL_UNFAIR_LOCK owner thread id */
+ 	uint64_t bt[N10_SB_BT]; /* v408: user pc + frame-pointer return addresses */
+@@ -354,6 +364,21 @@ static struct {
+  * N406R / N406X / N406T / N407Q / N407S stay SpringBoard-only. Observation only.
+  */
+ static uint32_t n10_bb_rl, n10_bb_rlast;
++/*
++ * v409: who does SpringBoard's main thread wait on? v408: it sat 205 s in a receive-only mach_msg2 (o=0x700420e,
++ * MACH_RCV_SYNC_WAIT) under xpc_connection_send_message_with_reply_sync called from Foundation, while it held a
++ * CoreServices (LaunchServices __DATA_DIRTY) os_unfair_lock that another SpringBoard thread waited for in _LSInit
++ * (N408U ot=c3). An XPC sync request is a send-only mach_msg2 followed by that receive, so the receiver is the
++ * destination of the thread's last send-only message:
++ *   N409W  window-end, per SpringBoard thread with such a send: port, msgh_id, receiver pid / p_comm (n10_port_peer
++ *          at the send, thread context), service name (N407S map), age of the send
++ *   N409U  window-end user frames 10..21 of a tracked thread (N10_SB_BT 22; N408U keeps frames 0..9)
++ * lsd (the LaunchServices database daemon the lock belongs to) joins the table (slots N10_SB_LSD_FIRST..):
++ *   N409B  an lsd call that took >= N10_SB_LONG_MS (as N408B) (<= N10_LSD_R_MAX)
++ *   N409L  window-end lsd thread lines (as N408W) with the number of calls the thread entered (+ N409W for lsd)
++ * Observation only.
++ */
++static uint32_t n10_lsd_rl, n10_lsd_rlast;
+ static uint32_t n10_sb_nl, n10_sb_rl, n10_sb_xl, n10_sb_tl, n10_sb_dumps;
+ static uint32_t n10_sb_nlast, n10_sb_rlast, n10_sb_xlast, n10_sb_nnext;
+ static uint32_t n10_sb_seen[N10_SB_N_MAX];
+@@ -394,6 +419,7 @@ n10_sb_now_ms(void)
+ }
+ 
+ /* v408: alloc 0 = lookup only, 1 = SpringBoard (any free slot), 2 = backboardd (free slot >= N10_SB_BBD_FIRST). */
++/* v409: SpringBoard < N10_SB_LSD_FIRST, backboardd N10_SB_BBD_FIRST..N10_SB_LSD_FIRST-1, 3 = lsd >= N10_SB_LSD_FIRST. */
+ static int
+ n10_sb_slot(uint64_t tid, const void *th, int pid, int alloc)
+ {
+@@ -403,7 +429,8 @@ n10_sb_slot(uint64_t tid, const void *th, int pid, int alloc)
+ 		if (n10_sb[i].tid == tid) {
+ 			return i;
+ 		}
+-		if (fr < 0 && n10_sb[i].tid == 0 && (alloc == 1 || (alloc == 2 && i >= N10_SB_BBD_FIRST))) {
++		if (fr < 0 && n10_sb[i].tid == 0 && ((alloc == 1 && i < N10_SB_LSD_FIRST) ||
++		    (alloc == 2 && i >= N10_SB_BBD_FIRST && i < N10_SB_LSD_FIRST) || (alloc == 3 && i >= N10_SB_LSD_FIRST))) {
+ 			fr = i;
+ 		}
+ 	}
+@@ -414,6 +441,8 @@ n10_sb_slot(uint64_t tid, const void *th, int pid, int alloc)
+ 		n10_sb[fr].sum = 0;
+ 		n10_sb[fr].who = alloc;
+ 		n10_sb[fr].nbt = 0;
++		n10_sb[fr].calls = 0;
++		n10_sb[fr].lrem = 0;
+ 		n10_sb[fr].tid = tid;
+ 	}
+ 	return fr;
+@@ -598,7 +627,7 @@ n10_sb_peer(int i, int who, uint64_t tid, const uint64_t *a)
+ 	char comm[17], line[200];
+ 	int pp = -1, n, k;
+ 
+-	if ((opt & (N10_M64_SEND | N10_M64_RCV)) != (N10_M64_SEND | N10_M64_RCV) || rem == 0) {
++	if ((opt & N10_M64_SEND) == 0 || rem == 0 || ((opt & N10_M64_RCV) == 0 && (who == 2 || i < 0))) {
+ 		return;
+ 	}
+ 	for (k = 0; k < N10_SVC_MAX && who == 1; k++) {       /* v408: the map holds SpringBoard port names only */
+@@ -612,6 +641,18 @@ n10_sb_peer(int i, int who, uint64_t tid, const uint64_t *a)
+ 		comm[0] = '-';
+ 		comm[1] = '\0';
+ 	}
++	if ((opt & N10_M64_RCV) == 0) {                 /* v409: SpringBoard / lsd send-only (N409W at the window end) */
++		n10_sb[i].lrem = rem;
++		n10_sb[i].lid = id;
++		n10_sb[i].lms = n10_sb_now_ms();
++		n10_sb[i].lpp = pp;
++		memcpy(n10_sb[i].lcomm, comm, sizeof(comm));
++		for (k = 0; k < (int)sizeof(n10_sb[i].lsvc) - 1 && svc[k] != '\0'; k++) {
++			n10_sb[i].lsvc[k] = svc[k];
++		}
++		n10_sb[i].lsvc[k] = '\0';
++		return;
++	}
+ 	if (i >= 0) {
+ 		n10_sb[i].ppid = pp;
+ 		n10_sb[i].pty = ty;
+@@ -658,7 +699,15 @@ n10_sb_end(int i, uint32_t dur, int ret, char end)
+ 			    "n=%.32s op=0x%x ot=%llx f=%llx,%llx,%llx,%llx,%llx,%llx", n10_sb[i].tid, n10_sb[i].num, ret, dur, end,
+ 			    n10_sb[i].opt, n10_sb[i].rem, n10_sb[i].id, n10_sb[i].ppid, n10_sb[i].pcomm, n10_sb[i].pty, n10_sb[i].name,
+ 			    n10_sb[i].uop, n10_sb[i].otid, f[1], f[2], f[3], f[4], f[5], f[6]);
+-			n10_cap_emit(bl, n, (int)sizeof(bl), &n10_bb_rlast, &n10_bb_rl, N10_BB_R_MAX);
++			if (n10_sb[i].who == 3) {               /* v409 N409B */
++				n = snprintf(bl, sizeof(bl), "N409B t=%llx c=%d ret=0x%x ms=%u end=%c o=0x%x r=0x%x id=0x%x p=%d %.16s "
++				    "ty=%u op=0x%x ot=%llx f=%llx,%llx,%llx,%llx,%llx,%llx", n10_sb[i].tid, n10_sb[i].num, ret, dur, end,
++				    n10_sb[i].opt, n10_sb[i].rem, n10_sb[i].id, n10_sb[i].ppid, n10_sb[i].pcomm, n10_sb[i].pty,
++				    n10_sb[i].uop, n10_sb[i].otid, f[1], f[2], f[3], f[4], f[5], f[6]);
++				n10_cap_emit(bl, n, (int)sizeof(bl), &n10_lsd_rlast, &n10_lsd_rl, N10_LSD_R_MAX);
++			} else {
++				n10_cap_emit(bl, n, (int)sizeof(bl), &n10_bb_rlast, &n10_bb_rl, N10_BB_R_MAX);
++			}
+ 		}
+ 		n10_sb[i].rcv = 0;
+ 		return;
+@@ -726,13 +775,16 @@ n10_sb_enter(int num, const uint64_t *a)
+ 			n10_sb[i].ua = 0;
+ 			n10_sb[i].uv = 0;
+ 			n10_sb[i].otid = 0;
++			n10_sb[i].calls++;                      /* v409 N409L */
+ 			n10_sb_bt(i, num, a);
+ 			n10_sb[i].in = 1;
+ 		}
+ 	}
+ 	if (num == N10_XQ_MSG2 && a != NULL) {
+ 		n10_sb_peer(i, who, thread_tid(current_thread()), a);  /* v407 N407Q (v408: slot also for backboardd) */
+-		n10_sb_msg(who, pid, i, a);
++		if (who != 3) {                         /* v409: no N406N / reply parsing for lsd */
++			n10_sb_msg(who, pid, i, a);
++		}
+ 	}
+ }
+ 
+@@ -826,21 +878,64 @@ n10_sb_btline(int i, char *buf, int len)
+ 	return n;
+ }
+ 
++/* v409: window-end user frames 10..21 of slot i (N409U); 0 when the current call captured <= 10. */
++static int
++n10_sb_btline2(int i, char *buf, int len)
++{
++	const uint64_t *f = n10_sb[i].bt;
++	int n;
++
++	if (n10_sb[i].nbt <= 10) {
++		return 0;
++	}
++	n = snprintf(buf, (size_t)len - 1, "N409U t=%llx nb=%u f=%llx,%llx,%llx,%llx,%llx,%llx,%llx,%llx,%llx,%llx,%llx,%llx",
++	    n10_sb[i].tid, n10_sb[i].nbt, f[10], f[11], f[12], f[13], f[14], f[15], f[16], f[17], f[18], f[19], f[20], f[21]);
++	if (n <= 0) {
++		return 0;
++	}
++	if (n > len - 2) {
++		n = len - 2;
++	}
++	buf[n++] = '\n';
++	return n;
++}
++
++/* v409: window-end last send-only destination of SpringBoard / lsd slot i (N409W); 0 when none. */
++static int
++n10_sb_sendline(int i, uint32_t now, char *buf, int len)
++{
++	int n;
++
++	if (n10_sb[i].who == 2 || n10_sb[i].lrem == 0) {
++		return 0;
++	}
++	n = snprintf(buf, (size_t)len - 1, "N409W t=%llx lr=0x%x lid=0x%x lp=%d %.16s ls=%.40s lage=%u", n10_sb[i].tid,
++	    n10_sb[i].lrem, n10_sb[i].lid, n10_sb[i].lpp, n10_sb[i].lcomm, n10_sb[i].lsvc, now - n10_sb[i].lms);
++	if (n <= 0) {
++		return 0;
++	}
++	if (n > len - 2) {
++		n = len - 2;
++	}
++	buf[n++] = '\n';
++	return n;
++}
++
+ void
+ n10_sb_final(void)
+ {
+ 	char line[200], ub[320];
+-	uint64_t mt[3] = { 0, 0, 0 };
++	uint64_t mt[4] = { 0, 0, 0, 0 };
+ 	uint32_t now = n10_sb_now_ms();
+ 	int n, m;
+ 
+ 	for (int i = 0; i < N10_SB_SLOTS; i++) {
+ 		int w = n10_sb[i].who;
+-		if (n10_sb[i].tid != 0 && w >= 1 && w <= 2 && (mt[w] == 0 || n10_sb[i].tid < mt[w])) {
++		if (n10_sb[i].tid != 0 && w >= 1 && w <= 3 && (mt[w] == 0 || n10_sb[i].tid < mt[w])) {
+ 			mt[w] = n10_sb[i].tid;
+ 		}
+ 	}
+-	for (int w = 1; w <= 2; w++)
++	for (int w = 1; w <= 3; w++)
+ 	for (int i = 0; i < N10_SB_SLOTS; i++) {
+ 		uint64_t tid = n10_sb[i].tid;
+ 		if (tid == 0 || n10_sb[i].who != w) {
+@@ -850,10 +945,14 @@ n10_sb_final(void)
+ 			n = snprintf(line, sizeof(line) - 2, "N407W t=%llx m=%u c=%d in=%u o=0x%x r=0x%x id=0x%x p=%d %.16s ty=%u s=%.32s",
+ 			    tid, tid == mt[w] ? 1u : 0u, n10_sb[i].num, n10_sb[i].in, n10_sb[i].opt, n10_sb[i].rem, n10_sb[i].id,
+ 			    n10_sb[i].ppid, n10_sb[i].pcomm, n10_sb[i].pty, n10_sb[i].svc[0] != '\0' ? n10_sb[i].svc : n10_sb[i].name);
+-		} else {
++		} else if (w == 2) {
+ 			n = snprintf(line, sizeof(line) - 2, "N408W t=%llx m=%u c=%d in=%u o=0x%x r=0x%x id=0x%x p=%d %.16s ty=%u n=%.32s",
+ 			    tid, tid == mt[w] ? 1u : 0u, n10_sb[i].num, n10_sb[i].in, n10_sb[i].opt, n10_sb[i].rem, n10_sb[i].id,
+ 			    n10_sb[i].ppid, n10_sb[i].pcomm, n10_sb[i].pty, n10_sb[i].name);
++		} else {                                /* v409 N409L */
++			n = snprintf(line, sizeof(line) - 2, "N409L t=%llx m=%u c=%d in=%u o=0x%x r=0x%x id=0x%x p=%d %.16s ty=%u n=%u",
++			    tid, tid == mt[w] ? 1u : 0u, n10_sb[i].num, n10_sb[i].in, n10_sb[i].opt, n10_sb[i].rem, n10_sb[i].id,
++			    n10_sb[i].ppid, n10_sb[i].pcomm, n10_sb[i].pty, n10_sb[i].calls);
+ 		}
+ 		if (n <= 0 || n >= (int)sizeof(line) - 2) {
+ 			continue;
+@@ -872,10 +971,18 @@ n10_sb_final(void)
+ 		}
+ 		line[n++] = '\n';
+ 		n10_dsslog_final(line, n);
++		n = n10_sb_sendline(i, now, ub, (int)sizeof(ub));      /* v409 N409W */
++		if (n > 0) {
++			n10_dsslog_final(ub, n);
++		}
+ 		n = n10_sb_btline(i, ub, (int)sizeof(ub));     /* v408 N408U */
+ 		if (n > 0) {
+ 			n10_dsslog_final(ub, n);
+ 		}
++		n = n10_sb_btline2(i, ub, (int)sizeof(ub));    /* v409 N409U */
++		if (n > 0) {
++			n10_dsslog_final(ub, n);
++		}
+ 	}
+ }
+ 
+diff --git a/iokit/Kernel/IOUserClient.cpp b/iokit/Kernel/IOUserClient.cpp
+index bfea689..bf9b00b 100644
+--- a/iokit/Kernel/IOUserClient.cpp
++++ b/iokit/Kernel/IOUserClient.cpp
+@@ -2919,7 +2919,7 @@ n10_path_miss(const char *path, uint32_t ool)
+  * (a = interest type), o open_extended final result (v = connect type). kr = the routine's IOReturn (found/not found).
+  * Log only (no lookup, return value or object changed), at most N10_IOK8_MAX lines per boot.
+  */
+-#define N10_IOK8_MAX    192u
++#define N10_IOK8_MAX    64u             /* v409: 192 -> 64 (dss budget; v408 list known) */
+ #define N10_IOK8_NAMES  48u
+ static uint32_t n10_iok8_lines, n10_iok8_names, n10_iok8_next;
+ static uint32_t n10_iok8_seen[N10_IOK8_MAX];
+diff --git a/iokit/Kernel/NoteFramebuffer.cpp b/iokit/Kernel/NoteFramebuffer.cpp
+index 65f0f15..fe3f652 100644
+--- a/iokit/Kernel/NoteFramebuffer.cpp
++++ b/iokit/Kernel/NoteFramebuffer.cpp
+@@ -307,6 +307,16 @@
+  * two swap records' words 0x00..0x3c; N406B bounding box and count of
+  * non-black pixels (every 4th pixel / row) on the first two iOS frames and
+  * every hash change (<= 16). No new register write, mapping or format.
++ *
++ * v409: no test pattern; one black frame early. The eight-colour test bars
++ * are gone (the scanout path is proven by v402..v408). Instead the first
++ * timer tick comes 2 s after publish (was 15 s; the v408 publish probe read
++ * the same ready DPU / DECON state as the 15 s timer probe) and, while no
++ * 1440x3040 iOS surface exists yet, sends exactly one frame from a black
++ * 1440-pixel row (BGRA 0xff000000, every row) so the panel GRAM stops
++ * showing the stale TWRP frame; later ticks before a surface send nothing.
++ * Same armed state, checks, copy path and the two DECON0 trigger writes;
++ * N398F how=3 = that black frame. DECON / DPP / sysmmu write list unchanged.
+  */
+ #include <pexpert/arm64/board_config.h>
+ 
+@@ -358,7 +368,7 @@ static void n10_disp_arm(void);
+ static void n10_disp_swap(IOExternalMethodArguments *args);
+ static void n10_disp_frame(uint32_t want, uint32_t tmr);
+ static void n10_disp_tick(thread_call_param_t p0, thread_call_param_t p1);
+-#define N10_DISP_TMR_FIRST_S    15u             /* v402: first timer tick after publish */
++#define N10_DISP_TMR_FIRST_S    2u              /* v402: first timer tick after publish; v409: 15 -> 2 (black frame) */
+ #define N10_DISP_TMR_NS         2000000000ull   /* then one tick every 2 s */
+ #define N10_DISP_TMR_TICKS      150u            /* v407: through the 300 s window (last tick ~313 s after publish); v403: 50 */
+ #define N10_DISP_SE_QUIET_NS    4000000000ull   /* v403: timer frame after 4 s without a SwapEnd frame */
+@@ -369,7 +379,8 @@ static uint32_t n10_disp_ticks, n10_disp_se_seen, n10_disp_retry, n10_disp_retri
+ static uint64_t n10_disp_retry_at;
+ static uint64_t n10_disp_se_ok_at;              /* v403: last completed SwapEnd frame */
+ static uint32_t n10_disp_se_frames, n10_disp_se_logged;
+-static uint32_t *n10_disp_bars;                 /* v402: one 1440-pixel test row (BGRA), every row */
++static uint32_t *n10_disp_black;                /* v409: one 1440-pixel black row (BGRA), every row (was the test bars) */
++static uint32_t n10_disp_black_sent;            /* v409: the black frame is sent once */
+ /* v392 N392F counters: opens, notification ports, selectors 3/4/5/6/8, others. */
+ enum { N10_FB_C_SURF, N10_FB_C_SB, N10_FB_C_SE, N10_FB_C_SW, N10_FB_C_DS, N10_FB_C_OTHER, N10_FB_C_N };
+ static uint32_t n10_fb_opens, n10_fb_notifies;
+@@ -2894,7 +2905,7 @@ n10_disp_swap(IOExternalMethodArguments *args)
+ 	n10_disp_frame(want, 0);
+ }
+ 
+-/* v402: one frame: SwapEnd (want = surface id) or timer (tmr 1: newest surface, else the test bars). */
++/* v402: one frame: SwapEnd (want = surface id) or timer (tmr 1: newest surface, else once the black row (v409)). */
+ static void
+ n10_disp_frame(uint32_t want, uint32_t tmr)
+ {
+@@ -2944,9 +2955,10 @@ n10_disp_frame(uint32_t want, uint32_t tmr)
+ 	IOLockUnlock(n10_surf_lock);
+ 	if (md != NULL) {
+ 		src = (const uint32_t *)md->getBytesNoCopy();
+-	} else if (tmr == 1u && n10_disp_bars != NULL) {    /* v403: tmr 2 (after a SwapEnd) never uses the bars */
+-		src = n10_disp_bars;                    /* v402 test bars: bpr 0 repeats the row */
++	} else if (tmr == 1u && n10_disp_black != NULL && n10_disp_black_sent == 0) {     /* v409: tmr 2 never */
++		src = n10_disp_black;                   /* v409 black frame (once): bpr 0 repeats the row */
+ 		how = 3;
++		n10_disp_black_sent = 1;                /* single in-flight (n10_disp_busy) */
+ 	}
+ 	if (src == NULL) {
+ 		__atomic_fetch_add(&n10_disp_skips, 1u, __ATOMIC_RELAXED);
+@@ -3133,8 +3145,6 @@ n10_iomfb_publish(void)
+ static void
+ n10_disp_tick(thread_call_param_t p0, thread_call_param_t p1)
+ {
+-	static const uint32_t bars[8] = { 0xffffffffu, 0xffffff00u, 0xff00ffffu, 0xff00ff00u, 0xffff00ffu, 0xffff0000u,
+-		                          0xff0000ffu, 0xff000000u };     /* BGRA words: A R G B */
+ 	uint32_t tick = ++n10_disp_ticks, seen, re = 0;
+ 	uint64_t d, now = mach_absolute_time();
+ 
+@@ -3154,13 +3164,13 @@ n10_disp_tick(thread_call_param_t p0, thread_call_param_t p1)
+ 		nanoseconds_to_absolutetime(N10_DISP_RETRY_NS, &d);
+ 		n10_disp_retry_at = now + d;
+ 	}
+-	if (n10_disp_bars == NULL) {
++	if (n10_disp_black == NULL) {                   /* v409: black row (BGRA words: A R G B) */
+ 		uint32_t *row = (uint32_t *)IOMalloc(N10_FB_WIDTH * 4u);
+ 		if (row != NULL) {
+ 			for (uint32_t x = 0; x < N10_FB_WIDTH; x++) {
+-				row[x] = bars[x / (N10_FB_WIDTH / 8u)];
++				row[x] = 0xff000000u;
+ 			}
+-			n10_disp_bars = row;
++			n10_disp_black = row;
+ 		}
+ 	}
+ 	seen = __atomic_load_n(&n10_disp_se_seen, __ATOMIC_RELAXED);
+diff --git a/osfmk/arm64/note10/n10_dsslog.c b/osfmk/arm64/note10/n10_dsslog.c
+index 65ebdc8..29535dc 100644
+--- a/osfmk/arm64/note10/n10_dsslog.c
++++ b/osfmk/arm64/note10/n10_dsslog.c
+@@ -97,7 +97,7 @@ static uint32_t n10_dss_dropped;
+  * N10_DSS_RESERVE; only n10_dsslog_final (N407G, N407W window-end lines, N376W) may use it. Panic notes
+  * (n10_dsslog_putc) and the N347X/N347R capture are unchanged.
+  */
+-#define N10_DSS_LATE_RESERVE    28672u          /* v408: 6144 -> 28672 (N407W + N408W + N408U window-end lines) */
++#define N10_DSS_LATE_RESERVE    45056u          /* v408: 6144 -> 28672 (N407W + N408W + N408U window-end lines); v409: 45056 (+ N409W / N409L / N409U) */
+ uint32_t n10_dss_quiet;
+ static uint32_t n10_dss_final;
+ extern int snprintf(char *, size_t, const char *, ...) __printflike(3, 4);

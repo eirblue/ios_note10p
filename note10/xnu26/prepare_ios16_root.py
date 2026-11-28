@@ -170,6 +170,10 @@ OVERLAY = (
      '1cb95051cb4d4f0ba45213ee538661a59ef6050aa4a2c8feb0db367ab42735cd',
      ('bsd/dev/arm/systemcalls.c', 'iokit/Kernel/IOUserClient.cpp', 'iokit/Kernel/NoteFramebuffer.cpp',
       'osfmk/arm64/note10/n10_dsslog.c')),
+    ('0075-exynos9825-n10-xpcpeer-lsd-blackframe.patch',
+     'd50e3e89f89d2b08c908cde4414b57062f53058de2d9283d8ffdc342c30278d6',
+     ('bsd/dev/arm/systemcalls.c', 'iokit/Kernel/IOUserClient.cpp', 'iokit/Kernel/NoteFramebuffer.cpp',
+      'osfmk/arm64/note10/n10_dsslog.c')),
 )
 STAGED_DIRS = ('bsd/n10_hfs/core', 'bsd/n10_hfs/hfs_encodings')
 
