@@ -1,0 +1,361 @@
+diff --git a/iokit/Kernel/NoteFramebuffer.cpp b/iokit/Kernel/NoteFramebuffer.cpp
+index 07937d0..77294ef 100644
+--- a/iokit/Kernel/NoteFramebuffer.cpp
++++ b/iokit/Kernel/NoteFramebuffer.cpp
+@@ -261,6 +261,33 @@
+  * after the copy at five fixed points for iOS-surface frames, and the
+  * surface creation path zero-fills the new surface (it was uninitialised
+  * kernel memory until the first render).
++ *
++ * v405: touch I2C survives transient errors. v404 read the IC 135 times,
++ * then took a TRANS_STATUS master state 0xb seen while a 16-byte read was
++ * still running (master busy, INT_STATUS 0) for a NACK (N404E stage 3),
++ * reset the controller and stopped because the master was still busy right
++ * after the reset. Now the polled message follows Linux
++ * exynos5_i2c_xfer_msg HSI2C_POLLING exactly: no master-state test while
++ * the message runs; the message ends with all bytes moved and
++ * TRANSFER_DONE (+ TX FIFO empty); NACK = INT_STATUS NODEV, or
++ * TRANSFER_DONE with read bytes missing; 25 ms deadline per message; the
++ * master must be idle (<= 1 ms wait) before a message starts. A failed
++ * command is tried 3 times, 1 ms apart (sec_ts_i2c_read); every failed try
++ * does the Linux exynos5_i2c_reset + exynos5_i2c_init sequence (SW_RST
++ * set / clear, TIMING_FS1..3, CTL, TRAILIG_CTL (value read at the first
++ * check), ADDR, CONF) and reads the written configuration back (N405R;
++ * a mismatch stops polling, a busy master only waits <= 2 ms and is
++ * recorded). A tick whose command failed all tries releases the held
++ * fingers (one release tree) and skips 1, 2, 4 .. 64 ticks (N405K); the
++ * first good read after that sends SENSE_ON again (idempotent). N405S
++ * (with N404S) counts resets, retries, failed ticks and recoveries.
++ * IOHIDEventServicePlugin copyEvent (selector 2, backboardd asked type 3
++ * keyboard) treats kIOReturnUnsupported as "no event" without an error log,
++ * so selectors 2 / 4 keep that reply. Display: the iOS surface frames are
++ * drawn (zero-filled surfaces came back opaque black with a white centre,
++ * same hash every frame: QuartzCore's software renderer runs without AGX);
++ * N405C logs twelve source words down the centre column for the first two
++ * iOS frames and whenever the frame hash changes (at most 16).
+  */
+ #include <pexpert/arm64/board_config.h>
+ 
+@@ -941,7 +968,12 @@ IOMobileFramebufferUserClient::n10SurfRelease(void *p1, __unused void *p2, __unu
+ #define N10_TS_ADDR7            0x48u
+ #define N10_TS_PERIOD_NS        16000000ull     /* ~60 Hz */
+ #define N10_TS_FIRST_NS         2000000000ull
+-#define N10_TS_MAX_FAILS        8u
++#define N10_I2C_TRAIL           0x08u           /* v405: TRAILIG_CTL (saved at the first check, restored after a reset) */
++#define N10_TS_XFER_NS          25000000ull     /* v405: per message (Linux EXYNOS5_I2C_TIMEOUT is 1 s) */
++#define N10_TS_IDLE_NS          1000000ull      /* v405: master idle wait before a message */
++#define N10_TS_TRIES            3u              /* v405: tries per command, 1 ms apart (sec_ts_i2c_read) */
++#define N10_TS_BACKOFF_MAX      64u             /* v405: at most 64 skipped ticks (~1 s) after a failed tick */
++#define N10_TS_R_LINES          32u             /* v405: N405R + N405K lines */
+ #define N10_TS_SLOTS            10u
+ #define N10_TS_EV               16u
+ #define N10_TS_EVS              32u             /* 1 + left (5 bits, <= 31) */
+@@ -964,7 +996,8 @@ struct n10_ts_slot {
+ static vm_offset_t n10_ts_va, n10_ts_gpa;
+ static uint32_t n10_ts_sv_ctl, n10_ts_sv_conf, n10_ts_sv_addr;
+ static uint32_t n10_ts_state;                   /* 0 init pending, 1 polling, 2 stopped */
+-static uint32_t n10_ts_fails, n10_ts_errs, n10_ts_blines;
++static uint32_t n10_ts_fails, n10_ts_errs, n10_ts_blines;   /* v405: fails = failed ticks in a row */
++static uint32_t n10_ts_sv_trail, n10_ts_skip, n10_ts_resets, n10_ts_retried, n10_ts_badticks, n10_ts_recov, n10_ts_rlines;
+ static uint32_t n10_ts_ticks, n10_ts_reads, n10_ts_events, n10_ts_status, n10_ts_gesture, n10_ts_tlines, n10_ts_slines;
+ static uint32_t n10_ts_frames, n10_ts_noclient, n10_ts_full, n10_ts_qlines, n10_ts_qlast;
+ static uint64_t n10_ts_q_at;
+@@ -1008,6 +1041,7 @@ n10_ts_bus_check(const char *why)
+ 		n10_ts_sv_ctl = ctl & ~(N10_I2C_SW_RST | N10_I2C_TXCHON | N10_I2C_RXCHON);
+ 		n10_ts_sv_conf = conf;
+ 		n10_ts_sv_addr = addr;
++		n10_ts_sv_trail = n10_ts_rd(N10_I2C_TRAIL);
+ 	}
+ 	if (n10_ts_blines++ < 8u) {
+ 		n10_dsslog_trace("N404B %s conf=0x%x ctl=0x%x fs=0x%x/0x%x/0x%x usi=0x%x trans=0x%x fifo=0x%x addr=0x%x ok=%u", why,
+@@ -1016,7 +1050,10 @@ n10_ts_bus_check(const char *why)
+ 	return ok;
+ }
+ 
+-/* Linux exynos5_i2c_reset: SW_RST set / clear, then the saved timing and configuration. */
++/*
++ * Linux exynos5_i2c_reset + exynos5_hsi2c_clock_setup + exynos5_i2c_init: SW_RST set / clear, the checked timing,
++ * CTL (master), TRAILIG_CTL, ADDR and CONF (AUTO_MODE) as read at the first check.
++ */
+ static void
+ n10_ts_reset(void)
+ {
+@@ -1025,24 +1062,60 @@ n10_ts_reset(void)
+ 	for (uint32_t i = 0; i < 3; i++) {
+ 		n10_ts_wr(N10_I2C_FS1 + 4u * i, n10_ts_fs[i]);
+ 	}
++	n10_ts_wr(N10_I2C_CTL, n10_ts_sv_ctl);
++	n10_ts_wr(N10_I2C_TRAIL, n10_ts_sv_trail);
+ 	n10_ts_wr(N10_I2C_ADDR, n10_ts_sv_addr);
+ 	n10_ts_wr(N10_I2C_CONF, n10_ts_sv_conf);
+-	n10_ts_wr(N10_I2C_CTL, n10_ts_sv_ctl);
++	n10_ts_resets++;
+ }
+ 
++/* v405: the written configuration reads back after a reset (else stop); a busy master waits <= 2 ms, recorded only. */
+ static bool
+-n10_ts_nack(void)
++n10_ts_rst_check(void)
+ {
+-	return (n10_ts_rd(N10_I2C_INT_ST) & N10_I2C_INT_NODEV) != 0 ||
+-	       (n10_ts_rd(N10_I2C_TRANS) & 0xfu) == N10_I2C_ST_NO_ACK;
++	uint32_t conf = n10_ts_rd(N10_I2C_CONF), ctl = n10_ts_rd(N10_I2C_CTL), usi = n10_ts_rd(N10_I2C_USI_CON);
++	uint32_t trail = n10_ts_rd(N10_I2C_TRAIL), addr = n10_ts_rd(N10_I2C_ADDR), wait = 0, trans;
++	bool ok = conf == n10_ts_sv_conf && ctl == n10_ts_sv_ctl && usi == 0 && trail == n10_ts_sv_trail &&
++	    addr == n10_ts_sv_addr;
++
++	for (uint32_t i = 0; i < 3; i++) {
++		ok = ok && n10_ts_rd(N10_I2C_FS1 + 4u * i) == n10_ts_fs[i];
++	}
++	while (((trans = n10_ts_rd(N10_I2C_TRANS)) & N10_I2C_MASTER_BUSY) != 0 && wait < 2000u) {
++		IODelay(1);
++		wait++;
++	}
++	if (n10_ts_rlines < N10_TS_R_LINES) {
++		n10_ts_rlines++;
++		n10_dsslog_trace("N405R rst=%u conf=0x%x ctl=0x%x usi=0x%x trail=0x%x addr=0x%x trans=0x%x wait=%u ok=%u",
++		    n10_ts_resets, conf, ctl, usi, trail, addr, trans, wait, ok ? 1u : 0u);
++	}
++	return ok;
+ }
+ 
+-/* One polled message (Linux exynos5_i2c_xfer_msg HSI2C_POLLING, stop after every message): 0 or the stage. */
++/*
++ * One polled message, Linux exynos5_i2c_xfer_msg HSI2C_POLLING (stop after every message): no master-state test
++ * while the message runs (v404 took a transient state 0xb during a running read for a NACK). 0 or the stage:
++ * 1 TX data / 2 RX data deadline, 3 NACK (INT_STATUS NODEV, or TRANSFER_DONE with read bytes missing),
++ * 4 TRANSFER_DONE deadline, 5 master busy before the start.
++ */
+ static uint32_t
+ n10_ts_xfer(bool rx, uint8_t *buf, uint32_t len)
+ {
+-	uint32_t budget = 2000u + len * 40u, got = 0, v;
++	uint64_t lim, idle, now = mach_absolute_time();
++	uint32_t got = 0, v;
+ 	uint32_t trig = len >= 8u ? 8u : len;
++
++	nanoseconds_to_absolutetime(N10_TS_XFER_NS, &lim);
++	nanoseconds_to_absolutetime(N10_TS_IDLE_NS, &idle);
++	lim += now;
++	idle += now;
++	while ((n10_ts_rd(N10_I2C_TRANS) & N10_I2C_MASTER_BUSY) != 0) {
++		if (mach_absolute_time() > idle) {
++			return 5;
++		}
++		IODelay(1);
++	}
+ 	uint32_t ctl = n10_ts_rd(N10_I2C_CTL) & ~(N10_I2C_TXCHON | N10_I2C_RXCHON);
+ 	uint32_t ac = n10_ts_rd(N10_I2C_AUTO) | N10_I2C_STOP;
+ 	uint32_t addr = n10_ts_rd(N10_I2C_ADDR) & ~((0x3ffu << 10) | 0x3ffu | (0xffu << 24));
+@@ -1072,52 +1145,63 @@ n10_ts_xfer(bool rx, uint8_t *buf, uint32_t len)
+ 			n10_ts_wr(N10_I2C_TX, buf[got++]);
+ 			continue;
+ 		}
+-		if (n10_ts_nack()) {
++		v = n10_ts_rd(N10_I2C_INT_ST);
++		if ((v & N10_I2C_INT_NODEV) != 0 ||
++		    (rx && (v & N10_I2C_INT_DONE) != 0 && (n10_ts_rd(N10_I2C_FIFO_ST) & N10_I2C_RX_EMPTY) != 0)) {
+ 			return 3;
+ 		}
+-		if (budget-- == 0) {
++		if (mach_absolute_time() > lim) {
+ 			return rx ? 2u : 1u;
+ 		}
+ 		IODelay(1);
+ 	}
+ 	for (;;) {
+ 		v = n10_ts_rd(N10_I2C_INT_ST);
++		if ((v & N10_I2C_INT_NODEV) != 0) {
++			return 3;
++		}
+ 		if ((v & N10_I2C_INT_DONE) != 0 && (n10_ts_rd(N10_I2C_FIFO_ST) & N10_I2C_TX_EMPTY) != 0) {
+ 			n10_ts_wr(N10_I2C_INT_ST, v);
+ 			return 0;
+ 		}
+-		if (n10_ts_nack()) {
+-			return 3;
+-		}
+-		if (budget-- == 0) {
++		if (mach_absolute_time() > lim) {
+ 			return 4;
+ 		}
+ 		IODelay(1);
+ 	}
+ }
+ 
+-/* Register select (+ read of rlen bytes). Failure: N404E, controller reset + read-check, stop after 8 in a row. */
++/*
++ * Register select (+ read of rlen bytes), at most N10_TS_TRIES tries 1 ms apart. Each failed try: N404E (capped),
++ * the Linux reset and the configuration read-back (N405R; a mismatch stops polling).
++ */
+ static bool
+ n10_ts_cmd(uint8_t reg, uint8_t *rbuf, uint32_t rlen)
+ {
+-	uint8_t r = reg;
+-	uint32_t stage = n10_ts_xfer(false, &r, 1);
++	for (uint32_t t = 0; t < N10_TS_TRIES && n10_ts_state != 2; t++) {
++		uint8_t r = reg;
++		uint32_t stage;
+ 
+-	if (stage == 0 && rlen != 0) {
+-		stage = n10_ts_xfer(true, rbuf, rlen);
+-	}
+-	if (stage == 0) {
+-		n10_ts_fails = 0;
+-		return true;
+-	}
+-	uint32_t n = ++n10_ts_errs;
+-	if (n <= N10_TS_E_LINES || (n & 63u) == 0) {
+-		n10_dsslog_trace("N404E reg=0x%x len=%u stage=%u trans=0x%x int=0x%x fifo=0x%x n=%u", reg, rlen, stage,
+-		    n10_ts_rd(N10_I2C_TRANS), n10_ts_rd(N10_I2C_INT_ST), n10_ts_rd(N10_I2C_FIFO_ST), n);
+-	}
+-	n10_ts_reset();
+-	if (++n10_ts_fails >= N10_TS_MAX_FAILS || !n10_ts_bus_check("rst")) {
+-		n10_ts_state = 2;
++		if (t != 0) {
++			n10_ts_retried++;
++			IODelay(1000);
++		}
++		stage = n10_ts_xfer(false, &r, 1);
++		if (stage == 0 && rlen != 0) {
++			stage = n10_ts_xfer(true, rbuf, rlen);
++		}
++		if (stage == 0) {
++			return true;
++		}
++		uint32_t n = ++n10_ts_errs;
++		if (n <= N10_TS_E_LINES || (n & 63u) == 0) {
++			n10_dsslog_trace("N404E reg=0x%x len=%u stage=%u trans=0x%x int=0x%x fifo=0x%x n=%u", reg, rlen, stage,
++			    n10_ts_rd(N10_I2C_TRANS), n10_ts_rd(N10_I2C_INT_ST), n10_ts_rd(N10_I2C_FIFO_ST), n);
++		}
++		n10_ts_reset();
++		if (!n10_ts_rst_check()) {
++			n10_ts_state = 2;
++		}
+ 	}
+ 	return false;
+ }
+@@ -1334,6 +1418,27 @@ n10_ts_init(void)
+ 	}
+ }
+ 
++/* v405: a tick whose command failed every try releases the held fingers (no stuck touch) and backs off. */
++static void
++n10_ts_tick_failed(void)
++{
++	for (uint32_t s = 0; s < N10_TS_SLOTS; s++) {
++		if (n10_ts_slots[s].down) {
++			n10_ts_slots[s].down = 0;
++			n10_ts_slots[s].chg = 3;
++		}
++	}
++	n10_ts_emit();
++	n10_ts_badticks++;
++	n10_ts_fails++;
++	n10_ts_skip = n10_ts_fails >= 7u ? N10_TS_BACKOFF_MAX : 1u << (n10_ts_fails - 1u);
++	if (n10_ts_rlines < N10_TS_R_LINES) {
++		n10_ts_rlines++;
++		n10_dsslog_trace("N405K fail=%u skip=%u errs=%u resets=%u state=%u", n10_ts_fails, n10_ts_skip, n10_ts_errs,
++		    n10_ts_resets, n10_ts_state);
++	}
++}
++
+ static void
+ n10_ts_poll(void)
+ {
+@@ -1341,8 +1446,19 @@ n10_ts_poll(void)
+ 	uint32_t left;
+ 
+ 	if (!n10_ts_cmd(0x60, ev, N10_TS_EV)) {         /* READ_ONE_EVENT */
++		n10_ts_tick_failed();
+ 		return;
+ 	}
++	if (n10_ts_fails != 0) {                        /* v405: first good read after failed ticks */
++		bool sense = n10_ts_cmd(0x10, NULL, 0); /* SENSE_ON again (idempotent, Linux start_device) */
++		n10_ts_recov++;
++		if (n10_ts_rlines < N10_TS_R_LINES) {
++			n10_ts_rlines++;
++			n10_dsslog_trace("N405K ok after=%u sense=%u errs=%u resets=%u", n10_ts_fails, sense ? 1u : 0u,
++			    n10_ts_errs, n10_ts_resets);
++		}
++		n10_ts_fails = 0;
++	}
+ 	n10_ts_reads++;
+ 	if (ev[0] == 0) {
+ 		return;                                 /* event buffer empty */
+@@ -1360,6 +1476,7 @@ n10_ts_poll(void)
+ 	}
+ 	left = ev[7] & 0x1fu;
+ 	if (left != 0 && !n10_ts_cmd(0x61, ev + N10_TS_EV, N10_TS_EV * left)) {   /* READ_ALL_EVENT */
++		n10_ts_tick_failed();
+ 		return;
+ 	}
+ 	for (uint32_t i = 0; i <= left; i++) {
+@@ -1380,13 +1497,19 @@ n10_ts_tick(thread_call_param_t p0, thread_call_param_t p1)
+ 		n10_ts_init();
+ 	}
+ 	if (n10_ts_state == 1) {
+-		n10_ts_poll();
++		if (n10_ts_skip != 0) {                 /* v405: back-off after a failed tick */
++			n10_ts_skip--;
++		} else {
++			n10_ts_poll();
++		}
+ 	}
+ 	if ((t % 625u == 0 || n10_ts_state == 2) && n10_ts_slines < N10_TS_S_LINES) {      /* ~10 s, and once at a stop */
+ 		n10_ts_slines++;
+ 		n10_dsslog_trace("N404S ticks=%u reads=%u events=%u status=%u gesture=%u errs=%u frames=%u state=%u attn=%u", t,
+ 		    n10_ts_reads, n10_ts_events, n10_ts_status, n10_ts_gesture, n10_ts_errs, n10_ts_frames, n10_ts_state,
+ 		    n10_ts_gpa != 0 ? (*(volatile uint32_t *)(n10_ts_gpa + N10_TS_GPA1_DAT) & 1u) : 2u);
++		n10_dsslog_trace("N405S resets=%u retried=%u badticks=%u recov=%u skip=%u", n10_ts_resets, n10_ts_retried,
++		    n10_ts_badticks, n10_ts_recov, n10_ts_skip);
+ 	}
+ 	if (n10_ts_state != 2) {
+ 		nanoseconds_to_absolutetime(N10_TS_PERIOD_NS, &d);
+@@ -1459,7 +1582,7 @@ n10_ts_method(void *client, uint32_t selector, IOExternalMethodArguments *args)
+ 		IOLockUnlock(n10_ts_lock);
+ 		break;
+ 	case 2:                                         /* copyEvent / copyMatchingEvent: no event to copy */
+-	case 4:
++	case 4:                                         /* v405: the plugin takes kIOReturnUnsupported as nil, no error log */
+ 		ret = kIOReturnUnsupported;
+ 		break;
+ 	default:
+@@ -2512,6 +2635,29 @@ n10_disp_dump(const uint32_t *src, uint32_t bpr, uint32_t how)
+ 	    n10_disp_swap_rb, s[0], s[1], s[2], s[3], s[4], d[0], d[1], d[2], d[3], d[4]);
+ }
+ 
++/*
++ * v405 N405C: twelve source words down the centre column (x 720, y 128 + 256 k) for the first two iOS frames and
++ * whenever the frame hash changes, at most 16 lines (boot logo: white only near the centre; UI: content elsewhere).
++ */
++static uint32_t n10_disp_clines, n10_disp_chash;
++
++static void
++n10_disp_col(const uint32_t *src, uint32_t bpr, uint32_t how, uint32_t hash)
++{
++	uint32_t c[12];
++
++	if (n10_disp_clines >= 16u || (n10_disp_clines >= 2u && hash == n10_disp_chash)) {
++		return;
++	}
++	n10_disp_clines++;
++	n10_disp_chash = hash;
++	for (uint32_t k = 0; k < 12u; k++) {
++		c[k] = src[(uint64_t)(128u + 256u * k) * (bpr / 4u) + 720u];
++	}
++	n10_dsslog_trace("N405C n=%u how=%u hash=0x%08x c=%08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x",
++	    n10_disp_clines, how, hash, c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7], c[8], c[9], c[10], c[11]);
++}
++
+ /* SwapEnd: copy the front surface into the window buffer and send one frame (armed only). */
+ static void
+ n10_disp_swap(IOExternalMethodArguments *args)
+@@ -2622,6 +2768,7 @@ n10_disp_frame(uint32_t want, uint32_t tmr)
+ 	__builtin_arm_dsb(0xf);
+ 	if (how == 1u || how == 2u) {
+ 		n10_disp_dump(src, bpr, how);           /* v404 N404D content proof */
++		n10_disp_col(src, bpr, how, hash);      /* v405 N405C centre column */
+ 	}
+ 
+ 	/* one frame: same order as Linux decon_reg_update_req_and_unmask / decon_reg_wait_update_done_and_mask */

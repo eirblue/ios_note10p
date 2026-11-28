@@ -156,6 +156,9 @@ OVERLAY = (
     ('0070-exynos9825-n10-sec-ts-touch-hid.patch',
      'd3df9994b0a3d67303b9c3c86ecf807e4104a3e196080abce2e4b4267f56f772',
      ('iokit/Kernel/IOUserClient.cpp', 'iokit/Kernel/NoteFramebuffer.cpp')),
+    ('0071-exynos9825-n10-touch-i2c-recover-hid-display.patch',
+     '6f71d8faf932a3b42208776a2f19927f3bbfd954834e701fe7ec572a70eeb435',
+     ('iokit/Kernel/NoteFramebuffer.cpp',)),
 )
 STAGED_DIRS = ('bsd/n10_hfs/core', 'bsd/n10_hfs/hfs_encodings')
 
