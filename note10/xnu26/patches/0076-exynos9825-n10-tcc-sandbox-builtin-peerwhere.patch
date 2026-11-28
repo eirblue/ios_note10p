@@ -1,0 +1,339 @@
+diff --git a/bsd/dev/arm/systemcalls.c b/bsd/dev/arm/systemcalls.c
+index 7cf6d30..0c77980 100644
+--- a/bsd/dev/arm/systemcalls.c
++++ b/bsd/dev/arm/systemcalls.c
+@@ -291,6 +291,9 @@ n10_sb_who(proc_t p)
+ 	if (strncmp(p->p_comm, "lsd", 4) == 0) {
+ 		return 3;                               /* v409: LaunchServices daemon (N409B / N409L) */
+ 	}
++	if (strncmp(p->p_comm, "containermanager", 17) == 0) {
++		return 4;                               /* v410: containermanagerd (p_comm 16 chars; N410B / N410L) */
++	}
+ 	return strncmp(p->p_comm, "backboardd", 11) == 0 ? 2 : 0;
+ }
+ 
+@@ -311,9 +314,11 @@ n10_sb_who(proc_t p)
+  * Written with n10_dsslog_write on own caps (outside the shared trace budget, inside the dss area). Observation only:
+  * no argument, return value or state of any call is changed; copyin failures are ignored.
+  */
+-#define N10_SB_SLOTS            80              /* v408: 24 -> 64; backboardd threads from slot N10_SB_BBD_FIRST; v409: 80 */
++#define N10_SB_SLOTS            96              /* v408: 24 -> 64; backboardd threads from slot N10_SB_BBD_FIRST; v409: 80; v410: 96 */
+ #define N10_SB_BBD_FIRST        24
+ #define N10_SB_LSD_FIRST        64              /* v409: lsd threads in slots 64..79 */
++#define N10_SB_CMD_FIRST        80              /* v410: containermanagerd threads in slots 80..95 */
++#define N10_CMD_R_MAX           16u             /* v410: N410B cap */
+ #define N10_SB_BT               22              /* v408: user frames per slot (backtrace_user); v409: 10 -> 22 (N409U) */
+ #define N10_BB_R_MAX            16u             /* v408: N408B cap; v409: 64 -> 16 (dss budget) */
+ #define N10_LSD_R_MAX           24u             /* v409: N409B cap */
+@@ -342,10 +347,13 @@ static struct {
+ 	char svc[48];           /* v407: service name of rem from a lookup reply (N407S map) */
+ 	char lcomm[17];         /* v409: receiver p_comm of the last send-only mach_msg2 (N409W) */
+ 	char lsvc[48];          /* v409: its service name (N407S map) */
++	char ldcomm[17];        /* v410: p_comm of the task holding the destination's message when it is in transit */
+ 	int who;                /* v408: 1 SpringBoard, 2 backboardd; v409: 3 lsd */
+ 	uint32_t calls;         /* v409: calls entered by this thread (N409L) */
+ 	uint32_t lrem, lid, lms;        /* v409: last send-only mach_msg2 of a SpringBoard / lsd thread: port, msgh_id, time */
+ 	int lpp;                /* v409: its receiver pid (-1 unknown) */
++	int lkr, ldp;           /* v410: lpp -1: translate kr (0 = send right) / pid holding the in-transit port (N410P) */
++	uint32_t lst, lqn;      /* v410: lpp -1: port io_state (0xff none) / queued messages on the destination */
+ 	uint32_t nbt, uop;      /* v408: frames captured at the entry of this call; ulock operation */
+ 	uint64_t ua, uv, otid;  /* v408: ulock address / value, UL_UNFAIR_LOCK owner thread id */
+ 	uint64_t bt[N10_SB_BT]; /* v408: user pc + frame-pointer return addresses */
+@@ -379,6 +387,21 @@ static uint32_t n10_bb_rl, n10_bb_rlast;
+  * Observation only.
+  */
+ static uint32_t n10_lsd_rl, n10_lsd_rlast;
++/*
++ * v410: v409 r1 N409W: SpringBoard's main thread (t=bc) sent its XPC request (lid 0x40000000, port 0x6703) at ~97 s
++ * to a port n10_port_peer could not resolve (lp=-1: not a send right, or not in any space), right after tccd's 6th
++ * abort; lsd's request threads waited in ulock under NSXPC (database not ready) while its scan thread made 2-5 s
++ * container_xpc_send_sync_message calls to containermanagerd (N409B).
++ *   N410P  window-end, after N409W when lp=-1: translate kr (0 = send right), port io_state (1 in space, 3/4 limbo,
++ *          5/6 in transit / inside a port-destroyed notification), queued messages, and for an in-transit port the
++ *          pid / p_comm of the task whose port queue holds it (n10_port_where at the send, thread context)
++ * containermanagerd joins the table (p_comm "containermanager", slots N10_SB_CMD_FIRST..):
++ *   N410B  a containermanagerd call that took >= N10_SB_LONG_MS (as N409B) (<= N10_CMD_R_MAX)
++ *   N410L  window-end containermanagerd thread lines (as N409L) (+ N409W / N410P / N408U / N409U)
++ * Observation only.
++ */
++extern int n10_port_where(uint32_t name, uint32_t *st, uint32_t *qn, int *dpid, char *dcomm, int len);
++static uint32_t n10_cmd_rl, n10_cmd_rlast;
+ static uint32_t n10_sb_nl, n10_sb_rl, n10_sb_xl, n10_sb_tl, n10_sb_dumps;
+ static uint32_t n10_sb_nlast, n10_sb_rlast, n10_sb_xlast, n10_sb_nnext;
+ static uint32_t n10_sb_seen[N10_SB_N_MAX];
+@@ -430,7 +453,8 @@ n10_sb_slot(uint64_t tid, const void *th, int pid, int alloc)
+ 			return i;
+ 		}
+ 		if (fr < 0 && n10_sb[i].tid == 0 && ((alloc == 1 && i < N10_SB_LSD_FIRST) ||
+-		    (alloc == 2 && i >= N10_SB_BBD_FIRST && i < N10_SB_LSD_FIRST) || (alloc == 3 && i >= N10_SB_LSD_FIRST))) {
++		    (alloc == 2 && i >= N10_SB_BBD_FIRST && i < N10_SB_LSD_FIRST) ||
++		    (alloc == 3 && i >= N10_SB_LSD_FIRST && i < N10_SB_CMD_FIRST) || (alloc == 4 && i >= N10_SB_CMD_FIRST))) {
+ 			fr = i;
+ 		}
+ 	}
+@@ -443,6 +467,12 @@ n10_sb_slot(uint64_t tid, const void *th, int pid, int alloc)
+ 		n10_sb[fr].nbt = 0;
+ 		n10_sb[fr].calls = 0;
+ 		n10_sb[fr].lrem = 0;
++		n10_sb[fr].lpp = -1;
++		n10_sb[fr].lkr = 0;
++		n10_sb[fr].ldp = -1;
++		n10_sb[fr].lst = 0xffu;
++		n10_sb[fr].lqn = 0;
++		n10_sb[fr].ldcomm[0] = '\0';
+ 		n10_sb[fr].tid = tid;
+ 	}
+ 	return fr;
+@@ -646,6 +676,15 @@ n10_sb_peer(int i, int who, uint64_t tid, const uint64_t *a)
+ 		n10_sb[i].lid = id;
+ 		n10_sb[i].lms = n10_sb_now_ms();
+ 		n10_sb[i].lpp = pp;
++		n10_sb[i].lkr = 0;
++		n10_sb[i].ldp = -1;
++		n10_sb[i].lst = 0xffu;
++		n10_sb[i].lqn = 0;
++		n10_sb[i].ldcomm[0] = '\0';
++		if (pp == -1) {                         /* v410 N410P */
++			n10_sb[i].lkr = n10_port_where(rem, &n10_sb[i].lst, &n10_sb[i].lqn, &n10_sb[i].ldp, n10_sb[i].ldcomm,
++			    (int)sizeof(n10_sb[i].ldcomm));
++		}
+ 		memcpy(n10_sb[i].lcomm, comm, sizeof(comm));
+ 		for (k = 0; k < (int)sizeof(n10_sb[i].lsvc) - 1 && svc[k] != '\0'; k++) {
+ 			n10_sb[i].lsvc[k] = svc[k];
+@@ -705,6 +744,12 @@ n10_sb_end(int i, uint32_t dur, int ret, char end)
+ 				    n10_sb[i].opt, n10_sb[i].rem, n10_sb[i].id, n10_sb[i].ppid, n10_sb[i].pcomm, n10_sb[i].pty,
+ 				    n10_sb[i].uop, n10_sb[i].otid, f[1], f[2], f[3], f[4], f[5], f[6]);
+ 				n10_cap_emit(bl, n, (int)sizeof(bl), &n10_lsd_rlast, &n10_lsd_rl, N10_LSD_R_MAX);
++			} else if (n10_sb[i].who == 4) {        /* v410 N410B */
++				n = snprintf(bl, sizeof(bl), "N410B t=%llx c=%d ret=0x%x ms=%u end=%c o=0x%x r=0x%x id=0x%x p=%d %.16s "
++				    "ty=%u op=0x%x ot=%llx f=%llx,%llx,%llx,%llx,%llx,%llx", n10_sb[i].tid, n10_sb[i].num, ret, dur, end,
++				    n10_sb[i].opt, n10_sb[i].rem, n10_sb[i].id, n10_sb[i].ppid, n10_sb[i].pcomm, n10_sb[i].pty,
++				    n10_sb[i].uop, n10_sb[i].otid, f[1], f[2], f[3], f[4], f[5], f[6]);
++				n10_cap_emit(bl, n, (int)sizeof(bl), &n10_cmd_rlast, &n10_cmd_rl, N10_CMD_R_MAX);
+ 			} else {
+ 				n10_cap_emit(bl, n, (int)sizeof(bl), &n10_bb_rlast, &n10_bb_rl, N10_BB_R_MAX);
+ 			}
+@@ -782,7 +827,7 @@ n10_sb_enter(int num, const uint64_t *a)
+ 	}
+ 	if (num == N10_XQ_MSG2 && a != NULL) {
+ 		n10_sb_peer(i, who, thread_tid(current_thread()), a);  /* v407 N407Q (v408: slot also for backboardd) */
+-		if (who != 3) {                         /* v409: no N406N / reply parsing for lsd */
++		if (who < 3) {                          /* v409: no N406N / reply parsing for lsd; v410: nor containermanagerd */
+ 			n10_sb_msg(who, pid, i, a);
+ 		}
+ 	}
+@@ -921,21 +966,42 @@ n10_sb_sendline(int i, uint32_t now, char *buf, int len)
+ 	return n;
+ }
+ 
++/* v410: window-end location of an unresolved send-only destination of slot i (N410P); 0 when resolved / none. */
++static int
++n10_sb_whereline(int i, char *buf, int len)
++{
++	int n;
++
++	if (n10_sb[i].who == 2 || n10_sb[i].lrem == 0 || n10_sb[i].lpp != -1) {
++		return 0;
++	}
++	n = snprintf(buf, (size_t)len - 1, "N410P t=%llx lr=0x%x kr=%d st=%u qn=%u dp=%d %.16s", n10_sb[i].tid,
++	    n10_sb[i].lrem, n10_sb[i].lkr, n10_sb[i].lst, n10_sb[i].lqn, n10_sb[i].ldp, n10_sb[i].ldcomm);
++	if (n <= 0) {
++		return 0;
++	}
++	if (n > len - 2) {
++		n = len - 2;
++	}
++	buf[n++] = '\n';
++	return n;
++}
++
+ void
+ n10_sb_final(void)
+ {
+ 	char line[200], ub[320];
+-	uint64_t mt[4] = { 0, 0, 0, 0 };
++	uint64_t mt[5] = { 0, 0, 0, 0, 0 };
+ 	uint32_t now = n10_sb_now_ms();
+ 	int n, m;
+ 
+ 	for (int i = 0; i < N10_SB_SLOTS; i++) {
+ 		int w = n10_sb[i].who;
+-		if (n10_sb[i].tid != 0 && w >= 1 && w <= 3 && (mt[w] == 0 || n10_sb[i].tid < mt[w])) {
++		if (n10_sb[i].tid != 0 && w >= 1 && w <= 4 && (mt[w] == 0 || n10_sb[i].tid < mt[w])) {
+ 			mt[w] = n10_sb[i].tid;
+ 		}
+ 	}
+-	for (int w = 1; w <= 3; w++)
++	for (int w = 1; w <= 4; w++)
+ 	for (int i = 0; i < N10_SB_SLOTS; i++) {
+ 		uint64_t tid = n10_sb[i].tid;
+ 		if (tid == 0 || n10_sb[i].who != w) {
+@@ -949,10 +1015,14 @@ n10_sb_final(void)
+ 			n = snprintf(line, sizeof(line) - 2, "N408W t=%llx m=%u c=%d in=%u o=0x%x r=0x%x id=0x%x p=%d %.16s ty=%u n=%.32s",
+ 			    tid, tid == mt[w] ? 1u : 0u, n10_sb[i].num, n10_sb[i].in, n10_sb[i].opt, n10_sb[i].rem, n10_sb[i].id,
+ 			    n10_sb[i].ppid, n10_sb[i].pcomm, n10_sb[i].pty, n10_sb[i].name);
+-		} else {                                /* v409 N409L */
++		} else if (w == 3) {                    /* v409 N409L */
+ 			n = snprintf(line, sizeof(line) - 2, "N409L t=%llx m=%u c=%d in=%u o=0x%x r=0x%x id=0x%x p=%d %.16s ty=%u n=%u",
+ 			    tid, tid == mt[w] ? 1u : 0u, n10_sb[i].num, n10_sb[i].in, n10_sb[i].opt, n10_sb[i].rem, n10_sb[i].id,
+ 			    n10_sb[i].ppid, n10_sb[i].pcomm, n10_sb[i].pty, n10_sb[i].calls);
++		} else {                                /* v410 N410L */
++			n = snprintf(line, sizeof(line) - 2, "N410L t=%llx m=%u c=%d in=%u o=0x%x r=0x%x id=0x%x p=%d %.16s ty=%u n=%u",
++			    tid, tid == mt[w] ? 1u : 0u, n10_sb[i].num, n10_sb[i].in, n10_sb[i].opt, n10_sb[i].rem, n10_sb[i].id,
++			    n10_sb[i].ppid, n10_sb[i].pcomm, n10_sb[i].pty, n10_sb[i].calls);
+ 		}
+ 		if (n <= 0 || n >= (int)sizeof(line) - 2) {
+ 			continue;
+@@ -975,6 +1045,10 @@ n10_sb_final(void)
+ 		if (n > 0) {
+ 			n10_dsslog_final(ub, n);
+ 		}
++		n = n10_sb_whereline(i, ub, (int)sizeof(ub));  /* v410 N410P */
++		if (n > 0) {
++			n10_dsslog_final(ub, n);
++		}
+ 		n = n10_sb_btline(i, ub, (int)sizeof(ub));     /* v408 N408U */
+ 		if (n > 0) {
+ 			n10_dsslog_final(ub, n);
+diff --git a/osfmk/arm64/bsd_arm64.c b/osfmk/arm64/bsd_arm64.c
+index 0c837d8..c13004f 100644
+--- a/osfmk/arm64/bsd_arm64.c
++++ b/osfmk/arm64/bsd_arm64.c
+@@ -106,6 +106,67 @@ n10_port_peer(uint32_t name, int *pid, char *comm, int len, uint32_t *ty)
+ 	ip_mq_unlock(port);
+ 	return ok;
+ }
++
++/*
++ * v410: where is the receive right of a send right n10_port_peer could not resolve (bsd/dev/arm/systemcalls.c N410P,
++ * SpringBoard / lsd / containermanagerd send-only mach_msg2, thread context, before the trap runs)? Returns the
++ * ipc_port_translate_send kr when the name is not a send right (dead name, send-once, invalid); else 0 with the port's
++ * io_state, its queued message count and, when the port is in transit (inside a message, incl. a port-destroyed
++ * notification), the receiving task of the port whose queue holds that message (one hop: the held port keeps a
++ * reference on it; it is only try-locked under the held port lock, never waited for; -3 busy, -2 itself not in a
++ * space). Read only: no right, reference or port state changes.
++ */
++int n10_port_where(uint32_t name, uint32_t *st, uint32_t *qn, int *dpid, char *dcomm, int len);
++
++int
++n10_port_where(uint32_t name, uint32_t *st, uint32_t *qn, int *dpid, char *dcomm, int len)
++{
++	ipc_port_t port = IP_NULL, dest;
++	ipc_space_t space;
++	task_t task;
++	void *bp;
++	const char *nm = NULL;
++	kern_return_t kr;
++	int k = 0;
++
++	if (st == NULL || qn == NULL || dpid == NULL || dcomm == NULL || len <= 1) {
++		return -1;
++	}
++	*st = 0xffu;
++	*qn = 0;
++	*dpid = -1;
++	dcomm[0] = '\0';
++	if (name == 0) {
++		return -1;
++	}
++	kr = ipc_port_translate_send(current_space(), (mach_port_name_t)name, &port);
++	if (kr != KERN_SUCCESS) {
++		return (int)kr;
++	}
++	*st = (uint32_t)ip_to_object(port)->io_state;
++	*qn = port->ip_messages.imq_msgcount;
++	dest = ip_in_transit(port) ? ip_get_destination(port) : IP_NULL;
++	if (dest != IP_NULL && ip_mq_lock_try(dest)) {
++		space = ip_get_receiver(dest);
++		if (space != NULL) {
++			task = space->is_task;
++			bp = task != TASK_NULL ? get_bsdtask_info(task) : NULL;
++			nm = bp != NULL ? proc_name_address(bp) : NULL;
++			*dpid = task != TASK_NULL ? task_pid(task) : -1;
++		} else {
++			*dpid = -2;
++		}
++		for (; nm != NULL && k < len - 1 && nm[k] != '\0'; k++) {
++			dcomm[k] = nm[k];
++		}
++		ip_mq_unlock(dest);
++	} else if (dest != IP_NULL) {
++		*dpid = -3;
++	}
++	dcomm[k] = '\0';
++	ip_mq_unlock(port);
++	return 0;
++}
+ #endif
+ 
+ extern void throttle_lowpri_io(int);
+diff --git a/security/mac_base.c b/security/mac_base.c
+index 376dea3..d1e1192 100644
+--- a/security/mac_base.c
++++ b/security/mac_base.c
+@@ -1566,6 +1566,11 @@ extern void n10_dsslog_trace(const char *fmt, ...) __printflike(1, 2);
+ static uint32_t n10_macp_lines;
+ #define N10_SBX_MAX             48u
+ static uint32_t n10_sbx_lines;
++#define N10_SBP_MAX             32u             /* v410: N410K cap */
++#define N10_MACS_MAX            48u             /* v410: N410S cap */
++#define N10_MACS_SEEN           64
++static uint32_t n10_sbp_lines, n10_macs_lines, n10_macs_next;
++static uint32_t n10_macs_seen[N10_MACS_SEEN];
+ #endif
+ 
+ int
+@@ -1639,6 +1644,53 @@ done:
+ 			n10_dsslog_trace("N391K pid=%d %.16s sandbox check allowed", proc_getpid(p), p->p_comm);
+ 		}
+ 	}
++	/*
++	 * Note10 (v410): tccd aborts at start (v409 r1: 19 exits, OS_REASON_SANDBOX "com.apple.tccd: profile not
++	 * found", respawned by launchd every ~10 s, its service port never answers). libsandbox.1.dylib
++	 * sandbox_compile_named() asks __mac_syscall("Sandbox", 22, &name) whether a built-in profile of that name
++	 * exists and on any error falls back to /System/Library/Sandbox/Profiles/<name>.sb (absent) -> "profile not
++	 * found"; sandbox_apply() of a built-in name is call 1. dmd: rootless_mkdir_datavault() /
++	 * rootless_convert_to_datavault() set the storage class with call 261 (0x105) and treat ENOPOLICY as fatal
++	 * ("Failed to enable data vault: Policy not found (103)"). No Sandbox policy is registered in this kernel
++	 * (there is no profile to apply and no storage-class flag to set), so answer these three calls as done:
++	 * return 0, write nothing. One N410K line each, cap N10_SBP_MAX.
++	 */
++	if (error == ENOPOLICY && (uap->call == 1 || uap->call == 22 || uap->call == 261) &&
++	    strcmp(target, "Sandbox") == 0) {
++		error = 0;
++		if (__atomic_fetch_add(&n10_sbp_lines, 1u, __ATOMIC_RELAXED) < N10_SBP_MAX) {
++			n10_dsslog_trace("N410K pid=%d %.16s sandbox call=%d done", proc_getpid(p), p->p_comm, uap->call);
++		}
++	}
++	/*
++	 * Note10 (v410): N379P (first 48 lines) is used up by early boot tasks (AMFI 90 / Sandbox 4 each). N410S: the
++	 * first ENOPOLICY return of each (p_comm, policy, call), AMFI 90 and Sandbox 4 skipped, cap N10_MACS_MAX.
++	 * Observation only.
++	 */
++	if (error == ENOPOLICY && !(uap->call == 90 && strcmp(target, "AMFI") == 0) &&
++	    !(uap->call == 4 && strcmp(target, "Sandbox") == 0)) {
++		uint32_t h = 2166136261u;
++		int seen = 0;
++
++		for (int k = 0; k < MAXCOMLEN && p->p_comm[k] != '\0'; k++) {
++			h = (h ^ (uint8_t)p->p_comm[k]) * 16777619u;
++		}
++		for (int k = 0; target[k] != '\0'; k++) {
++			h = (h ^ (uint8_t)target[k]) * 16777619u;
++		}
++		h = (h ^ (uint32_t)uap->call) * 16777619u;
++		h = h != 0 ? h : 1u;
++		for (int k = 0; k < N10_MACS_SEEN; k++) {
++			seen |= n10_macs_seen[k] == h;
++		}
++		if (!seen) {
++			n10_macs_seen[n10_macs_next++ % (uint32_t)N10_MACS_SEEN] = h;
++			if (__atomic_fetch_add(&n10_macs_lines, 1u, __ATOMIC_RELAXED) < N10_MACS_MAX) {
++				n10_dsslog_trace("N410S pid=%d %.16s policy=%.16s call=%d", proc_getpid(p), p->p_comm, target,
++				    uap->call);
++			}
++		}
++	}
+ 	/*
+ 	 * Note10 (v379): which policy/call returns ENOPOLICY (no MAC policy is
+ 	 * registered in this kernel). First N10_MACP_MAX lines into the dss ring

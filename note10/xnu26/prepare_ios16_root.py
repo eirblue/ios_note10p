@@ -174,6 +174,9 @@ OVERLAY = (
      'd50e3e89f89d2b08c908cde4414b57062f53058de2d9283d8ffdc342c30278d6',
      ('bsd/dev/arm/systemcalls.c', 'iokit/Kernel/IOUserClient.cpp', 'iokit/Kernel/NoteFramebuffer.cpp',
       'osfmk/arm64/note10/n10_dsslog.c')),
+    ('0076-exynos9825-n10-tcc-sandbox-builtin-peerwhere.patch',
+     'fbd562a34045c4bd9bca36fec2ca37591100b540d829a9956097e3aae0b49ec7',
+     ('bsd/dev/arm/systemcalls.c', 'osfmk/arm64/bsd_arm64.c', 'security/mac_base.c')),
 )
 STAGED_DIRS = ('bsd/n10_hfs/core', 'bsd/n10_hfs/hfs_encodings')
 
