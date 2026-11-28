@@ -1,0 +1,525 @@
+diff --git a/bsd/dev/arm/systemcalls.c b/bsd/dev/arm/systemcalls.c
+index 336f75d..ca3c8d4 100644
+--- a/bsd/dev/arm/systemcalls.c
++++ b/bsd/dev/arm/systemcalls.c
+@@ -132,6 +132,8 @@ n10_xpc_note(int trap, int num, int err)
+  * Observation only: no return value or state of any call is changed.
+  */
+ #include <pthread/workqueue_internal.h>
++#include <kern/backtrace.h>                     /* v408: N408U / N408B user frames */
++#include <sys/ulock.h>                          /* v408: ulock operation / owner name */
+ #define N10_XQ_XPC              8
+ #define N10_XQ_LD               6
+ #define N10_XQ_SLOTS            (N10_XQ_XPC + N10_XQ_LD)
+@@ -306,7 +308,10 @@ n10_sb_who(proc_t p)
+  * Written with n10_dsslog_write on own caps (outside the shared trace budget, inside the dss area). Observation only:
+  * no argument, return value or state of any call is changed; copyin failures are ignored.
+  */
+-#define N10_SB_SLOTS            24
++#define N10_SB_SLOTS            64              /* v408: 24 -> 64; backboardd threads from slot N10_SB_BBD_FIRST */
++#define N10_SB_BBD_FIRST        24
++#define N10_SB_BT               10              /* v408: user frames per slot (backtrace_user) */
++#define N10_BB_R_MAX            64u             /* v408: N408B cap */
+ #define N10_SB_N_MAX            48u
+ #define N10_SB_R_MAX            48u
+ #define N10_SB_X_MAX            24u
+@@ -330,7 +335,25 @@ static struct {
+ 	uint32_t pty;           /* v407: port object type */
+ 	char pcomm[17];         /* v407: receiver p_comm */
+ 	char svc[48];           /* v407: service name of rem from a lookup reply (N407S map) */
++	int who;                /* v408: 1 SpringBoard, 2 backboardd */
++	uint32_t nbt, uop;      /* v408: frames captured at the entry of this call; ulock operation */
++	uint64_t ua, uv, otid;  /* v408: ulock address / value, UL_UNFAIR_LOCK owner thread id */
++	uint64_t bt[N10_SB_BT]; /* v408: user pc + frame-pointer return addresses */
+ } n10_sb[N10_SB_SLOTS];
++/*
++ * v408: why does the panel keep the boot logo? v407: SpringBoard's main thread waited 57 s for launchd (the reply came
++ * right after backboardd checked in com.apple.backboard.display.services, ~45 s after backboardd's exec), then sat 180 s
++ * in a receive-only mach_msg2 while two SpringBoard threads waited 180 s in ulock_wait. Same slot table for backboardd
++ * (slots N10_SB_BBD_FIRST.. only, so SpringBoard keeps 24), and at the entry of a blocking call (mach_msg2 with
++ * receive, ulock_wait / ulock_wait2, psynch mutex / cv wait, semaphore wait traps) the caller's user backtrace
++ * (backtrace_user, thread context, <= N10_SB_BT frames) plus for ulock the operation / address / value and, for
++ * UL_UNFAIR_LOCK, the owner's thread id (port_name_to_thread in the caller's space, reference dropped at once).
++ *   N408B  a backboardd call that took >= N10_SB_LONG_MS (receiver as N407Q, frames 1..6) (<= N10_BB_R_MAX)
++ *   N408W  window-end backboardd thread lines (as N407W) from n10_sb_final
++ *   N408U  window-end user frames of every tracked thread whose current call captured them
++ * N406R / N406X / N406T / N407Q / N407S stay SpringBoard-only. Observation only.
++ */
++static uint32_t n10_bb_rl, n10_bb_rlast;
+ static uint32_t n10_sb_nl, n10_sb_rl, n10_sb_xl, n10_sb_tl, n10_sb_dumps;
+ static uint32_t n10_sb_nlast, n10_sb_rlast, n10_sb_xlast, n10_sb_nnext;
+ static uint32_t n10_sb_seen[N10_SB_N_MAX];
+@@ -370,26 +393,65 @@ n10_sb_now_ms(void)
+ 	return (uint32_t)(ns / NSEC_PER_MSEC);
+ }
+ 
++/* v408: alloc 0 = lookup only, 1 = SpringBoard (any free slot), 2 = backboardd (free slot >= N10_SB_BBD_FIRST). */
+ static int
+ n10_sb_slot(uint64_t tid, const void *th, int pid, int alloc)
+ {
++	int fr = -1;
++
+ 	for (int i = 0; i < N10_SB_SLOTS; i++) {
+ 		if (n10_sb[i].tid == tid) {
+ 			return i;
+ 		}
+-		if (n10_sb[i].tid == 0) {
+-			if (!alloc) {
+-				return -1;
++		if (fr < 0 && n10_sb[i].tid == 0 && (alloc == 1 || (alloc == 2 && i >= N10_SB_BBD_FIRST))) {
++			fr = i;
++		}
++	}
++	if (fr >= 0) {
++		n10_sb[fr].pid = pid;
++		n10_sb[fr].th = th;
++		n10_sb[fr].in = 0;
++		n10_sb[fr].sum = 0;
++		n10_sb[fr].who = alloc;
++		n10_sb[fr].nbt = 0;
++		n10_sb[fr].tid = tid;
++	}
++	return fr;
++}
++
++/*
++ * v408: user frames (and the ulock operands) at the entry of a blocking call, in the caller's thread context.
++ * BSD calls pass uu_arg (ulock_wait / ulock_wait2: operation, address, value).
++ */
++static void
++n10_sb_bt(int i, int num, const uint64_t *a)
++{
++	struct backtrace_user_info info = BTUINFO_INIT;
++	uintptr_t bt[N10_SB_BT] = { 0 };
++	unsigned int n;
++
++	if (!((num == N10_XQ_MSG2 && a != NULL && (a[1] & N10_M64_RCV) != 0) || num == 515 || num == 544 ||
++	    num == 301 || num == 305 || (num <= -36 && num >= -39))) {
++		return;
++	}
++	n = backtrace_user(bt, N10_SB_BT, NULL, &info);
++	for (int k = 0; k < N10_SB_BT; k++) {
++		n10_sb[i].bt[k] = k < (int)n ? (uint64_t)bt[k] : 0;
++	}
++	n10_sb[i].nbt = n;
++	if ((num == 515 || num == 544) && a != NULL) {
++		n10_sb[i].uop = (uint32_t)a[0];
++		n10_sb[i].ua = a[1];
++		n10_sb[i].uv = a[2];
++		if ((a[0] & 0xffu) == UL_UNFAIR_LOCK) {
++			thread_t ow = port_name_to_thread(ulock_owner_value_to_port_name((uint32_t)a[2]),
++			    PORT_INTRANS_THREAD_IN_CURRENT_TASK | PORT_INTRANS_THREAD_NOT_CURRENT_THREAD);
++			if (ow != THREAD_NULL) {
++				n10_sb[i].otid = thread_tid(ow);
++				thread_deallocate(ow);
+ 			}
+-			n10_sb[i].pid = pid;
+-			n10_sb[i].th = th;
+-			n10_sb[i].in = 0;
+-			n10_sb[i].sum = 0;
+-			n10_sb[i].tid = tid;
+-			return i;
+ 		}
+ 	}
+-	return -1;
+ }
+ 
+ /* Offset of the value after an XPC dictionary key (key incl. NUL, kl bytes) behind the wire magic, or -1. */
+@@ -528,7 +590,7 @@ n10_sb_svc_note(const uint8_t *b, int n, const char *svc)
+ 
+ /* v407: receiver of a SpringBoard send+receive mach_msg2 (N407Q); stored in the slot for N407W. */
+ static void
+-n10_sb_peer(int i, uint64_t tid, const uint64_t *a)
++n10_sb_peer(int i, int who, uint64_t tid, const uint64_t *a)
+ {
+ 	uint64_t opt = a[1];
+ 	uint32_t rem = (uint32_t)a[3], id = (uint32_t)(a[4] >> 32), ty = 0, h = 2166136261u;
+@@ -539,7 +601,7 @@ n10_sb_peer(int i, uint64_t tid, const uint64_t *a)
+ 	if ((opt & (N10_M64_SEND | N10_M64_RCV)) != (N10_M64_SEND | N10_M64_RCV) || rem == 0) {
+ 		return;
+ 	}
+-	for (k = 0; k < N10_SVC_MAX; k++) {
++	for (k = 0; k < N10_SVC_MAX && who == 1; k++) {       /* v408: the map holds SpringBoard port names only */
+ 		if (n10_svc[k].name == rem) {
+ 			svc = n10_svc[k].svc;
+ 			break;
+@@ -559,6 +621,9 @@ n10_sb_peer(int i, uint64_t tid, const uint64_t *a)
+ 		}
+ 		n10_sb[i].svc[k] = '\0';
+ 	}
++	if (who != 1) {
++		return;                                 /* v408: backboardd: slot only, no N407Q line */
++	}
+ 	h = (h ^ rem) * 16777619u;
+ 	h = (h ^ (uint32_t)pp) * 16777619u;
+ 	h = (h ^ id) * 16777619u;
+@@ -585,6 +650,19 @@ n10_sb_end(int i, uint32_t dur, int ret, char end)
+ 	int n, o;
+ 
+ 	n10_sb[i].in = 0;
++	if (n10_sb[i].who != 1) {
++		if (dur >= N10_SB_LONG_MS) {            /* v408 N408B */
++			char bl[260];
++			const uint64_t *f = n10_sb[i].bt;
++			n = snprintf(bl, sizeof(bl), "N408B t=%llx c=%d ret=0x%x ms=%u end=%c o=0x%x r=0x%x id=0x%x p=%d %.16s ty=%u "
++			    "n=%.32s op=0x%x ot=%llx f=%llx,%llx,%llx,%llx,%llx,%llx", n10_sb[i].tid, n10_sb[i].num, ret, dur, end,
++			    n10_sb[i].opt, n10_sb[i].rem, n10_sb[i].id, n10_sb[i].ppid, n10_sb[i].pcomm, n10_sb[i].pty, n10_sb[i].name,
++			    n10_sb[i].uop, n10_sb[i].otid, f[1], f[2], f[3], f[4], f[5], f[6]);
++			n10_cap_emit(bl, n, (int)sizeof(bl), &n10_bb_rlast, &n10_bb_rl, N10_BB_R_MAX);
++		}
++		n10_sb[i].rcv = 0;
++		return;
++	}
+ 	if (dur >= N10_SB_LONG_MS) {
+ 		n = snprintf(line, sizeof(line), "N406R t=%llx c=%d ret=0x%x ms=%u end=%c o=0x%x r=0x%x id=0x%x n=%.40s",
+ 		    n10_sb[i].tid, n10_sb[i].num, ret, dur, end, n10_sb[i].opt, n10_sb[i].rem, n10_sb[i].id, n10_sb[i].name);
+@@ -623,11 +701,11 @@ n10_sb_enter(int num, const uint64_t *a)
+ 		return;
+ 	}
+ 	pid = proc_getpid(p);
+-	if (who == 1) {
++	{                                               /* v408: SpringBoard and backboardd threads */
+ 		thread_t th = current_thread();
+ 		uint32_t now = n10_sb_now_ms();
+ 
+-		i = n10_sb_slot(thread_tid(th), th, pid, 1);
++		i = n10_sb_slot(thread_tid(th), th, pid, who);
+ 		if (i >= 0) {
+ 			if (n10_sb[i].in) {
+ 				n10_sb_end(i, now - n10_sb[i].ms, 0, 'c');
+@@ -643,13 +721,17 @@ n10_sb_enter(int num, const uint64_t *a)
+ 			n10_sb[i].pty = 0;
+ 			n10_sb[i].pcomm[0] = '\0';
+ 			n10_sb[i].svc[0] = '\0';
++			n10_sb[i].nbt = 0;                      /* v408: frames / ulock operands of this call */
++			n10_sb[i].uop = 0;
++			n10_sb[i].ua = 0;
++			n10_sb[i].uv = 0;
++			n10_sb[i].otid = 0;
++			n10_sb_bt(i, num, a);
+ 			n10_sb[i].in = 1;
+ 		}
+ 	}
+ 	if (num == N10_XQ_MSG2 && a != NULL) {
+-		if (who == 1) {
+-			n10_sb_peer(i, thread_tid(current_thread()), a);       /* v407 N407Q */
+-		}
++		n10_sb_peer(i, who, thread_tid(current_thread()), a);  /* v407 N407Q (v408: slot also for backboardd) */
+ 		n10_sb_msg(who, pid, i, a);
+ 	}
+ }
+@@ -660,7 +742,7 @@ n10_sb_leave(int num, int ret)
+ 	int i;
+ 
+ 	(void)num;
+-	if (n10_sb_who(current_proc()) != 1 || (i = n10_sb_slot(thread_tid(current_thread()), NULL, 0, 0)) < 0 ||
++	if (n10_sb_who(current_proc()) == 0 || (i = n10_sb_slot(thread_tid(current_thread()), NULL, 0, 0)) < 0 ||
+ 	    !n10_sb[i].in) {
+ 		return;
+ 	}
+@@ -691,6 +773,12 @@ n10_sb_dump(void)
+ 		}
+ 		m = n10_thread_peek(n10_sb[i].th, tid, line + n, (int)sizeof(line) - n);
+ 		int gone = m <= 0;
++		if (n10_sb[i].who != 1) {               /* v408: backboardd slot: freed when gone, no N406T line */
++			if (gone) {
++				n10_sb[i].tid = 0;
++			}
++			continue;
++		}
+ 		if (gone) {
+ 			m = snprintf(line + n, sizeof(line) - (size_t)n, " gone");
+ 		}
+@@ -715,27 +803,58 @@ n10_sb_dump(void)
+ }
+ 
+ /* v407: window-end SpringBoard thread lines (N407W), once, from the n10_wdt timer (CPU0) before the deadline. */
++/* v408: window-end user frames of slot i (N408U); 0 when its current call captured none. */
++static int
++n10_sb_btline(int i, char *buf, int len)
++{
++	const uint64_t *f = n10_sb[i].bt;
++	int n;
++
++	if (n10_sb[i].nbt == 0) {
++		return 0;
++	}
++	n = snprintf(buf, (size_t)len - 1, "N408U t=%llx w=%d c=%d nb=%u op=0x%x ua=0x%llx uv=0x%llx ot=%llx "
++	    "f=%llx,%llx,%llx,%llx,%llx,%llx,%llx,%llx,%llx,%llx", n10_sb[i].tid, n10_sb[i].who, n10_sb[i].num, n10_sb[i].nbt,
++	    n10_sb[i].uop, n10_sb[i].ua, n10_sb[i].uv, n10_sb[i].otid, f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7], f[8], f[9]);
++	if (n <= 0) {
++		return 0;
++	}
++	if (n > len - 2) {
++		n = len - 2;
++	}
++	buf[n++] = '\n';
++	return n;
++}
++
+ void
+ n10_sb_final(void)
+ {
+-	char line[200];
+-	uint64_t mt = 0;
++	char line[200], ub[320];
++	uint64_t mt[3] = { 0, 0, 0 };
+ 	uint32_t now = n10_sb_now_ms();
+ 	int n, m;
+ 
+ 	for (int i = 0; i < N10_SB_SLOTS; i++) {
+-		if (n10_sb[i].tid != 0 && (mt == 0 || n10_sb[i].tid < mt)) {
+-			mt = n10_sb[i].tid;
++		int w = n10_sb[i].who;
++		if (n10_sb[i].tid != 0 && w >= 1 && w <= 2 && (mt[w] == 0 || n10_sb[i].tid < mt[w])) {
++			mt[w] = n10_sb[i].tid;
+ 		}
+ 	}
++	for (int w = 1; w <= 2; w++)
+ 	for (int i = 0; i < N10_SB_SLOTS; i++) {
+ 		uint64_t tid = n10_sb[i].tid;
+-		if (tid == 0) {
++		if (tid == 0 || n10_sb[i].who != w) {
+ 			continue;
+ 		}
+-		n = snprintf(line, sizeof(line) - 2, "N407W t=%llx m=%u c=%d in=%u o=0x%x r=0x%x id=0x%x p=%d %.16s ty=%u s=%.32s",
+-		    tid, tid == mt ? 1u : 0u, n10_sb[i].num, n10_sb[i].in, n10_sb[i].opt, n10_sb[i].rem, n10_sb[i].id,
+-		    n10_sb[i].ppid, n10_sb[i].pcomm, n10_sb[i].pty, n10_sb[i].svc[0] != '\0' ? n10_sb[i].svc : n10_sb[i].name);
++		if (w == 1) {
++			n = snprintf(line, sizeof(line) - 2, "N407W t=%llx m=%u c=%d in=%u o=0x%x r=0x%x id=0x%x p=%d %.16s ty=%u s=%.32s",
++			    tid, tid == mt[w] ? 1u : 0u, n10_sb[i].num, n10_sb[i].in, n10_sb[i].opt, n10_sb[i].rem, n10_sb[i].id,
++			    n10_sb[i].ppid, n10_sb[i].pcomm, n10_sb[i].pty, n10_sb[i].svc[0] != '\0' ? n10_sb[i].svc : n10_sb[i].name);
++		} else {
++			n = snprintf(line, sizeof(line) - 2, "N408W t=%llx m=%u c=%d in=%u o=0x%x r=0x%x id=0x%x p=%d %.16s ty=%u n=%.32s",
++			    tid, tid == mt[w] ? 1u : 0u, n10_sb[i].num, n10_sb[i].in, n10_sb[i].opt, n10_sb[i].rem, n10_sb[i].id,
++			    n10_sb[i].ppid, n10_sb[i].pcomm, n10_sb[i].pty, n10_sb[i].name);
++		}
+ 		if (n <= 0 || n >= (int)sizeof(line) - 2) {
+ 			continue;
+ 		}
+@@ -753,6 +872,10 @@ n10_sb_final(void)
+ 		}
+ 		line[n++] = '\n';
+ 		n10_dsslog_final(line, n);
++		n = n10_sb_btline(i, ub, (int)sizeof(ub));     /* v408 N408U */
++		if (n > 0) {
++			n10_dsslog_final(ub, n);
++		}
+ 	}
+ }
+ 
+@@ -933,7 +1056,7 @@ unix_syscall(
+ 	AUDIT_SYSCALL_ENTER(code, proc, uthread);
+ #if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
+ 	n10_xpc_enter(code, uthread->uu_arg[0], uthread->uu_arg[1], 0);       /* v386: arg0/arg1 for N386B */
+-	n10_sb_enter(code, NULL);                       /* v406: SpringBoard wait trace */
++	n10_sb_enter(code, (const uint64_t *)&uthread->uu_arg[0]);    /* v406: SpringBoard wait trace (v408: BSD args, read only) */
+ #endif
+ 	error = (*(callp->sy_call))(proc, &uthread->uu_arg[0], &(uthread->uu_rval[0]));
+ 	AUDIT_SYSCALL_EXIT(code, proc, uthread, error);
+diff --git a/iokit/Kernel/IOUserClient.cpp b/iokit/Kernel/IOUserClient.cpp
+index 52028e2..bfea689 100644
+--- a/iokit/Kernel/IOUserClient.cpp
++++ b/iokit/Kernel/IOUserClient.cpp
+@@ -2905,6 +2905,66 @@ n10_path_miss(const char *path, uint32_t ool)
+ 	__atomic_store_n(&n10_path_seen[n], h, __ATOMIC_RELAXED);
+ 	n10_dsslog_trace("N394P %s o=%u p=%.100s", name, ool, path);
+ }
++
++/*
++ * Note10 (v408): what SpringBoard / backboardd ask IOKit and what they get. v407: SpringBoard's main thread sent
++ * io_registry_create_iterator (0xaf6) to the main device port (port type IKOT_MAIN_DEVICE 37), io_iterator_next
++ * (0xaf2) and io_registry_entry_get_name (0xafa) to 30+ registry objects (IKOT_IOKIT_OBJECT 40),
++ * io_registry_entry_from_path (0xaf9), io_service_get_matching_service_bin (0xb40),
++ * io_service_add_interest_notification_64 (0xb35) and io_service_open_extended (0xb2e) (osfmk/device/device.defs,
++ * subsystem iokit 2800). One "N408I" line per distinct (caller, op, class, name, argument, result):
++ * op i create_iterator (a = plane, v = options), n get_name (<= N10_IOK8_NAMES lines), p get_property,
++ * y get_property_bytes, b get_property_bin(_buf) (v = options), m get_matching_service hit (a = class / name /
++ * resource / first property key of the matching), f from_path hit (a = path), t add_interest_notification
++ * (a = interest type), o open_extended final result (v = connect type). kr = the routine's IOReturn (found/not found).
++ * Log only (no lookup, return value or object changed), at most N10_IOK8_MAX lines per boot.
++ */
++#define N10_IOK8_MAX    192u
++#define N10_IOK8_NAMES  48u
++static uint32_t n10_iok8_lines, n10_iok8_names, n10_iok8_next;
++static uint32_t n10_iok8_seen[N10_IOK8_MAX];
++
++static void
++n10_iok8_note(char op, OSObject *obj, const char *arg, uint64_t val, kern_return_t kr)
++{
++	char name[MAXCOMLEN + 1];
++	IORegistryEntry *re = OSDynamicCast(IORegistryEntry, obj);
++	const char *cls = obj != NULL ? obj->getMetaClass()->getClassName() : "-";
++	const char *nm = re != NULL ? re->getName() : NULL;
++	uint32_t h = 2166136261u;
++
++	if (__atomic_load_n(&n10_iok8_lines, __ATOMIC_RELAXED) >= N10_IOK8_MAX ||
++	    (op == 'n' && __atomic_load_n(&n10_iok8_names, __ATOMIC_RELAXED) >= N10_IOK8_NAMES)) {
++		return;
++	}
++	proc_selfname(name, sizeof(name));
++	if (strcmp(name, "SpringBoard") != 0 && strcmp(name, "backboardd") != 0) {
++		return;
++	}
++	nm = nm != NULL ? nm : "";
++	arg = arg != NULL ? arg : "";
++	h = n10_iokit_hash(h, name);
++	h = n10_iokit_hash(h, cls);
++	h = n10_iokit_hash(h, nm);
++	h = n10_iokit_hash(h, arg);
++	h = (h ^ (uint8_t)op) * 16777619u;
++	h = ((h ^ (uint32_t)kr) * 16777619u) | 1u;      /* 0 = free slot */
++	for (uint32_t i = 0; i < N10_IOK8_MAX; i++) {
++		if (__atomic_load_n(&n10_iok8_seen[i], __ATOMIC_RELAXED) == h) {
++			return;
++		}
++	}
++	__atomic_store_n(&n10_iok8_seen[__atomic_fetch_add(&n10_iok8_next, 1u, __ATOMIC_RELAXED) % N10_IOK8_MAX], h,
++	    __ATOMIC_RELAXED);
++	if (__atomic_fetch_add(&n10_iok8_lines, 1u, __ATOMIC_RELAXED) >= N10_IOK8_MAX) {
++		return;
++	}
++	if (op == 'n') {
++		(void)__atomic_fetch_add(&n10_iok8_names, 1u, __ATOMIC_RELAXED);
++	}
++	n10_dsslog_trace("N408I %s %c c=%.32s n=%.28s a=%.60s v=0x%llx kr=0x%x", name, op, cls, nm, arg,
++	    (unsigned long long)val, (unsigned int)kr);
++}
+ #endif /* ARM64_BOARD_CONFIG_EXYNOS9825 */
+ 
+ static kern_return_t
+@@ -3018,6 +3078,23 @@ internal_io_service_get_matching_service(
+ #if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
+ 		if (*service == NULL) {
+ 			n10_iokit_miss('g', dict, true);
++		} else {
++			char ma[64];                    /* v408 N408I m: matching summary */
++			const char *pk = "";
++			OSDictionary *pm = OSDynamicCast(OSDictionary, dict->getObject(kIOPropertyMatchKey));
++			if (pm != NULL) {
++				OSCollectionIterator *it = OSCollectionIterator::withCollection(pm);
++				if (it != NULL) {
++					const OSSymbol *key = OSDynamicCast(OSSymbol, it->getNextObject());
++					if (key != NULL) {
++						pk = key->getCStringNoCopy();
++					}
++					it->release();
++				}
++			}
++			snprintf(ma, sizeof(ma), "%.20s/%.16s/%.12s/%.12s", n10_iokit_str(dict->getObject(kIOProviderClassKey)),
++			    n10_iokit_str(dict->getObject(kIONameMatchKey)), n10_iokit_str(dict->getObject(kIOResourceMatchKey)), pk);
++			n10_iok8_note('m', *service, ma, 0, kr);
+ 		}
+ #endif
+ 	} else {
+@@ -3428,6 +3505,9 @@ internal_io_service_add_interest_notification(
+ 		userNotify->release();
+ 		userNotify = NULL;
+ 	}
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	n10_iok8_note('t', service, type_of_interest, 0, err);  /* v408 N408I */
++#endif
+ 
+ 	return err;
+ }
+@@ -3545,6 +3625,9 @@ is_io_registry_create_iterator(
+ 	*iterator = IOUserIterator::withIterator(
+ 		IORegistryIterator::iterateOver(
+ 			IORegistryEntry::getPlane( plane ), options ));
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	n10_iok8_note('i', NULL, plane, options, *iterator ? kIOReturnSuccess : kIOReturnBadArgument);       /* v408 N408I */
++#endif
+ 
+ 	return *iterator ? kIOReturnSuccess : kIOReturnBadArgument;
+ }
+@@ -3627,6 +3710,8 @@ is_io_registry_entry_from_path(
+ #if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
+ 	if (!entry) {
+ 		n10_path_miss(path, 0);
++	} else {
++		n10_iok8_note('f', entry, path, 0, kIOReturnSuccess);  /* v408 N408I */
+ 	}
+ #endif
+ 
+@@ -3685,6 +3770,8 @@ is_io_registry_entry_from_path_ool(
+ #if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
+ 		if (!entry) {
+ 			n10_path_miss(cpath, path[0] ? 0 : 1);
++		} else {
++			n10_iok8_note('f', entry, cpath, path[0] ? 0 : 1, kIOReturnSuccess);   /* v408 N408I */
+ 		}
+ #endif
+ 	}
+@@ -3786,6 +3873,9 @@ is_io_registry_entry_get_name(
+ 	CHECK( IORegistryEntry, registry_entry, entry );
+ 
+ 	strncpy( name, entry->getName(), sizeof(io_name_t));
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	n10_iok8_note('n', entry, NULL, 0, kIOReturnSuccess);   /* v408 N408I */
++#endif
+ 
+ 	return kIOReturnSuccess;
+ }
+@@ -3909,6 +3999,9 @@ is_io_registry_entry_get_property_bytes(
+ #endif
+ 
+ 	obj = IOCopyPropertyCompatible(entry, property_name);
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	n10_iok8_note('y', entry, property_name, obj != NULL, obj != NULL ? kIOReturnSuccess : kIOReturnNoResources);       /* v408 */
++#endif
+ 	if (!obj) {
+ 		return kIOReturnNoResources;
+ 	}
+@@ -3977,6 +4070,9 @@ is_io_registry_entry_get_property(
+ #endif
+ 
+ 	obj = IOCopyPropertyCompatible(entry, property_name);
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	n10_iok8_note('p', entry, property_name, obj != NULL, obj != NULL ? kIOReturnSuccess : kIOReturnNotFound); /* v408 */
++#endif
+ 	if (!obj) {
+ 		return kIOReturnNotFound;
+ 	}
+@@ -4219,6 +4315,9 @@ is_io_registry_entry_get_property_bin_buf(
+ 	}
+ 
+ 	err = kIOReturnNotFound;
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	IORegistryEntry * n10_qentry = entry;           /* v408 N408I b */
++#endif
+ 	if (gIORegistryEntryPropertyKeysKey == sym) {
+ 		obj = entry->copyPropertyKeys();
+ 	} else {
+@@ -4251,6 +4350,9 @@ is_io_registry_entry_get_property_bin_buf(
+ 	}
+ 
+ 	sym->release();
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	n10_iok8_note('b', n10_qentry, property_name, options, obj != NULL ? kIOReturnSuccess : err);      /* v408 */
++#endif
+ 	if (!obj) {
+ 		return err;
+ 	}
+@@ -4809,6 +4911,9 @@ is_io_service_open_extended(
+ 			client->setTerminateDefer(service, false);
+ 		}
+ 	}while (false);
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	n10_iok8_note('o', service, client != NULL ? client->getMetaClass()->getClassName() : "", connect_type, res);  /* v408 */
++#endif
+ 
+ 	*connection = client;
+ 	*result = res;
+diff --git a/osfmk/arm64/note10/n10_dsslog.c b/osfmk/arm64/note10/n10_dsslog.c
+index 8e9b4ef..65ebdc8 100644
+--- a/osfmk/arm64/note10/n10_dsslog.c
++++ b/osfmk/arm64/note10/n10_dsslog.c
+@@ -97,7 +97,7 @@ static uint32_t n10_dss_dropped;
+  * N10_DSS_RESERVE; only n10_dsslog_final (N407G, N407W window-end lines, N376W) may use it. Panic notes
+  * (n10_dsslog_putc) and the N347X/N347R capture are unchanged.
+  */
+-#define N10_DSS_LATE_RESERVE    6144u
++#define N10_DSS_LATE_RESERVE    28672u          /* v408: 6144 -> 28672 (N407W + N408W + N408U window-end lines) */
+ uint32_t n10_dss_quiet;
+ static uint32_t n10_dss_final;
+ extern int snprintf(char *, size_t, const char *, ...) __printflike(3, 4);

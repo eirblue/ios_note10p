@@ -166,6 +166,9 @@ OVERLAY = (
      'e7cd94e448a88de06fb072940676cb87f1aef936a6f3e2c1b42db53d875d64f9',
      ('bsd/dev/arm/systemcalls.c', 'iokit/Kernel/NoteFramebuffer.cpp', 'osfmk/arm64/bsd_arm64.c',
       'osfmk/arm64/note10/n10_dsslog.c', 'osfmk/arm64/note10/n10_wdt.c', 'osfmk/console/serial_console.c')),
+    ('0074-exynos9825-n10-sbwait-bbd-iokit-trace.patch',
+     '9818acb069142a0d38b0d1efb09e93772a2f9d8a139f25471e2f6410db170e69',
+     ('bsd/dev/arm/systemcalls.c', 'iokit/Kernel/IOUserClient.cpp', 'osfmk/arm64/note10/n10_dsslog.c')),
 )
 STAGED_DIRS = ('bsd/n10_hfs/core', 'bsd/n10_hfs/hfs_encodings')
 
