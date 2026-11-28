@@ -177,6 +177,10 @@ OVERLAY = (
     ('0076-exynos9825-n10-tcc-sandbox-builtin-peerwhere.patch',
      'fbd562a34045c4bd9bca36fec2ca37591100b540d829a9956097e3aae0b49ec7',
      ('bsd/dev/arm/systemcalls.c', 'osfmk/arm64/bsd_arm64.c', 'security/mac_base.c')),
+    ('0077-exynos9825-n10-lsd-prio-floor-policy-done.patch',
+     '3a6842dfd6b31496bcc590ef9ca6cd56a45078aff2dc606def4bca3e19f8ec5f',
+     ('bsd/dev/arm/systemcalls.c', 'osfmk/arm64/note10/n10_wdt.c', 'osfmk/kern/thread_policy.c',
+      'security/mac_base.c')),
 )
 STAGED_DIRS = ('bsd/n10_hfs/core', 'bsd/n10_hfs/hfs_encodings')
 

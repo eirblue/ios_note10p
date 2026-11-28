@@ -1,0 +1,211 @@
+diff --git a/bsd/dev/arm/systemcalls.c b/bsd/dev/arm/systemcalls.c
+index 0c77980..05059a4 100644
+--- a/bsd/dev/arm/systemcalls.c
++++ b/bsd/dev/arm/systemcalls.c
+@@ -402,6 +402,93 @@ static uint32_t n10_lsd_rl, n10_lsd_rlast;
+  */
+ extern int n10_port_where(uint32_t name, uint32_t *st, uint32_t *qn, int *dpid, char *dcomm, int len);
+ static uint32_t n10_cmd_rl, n10_cmd_rlast;
++/*
++ * v411: who uses CPU0. n10_cpu_sample() runs in the 250 ms watchdog timer interrupt (osfmk/arm64/note10/n10_wdt.c,
++ * after a guarded pet; CPU0 only, so never concurrent with itself or with n10_sb_final) and counts the interrupted
++ * thread's pid (0 = kernel_task, including idle) in N10_CPU_SLOTS slots (first come; further pids add to o=).
++ *   N411C  window-end: samples n, overflow o, v411 priority-floor applications b (osfmk/kern/thread_policy.c), then
++ *          the N10_CPU_TOP most sampled pid:p_comm:count, two lines
++ * Observation only.
++ */
++#define N10_CPU_SLOTS           64
++#define N10_CPU_TOP             16
++static struct {
++	int pid;
++	uint32_t n;
++	char comm[17];
++} n10_cpu[N10_CPU_SLOTS];
++static uint32_t n10_cpu_n, n10_cpu_o;
++extern uint32_t n10_prio_floor_hits;
++extern void n10_dsslog_final(const char *s, int n);
++void n10_cpu_sample(void);
++
++void
++n10_cpu_sample(void)
++{
++	proc_t p = current_proc();
++	int pid = p != PROC_NULL ? proc_getpid(p) : -1;
++	int fr = -1;
++
++	n10_cpu_n++;
++	for (int i = 0; i < N10_CPU_SLOTS; i++) {
++		if (n10_cpu[i].n != 0 && n10_cpu[i].pid == pid) {
++			n10_cpu[i].n++;
++			return;
++		}
++		if (fr < 0 && n10_cpu[i].n == 0) {
++			fr = i;
++		}
++	}
++	if (fr < 0) {
++		n10_cpu_o++;
++		return;
++	}
++	n10_cpu[fr].pid = pid;
++	n10_cpu[fr].n = 1;
++	for (int k = 0; k < 16; k++) {
++		n10_cpu[fr].comm[k] = p != PROC_NULL ? p->p_comm[k] : '\0';
++		if (n10_cpu[fr].comm[k] == '\0') {
++			break;
++		}
++	}
++	n10_cpu[fr].comm[16] = '\0';
++}
++
++/* v411: window-end N411C (two lines, N10_CPU_TOP entries by count); the slot counts are consumed. */
++static void
++n10_cpu_final(void)
++{
++	char ub[320];
++	int n, m;
++
++	for (int ln = 0; ln < 2; ln++) {
++		n = ln == 0 ? snprintf(ub, sizeof(ub) - 2, "N411C n=%u o=%u b=%u", n10_cpu_n, n10_cpu_o, n10_prio_floor_hits) :
++		    snprintf(ub, sizeof(ub) - 2, "N411C +");
++		if (n <= 0 || n >= (int)sizeof(ub) - 2) {
++			return;
++		}
++		for (int e = 0; e < N10_CPU_TOP / 2; e++) {
++			int best = -1;
++			for (int i = 0; i < N10_CPU_SLOTS; i++) {
++				if (n10_cpu[i].n != 0 && (best < 0 || n10_cpu[i].n > n10_cpu[best].n)) {
++					best = i;
++				}
++			}
++			if (best < 0) {
++				break;
++			}
++			m = snprintf(ub + n, sizeof(ub) - 2 - (size_t)n, " %d:%.16s:%u", n10_cpu[best].pid, n10_cpu[best].comm,
++			    n10_cpu[best].n);
++			n10_cpu[best].n = 0;
++			if (m <= 0 || n + m >= (int)sizeof(ub) - 2) {
++				break;
++			}
++			n += m;
++		}
++		ub[n++] = '\n';
++		n10_dsslog_final(ub, n);
++	}
++}
+ static uint32_t n10_sb_nl, n10_sb_rl, n10_sb_xl, n10_sb_tl, n10_sb_dumps;
+ static uint32_t n10_sb_nlast, n10_sb_rlast, n10_sb_xlast, n10_sb_nnext;
+ static uint32_t n10_sb_seen[N10_SB_N_MAX];
+@@ -995,6 +1082,7 @@ n10_sb_final(void)
+ 	uint32_t now = n10_sb_now_ms();
+ 	int n, m;
+ 
++	n10_cpu_final();                                /* v411 N411C */
+ 	for (int i = 0; i < N10_SB_SLOTS; i++) {
+ 		int w = n10_sb[i].who;
+ 		if (n10_sb[i].tid != 0 && w >= 1 && w <= 4 && (mt[w] == 0 || n10_sb[i].tid < mt[w])) {
+diff --git a/osfmk/arm64/note10/n10_wdt.c b/osfmk/arm64/note10/n10_wdt.c
+index 93ada07..57dac75 100644
+--- a/osfmk/arm64/note10/n10_wdt.c
++++ b/osfmk/arm64/note10/n10_wdt.c
+@@ -116,6 +116,7 @@ static bool n10_wdt_quiet, n10_wdt_final;
+ extern void n10_dsslog_quiet(uint32_t t);
+ extern void n10_dsslog_final(const char *s, int n);
+ extern void n10_sb_final(void);                 /* v407: bsd/dev/arm/systemcalls.c N407W */
++extern void n10_cpu_sample(void);               /* v411: bsd/dev/arm/systemcalls.c N411C (pid of the interrupted thread) */
+ 
+ /*
+  * v376: one "N376H" line per timer-path pet into the dss ring
+@@ -273,6 +274,7 @@ n10_wdt_tick(__unused timer_call_param_t p0, __unused timer_call_param_t p1)
+ 	if (n10_wdt_ticks % N10_WDT_TICK_EVERY == 0) {
+ 		n10_wdt_tickline(now, c0, c2);
+ 	}
++	n10_cpu_sample();                               /* v411 N411C */
+ 	if (!n10_wdt_quiet && now - n10_wdt_start_abs >= n10_wdt_quiet_abs) {
+ 		n10_wdt_quiet = true;
+ 		n10_dsslog_quiet(N10_WDT_QUIET_S);
+diff --git a/osfmk/kern/thread_policy.c b/osfmk/kern/thread_policy.c
+index bb1f51b..07a5c6c 100644
+--- a/osfmk/kern/thread_policy.c
++++ b/osfmk/kern/thread_policy.c
+@@ -54,6 +54,22 @@ extern void     rethrottle_thread(void * uthread);
+ 
+ #define QOS_EXTRACT(q)        ((q) & 0xff)
+ 
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825) && defined(MACH_BSD)
++/*
++ * Note10 (v411): XNU runs on CPU0 only. v410 r1: from ~49 s every 1 s N381K sample is busy (about 100 daemons
++ * starting), lsd got 2 of ~70 samples; its database scan thread was still running at the 300 s window end and its
++ * request threads waited for it (ulock, 228 s), so lsd never dequeued SpringBoard's XPC connection (N410P: the
++ * destination receive right in transit, queued at lsd). lsd and containermanagerd (its per-item sync peer) threads
++ * get a priority floor of BASEPRI_USER_INITIATED (37): above default / utility / background daemons, below
++ * SpringBoard / backboardd UI threads (47) and kernel threads (touch / display thread calls, 80+). The task clamp
++ * below still applies (a darwin-bg thread stays at 4). Sync IPC turnstiles pass it on to the servers lsd waits on.
++ * n10_prio_floor_hits counts applications (N411C, bsd/dev/arm/systemcalls.c).
++ */
++#include <string.h>
++#define N10_PRIO_FLOOR          BASEPRI_USER_INITIATED
++uint32_t n10_prio_floor_hits;
++#endif
++
+ #define QOS_OVERRIDE_MODE_OVERHANG_PEAK 0
+ #define QOS_OVERRIDE_MODE_IGNORE_OVERRIDE 1
+ #define QOS_OVERRIDE_MODE_FINE_GRAINED_OVERRIDE 2
+@@ -1126,6 +1142,19 @@ thread_recompute_priority(
+ 
+ 	priority = MAX(priority, thread->user_promotion_basepri);
+ 
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825) && defined(MACH_BSD)
++	if (priority < N10_PRIO_FLOOR && !wi_priority && thread->t_tro != NULL) {   /* v411 */
++		task_t n10_tk = get_threadtask(thread);
++		void *n10_bp = (n10_tk != TASK_NULL && n10_tk != kernel_task) ? get_bsdtask_info(n10_tk) : NULL;
++		const char *n10_nm = n10_bp != NULL ? proc_name_address(n10_bp) : NULL;
++
++		if (n10_nm != NULL && (strncmp(n10_nm, "lsd", 4) == 0 || strncmp(n10_nm, "containermanager", 17) == 0)) {
++			priority = N10_PRIO_FLOOR;
++			n10_prio_floor_hits++;
++		}
++	}
++#endif
++
+ 	/*
+ 	 * Clamp priority back into the allowed range for this task.
+ 	 *  The initial priority value could be out of this range due to:
+diff --git a/security/mac_base.c b/security/mac_base.c
+index d1e1192..18efafa 100644
+--- a/security/mac_base.c
++++ b/security/mac_base.c
+@@ -1570,6 +1570,8 @@ static uint32_t n10_sbx_lines;
+ #define N10_MACS_MAX            48u             /* v410: N410S cap */
+ #define N10_MACS_SEEN           64
+ static uint32_t n10_sbp_lines, n10_macs_lines, n10_macs_next;
++#define N10_SBQ_MAX             32u             /* v411: N411K cap */
++static uint32_t n10_sbq_lines;
+ static uint32_t n10_macs_seen[N10_MACS_SEEN];
+ #endif
+ 
+@@ -1662,6 +1664,24 @@ done:
+ 			n10_dsslog_trace("N410K pid=%d %.16s sandbox call=%d done", proc_getpid(p), p->p_comm, uap->call);
+ 		}
+ 	}
++	/*
++	 * Note10 (v411): the remaining ENOPOLICY returns of v410 r1 (N410S) on the LaunchServices / container path,
++	 * answered as done like the v410 set (return 0, nothing written; every caller pre-initialises its out value):
++	 *   Sandbox 12  sandbox_passthrough_access(fd, ...) (cfprefsd, syncdefaultsd): in-only args; 0 = allowed
++	 *   Sandbox 15  sandbox_user_state_item_buffer_send (containermanagerd): in-only {buf, len}
++	 *   Sandbox 16  sandbox_user_state_iterate_items (containermanagerd): out length stays 0 = no items
++	 *   AMFI 96     amfi_interface_query_bootarg_state (lsd, libmis): out u64 pre-zeroed = no boot-arg flags
++	 * Sandbox 5 / 28 (container path / reference queries) keep their error (callers treat it as "none").
++	 * One N411K line each, cap N10_SBQ_MAX.
++	 */
++	if (error == ENOPOLICY && (((uap->call == 12 || uap->call == 15 || uap->call == 16) &&
++	    strcmp(target, "Sandbox") == 0) || (uap->call == 96 && strcmp(target, "AMFI") == 0))) {
++		error = 0;
++		if (__atomic_fetch_add(&n10_sbq_lines, 1u, __ATOMIC_RELAXED) < N10_SBQ_MAX) {
++			n10_dsslog_trace("N411K pid=%d %.16s policy=%.16s call=%d done", proc_getpid(p), p->p_comm, target,
++			    uap->call);
++		}
++	}
+ 	/*
+ 	 * Note10 (v410): N379P (first 48 lines) is used up by early boot tasks (AMFI 90 / Sandbox 4 each). N410S: the
+ 	 * first ENOPOLICY return of each (p_comm, policy, call), AMFI 90 and Sandbox 4 skipped, cap N10_MACS_MAX.
