@@ -1,0 +1,878 @@
+diff --git a/iokit/Kernel/IOUserClient.cpp b/iokit/Kernel/IOUserClient.cpp
+index aa82fc9..52028e2 100644
+--- a/iokit/Kernel/IOUserClient.cpp
++++ b/iokit/Kernel/IOUserClient.cpp
+@@ -2561,6 +2561,10 @@ is_io_object_get_bundle_identifier(
+ 	return ret;
+ }
+ 
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++extern "C" bool n10_touch_conforms(OSObject *object, const char *name);    /* NoteFramebuffer.cpp (v404) */
++#endif
++
+ /* Routine io_object_conforms_to */
+ kern_return_t
+ is_io_object_conforms_to(
+@@ -2573,6 +2577,11 @@ is_io_object_conforms_to(
+ 	}
+ 
+ 	*conforms = (NULL != object->metaCast( className ));
++#if defined(ARM64_BOARD_CONFIG_EXYNOS9825)
++	if (!*conforms && n10_touch_conforms(object, className)) {
++		*conforms = true;                       /* v404: NoteFramebuffer.cpp touch service only */
++	}
++#endif
+ 
+ 	return kIOReturnSuccess;
+ }
+diff --git a/iokit/Kernel/NoteFramebuffer.cpp b/iokit/Kernel/NoteFramebuffer.cpp
+index f63e72f..24aa38b 100644
+--- a/iokit/Kernel/NoteFramebuffer.cpp
++++ b/iokit/Kernel/NoteFramebuffer.cpp
+@@ -227,6 +227,40 @@
+  * failure and the first 8 SwapEnd frames (surf = front surface id, how = 1
+  * id match / 2 newest). N402T also on the first tick after a SwapEnd.
+  * Frame path, checks and the two DECON0 trigger writes are unchanged.
++ *
++ * v404: touch input. The loader Linux leaves the sec_ts Y771_D touch IC
++ * powered and scanning (probe + SENSE_ON, no driver shutdown before the
++ * branch) and hsi2c@104B0000 (USI03, adapter i2c-4) in its 400 kHz
++ * configuration. A thread call (first tick 2 s after publish, then every
++ * 16 ms) reads the IC at 7-bit address 0x48 by polled I2C (Linux
++ * i2c-exynos5 HSI2C_POLLING sequence, every spin bounded). Read-check before
++ * any write: CONF AUTO_MODE, TIMING_FS1..3 = the Linux 400 kHz values,
++ * USI_CON 0, master not busy (N404B); only the hsi2c registers CTL,
++ * FIFO_CTL, INT_ENABLE, INT_STATUS, TX_DATA, CONF, AUTO_CONF, TIMEOUT,
++ * TIMING_FS1..3 and ADDR are written; GPA1 DAT (ATTN) is read only. IC:
++ * DEVICE_ID 0x22 (53 45 37 71), BOOT_STATUS 0x55, TS_STATUS 0xAF and
++ * PANEL_INFO 0x23 are read once (N404I), then only CLEAR_EVENT_STACK 0x62
++ * and SENSE_ON 0x10 are written. Each tick: READ_ONE_EVENT 0x60 and, when
++ * events are left, READ_ALL_EVENT 0x61; coordinate events are decoded as the
++ * reviewed note10_y771d_decode (tid 1..10, action press/move/release, type 0
++ * finger) into ten slots (N404T). A changed batch becomes one serialized
++ * digitizer event tree in an IOSharedDataQueue: iOS 16.7.16
++ * IOHIDEventServicePlugin (HIDPlugins/ServicePlugins, matching
++ * HIDServiceSupport, probe IOObjectConformsTo "IOHIDEventService") opens
++ * connect type 'esuc', calls selector 0 open / 1 close (one scalar), maps
++ * memory type 0 as an IODataQueue, sets notification port type 0 and builds
++ * one HIDEvent per entry (IOHIDEventCreateWithBytes: 0x1c-byte header
++ * timestamp, sender, options, attribute length, event count, then 0x68-byte
++ * digitizer records with depth at +0xc). The service is a plain IOService
++ * "NoteTouchHIDEventService" (usage 0x0D/0x04, Built-In, DisplayIntegrated)
++ * whose user clients are the existing IOMobileFramebufferUserClient class
++ * (clientMemoryForType override, no new class); IOUserClient.cpp answers
++ * the conforms-to query for "IOHIDEventService" for this one service only.
++ * N404U logs what user space calls (selector, counts, sizes, caller).
++ * Display: N404D samples source words and the scanned buffer words read back
++ * after the copy at five fixed points for iOS-surface frames, and the
++ * surface creation path zero-fills the new surface (it was uninitialised
++ * kernel memory until the first render).
+  */
+ #include <pexpert/arm64/board_config.h>
+ 
+@@ -244,6 +278,7 @@
+ #include <libkern/c++/OSDictionary.h>
+ #include <libkern/c++/OSUnserialize.h>
+ #include <IOKit/IOBufferMemoryDescriptor.h>
++#include <IOKit/IOSharedDataQueue.h>
+ #include <kern/task.h>
+ #include <kern/clock.h>
+ #include <sys/proc.h>
+@@ -388,12 +423,22 @@ public:
+ 	    IOExternalMethodDispatch *dispatch, OSObject *target,
+ 	    void *reference) APPLE_KEXT_OVERRIDE;
+ 	IOExternalTrap *getTargetAndTrapForIndex(IOService **targetP, UInt32 index) APPLE_KEXT_OVERRIDE;
++	using IOUserClient::clientMemoryForType;
++	IOReturn clientMemoryForType(UInt32 type, IOOptionBits *options, IOMemoryDescriptor **memory) APPLE_KEXT_OVERRIDE;
+ 	IOReturn n10SurfLock(void *p1, void *p2, void *p3, void *p4, void *p5, void *p6);
+ 	IOReturn n10SurfRelease(void *p1, void *p2, void *p3, void *p4, void *p5, void *p6);
+ };
+ 
+ OSDefineMetaClassAndStructors(IOMobileFramebufferUserClient, IOUserClient);
+ 
++/* v404 touch + HID queue (see the header); implemented before the user client methods. */
++static IOService *n10_ts_svc;
++static IOReturn n10_ts_method(void *client, uint32_t selector, IOExternalMethodArguments *args);
++static void n10_ts_open(void *client, bool open);
++static void n10_ts_port(void *client, mach_port_t port);
++static void n10_ts_publish(IOService *resources);
++static void n10_fb_zero_struct_out(IOExternalMethodArguments *args);
++
+ /*
+  * v396 IOSurface root (see the header comment). Record offsets follow the
+  * iOS 16.7.16 IOSurface.framework accessors (client object = 0x68-byte header
+@@ -665,7 +710,7 @@ n10_surf_create(void *client, OSDictionary *d, uint8_t *out, struct n10_surf *s)
+ 		    (vm_size_t)s->bytes, page_size);
+ 		ret = kIOReturnNoMemory;
+ 		if (s->md != NULL) {
+-			bzero((uint8_t *)s->md->getBytesNoCopy() + s->alloc, page_size);
++			bzero(s->md->getBytesNoCopy(), (vm_size_t)s->bytes);    /* v404: whole surface + shared page */
+ 			if (++n10_surf_next_id == 0) {
+ 				n10_surf_next_id = 1;
+ 			}
+@@ -856,6 +901,644 @@ IOMobileFramebufferUserClient::n10SurfRelease(void *p1, __unused void *p2, __unu
+ 	return ret;
+ }
+ 
++/*
++ * v404 touch (see the header). Public SoC / board facts: exynos9820 device
++ * tree hsi2c@104B0000 + touchscreen@48, Linux i2c-exynos5.c register map,
++ * sec_ts y771_d command set and 16-byte coordinate event.
++ */
++#define N10_TS_I2C_PA           0x104b0000u
++#define N10_TS_I2C_SIZE         0x1000u
++#define N10_TS_GPA1_PA          0x15850000u     /* pinctrl@15850000: GPA1 DAT +0x24 bit 0 (ATTN, low = pending), read only */
++#define N10_TS_GPA1_DAT         0x24u
++#define N10_I2C_CTL             0x00u
++#define N10_I2C_FIFO_CTL        0x04u
++#define N10_I2C_INT_EN          0x20u
++#define N10_I2C_INT_ST          0x24u
++#define N10_I2C_FIFO_ST         0x30u
++#define N10_I2C_TX              0x34u
++#define N10_I2C_RX              0x38u
++#define N10_I2C_CONF            0x40u
++#define N10_I2C_AUTO            0x44u
++#define N10_I2C_TIMEOUT         0x48u
++#define N10_I2C_TRANS           0x50u
++#define N10_I2C_FS1             0x60u
++#define N10_I2C_ADDR            0x70u
++#define N10_I2C_USI_CON         0xc4u
++#define N10_I2C_RXCHON          (1u << 6)
++#define N10_I2C_TXCHON          (1u << 7)
++#define N10_I2C_SW_RST          (1u << 31)
++#define N10_I2C_AUTO_MODE       (1u << 31)
++#define N10_I2C_READ            (1u << 16)
++#define N10_I2C_STOP            (1u << 17)
++#define N10_I2C_RUN             (1u << 31)
++#define N10_I2C_TIMEOUT_EN      (1u << 31)
++#define N10_I2C_INT_DONE        (1u << 7)
++#define N10_I2C_INT_NODEV       (1u << 10)
++#define N10_I2C_RX_EMPTY        (1u << 24)
++#define N10_I2C_TX_EMPTY        (1u << 8)
++#define N10_I2C_MASTER_BUSY     (1u << 17)
++#define N10_I2C_ST_NO_ACK       0xbu            /* TRANS_STATUS master state (USI v2) */
++#define N10_TS_ADDR7            0x48u
++#define N10_TS_PERIOD_NS        16000000ull     /* ~60 Hz */
++#define N10_TS_FIRST_NS         2000000000ull
++#define N10_TS_MAX_FAILS        8u
++#define N10_TS_SLOTS            10u
++#define N10_TS_EV               16u
++#define N10_TS_EVS              32u             /* 1 + left (5 bits, <= 31) */
++#define N10_TS_REC              0x68u           /* IOHIDDigitizerEventData (iOS 16.7.16 IOKit event size table, type 11) */
++#define N10_TS_HDR              0x1cu           /* IOHIDSystemQueueElement header (IOHIDEventCreateWithBytes) */
++#define N10_TS_QUEUE            0x8000u
++#define N10_TS_T_LINES          160u
++#define N10_TS_E_LINES          16u
++#define N10_TS_U_LINES          48u
++#define N10_TS_U_MAX            96u
++#define N10_TS_Q_LINES          64u
++#define N10_TS_S_LINES          16u
++static const uint32_t n10_ts_fs[3] = { 0x1f0ff00u, 0x30003e0u, 0x210000u };    /* Linux 400 kHz FS1..FS3 */
++
++struct n10_ts_slot {
++	uint16_t x, y;
++	uint8_t down, chg;                      /* chg 0 none, 1 press, 2 move, 3 release (this batch) */
++};
++
++static vm_offset_t n10_ts_va, n10_ts_gpa;
++static uint32_t n10_ts_sv_ctl, n10_ts_sv_conf, n10_ts_sv_addr;
++static uint32_t n10_ts_state;                   /* 0 init pending, 1 polling, 2 stopped */
++static uint32_t n10_ts_fails, n10_ts_errs, n10_ts_blines;
++static uint32_t n10_ts_ticks, n10_ts_reads, n10_ts_events, n10_ts_status, n10_ts_gesture, n10_ts_tlines, n10_ts_slines;
++static uint32_t n10_ts_frames, n10_ts_noclient, n10_ts_full, n10_ts_qlines, n10_ts_qlast;
++static uint64_t n10_ts_q_at;
++static uint32_t n10_ts_max_x = 4095u, n10_ts_max_y = 4095u;
++static struct n10_ts_slot n10_ts_slots[N10_TS_SLOTS];
++static thread_call_t n10_ts_tmr;
++static IOSharedDataQueue *n10_ts_q;
++static IOLock *n10_ts_lock;
++static void *n10_ts_owner;                      /* user client whose notification port the queue uses */
++static uint32_t n10_ts_opened, n10_ts_ulines, n10_ts_useen[2];
++static uint8_t n10_ts_ev[N10_TS_EV * N10_TS_EVS];
++static uint8_t n10_ts_frame[N10_TS_HDR + (1u + N10_TS_SLOTS) * N10_TS_REC];
++
++static inline uint32_t
++n10_ts_rd(uint32_t off)
++{
++	return *(volatile uint32_t *)(n10_ts_va + off);
++}
++
++static inline void
++n10_ts_wr(uint32_t off, uint32_t v)
++{
++	*(volatile uint32_t *)(n10_ts_va + off) = v;
++}
++
++/* Read-check of the Linux configuration; saves CTL / CONF / ADDR when it passes. One N404B line (at most 8). */
++static bool
++n10_ts_bus_check(const char *why)
++{
++	uint32_t conf = n10_ts_rd(N10_I2C_CONF), ctl = n10_ts_rd(N10_I2C_CTL), usi = n10_ts_rd(N10_I2C_USI_CON);
++	uint32_t trans = n10_ts_rd(N10_I2C_TRANS), fifo = n10_ts_rd(N10_I2C_FIFO_ST), addr = n10_ts_rd(N10_I2C_ADDR);
++	uint32_t fs[3];
++	bool ok;
++
++	for (uint32_t i = 0; i < 3; i++) {
++		fs[i] = n10_ts_rd(N10_I2C_FS1 + 4u * i);
++	}
++	ok = (conf & N10_I2C_AUTO_MODE) != 0 && fs[0] == n10_ts_fs[0] && fs[1] == n10_ts_fs[1] && fs[2] == n10_ts_fs[2] &&
++	    usi == 0 && (trans & N10_I2C_MASTER_BUSY) == 0;
++	if (ok) {
++		n10_ts_sv_ctl = ctl & ~(N10_I2C_SW_RST | N10_I2C_TXCHON | N10_I2C_RXCHON);
++		n10_ts_sv_conf = conf;
++		n10_ts_sv_addr = addr;
++	}
++	if (n10_ts_blines++ < 8u) {
++		n10_dsslog_trace("N404B %s conf=0x%x ctl=0x%x fs=0x%x/0x%x/0x%x usi=0x%x trans=0x%x fifo=0x%x addr=0x%x ok=%u", why,
++		    conf, ctl, fs[0], fs[1], fs[2], usi, trans, fifo, addr, ok ? 1u : 0u);
++	}
++	return ok;
++}
++
++/* Linux exynos5_i2c_reset: SW_RST set / clear, then the saved timing and configuration. */
++static void
++n10_ts_reset(void)
++{
++	n10_ts_wr(N10_I2C_CTL, n10_ts_rd(N10_I2C_CTL) | N10_I2C_SW_RST);
++	n10_ts_wr(N10_I2C_CTL, n10_ts_rd(N10_I2C_CTL) & ~N10_I2C_SW_RST);
++	for (uint32_t i = 0; i < 3; i++) {
++		n10_ts_wr(N10_I2C_FS1 + 4u * i, n10_ts_fs[i]);
++	}
++	n10_ts_wr(N10_I2C_ADDR, n10_ts_sv_addr);
++	n10_ts_wr(N10_I2C_CONF, n10_ts_sv_conf);
++	n10_ts_wr(N10_I2C_CTL, n10_ts_sv_ctl);
++}
++
++static bool
++n10_ts_nack(void)
++{
++	return (n10_ts_rd(N10_I2C_INT_ST) & N10_I2C_INT_NODEV) != 0 ||
++	       (n10_ts_rd(N10_I2C_TRANS) & 0xfu) == N10_I2C_ST_NO_ACK;
++}
++
++/* One polled message (Linux exynos5_i2c_xfer_msg HSI2C_POLLING, stop after every message): 0 or the stage. */
++static uint32_t
++n10_ts_xfer(bool rx, uint8_t *buf, uint32_t len)
++{
++	uint32_t budget = 2000u + len * 40u, got = 0, v;
++	uint32_t trig = len >= 8u ? 8u : len;
++	uint32_t ctl = n10_ts_rd(N10_I2C_CTL) & ~(N10_I2C_TXCHON | N10_I2C_RXCHON);
++	uint32_t ac = n10_ts_rd(N10_I2C_AUTO) | N10_I2C_STOP;
++	uint32_t addr = n10_ts_rd(N10_I2C_ADDR) & ~((0x3ffu << 10) | 0x3ffu | (0xffu << 24));
++
++	n10_ts_wr(N10_I2C_INT_ST, n10_ts_rd(N10_I2C_INT_ST));
++	n10_ts_wr(N10_I2C_TIMEOUT, n10_ts_rd(N10_I2C_TIMEOUT) & ~N10_I2C_TIMEOUT_EN);
++	n10_ts_wr(N10_I2C_FIFO_CTL, 0x3u | (trig << 4) | (trig << 16));
++	if (rx) {
++		ctl |= N10_I2C_RXCHON;
++		ac |= N10_I2C_READ;
++	} else {
++		ctl |= N10_I2C_TXCHON;
++		ac &= ~N10_I2C_READ;
++	}
++	n10_ts_wr(N10_I2C_ADDR, addr | (0x7u << 24) | (N10_TS_ADDR7 << 10));
++	n10_ts_wr(N10_I2C_CTL, ctl);
++	n10_ts_wr(N10_I2C_INT_EN, N10_I2C_INT_DONE);
++	n10_ts_wr(N10_I2C_AUTO, (ac & ~0xffffu) | len);
++	n10_ts_wr(N10_I2C_AUTO, n10_ts_rd(N10_I2C_AUTO) | N10_I2C_RUN);
++	while (got < len) {
++		if (rx) {
++			if ((n10_ts_rd(N10_I2C_FIFO_ST) & N10_I2C_RX_EMPTY) == 0) {
++				buf[got++] = (uint8_t)n10_ts_rd(N10_I2C_RX);
++				continue;
++			}
++		} else if ((n10_ts_rd(N10_I2C_FIFO_ST) & 0x7fu) < 16u) {
++			n10_ts_wr(N10_I2C_TX, buf[got++]);
++			continue;
++		}
++		if (n10_ts_nack()) {
++			return 3;
++		}
++		if (budget-- == 0) {
++			return rx ? 2u : 1u;
++		}
++		IODelay(1);
++	}
++	for (;;) {
++		v = n10_ts_rd(N10_I2C_INT_ST);
++		if ((v & N10_I2C_INT_DONE) != 0 && (n10_ts_rd(N10_I2C_FIFO_ST) & N10_I2C_TX_EMPTY) != 0) {
++			n10_ts_wr(N10_I2C_INT_ST, v);
++			return 0;
++		}
++		if (n10_ts_nack()) {
++			return 3;
++		}
++		if (budget-- == 0) {
++			return 4;
++		}
++		IODelay(1);
++	}
++}
++
++/* Register select (+ read of rlen bytes). Failure: N404E, controller reset + read-check, stop after 8 in a row. */
++static bool
++n10_ts_cmd(uint8_t reg, uint8_t *rbuf, uint32_t rlen)
++{
++	uint8_t r = reg;
++	uint32_t stage = n10_ts_xfer(false, &r, 1);
++
++	if (stage == 0 && rlen != 0) {
++		stage = n10_ts_xfer(true, rbuf, rlen);
++	}
++	if (stage == 0) {
++		n10_ts_fails = 0;
++		return true;
++	}
++	uint32_t n = ++n10_ts_errs;
++	if (n <= N10_TS_E_LINES || (n & 63u) == 0) {
++		n10_dsslog_trace("N404E reg=0x%x len=%u stage=%u trans=0x%x int=0x%x fifo=0x%x n=%u", reg, rlen, stage,
++		    n10_ts_rd(N10_I2C_TRANS), n10_ts_rd(N10_I2C_INT_ST), n10_ts_rd(N10_I2C_FIFO_ST), n);
++	}
++	n10_ts_reset();
++	if (++n10_ts_fails >= N10_TS_MAX_FAILS || !n10_ts_bus_check("rst")) {
++		n10_ts_state = 2;
++	}
++	return false;
++}
++
++static inline void
++n10_ts_put32(uint8_t *o, uint32_t off, uint32_t v)
++{
++	memcpy(o + off, &v, sizeof(v));
++}
++
++/* Normalized IOFixed 16.16 (0..0x10000) of a raw coordinate. */
++static uint32_t
++n10_ts_norm(uint32_t raw, uint32_t max)
++{
++	return raw >= max ? 0x10000u : (uint32_t)(((uint64_t)raw << 16) / max);
++}
++
++/*
++ * One 0x68-byte digitizer record. Offsets from iOS 16.7.16 IOKit
++ * IOHIDEventCreateDigitizerEvent / IOHIDEventCreateDigitizerFingerEvent and
++ * IOHIDEventGetIntegerValue (emulated): +0 size, +4 type 11, +8 options
++ * (bit0 absolute, bit1 collection, bit16 range, bit17 touch, bit19 display
++ * integrated), +0xc depth, +0x10/+0x14/+0x18 x/y/z IOFixed, +0x1c index,
++ * +0x20 transducer type, +0x24 identity, +0x28 event mask, +0x2c child
++ * event mask, +0x30 buttons, +0x40 orientation type (2 quality, then quality,
++ * density, irregularity 1.0, major / minor radius 5.0 as the finger creator).
++ */
++static void
++n10_ts_rec(uint8_t *o, uint32_t options, uint32_t depth, uint32_t x, uint32_t y, uint32_t index, uint32_t ttype,
++    uint32_t mask, uint32_t child)
++{
++	bzero(o, N10_TS_REC);
++	n10_ts_put32(o, 0x00, N10_TS_REC);
++	n10_ts_put32(o, 0x04, 11u);
++	n10_ts_put32(o, 0x08, options);
++	o[0x0c] = (uint8_t)depth;
++	n10_ts_put32(o, 0x10, x);
++	n10_ts_put32(o, 0x14, y);
++	n10_ts_put32(o, 0x1c, index);
++	n10_ts_put32(o, 0x20, ttype);
++	n10_ts_put32(o, 0x24, index);
++	n10_ts_put32(o, 0x28, mask);
++	n10_ts_put32(o, 0x2c, child);
++	if (ttype == 2u) {
++		n10_ts_put32(o, 0x40, 2u);
++		n10_ts_put32(o, 0x44, 0x10000u);
++		n10_ts_put32(o, 0x48, 0x10000u);
++		n10_ts_put32(o, 0x4c, 0x10000u);
++		n10_ts_put32(o, 0x50, 5u << 16);
++		n10_ts_put32(o, 0x54, 5u << 16);
++	}
++}
++
++/* One queue entry when a slot changed: hand collection (depth 0) + one finger per active / changed slot (depth 1). */
++static void
++n10_ts_emit(void)
++{
++	uint8_t *f = n10_ts_frame, *r = n10_ts_frame + N10_TS_HDR + N10_TS_REC;
++	uint32_t n = 0, chg = 0, down = 0, mask = 0, hx = 0, hy = 0;
++	uint64_t now = mach_absolute_time(), sender = n10_ts_svc != NULL ? n10_ts_svc->getRegistryEntryID() : 0;
++	bool ok = false, sent = false;
++
++	for (uint32_t s = 0; s < N10_TS_SLOTS; s++) {
++		chg |= n10_ts_slots[s].chg;
++	}
++	if (chg == 0) {
++		return;
++	}
++	for (uint32_t s = 0; s < N10_TS_SLOTS; s++) {
++		struct n10_ts_slot *sl = &n10_ts_slots[s];
++		if (sl->chg == 0 && !sl->down) {
++			continue;
++		}
++		uint32_t m = sl->chg == 1 ? 0x23u : sl->chg == 2 ? 0x4u : sl->chg == 3 ? 0x3u : 0u;
++		uint32_t x = n10_ts_norm(sl->x, n10_ts_max_x), y = n10_ts_norm(sl->y, n10_ts_max_y);
++		n10_ts_rec(r, 0x80001u | (sl->down ? 0x30000u : 0u), 1, x, y, s + 1u, 2u, m, 0);
++		if (n == 0) {
++			hx = x;
++			hy = y;
++		}
++		r += N10_TS_REC;
++		n++;
++		down |= sl->down;
++		mask |= m;
++		sl->chg = 0;
++	}
++	n10_ts_rec(f + N10_TS_HDR, 0x80003u | (down ? 0x30000u : 0u), 0, hx, hy, 0, 3u, mask, mask);
++	memcpy(f, &now, sizeof(now));
++	memcpy(f + 8, &sender, sizeof(sender));
++	n10_ts_put32(f, 0x10, 0);
++	n10_ts_put32(f, 0x14, 0);
++	n10_ts_put32(f, 0x18, n + 1u);
++	IOLockLock(n10_ts_lock);
++	if (n10_ts_opened != 0 && n10_ts_owner != NULL) {
++		sent = true;
++		ok = n10_ts_q->enqueue(f, N10_TS_HDR + (n + 1u) * N10_TS_REC);
++	}
++	IOLockUnlock(n10_ts_lock);
++	if (ok) {
++		n10_ts_frames++;
++	} else if (sent) {
++		n10_ts_full++;
++	} else {
++		n10_ts_noclient++;
++	}
++	uint64_t sec;
++	nanoseconds_to_absolutetime(1000000000ull, &sec);
++	uint32_t sum = n10_ts_frames + n10_ts_full + n10_ts_noclient;
++	if (sum != n10_ts_qlast && now - n10_ts_q_at >= sec && n10_ts_qlines < N10_TS_Q_LINES) {
++		n10_ts_qlines++;
++		n10_ts_qlast = sum;
++		n10_ts_q_at = now;
++		n10_dsslog_trace("N404Q frames=%u noclient=%u full=%u opened=%u owner=%u fingers=%u", n10_ts_frames,
++		    n10_ts_noclient, n10_ts_full, n10_ts_opened, n10_ts_owner != NULL ? 1u : 0u, n);
++	}
++}
++
++/* One 16-byte event (Linux sec_ts_read_event semantics; coordinates as the reviewed note10_y771d_decode). */
++static void
++n10_ts_contact(const uint8_t *p, uint32_t left)
++{
++	uint32_t eid = p[0] & 3u;
++	char act;
++
++	if (eid != 0) {
++		uint32_t k = eid == 1u ? ++n10_ts_status : ++n10_ts_gesture;
++		if (k <= 8u && n10_ts_tlines < N10_TS_T_LINES) {
++			n10_ts_tlines++;
++			n10_dsslog_trace("N404T eid=%u n=%u b=%02x %02x %02x %02x %02x %02x %02x %02x", eid, k, p[0], p[1], p[2],
++			    p[3], p[4], p[5], p[6], p[7]);
++		}
++		return;
++	}
++	uint32_t tid = (p[0] >> 2) & 0x0fu, a = p[0] >> 6, type = ((uint32_t)(p[6] >> 6) << 2) | (p[7] >> 6);
++	if (tid == 0 || tid > N10_TS_SLOTS || a == 0 || type != 0) {
++		return;
++	}
++	uint32_t x = ((uint32_t)p[1] << 4) | (p[3] >> 4), y = ((uint32_t)p[2] << 4) | (p[3] & 0x0fu);
++	struct n10_ts_slot *sl = &n10_ts_slots[tid - 1u];
++	if (a == 1u || (a == 2u && !sl->down)) {        /* press; Linux non-strict: move on an idle slot opens it */
++		if (sl->chg == 3u) {
++			n10_ts_emit();                  /* release of this batch first */
++		}
++		sl->down = 1;
++		sl->chg = 1;
++		sl->x = (uint16_t)x;
++		sl->y = (uint16_t)y;
++		act = 'P';
++	} else if (a == 2u) {
++		sl->x = (uint16_t)x;
++		sl->y = (uint16_t)y;
++		if (sl->chg == 0) {
++			sl->chg = 2;
++		}
++		act = 'M';
++	} else {
++		if (!sl->down) {
++			return;
++		}
++		if (sl->chg == 1u) {
++			n10_ts_emit();                  /* press of this batch first */
++		}
++		sl->down = 0;
++		sl->chg = 3;                            /* release keeps the last accepted position */
++		act = 'R';
++	}
++	n10_ts_events++;
++	if (n10_ts_tlines < N10_TS_T_LINES && (n10_ts_tlines < 64u || act != 'M')) {
++		n10_ts_tlines++;
++		n10_dsslog_trace("N404T slot=%u act=%c raw=%u,%u pt=%u,%u left=%u", tid - 1u, act, x, y,
++		    x * 480u / n10_ts_max_x, y * 1013u / n10_ts_max_y, left);
++	}
++}
++
++static void
++n10_ts_init(void)
++{
++	uint8_t id[5], boot = 0, ts[4], pi[11];
++	bool ok, clr = false, sense = false;
++
++	bzero(id, sizeof(id));
++	bzero(ts, sizeof(ts));
++	bzero(pi, sizeof(pi));
++	n10_ts_va = ml_io_map(N10_TS_I2C_PA, N10_TS_I2C_SIZE);
++	n10_ts_gpa = ml_io_map(N10_TS_GPA1_PA, 0x1000u);
++	if (n10_ts_va == 0 || !n10_ts_bus_check("init")) {
++		n10_ts_state = 2;
++		return;
++	}
++	ok = n10_ts_cmd(0x22, id, 5) && id[0] == 0x53 && id[1] == 0x45 && id[2] == 0x37 && id[3] == 0x71;
++	if (ok) {
++		(void)n10_ts_cmd(0x55, &boot, 1);
++		(void)n10_ts_cmd(0xaf, ts, 4);
++		if (n10_ts_cmd(0x23, pi, 11)) {         /* note10_y771d_panel_bounds: zero count -> DT count 4096 */
++			uint32_t xc = ((uint32_t)pi[0] << 8) | pi[1], yc = ((uint32_t)pi[2] << 8) | pi[3];
++			xc = xc == 0 ? 4096u : xc;
++			yc = yc == 0 ? 4096u : yc;
++			if (xc <= 4096u && yc <= 4096u && xc > 1u && yc > 1u) {
++				n10_ts_max_x = xc - 1u;
++				n10_ts_max_y = yc - 1u;
++			}
++		}
++		clr = n10_ts_cmd(0x62, NULL, 0);        /* CLEAR_EVENT_STACK: drop events queued since the branch */
++		sense = n10_ts_cmd(0x10, NULL, 0);      /* SENSE_ON (idempotent, Linux probe / start_device) */
++	}
++	n10_dsslog_trace("N404I id=%02x%02x%02x%02x%02x boot=0x%x ts=%02x%02x%02x%02x bounds=%u/%u ok=%u clear=%u sense=%u",
++	    id[0], id[1], id[2], id[3], id[4], boot, ts[0], ts[1], ts[2], ts[3], n10_ts_max_x, n10_ts_max_y, ok ? 1u : 0u,
++	    clr ? 1u : 0u, sense ? 1u : 0u);
++	if (n10_ts_state == 0) {
++		n10_ts_state = (ok && sense) ? 1u : 2u;
++	}
++}
++
++static void
++n10_ts_poll(void)
++{
++	uint8_t *ev = n10_ts_ev;
++	uint32_t left;
++
++	if (!n10_ts_cmd(0x60, ev, N10_TS_EV)) {         /* READ_ONE_EVENT */
++		return;
++	}
++	n10_ts_reads++;
++	if (ev[0] == 0) {
++		return;                                 /* event buffer empty */
++	}
++	if ((ev[0] & 3u) == 3u) {                       /* invalid: clear the stack, release all */
++		(void)n10_ts_cmd(0x62, NULL, 0);
++		for (uint32_t s = 0; s < N10_TS_SLOTS; s++) {
++			if (n10_ts_slots[s].down) {
++				n10_ts_slots[s].down = 0;
++				n10_ts_slots[s].chg = 3;
++			}
++		}
++		n10_ts_emit();
++		return;
++	}
++	left = ev[7] & 0x1fu;
++	if (left != 0 && !n10_ts_cmd(0x61, ev + N10_TS_EV, N10_TS_EV * left)) {   /* READ_ALL_EVENT */
++		return;
++	}
++	for (uint32_t i = 0; i <= left; i++) {
++		n10_ts_contact(ev + N10_TS_EV * i, left);
++	}
++	n10_ts_emit();
++}
++
++static void
++n10_ts_tick(thread_call_param_t p0, thread_call_param_t p1)
++{
++	uint32_t t = ++n10_ts_ticks;
++	uint64_t d;
++
++	(void)p0;
++	(void)p1;
++	if (n10_ts_state == 0) {
++		n10_ts_init();
++	}
++	if (n10_ts_state == 1) {
++		n10_ts_poll();
++	}
++	if ((t % 625u == 0 || n10_ts_state == 2) && n10_ts_slines < N10_TS_S_LINES) {      /* ~10 s, and once at a stop */
++		n10_ts_slines++;
++		n10_dsslog_trace("N404S ticks=%u reads=%u events=%u status=%u gesture=%u errs=%u frames=%u state=%u attn=%u", t,
++		    n10_ts_reads, n10_ts_events, n10_ts_status, n10_ts_gesture, n10_ts_errs, n10_ts_frames, n10_ts_state,
++		    n10_ts_gpa != 0 ? (*(volatile uint32_t *)(n10_ts_gpa + N10_TS_GPA1_DAT) & 1u) : 2u);
++	}
++	if (n10_ts_state != 2) {
++		nanoseconds_to_absolutetime(N10_TS_PERIOD_NS, &d);
++		thread_call_enter_delayed(n10_ts_tmr, mach_absolute_time() + d);
++	}
++}
++
++/* User-client side (provider == n10_ts_svc). */
++static void
++n10_ts_line(const char *what, uint32_t a, uint32_t b)
++{
++	if (__atomic_fetch_add(&n10_ts_ulines, 1u, __ATOMIC_RELAXED) < N10_TS_U_MAX) {
++		char name[32];
++		proc_selfname(name, sizeof(name));
++		n10_dsslog_trace("N404H %s %s pid=%d a=0x%x b=0x%x", what, name, proc_selfpid(), a, b);
++	}
++}
++
++static void
++n10_ts_open(void *client, bool open)
++{
++	if (!open) {
++		IOLockLock(n10_ts_lock);
++		if (n10_ts_owner == client) {
++			n10_ts_q->setNotificationPort(MACH_PORT_NULL);
++			n10_ts_owner = NULL;
++			n10_ts_opened = 0;
++		}
++		IOLockUnlock(n10_ts_lock);
++	}
++	n10_ts_line(open ? "open" : "close", 0, 0);
++}
++
++static void
++n10_ts_port(void *client, mach_port_t port)
++{
++	IOLockLock(n10_ts_lock);
++	n10_ts_q->setNotificationPort(port);
++	n10_ts_owner = port != MACH_PORT_NULL ? client : NULL;
++	IOLockUnlock(n10_ts_lock);
++	n10_ts_line("notify", port != MACH_PORT_NULL ? 1u : 0u, 0);
++}
++
++static IOReturn
++n10_ts_method(void *client, uint32_t selector, IOExternalMethodArguments *args)
++{
++	IOReturn ret = kIOReturnSuccess;
++	uint32_t in_s = args->scalarInputCount, out_s = args->scalarOutputCount;
++	uint32_t in_b = args->structureInputDescriptor != NULL ?
++	    (uint32_t)args->structureInputDescriptor->getLength() : args->structureInputSize;
++	uint32_t out_b = args->structureOutputDescriptor != NULL ?
++	    (uint32_t)args->structureOutputDescriptor->getLength() : args->structureOutputSize;
++	uint64_t s0 = in_s != 0 ? args->scalarInput[0] : 0;
++
++	for (uint32_t i = 0; i < out_s; i++) {
++		args->scalarOutput[i] = 0;
++	}
++	n10_fb_zero_struct_out(args);
++	switch (selector) {
++	case 0:                                         /* IOHIDEventServicePlugin open (one scalar: options) */
++		IOLockLock(n10_ts_lock);
++		n10_ts_opened = 1;
++		IOLockUnlock(n10_ts_lock);
++		break;
++	case 1:                                         /* close */
++		IOLockLock(n10_ts_lock);
++		if (n10_ts_owner == client || n10_ts_owner == NULL) {
++			n10_ts_opened = 0;
++		}
++		IOLockUnlock(n10_ts_lock);
++		break;
++	case 2:                                         /* copyEvent / copyMatchingEvent: no event to copy */
++	case 4:
++		ret = kIOReturnUnsupported;
++		break;
++	default:
++		break;
++	}
++	bool first = true;
++	if (selector < 64) {
++		uint32_t bit = 1u << (selector & 31);
++		first = (__atomic_fetch_or(&n10_ts_useen[selector >> 5], bit, __ATOMIC_RELAXED) & bit) == 0;
++	}
++	uint32_t ln = __atomic_load_n(&n10_ts_ulines, __ATOMIC_RELAXED);
++	if ((first || ln < N10_TS_U_LINES) && __atomic_fetch_add(&n10_ts_ulines, 1u, __ATOMIC_RELAXED) < N10_TS_U_MAX) {
++		char name[32];
++		proc_selfname(name, sizeof(name));
++		n10_dsslog_trace("N404U %s sel=%u in=%u/%u out=%u/%u s0=0x%llx ret=0x%x", name, selector, in_s, in_b, out_s,
++		    out_b, (unsigned long long)s0, ret);
++	}
++	return ret;
++}
++
++/* IOUserClient.cpp is_io_object_conforms_to (v404): the touch service answers "IOHIDEventService". */
++extern "C" bool n10_touch_conforms(OSObject *object, const char *name);
++
++extern "C" bool
++n10_touch_conforms(OSObject *object, const char *name)
++{
++	return object != NULL && n10_ts_svc != NULL && object == n10_ts_svc &&
++	       strncmp(name, "IOHIDEventService", sizeof("IOHIDEventService")) == 0;
++}
++
++static void
++n10_ts_publish(IOService *resources)
++{
++	bool ok = false;
++	IOService *svc = OSTypeAlloc(IOService);
++	OSArray *pairs = OSArray::withCapacity(1);
++	OSDictionary *pair = OSDictionary::withCapacity(2);
++	OSNumber *page = OSNumber::withNumber(0x0dull, 32), *usage = OSNumber::withNumber(0x04ull, 32);
++
++	n10_ts_lock = IOLockAlloc();
++	n10_ts_q = IOSharedDataQueue::withCapacity(N10_TS_QUEUE);
++	if (n10_ts_lock != NULL && n10_ts_q != NULL && svc != NULL && pairs != NULL && pair != NULL && page != NULL &&
++	    usage != NULL && resources != NULL && svc->init() && svc->attach(resources)) {
++		pair->setObject("DeviceUsagePage", page);
++		pair->setObject("DeviceUsage", usage);
++		pairs->setObject(pair);
++		svc->setName("NoteTouchHIDEventService");
++		svc->setProperty("HIDServiceSupport", true);
++		svc->setProperty("PrimaryUsagePage", 0x0du, 32);
++		svc->setProperty("PrimaryUsage", 0x04u, 32);
++		svc->setProperty("DeviceUsagePairs", pairs);
++		svc->setProperty("Built-In", true);
++		svc->setProperty("DisplayIntegrated", true);
++		svc->setProperty("Transport", "I2C");
++		svc->setProperty("Product", "Note10 Touch");
++		svc->setProperty(kIOUserClientClassKey, "IOMobileFramebufferUserClient");
++		ok = svc->start(resources);
++		if (ok) {
++			n10_ts_svc = svc;
++			svc->registerService();
++		} else {
++			svc->detach(resources);
++		}
++	}
++	OSSafeReleaseNULL(svc);
++	OSSafeReleaseNULL(pairs);
++	OSSafeReleaseNULL(pair);
++	OSSafeReleaseNULL(page);
++	OSSafeReleaseNULL(usage);
++	if (ok) {
++		n10_ts_tmr = thread_call_allocate_with_priority(n10_ts_tick, NULL, THREAD_CALL_PRIORITY_KERNEL);
++		if (n10_ts_tmr != NULL) {
++			uint64_t d;
++			nanoseconds_to_absolutetime(N10_TS_FIRST_NS, &d);
++			thread_call_enter_delayed(n10_ts_tmr, mach_absolute_time() + d);
++		}
++	}
++	n10_dsslog_trace("N404H publish hid=%u regid=0x%llx q=%u tmr=%u", ok ? 1u : 0u,
++	    (unsigned long long)(ok ? n10_ts_svc->getRegistryEntryID() : 0), n10_ts_q != NULL ? 1u : 0u,
++	    n10_ts_tmr != NULL ? 1u : 0u);
++}
++
+ bool
+ IOMobileFramebufferUserClient::start(IOService *provider)
+ {
+@@ -863,6 +1546,10 @@ IOMobileFramebufferUserClient::start(IOService *provider)
+ 		return false;
+ 	}
+ 	notifyPort = NULL;
++	if (n10_ts_svc != NULL && provider == n10_ts_svc) {      /* v404 touch HID queue client */
++		n10_ts_open(this, true);
++		return true;
++	}
+ 	if (n10_surf_root != NULL && provider == n10_surf_root) {
+ 		if (n10_surf_trace_ok(64, true)) {
+ 			char name[32];
+@@ -883,6 +1570,9 @@ IOMobileFramebufferUserClient::start(IOService *provider)
+ IOReturn
+ IOMobileFramebufferUserClient::clientClose(void)
+ {
++	if (n10_ts_svc != NULL && getProvider() == n10_ts_svc) {
++		n10_ts_open(this, false);               /* v404: queue port dropped before the port right */
++	}
+ 	if (n10_surf_root != NULL && getProvider() == n10_surf_root) {
+ 		IOLockLock(n10_surf_lock);
+ 		for (uint32_t k = 0; k < N10_SURF_MAX; k++) {
+@@ -908,6 +1598,10 @@ IOMobileFramebufferUserClient::registerNotificationPort(mach_port_t port, UInt32
+ 		releaseNotificationPort(notifyPort);
+ 	}
+ 	notifyPort = port;
++	if (n10_ts_svc != NULL && getProvider() == n10_ts_svc) {
++		n10_ts_port(this, port);                /* v404: IODataQueue data-available notifications */
++		return kIOReturnSuccess;
++	}
+ 	if (n10_surf_root != NULL && getProvider() == n10_surf_root) {
+ 		return kIOReturnSuccess;        /* v396: surface clients are not IOMFB notifications */
+ 	}
+@@ -920,6 +1614,23 @@ IOMobileFramebufferUserClient::registerNotificationPort(mach_port_t port, UInt32
+ 	return kIOReturnSuccess;
+ }
+ 
++/* v404: memory type 0 of a touch client = the IOSharedDataQueue (IODataQueueMemory + appendix). */
++IOReturn
++IOMobileFramebufferUserClient::clientMemoryForType(UInt32 type, IOOptionBits *options, IOMemoryDescriptor **memory)
++{
++	if (n10_ts_svc != NULL && getProvider() == n10_ts_svc) {
++		IOReturn ret = kIOReturnUnsupported;
++		if (type == 0 && n10_ts_q != NULL) {
++			*memory = n10_ts_q->getMemoryDescriptor();
++			*options = 0;
++			ret = *memory != NULL ? kIOReturnSuccess : kIOReturnNoMemory;
++		}
++		n10_ts_line("mem", type, (uint32_t)ret);
++		return ret;
++	}
++	return IOUserClient::clientMemoryForType(type, options, memory);
++}
++
+ /* Zero the caller's structure output (inband or descriptor), keeping its size. */
+ static void
+ n10_fb_zero_struct_out(IOExternalMethodArguments *args)
+@@ -957,6 +1668,9 @@ IOMobileFramebufferUserClient::externalMethod(uint32_t selector, IOExternalMetho
+ 	if (n10_surf_root != NULL && getProvider() == n10_surf_root) {
+ 		return n10_surf_method(this, selector, args);
+ 	}
++	if (n10_ts_svc != NULL && getProvider() == n10_ts_svc) {
++		return n10_ts_method(this, selector, args);
++	}
+ 	for (uint32_t i = 0; i < out_scalars; i++) {
+ 		args->scalarOutput[i] = 0;
+ 	}
+@@ -1765,6 +2479,36 @@ n10_disp_copy_otf(const uint32_t *src, uint32_t bpr)
+ 	}
+ }
+ 
++/* v404 N404D: source words and scanned-buffer words read back after the copy at five fixed points (how 1/2). */
++static uint32_t n10_disp_dlines;
++
++static void
++n10_disp_dump(const uint32_t *src, uint32_t bpr, uint32_t how)
++{
++	static const uint16_t pts[5][2] = { { 720, 1520 }, { 16, 16 }, { 1423, 16 }, { 16, 3023 }, { 1423, 3023 } };
++	uint32_t s[5], d[5], n = ++n10_disp_dlines;
++
++	if (n > 64u || (n > 6u && (n & 7u) != 0)) {
++		return;
++	}
++	for (uint32_t i = 0; i < 5; i++) {
++		uint64_t o = (uint64_t)pts[i][1] * n10_disp_stride + (uint64_t)pts[i][0] * 4u;
++		s[i] = src[(uint64_t)pts[i][1] * (bpr / 4u) + pts[i][0]];
++		d[i] = 0xdeadbeefu;
++		if (n10_disp_otf) {
++			d[i] = ml_phys_read_word_64(n10_disp_pa(o));
++		} else {
++			for (uint32_t k = 0; k < n10_disp_nrun; k++) {
++				if (o >= n10_disp_run[k].off && o < (uint64_t)n10_disp_run[k].off + n10_disp_run[k].len) {
++					d[i] = *(volatile uint32_t *)(n10_disp_run[k].va + (vm_offset_t)(o - n10_disp_run[k].off));
++				}
++			}
++		}
++	}
++	n10_dsslog_trace("N404D n=%u how=%u bpr=%u m=%u s=%08x %08x %08x %08x %08x d=%08x %08x %08x %08x %08x", n, how, bpr,
++	    n10_disp_swap_rb, s[0], s[1], s[2], s[3], s[4], d[0], d[1], d[2], d[3], d[4]);
++}
++
+ /* SwapEnd: copy the front surface into the window buffer and send one frame (armed only). */
+ static void
+ n10_disp_swap(IOExternalMethodArguments *args)
+@@ -1873,6 +2617,9 @@ n10_disp_frame(uint32_t want, uint32_t tmr)
+ 		return;
+ 	}
+ 	__builtin_arm_dsb(0xf);
++	if (how == 1u || how == 2u) {
++		n10_disp_dump(src, bpr, how);           /* v404 N404D content proof */
++	}
+ 
+ 	/* one frame: same order as Linux decon_reg_update_req_and_unmask / decon_reg_wait_update_done_and_mask */
+ 	vm_offset_t pmu = n10_disp_va[N10_DISP_MAP_PMU], dec = n10_disp_va[N10_DISP_MAP_DECON];
+@@ -1977,6 +2724,7 @@ n10_iomfb_publish(void)
+ 	}
+ 	OSSafeReleaseNULL(hid);
+ 	n10_dsslog_trace("N392H publish hid=%d HIDServiceSupport", (int)hid_ok);
++	n10_ts_publish(resources);                      /* v404 touch service + poll thread call */
+ 
+ 	/*
+ 	 * v396 IOSurface root: plain IOService named IOCoreSurfaceRoot (the name
